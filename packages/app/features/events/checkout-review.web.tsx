@@ -1,4 +1,6 @@
 "use client";
+import { useCheckoutCode } from "./use-checkout-code.web";
+import { canContinueWithCheckoutCode } from "@dvnt/app/lib/payments/checkout-code";
 
 /**
  * Checkout — Review Order — WEB (@dvnt/app/features/events/checkout-review).
@@ -644,7 +646,7 @@ export function CheckoutReviewScreen() {
     void promotersApi
       .getClaim(numericEventId)
       .then((claim) => {
-        if (!claim) return;
+        if (!claim || usePromoterRefStore.getState().getRef(cartEventId!)) return;
         setPromoterRef(
           cartEventId!,
           claim.code,
@@ -674,35 +676,14 @@ export function CheckoutReviewScreen() {
     }
   }, [promoCode, appliedPromo, setAppliedPromo, setPromoError]);
 
-  const handleApplyPromo = useCallback(async () => {
-    const code = promoCode.trim();
-    if (!code) {
-      setPromoError("Enter a promo code");
-      return;
-    }
-    if (!cart) return;
-    setPromoApplying(true);
-    setPromoError(null);
-    const { data, error } = await invokeEdge<{
-      valid: boolean;
-      discount_type?: "percent" | "fixed_cents" | "bogo";
-      discount_value?: number;
-      code?: string;
-      error?: string;
-    }>("validate-promo-code", { event_id: Number(cart.eventId), code });
-    setPromoApplying(false);
-    if (error || !data?.valid || !data.discount_type) {
-      setAppliedPromo(null);
-      setPromoError(data?.error || error?.message || "Invalid promo code");
-      return;
-    }
-    setAppliedPromo({
-      type: data.discount_type,
-      value: data.discount_value ?? 0,
-      code: data.code || code,
-      eventId: String(cart.eventId),
-    });
-  }, [promoCode, cart, setAppliedPromo, setPromoError, setPromoApplying]);
+  const handleApplyPromo = useCheckoutCode({
+    eventId: String(cart?.eventId ?? ""), scopeId: cart?.cartId ?? "",
+    enabled: !!cart && !isLoading && !pendingPayment, code: promoCode, applying: promoApplying,
+    setCode: setPromoCode,
+    setPromo: (promo) => setAppliedPromo(promo ? { ...promo, eventId: String(cart?.eventId ?? "") } : null),
+    setError: setPromoError, setApplying: setPromoApplying,
+  });
+  const codeReady = canContinueWithCheckoutCode(promoCode, appliedPromo, promoApplying, promoError);
 
   const handleIncrement = useCallback(
     (lineItem: CartLineItem) => {
@@ -739,6 +720,7 @@ export function CheckoutReviewScreen() {
   // confirm the returned Stripe PaymentIntent client secret on the web with
   // @stripe/stripe-js (web-safe; no @stripe/stripe-react-native).
   const handlePlaceOrder = useCallback(async () => {
+    if (!codeReady || isLoading) return;
     if (!cart || lineItems.length === 0) {
       showToast("error", "Your cart is empty");
       return;
@@ -828,6 +810,8 @@ export function CheckoutReviewScreen() {
       setCheckoutLoading(false);
     }
   }, [
+    codeReady,
+    isLoading,
     cart,
     lineItems.length,
     fees.customer_charge_amount,
@@ -958,7 +942,7 @@ export function CheckoutReviewScreen() {
 
             {/* Promo code */}
             <section className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-              <FormField label="Promo code">
+              <FormField label="Promo or promoter code">
                 <div className="flex items-center gap-2">
                   <div className="flex flex-1 items-center gap-2 rounded-xl border border-white/12 bg-white/[0.05] px-3 h-11">
                     <Tag size={18} className="shrink-0 text-white/40" />
@@ -966,6 +950,8 @@ export function CheckoutReviewScreen() {
                       value={promoCode}
                       onChange={(e) => setPromoCode(e.target.value)}
                       placeholder="Enter code"
+                      aria-label="Promo or promoter code"
+                      maxLength={64}
                       autoCapitalize="characters"
                       className="w-full bg-transparent text-[15px] text-white placeholder:text-white/40 outline-none"
                     />
@@ -1061,7 +1047,7 @@ export function CheckoutReviewScreen() {
                 <button
                   type="button"
                   onClick={handlePlaceOrder}
-                  disabled={isEmpty || isLoading}
+                  disabled={isEmpty || isLoading || !codeReady}
                   className="mt-4 flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-[#3FDCFF] text-[#06070d] active:scale-[0.99] disabled:opacity-45"
                 >
                   <CreditCard size={18} className="text-[#06070d]" />

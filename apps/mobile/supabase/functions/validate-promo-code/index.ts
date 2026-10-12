@@ -16,6 +16,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
+import { escapeLikePattern, validateAndApplyPromoterCode } from "../_shared/apply-promoter-code.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -23,7 +24,8 @@ const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-auth-token, apikey, x-client-info, sentry-trace, baggage",
+  "Cache-Control": "no-store",
 };
 
 function json(data: unknown, status = 200) {
@@ -50,10 +52,12 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Unauthorized" }, 401);
     }
 
-    const { event_id, code, ticket_type_id } = await req.json();
-
-    if (!event_id || !code) {
-      return json({ valid: false, error: "Missing event_id or code" }, 400);
+    const body = await req.json().catch(() => null);
+    const { event_id, code, ticket_type_id, accept_promoter } = body ?? {};
+    const eventId = Number(event_id);
+    if (!Number.isSafeInteger(eventId) || eventId <= 0 || typeof code !== "string" ||
+        !code.trim() || code.length > 64 || /[\x00-\x1f\x7f]/.test(code)) {
+      return json({ valid: false, error: "Enter a valid event and code." }, 400);
     }
 
     const normalizedCode = code.trim().toUpperCase();
@@ -63,14 +67,24 @@ Deno.serve(async (req: Request) => {
     let query = supabase
       .from("promo_codes")
       .select("*")
-      .eq("event_id", parseInt(event_id))
+      .eq("event_id", eventId)
       .is("deleted_at", null)
-      .ilike("code", normalizedCode);
+      .ilike("code", escapeLikePattern(normalizedCode));
 
     const { data: promos, error: promoError } = await query;
 
-    if (promoError || !promos?.length) {
-      return json({ valid: false, error: "Invalid promo code" });
+    if (promoError) return json({ valid: false, error: "Could not check the code. Please try again." }, 503);
+    if (!promos?.length) {
+      // Opt-in discriminated response: old promo-only clients cannot treat a
+      // promoter as a normal promo. Exact promo matches keep precedence even
+      // when expired, capped or scoped to another ticket type.
+      if (accept_promoter !== true) return json({ valid: false, error: "Invalid promo code" });
+      const { result, error } = await validateAndApplyPromoterCode(supabase, eventId, normalizedCode, 0);
+      if (!result || error) return json({ valid: false,
+        error: error === "Promoter code lookup failed" ? "Could not check the code. Please try again."
+          : "That promo or promoter code is invalid or no longer active." });
+      return json({ valid: true, code_kind: "promoter", code: result.code,
+        customer_discount_bps: result.customer_discount_bps });
     }
 
     // Find best match: prefer ticket_type-scoped, then event-wide
@@ -104,12 +118,13 @@ Deno.serve(async (req: Request) => {
 
     // Per-user cap — block if this buyer already redeemed it (Phase 5).
     if (promo.max_per_user && promo.max_per_user > 0) {
-      const { count } = await supabase
+      const { count, error: countError } = await supabase
         .from("orders")
         .select("id", { count: "exact", head: true })
         .eq("promo_code_id", promo.id)
         .eq("user_id", userId)
         .eq("status", "paid");
+      if (countError) return json({ valid: false, error: "Could not verify promo usage. Please try again." }, 503);
       if ((count ?? 0) >= promo.max_per_user) {
         return json({ valid: false, error: "You've already used this code." });
       }
@@ -118,6 +133,7 @@ Deno.serve(async (req: Request) => {
     // ── Return discount info ──────────────────────────────
     return json({
       valid: true,
+      code_kind: "promo",
       promo_code_id: promo.id,
       discount_type: promo.discount_type, // percent | fixed_cents | bogo
       discount_value: promo.discount_value,
@@ -126,6 +142,6 @@ Deno.serve(async (req: Request) => {
     });
   } catch (err: any) {
     console.error("[validate-promo-code] Error:", err);
-    return json({ error: err.message || "Internal error" }, 500);
+    return json({ error: "Could not validate the code. Please try again." }, 500);
   }
 });

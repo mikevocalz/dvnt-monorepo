@@ -82,6 +82,7 @@ function fixture(options={}){
     stripe.push({url,params:Object.fromEntries(new URLSearchParams(opts.body))});
     return Response.json({id:'cs_fixture_'+stripe.length,url:'https://checkout.stripe.com/c/pay/fixture'});
    },require:name=>{
+    if(options.entrypoint && name.endsWith('/verify-session.ts'))return{verifySession:async()=>options.unauthorized?null:'member-fixture'};
     if(name.startsWith('https://esm.sh/@supabase/'))return{createClient:()=>db};
     if(name.endsWith('/hmac-qr.ts'))return{createSignedQrPayload:async()=>({qrToken:'fixture',qrPayload:'fixture'})};
     if(name.endsWith('/ticket-email-delivery.ts'))return{deliverTicketBundleEmail:async(...args)=>emails.push(args[1])};
@@ -89,7 +90,7 @@ function fixture(options={}){
     return load(path.resolve(path.dirname(full),name));
    }},{filename:full});return exports;
  }
- load(path.join(__dirname,'index.ts'));
+ load(options.entrypoint || path.join(__dirname,'index.ts'));
  const selection={event_id:1,ticket_type_id:TIER,quantity:1,guest_email:EMAIL};
  async function call(body,method='POST'){
   const res=await handler(new Request('https://fixture.invalid/guest-checkout',{method,...(method==='POST'?{body:JSON.stringify(body)}:{})}));
