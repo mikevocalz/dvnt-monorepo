@@ -15,6 +15,7 @@ import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-s
 import { checkAdultBirthDate } from "../_shared/age-policy.ts";
 import { determineNewMemberStep } from "../_shared/new-member-onboarding.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
 function json(req: Request, value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -37,11 +38,9 @@ Deno.serve(withSentry("new-member-progress", async (req) => {
 
   const [
     { data: account, error: accountError },
-    { data: profile, error: profileError },
     { data: verified, error: verifiedError },
   ] = await Promise.all([
     db.from("user").select("id, createdAt, emailVerified, image").eq("id", authId).maybeSingle(),
-    db.from("users").select("id, auth_id, avatar_id").eq("auth_id", authId).maybeSingle(),
     db
       .from("identity_verifications")
       .select("status, date_of_birth, updated_at")
@@ -51,7 +50,12 @@ Deno.serve(withSentry("new-member-progress", async (req) => {
       .maybeSingle(),
   ]);
 
-  if (accountError || profileError || !account || !profile ||
+  // A handful of old/partial Better Auth accounts can exist without the app's
+  // public users row. Reuse the canonical resolver so those accounts get a real
+  // profile to complete instead of being trapped forever on a retry screen.
+  const profile = await resolveOrProvisionUser(db, authId, "id, auth_id, avatar_id");
+
+  if (accountError || !account || !profile ||
       account.id !== authId || profile.auth_id !== authId) {
     console.error("[new-member-progress] status_unavailable");
     return json(req, { ok: false, error: "Could not load profile progress. Retry." }, 503);
