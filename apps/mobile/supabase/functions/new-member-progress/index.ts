@@ -5,9 +5,10 @@
  * post. The server derives both facts from canonical records on every check so
  * local storage, stale counters, reinstalls, or account age cannot bypass it.
  *
- * Email/adult verification is still returned as informational state because
- * other DVNT rails enforce it independently; it does not exempt anyone from the
- * photo + first-post requirement.
+ * Verification-era signups still complete email/adult verification first.
+ * Legacy accounts do not gain a verification exemption from the new profile
+ * requirements: once their existing age-access rules admit them, photo + first
+ * post are still mandatory.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
@@ -75,8 +76,9 @@ Deno.serve(withSentry("new-member-progress", async (req) => {
     checkAdultBirthDate(verified.date_of_birth).allowed;
 
   if (verifiedError) {
-    // Verification state is a separate rail. Do not let a failed informational
-    // read turn into a bypass or block for the mandatory photo/post check.
+    // Verification-era signups fail closed into pending_verification when this
+    // read is unavailable. Legacy accounts still proceed to the mandatory
+    // photo/post evidence checks instead of being grandfathered out.
     console.warn("[new-member-progress] verification_state_unavailable");
   }
 
