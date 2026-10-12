@@ -11,16 +11,38 @@ export interface DialogProps {
   footer?: ReactNode;
   maxWidth?: number;
   hideClose?: boolean;
+  /**
+   * Whether Android back, backdrop presses, and the default X may dismiss the
+   * dialog. Defaults to true. Set false for a required flow.
+   */
+  dismissible?: boolean;
   /** Web only: id of the element that names the dialog. Ignored on native. */
   labelledBy?: string;
 }
 
 /** Native centered dialog (RN Modal). Mirror of `Dialog.web.tsx`. */
-export function Dialog({ open, onClose, title, children, footer, hideClose, maxWidth = 520 }: DialogProps) {
+export function Dialog({
+  open,
+  onClose,
+  title,
+  children,
+  footer,
+  hideClose,
+  dismissible = true,
+  maxWidth = 520,
+}: DialogProps) {
+  const showDefaultClose = dismissible && !hideClose;
+
   return (
-    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      visible={open}
+      transparent
+      animationType="fade"
+      onRequestClose={dismissible ? onClose : () => {}}
+      statusBarTranslucent
+    >
       <Pressable
-        onPress={onClose}
+        onPress={dismissible ? onClose : undefined}
         style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.7)", alignItems: "center", justifyContent: "center", padding: 16 }}
       >
         <Pressable
@@ -29,11 +51,16 @@ export function Dialog({ open, onClose, title, children, footer, hideClose, maxW
           accessibilityViewIsModal
           style={{ width: "100%", maxWidth, borderRadius: 24, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", backgroundColor: "#101321", overflow: "hidden" }}
         >
-          {title || !hideClose ? (
+          {title || showDefaultClose ? (
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.08)" }}>
               <Text style={{ fontSize: 16, fontWeight: "700", color: "#fff" }}>{title}</Text>
-              {!hideClose ? (
-                <Pressable onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" }}>
+              {showDefaultClose ? (
+                <Pressable
+                  onPress={onClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" }}
+                >
                   <X size={18} color="#fff" />
                 </Pressable>
               ) : null}
