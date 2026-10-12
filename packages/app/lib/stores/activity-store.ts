@@ -1,3 +1,4 @@
+import { eventActivityRoute } from "@dvnt/app/lib/activity/event-activity";
 import { create } from "zustand";
 import { getPostDetailRoute } from "@dvnt/app/lib/routes/post-routes";
 import {
@@ -52,6 +53,7 @@ export interface Activity {
   user: {
     id?: string;
     username: string;
+    displayName?: string;
     avatar: string;
   };
   // Entity reference for correct routing
@@ -115,6 +117,7 @@ function notificationToActivity(notif: Notification): Activity | null {
       user: {
         id: notif.sender?.id || "",
         username: senderUsername,
+        displayName: notif.sender?.displayName,
         avatar: notif.sender?.avatar || "",
       },
       entityType: notif.entityType as
@@ -272,6 +275,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       const activities = allActivities.filter((a) => {
         if (seenIds.has(a.id)) return false;
         seenIds.add(a.id);
+        // Broadcasts are separate messages, even from the same sender/event.
+        // Their notification ID is the only safe deduplication key.
+        if (a.type === "event_broadcast") return true;
         // Composite key: same actor doing the same action on the same entity
         const compositeKey = `${a.type}:${a.user?.id || ""}:${a.entityId || a.post?.id || ""}`;
         if (seenKeys.has(compositeKey)) return false;
@@ -306,6 +312,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   // Get the correct route for an activity item
   getRouteForActivity: (activity) => {
     const { type, entityType, entityId, post, event, user } = activity;
+
+    const eventRoute = eventActivityRoute(activity, "native");
+    if (eventRoute) return eventRoute;
 
     // Use entityType/entityId if available (preferred routing)
     if (entityType && entityId) {
@@ -459,3 +468,4 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     useUnreadCountsStore.getState().setNotificationsUnread(0);
   },
 }));
+

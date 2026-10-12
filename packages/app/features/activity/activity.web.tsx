@@ -22,6 +22,7 @@
  * State (active tab) lives in a tiny zustand store (never useState for tab).
  */
 
+import { eventActivityRoute, activitySenderLabel } from "@dvnt/app/lib/activity/event-activity";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { create } from "zustand";
 import { useRouter } from "solito/navigation";
@@ -178,7 +179,7 @@ function PostThumb({ src, className }: { src: string; className: string }) {
 }
 
 // ── Web route helpers (clean web routes, NOT native (protected) groups) ──────
-function webRouteForActivity(activity: Activity): string {
+export function webRouteForActivity(activity: Activity): string {
   const { type, entityType, entityId, post, postId, event, user } = activity;
   const detailPostId = post?.id || postId || (entityType === "post" ? entityId : undefined);
 
@@ -196,7 +197,8 @@ function webRouteForActivity(activity: Activity): string {
   );
   if (ticketRoute) return ticketRoute;
 
-  if (entityType === "event" && entityId) return `/events/${entityId}`;
+  const eventRoute = eventActivityRoute(activity, "web");
+  if (eventRoute) return eventRoute;
   if (entityType === "room" && entityId) return `/sneaky-lynk/room/${entityId}`;
 
   switch (type) {
@@ -230,8 +232,8 @@ function webRouteForActivity(activity: Activity): string {
     case "event_postponed":
     case "event_time_changed":
     case "event_venue_changed":
-      if (event?.id || entityId) return `/events/${event?.id || entityId}`;
-      return `/events`;
+      if (event?.id || entityId) return `/feed/events/${encodeURIComponent(event?.id || entityId || "")}`;
+      return `/feed/events`;
     case "room_invite":
     case "sneaky_lynk":
       if (entityId) return `/sneaky-lynk/room/${entityId}`;
@@ -489,7 +491,7 @@ function useForceUpdate() {
   return useReducer((x: number) => x + 1, 0);
 }
 
-function ActivityRow({
+export function ActivityRow({
   activity,
   isFollowed,
   isFollowPending,
@@ -528,7 +530,8 @@ function ActivityRow({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onUserPress(activity.user.username, activity.user.avatar);
+            if (activity.type === "event_broadcast") onActivityPress(activity);
+            else onUserPress(activity.user.username, activity.user.avatar);
           }}
           className="relative shrink-0"
           style={{ width: 48, height: 48 }}
@@ -552,10 +555,11 @@ function ActivityRow({
               className="font-semibold text-white"
               onClick={(e) => {
                 e.stopPropagation();
-                onUserPress(activity.user.username, activity.user.avatar);
+                if (activity.type === "event_broadcast") onActivityPress(activity);
+                else onUserPress(activity.user.username, activity.user.avatar);
               }}
             >
-              {activity.user.username}
+              {activitySenderLabel(activity)}
             </span>
           )}
           {getActivityText(activity)}

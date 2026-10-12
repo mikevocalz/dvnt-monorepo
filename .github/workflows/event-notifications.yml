@@ -1,0 +1,34 @@
+name: Event notification sender and navigation
+on:
+  pull_request:
+    paths:
+      - 'packages/app/lib/activity/**'
+      - 'packages/app/lib/api/notifications.ts'
+      - 'packages/app/lib/hooks/use-activities-query.ts'
+      - 'packages/app/lib/stores/activity-store.ts'
+      - 'packages/app/lib/notifications/**'
+      - 'packages/app/features/activity/**'
+      - 'packages/app/features/routes/screens/(protected)/(tabs)/activity.tsx'
+      - 'apps/mobile/supabase/functions/event-broadcast-message/**'
+      - 'scripts/test-event-notification-browser.cjs'
+      - '.github/workflows/event-notifications.yml'
+permissions:
+  contents: read
+jobs:
+  notification-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Sender identity, routes, and broadcast persistence
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node --test packages/app/lib/activity/*.test.ts packages/app/lib/activity/*.test.cjs packages/app/lib/notifications/event-broadcast-routing.test.cjs apps/mobile/supabase/functions/event-broadcast-message/index.test.cjs
+      - name: Install Chromium
+        run: pnpm --filter web exec playwright install --with-deps chromium
+      - name: Actual web and native row interactions
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-event-notification-browser.cjs
+

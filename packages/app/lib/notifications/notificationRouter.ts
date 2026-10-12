@@ -31,6 +31,7 @@ export type NotificationPayloadType =
   | "event"
   | "event_invite"
   | "event_update"
+  | "event_broadcast"
   | "event_promoter_added"
   | "sneaky_lynk"
   | "room_invite"
@@ -152,6 +153,7 @@ export function routeFromNotification(
     case "event":
     case "event_invite":
     case "event_update":
+    case "event_broadcast":
     case "ticket": {
       const eventId = data.eventId || data.entityId;
       if (eventId) {

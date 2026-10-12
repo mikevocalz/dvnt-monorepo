@@ -164,6 +164,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // Notifications point to users.id, never the auth string. Attribute the
+    // broadcast to the verified sender (including accepted admin co-organizers).
+    const { data: sender, error: senderError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_id", authId)
+      .maybeSingle();
+    if (senderError || !sender?.id) {
+      return json({ ok: false, error: { message: "Sender profile not found" } }, 409, req);
+    }
+
     // Collect attendee auth_ids based on audience.
     let ticketsQuery = supabase
       .from("tickets")
@@ -206,7 +217,7 @@ Deno.serve(async (req: Request) => {
     const { error: notificationError } = await supabase.from("notifications").insert(
       intIds.map((uid: number) => ({
         recipient_id: uid,
-        actor_id: null,
+        actor_id: sender.id,
         type: "event_broadcast",
         entity_type: "event",
         entity_id: String(eventId),
