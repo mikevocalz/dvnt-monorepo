@@ -144,9 +144,9 @@ Deno.serve(async (req) => {
     // Preserve the verification-first contract, including malformed requests.
     // Admission is checked again in the pre/post-mint snapshots below: reading
     // the request body or contacting the provider may outlive this decision.
-    const initialAdmission = await resolveVerifiedAdmission(supabase, userId);
-    if (initialAdmission.state === "blocked") {
-      const refusal = admissionRefusal(initialAdmission);
+    const admission = await resolveVerifiedAdmission(supabase, userId);
+    if (admission.state === "blocked") {
+      const refusal = admissionRefusal(admission);
       return errorResponse("forbidden", refusal.message, { reason: refusal.reason });
     }
 
