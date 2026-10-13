@@ -10,6 +10,12 @@ on:
       - 'apps/web/vercel.json'
       - 'packages/app/lib/ticket-embed/**'
       - 'packages/app/features/events/ui/event-widget.web.tsx'
+      - 'packages/app/features/events/*guest-checkout*'
+      - 'packages/app/features/events/event-detail.web.tsx'
+      - 'packages/app/lib/stores/guest-checkout-store.ts'
+      - 'packages/app/lib/tickets/guest-checkout-quote.ts'
+      - 'apps/web/src/app/(frontend)/public/events/**'
+      - 'scripts/test-guest-checkout-browser.cjs'
       - 'packages/app/components/ui/event-widget*'
       - 'scripts/*event-widget*'
       - '.github/workflows/event-ticket-widget.yml'
@@ -29,6 +35,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node --test scripts/test-event-widget.cjs
+      - name: Existing anonymous checkout and guest ticket delivery contracts
+        run: node --test apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs apps/mobile/supabase/functions/get-guest-ticket/index.test.cjs
+      - name: Install Chromium for the existing guest checkout flow
+        run: pnpm --filter web exec playwright install --with-deps chromium
+      - name: Signed-out checkout sheet and real handler with fixture Stripe
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-guest-checkout-browser.cjs
       - name: Actual widget migration in disposable PostgreSQL
         run: |
           set -euo pipefail

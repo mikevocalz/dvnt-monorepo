@@ -51,7 +51,7 @@ for(const origin of ['http://merchant.example.com','https://merchant.example.com
 test('stale revision cannot republish',async()=>{const h=harness();assert.equal((await h.call({action:'publish',revision:0,origin:'https://merchant.example.com'})).status,409);assert.equal(h.writes.length,0)});
 test('revocation immediately removes public widget',async()=>{const h=harness();assert.equal((await h.call({action:'revoke',revision:1})).status,200);assert.equal((await h.call()).status,404)});
 for(const patch of [{visibility:'private'},{is_hidden:true},{publish_at:'2099-01-01'},{publish_at:'invalid'},{status:'draft'},{status:'cancelled'},{nsfw:true}])test('private/unpublished/restricted event unavailable '+JSON.stringify(patch),async()=>{const h=harness({patch});assert.equal((await h.call()).status,404);assert.equal((await h.call({action:'publish',revision:1,origin:'https://merchant.example.com'})).status,409);assert.equal(h.writes.length,0)});
-test('public widget has canonical current price without any holds/charges',async()=>{const h=harness(),r=await h.call();assert.equal(r.status,200);assert.equal(r.data.tiers[0].priceCents,2500);assert.equal(r.data.checkoutUrl,'https://dvntapp.live/feed/events/1');assert.equal(r.data.event.host_id,undefined);assert.equal(h.writes.length,0);assert.equal(h.rpcs.length,2)});
+test('public widget has canonical current price without any holds/charges',async()=>{const h=harness(),r=await h.call();assert.equal(r.status,200);assert.equal(r.data.tiers[0].priceCents,2500);assert.equal(r.data.checkoutUrl,'https://dvntapp.live/public/events/1');assert.equal(r.data.event.host_id,undefined);assert.equal(h.writes.length,0);assert.equal(h.rpcs.length,2)});
 test('hidden/locked tiers never expose their names or prices',async()=>{const h=harness();h.tables.ticket_types[0].tier_visibility='locked';assert.deepEqual((await h.call()).data.tiers,[]);assert.equal(h.rpcs.length,0)});
 test('closed sales show event details only',async()=>{const r=await harness({patch:{start_date:'2020-01-01'}}).call();assert.equal(r.data.salesOpen,false);const html=renderEventWidget(r.data);assert.ok(!html.includes('Buy tickets on DVNT'));assert.match(html,/Online ticket sales are closed/)});
 test('HTML escapes attacker content and cannot redirect checkout elsewhere',async()=>{const r=await harness().call();r.data.event.title='<script>alert(1)</script>';r.data.tiers[0].name='"><img onerror=alert(1)>';const html=renderEventWidget(r.data);assert.ok(!html.includes('<script>'));assert.match(html,/&lt;script&gt;/);assert.match(html,/target="_blank" rel="noopener noreferrer"/);assert.match(html,/Powered by/);assert.ok(!html.includes('<form'));assert.throws(()=>renderEventWidget({...r.data,checkoutUrl:'https://evil.invalid'}));assert.throws(()=>widgetCode('not-a-uuid'))});
@@ -104,4 +104,39 @@ test('organizer links only the original event embed generator',()=>{
  assert.equal((organizer.match(/<EventWidgetEntry/g)||[]).length,1);
  assert.equal(organizer.includes('TicketEmbedOrganizerEntry'),false);
  assert.ok(alternate.includes('redirect(') && alternate.includes('/embed'));
+});
+
+// A published widget can outlive its backend release. Both canonical and legacy
+// same-event descriptors must emit the existing public guest-capable route.
+for(const destination of ['public','feed'])test(destination+' descriptor opens the guest-capable event page',async()=>{
+ const d=(await harness().call()).data;
+ d.checkoutUrl=`https://dvntapp.live/${destination}/events/1`;
+ const html=renderEventWidget(d);
+ assert.match(html,/href="https:\/\/dvntapp\.live\/public\/events\/1"/);
+ assert.ok(!html.includes('href="https://dvntapp.live/feed/'));
+ const closed=renderEventWidget({...d,salesOpen:false});
+ assert.match(closed,/href="https:\/\/dvntapp\.live\/public\/events\/1"/);
+ assert.match(closed,/View event on DVNT/);
+});
+for(const destination of ['https://dvntapp.live/public/events/2','https://dvntapp.live/feed/events/2','https://dvntapp.live/public/events/1?next=https://evil.invalid','https://dvntapp.live/public/events/1/organizer','https://evil.invalid/public/events/1'])test('reject mismatched checkout destination '+destination,async()=>{
+ const d=(await harness().call()).data;
+ assert.throws(()=>renderEventWidget({...d,checkoutUrl:destination}));
+});
+test('public numeric event route renders the existing guest-capable screen outside the protected feed shell',()=>{
+ const route=path.join(ROOT,'apps/web/src/app/(frontend)/public/events/[id]');
+ const page=fs.readFileSync(path.join(route,'page.tsx'),'utf8');
+ const client=fs.readFileSync(path.join(route,'event-detail-client.tsx'),'utf8');
+ assert.match(page,/<EventDetailClient/);
+ assert.match(client,/@dvnt\/app\/features\/events\/event-detail.web/);
+ assert.match(client,/m\.EventDetailScreen/);
+ const detail=fs.readFileSync(path.join(ROOT,'packages/app/features/events/event-detail.web.tsx'),'utf8');
+ assert.match(detail,/const idParam = String/);
+ assert.match(detail,/<GuestCheckoutSheet/);
+ // Ancestor route groups must never accidentally introduce the feed auth gate.
+ for(let dir=route;dir!==path.join(ROOT,'apps/web/src');dir=path.dirname(dir)){
+  const layout=path.join(dir,'layout.tsx');
+  if(fs.existsSync(layout))assert.doesNotMatch(fs.readFileSync(layout,'utf8'),/WebAppShell|ProtectedLayout|redirect\(/,layout);
+ }
+ const feed=fs.readFileSync(path.join(ROOT,'apps/web/src/app/(frontend)/feed/layout.tsx'),'utf8');
+ assert.match(feed,/<WebAppShell>/,'member routes still require the authenticated app shell');
 });

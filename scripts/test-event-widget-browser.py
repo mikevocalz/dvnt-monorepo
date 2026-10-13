@@ -36,7 +36,7 @@ try:
                 route.fulfill(content_type='image/svg+xml', body=pathlib.Path('apps/web/public/dvnt-wordmark.svg').read_text())
             elif url.endswith('/flyer.jpg'):
                 route.fulfill(content_type='image/svg+xml', body='<svg xmlns="http://www.w3.org/2000/svg" width="300" height="350"><rect width="300" height="350" fill="purple"/></svg>')
-            elif url == 'https://dvntapp.live/feed/events/1':
+            elif url == 'https://dvntapp.live/public/events/1':
                 route.fulfill(content_type='text/html', body='<title>Checkout navigation fixture</title>Existing checkout destination')
             else:
                 raise AssertionError('Unexpected external request: ' + url)
@@ -60,7 +60,7 @@ try:
                 frame.locator('a.buy').click()
             popup = opened.value
             popup.wait_for_load_state()
-            assert popup.url == 'https://dvntapp.live/feed/events/1'
+            assert popup.url == 'https://dvntapp.live/public/events/1'
             assert popup.evaluate('window.opener === null')
             assert page.url == 'http://127.0.0.1:8123/'
             popup.close()
