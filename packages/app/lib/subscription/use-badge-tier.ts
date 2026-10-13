@@ -20,17 +20,20 @@ export function useBadgeTier(username: string | null | undefined) {
   const query = useQuery({
     queryKey: ["badgeTier", username],
     enabled: !!username,
-    // A tier changes at most monthly; re-asking on every profile visit is
-    // wasted traffic for a value that is decorative.
-    staleTime: 10 * 60_000,
+    // Grants can be revoked at any time; keep an open profile in sync.
+    staleTime: 0,
+    refetchInterval: 30_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
     queryFn: async (): Promise<PlanKey | null> => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("user_badge_tiers")
         .select("plan_key")
         .eq("username", username as string)
         .maybeSingle();
+      if (error) throw error;
       return ((data as any)?.plan_key as PlanKey) ?? null;
     },
   });
-  return { planKey: query.data ?? null, isLoading: query.isLoading };
+  return { planKey: query.isError ? null : query.data ?? null, isLoading: query.isLoading };
 }

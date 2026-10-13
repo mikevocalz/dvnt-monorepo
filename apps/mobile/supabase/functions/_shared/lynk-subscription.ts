@@ -54,19 +54,22 @@ export function resolveLynkSubscription(
 export async function readLynkSubscription(source: unknown, userId: string, now: number = Date.now()) {
   const client = source as SubscriptionReadClient;
   const ownerKeys = await membershipOwnerKeys(client, userId);
-  const [membership, legacy] = await Promise.all([
+  const [membership, legacy, grants] = await Promise.all([
     client.from("membership_subscriptions")
       .select("product_family, plan_key, status, current_period_end, cancel_at_period_end, grace_period_ends_at")
       .in("user_id", ownerKeys),
     client.from("sneaky_subscriptions")
       .select("plan_id, status, current_period_end, cancel_at_period_end, grace_period_ends_at")
       .eq("host_id", userId),
+    client.from("membership_grant_records")
+      .select("product_family, plan_key, status, current_period_end, cancel_at_period_end, grace_period_ends_at")
+      .eq("user_id", userId),
   ]);
-  if (membership.error || legacy.error) {
+  if (membership.error || legacy.error || grants.error) {
     throw new Error("Could not verify subscription. Please try again.");
   }
   return resolveLynkSubscription(
-    (membership.data ?? []) as LynkSubscriptionRow[],
+    [...(membership.data ?? []), ...(grants.data ?? [])] as LynkSubscriptionRow[],
     (legacy.data ?? []) as LynkSubscriptionRow[], now,
   );
 }

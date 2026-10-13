@@ -10,6 +10,7 @@ import {
 const NOW = new Date("2026-10-13T12:00:00Z");
 const FUTURE = "2026-10-14T12:00:00Z";
 const rows = {
+  membership_grant_records: [],
   membership_subscriptions: [{ user_id: "auth-fixture", product_family: "dvnt_membership", plan_key: "dvnt_core", status: "active", current_period_end: FUTURE, rail: "ios_iap" }],
   sneaky_subscriptions: [{ host_id: "auth-fixture", plan_id: "host_50", status: "past_due", grace_period_ends_at: FUTURE }],
 };

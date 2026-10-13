@@ -47,7 +47,7 @@ test("membership precedence, legacy grace, and free membership rows reconcile co
   assert.equal(resolveLynkSubscription([{ plan_key: "constructor", status: "active" }], [], NOW.getTime()).planKey, "free");
 });
 
-for (const failed of ["membership_subscriptions", "sneaky_subscriptions"]) {
+for (const failed of ["membership_subscriptions", "sneaky_subscriptions", "membership_grant_records"]) {
   test(`${failed}: creation cannot proceed with a partial/unverified subscription read`, async () => {
     const reads: string[] = [];
     const client = { from(table: string) { return { select() {
@@ -61,7 +61,7 @@ for (const failed of ["membership_subscriptions", "sneaky_subscriptions"]) {
       return { eq: read, in: read };
     } }; } };
     await assert.rejects(readLynkSubscription(client, "auth-fixture"), /Could not verify subscription/);
-    assert.equal(reads.length, 4);
+    assert.equal(reads.length, 5);
   });
 }
 
