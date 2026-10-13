@@ -1,3 +1,4 @@
+import { getCaptionMetrics, validatePostCaption, MAX_CAPTION_LENGTH, MAX_CAPTION_RAW_LENGTH } from "@dvnt/app/lib/posts/post-caption";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 /**
  * Edit Post Screen
@@ -73,7 +74,7 @@ import { useAppStore } from "@dvnt/app/lib/stores/app-store";
  */
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const MEDIA_HEIGHT = SCREEN_WIDTH * 0.65;
-const MAX_CAPTION = 2200;
+const MAX_CAPTION = MAX_CAPTION_LENGTH;
 
 function EditPostScreenContent() {
   // Live, because the carousel's page index is derived from it.
@@ -156,7 +157,9 @@ function EditPostScreenContent() {
     }
   }, [post, isDirty]);
 
-  const captionOverLimit = caption.length > MAX_CAPTION;
+  const captionMetrics = getCaptionMetrics(caption);
+  const captionValidation = validatePostCaption(caption);
+  const captionOverLimit = post?.kind === "text" ? caption.length > MAX_CAPTION : !captionValidation.valid;
 
   // ─── Authorization guard ───
   const isOwner = useMemo(() => {
@@ -650,14 +653,14 @@ function EditPostScreenContent() {
           <UserMentionAutocomplete
             value={caption}
             onChangeText={setCaption}
-            placeholder="Write a caption... (use @ to tag people)"
+            placeholder="Write a caption… Add #hashtags here or @ to tag people"
             multiline
-            maxLength={MAX_CAPTION + 100}
+            maxLength={post?.kind === "text" ? MAX_CAPTION + 100 : MAX_CAPTION_RAW_LENGTH}
             style={{ minHeight: 120, fontSize: 15, lineHeight: 22 }}
           />
           {captionOverLimit && (
             <Text className="text-xs text-red-400 font-semibold mt-1">
-              Caption exceeds {MAX_CAPTION.toLocaleString()} characters
+              {post?.kind === "text" ? `Caption exceeds ${MAX_CAPTION.toLocaleString()} characters` : captionValidation.error}
             </Text>
           )}
           <View className="flex-row items-center justify-between mt-1.5">
@@ -668,37 +671,39 @@ function EditPostScreenContent() {
                   : "text-muted-foreground"
               }`}
             >
-              {caption.length.toLocaleString()}/{MAX_CAPTION.toLocaleString()}
+              {(post?.kind === "text" ? caption.length : captionMetrics.characterCount).toLocaleString()}/{MAX_CAPTION.toLocaleString()}
             </Text>
-            {caption.includes("#") && (
+            {captionMetrics.hashtags.length > 0 && (
               <Text className="text-xs text-primary/60">
-                {(caption.match(/#\w+/g) || []).length} hashtags
+                {captionMetrics.hashtags.length} hashtags
               </Text>
             )}
           </View>
 
+          {post?.kind !== "text" && <Text className="text-xs text-muted-foreground mt-1.5">Hashtags don’t count toward your caption limit.</Text>}
+
           {/* Extracted hashtags preview */}
-          {caption.includes("#") && (
+          {captionMetrics.hashtags.length > 0 && (
             <Motion.View
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ type: "timing", duration: 250 }}
               className="flex-row flex-wrap gap-1.5 mt-3"
             >
-              {(caption.match(/#\w+/g) || []).slice(0, 10).map((tag, index) => (
+              {captionMetrics.hashtags.slice(0, 10).map((tag, index) => (
                 <View
                   key={`${tag}-${index}`}
                   className="bg-primary/10 px-2.5 py-1 rounded-full"
                 >
                   <Text className="text-primary text-xs font-medium">
-                    {tag}
+                    #{tag}
                   </Text>
                 </View>
               ))}
-              {(caption.match(/#\w+/g) || []).length > 10 && (
+              {captionMetrics.hashtags.length > 10 && (
                 <View className="bg-white/5 px-2.5 py-1 rounded-full">
                   <Text className="text-muted-foreground text-xs">
-                    +{(caption.match(/#\w+/g) || []).length - 10} more
+                    +{captionMetrics.hashtags.length - 10} more
                   </Text>
                 </View>
               )}

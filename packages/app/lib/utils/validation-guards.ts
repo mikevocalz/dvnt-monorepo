@@ -63,25 +63,7 @@ export function validateCommentDepth(
 /**
  * Validate caption length
  */
-export function validateCaption(caption: string | undefined): {
-  valid: boolean;
-  error?: string;
-} {
-  if (!caption) {
-    return { valid: true }; // Caption is optional
-  }
-  
-  const MAX_CAPTION_LENGTH = 2200;
-  
-  if (caption.length > MAX_CAPTION_LENGTH) {
-    return { 
-      valid: false, 
-      error: `Caption must be ${MAX_CAPTION_LENGTH} characters or less` 
-    };
-  }
-  
-  return { valid: true };
-}
+export { validatePostCaption as validateCaption } from "../posts/post-caption.ts";
 
 /**
  * Validate comment content

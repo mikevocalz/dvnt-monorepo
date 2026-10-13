@@ -14,6 +14,7 @@ try {
 
 // Storage keys that contain user-specific data and should be cleared on logout/user switch
 const USER_DATA_STORAGE_KEYS = [
+  "create-post-storage", // unsent captions, text slides and tags
   "post-storage", // liked posts, like counts
   "bookmark-storage", // bookmarked posts
   "chat-storage", // chat data
@@ -23,9 +24,22 @@ const USER_DATA_STORAGE_KEYS = [
   // Don't clear app-storage - that's app state not user data
 ];
 
+const userDataResets = new Set<() => void>();
+/** Loaded stores register in-memory cleanup alongside persisted-key cleanup. */
+export function registerUserDataReset(reset: () => void): () => void {
+  userDataResets.add(reset);
+  return () => { userDataResets.delete(reset); };
+}
+
 // Clear all user-specific data from storage
 export function clearUserDataFromStorage(): void {
   console.log("[Storage] Clearing all user-specific data from storage");
+  // Reset first: a persisted store may write its empty state during reset.
+  for (const reset of userDataResets) {
+    try { reset(); } catch (error) {
+      console.error("[Storage] Could not reset a loaded store:", error);
+    }
+  }
   try {
     if (Platform.OS === "web") {
       USER_DATA_STORAGE_KEYS.forEach((key) => {

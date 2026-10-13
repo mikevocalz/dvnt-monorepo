@@ -1,5 +1,7 @@
 "use client";
 
+import { parseCaptionHashtags } from "@dvnt/app/lib/posts/post-caption";
+
 /**
  * Search screen — WEB variant (port of native `app/(protected)/search.tsx`).
  *
@@ -406,9 +408,8 @@ export function SearchScreen() {
     const counts = new Map<string, number>();
     for (const p of discoverPosts) {
       // Posts carry hashtags inside the caption (no structured tags field).
-      const matches = p.caption?.match(/#[\p{L}\p{N}_]+/gu) ?? [];
-      for (const tag of matches) {
-        const t = tag.replace(/^#/, "").trim().toLowerCase();
+      const matches = parseCaptionHashtags(p.caption ?? "");
+      for (const t of new Set(matches.map((token) => token.text.slice(1).toLowerCase()))) {
         if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
       }
     }
