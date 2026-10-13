@@ -9,6 +9,7 @@ on:
       - 'apps/mobile/supabase/functions/get-event-tickets/**'
       - 'apps/mobile/supabase/functions/ticket-scan/**'
       - 'scripts/*complimentary*'
+      - 'scripts/fixtures/complimentary-membership-existing-schema.sql'
       - '.github/workflows/complimentary-membership-regressions.yml'
   workflow_dispatch:
 permissions:

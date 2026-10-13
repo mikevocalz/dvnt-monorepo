@@ -158,7 +158,7 @@ GRANT EXECUTE ON FUNCTION public.grant_complimentary_vip(bigint,bigint,text,time
 GRANT EXECUTE ON FUNCTION public.revoke_complimentary_vip(uuid,bigint,text,uuid) TO service_role;
 
 -- One service-only effective tier for badges, existing entitlement RPCs and door
--- perks. Processor fields are never copied into grant rows or this public-facing
+-- roster/scanner perks. Processor fields are never copied into grant rows or this public-facing
 -- tier projection. Canonical auth-id ownership wins an ambiguous numeric key;
 -- a legacy profile-id owner is used only if no canonical owner exists.
 CREATE VIEW public.effective_membership_tiers WITH (security_barrier = true) AS
@@ -211,12 +211,14 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   SELECT u.id::bigint, t.plan_key FROM public.users u
   JOIN public.effective_membership_tiers t ON t.user_id = u.auth_id;
 $$;
-REVOKE ALL ON FUNCTION public.membership_badge_tiers() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.membership_badge_tiers() TO anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.membership_badge_tiers() FROM PUBLIC, anon, service_role;
+GRANT EXECUTE ON FUNCTION public.membership_badge_tiers() TO authenticated;
 CREATE OR REPLACE VIEW public.user_badge_tiers AS
 SELECT u.id::text AS user_id, u.username, t.plan_key
 FROM public.users u JOIN public.membership_badge_tiers() t ON t.profile_user_id = u.id;
-GRANT SELECT ON public.user_badge_tiers TO anon, authenticated, service_role;
+-- Preserve the verified live audience: signed-in profile badge reads only.
+REVOKE ALL ON public.user_badge_tiers FROM PUBLIC, anon, service_role;
+GRANT SELECT ON public.user_badge_tiers TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.is_entitled(uid text)
 RETURNS text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -233,59 +235,14 @@ CREATE OR REPLACE FUNCTION public.is_entitled_self()
 RETURNS text LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   SELECT public.is_entitled(nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub');
 $$;
-REVOKE ALL ON FUNCTION public.is_entitled(text) FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.is_entitled_self() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.is_entitled(text), public.is_entitled_self() TO authenticated, service_role;
+-- Preserve existing caller audiences. The self RPC has no caller-supplied ID;
+-- its definer context only bridges to the service-only effective-tier lookup.
+REVOKE ALL ON FUNCTION public.is_entitled(text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.is_entitled_self() FROM PUBLIC, anon, service_role;
+GRANT EXECUTE ON FUNCTION public.is_entitled(text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.is_entitled_self() TO authenticated;
 
--- One MVCC snapshot of authorized aggregate counts. No roster, QR or location data.
--- Tier ranks and eligibility mirror get-event-tickets, the existing perk authority.
-CREATE OR REPLACE FUNCTION public.watch_door_summary(p_event_id bigint, p_auth_id text)
-RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
-AS $$
-WITH event AS (
-  SELECT e.id, e.title, e.status, e.perk_config,
-    e.host_id = p_auth_id OR EXISTS (
-      SELECT 1 FROM public.event_co_organizers c WHERE c.event_id = e.id
-        AND c.user_id = p_auth_id AND c.accepted = true AND c.role IN ('admin','editor','scanner')
-    ) AS allowed
-  FROM public.events e WHERE e.id = p_event_id
-), authorized AS (
-  SELECT *, CASE
-    WHEN jsonb_typeof(perk_config->'skip_line') = 'null' THEN NULL
-    WHEN jsonb_typeof(perk_config->'skip_line') = 'number' THEN (perk_config->>'skip_line')::numeric
-    ELSE 4 END AS priority_min
-  FROM event WHERE allowed AND status = 'active'
-), roster AS (
-  SELECT t.id, t.user_id, t.event_id,
-    (t.status = 'scanned' OR t.checked_in_at IS NOT NULL) AS admitted,
-    EXISTS (
-      SELECT 1 FROM public.effective_membership_tiers s
-      WHERE s.user_id = t.user_id AND s.rank >= a.priority_min
-    ) AS priority,
-    EXISTS (
-      SELECT 1 FROM public.event_presence p
-      WHERE p.event_id = t.event_id AND p.ticket_id = t.id AND p.user_id = t.user_id
-        AND p.state = 'approaching' AND p.expires_at > now()
-    ) AS approaching
-  FROM public.tickets t JOIN authorized a ON a.id = t.event_id
-  WHERE t.status IN ('active','scanned','transfer_pending')
-), counts AS (
-  SELECT count(*) AS expected, count(*) FILTER (WHERE admitted) AS arrived,
-    count(*) FILTER (WHERE NOT admitted AND priority) AS priority_lane,
-    count(*) FILTER (WHERE NOT admitted AND approaching) AS approaching
-  FROM roster
-)
-SELECT CASE
-  WHEN NOT EXISTS (SELECT 1 FROM event) THEN jsonb_build_object('ok',false,'code','not_found')
-  WHEN NOT EXISTS (SELECT 1 FROM event WHERE allowed) THEN jsonb_build_object('ok',false,'code','forbidden')
-  WHEN NOT EXISTS (SELECT 1 FROM authorized) THEN jsonb_build_object('ok',false,'code','not_active')
-  ELSE (SELECT jsonb_build_object('ok',true,'summary',jsonb_build_object(
-    'eventId',a.id::text,'eventTitle',a.title,'expected',c.expected,'arrived',c.arrived,
-    'remaining',c.expected-c.arrived,'priorityLane',c.priority_lane,'approaching',c.approaching))
-    FROM authorized a CROSS JOIN counts c)
-END;
-$$;
-REVOKE ALL ON FUNCTION public.watch_door_summary(bigint,text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.watch_door_summary(bigint,text) TO service_role;
+-- The optional watch_door_summary RPC is absent from the verified live schema.
+-- Its separate feature migration remains responsible for creating/updating it.
 
 COMMIT;

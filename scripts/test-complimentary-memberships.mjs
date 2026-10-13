@@ -9,12 +9,13 @@ const { PGlite } = await import(process.env.PGLITE_MODULE
 const dir = new URL('../apps/mobile/supabase/migrations/', import.meta.url);
 const migration = readFileSync(new URL('20261013230000_complimentary_membership_grants.sql', dir), 'utf8');
 const identityMigration = readdirSync(dir).find(p => p.includes('membership_subscription_owner_reads'));
+const existingSchema = readFileSync(new URL('./fixtures/complimentary-membership-existing-schema.sql', import.meta.url), 'utf8');
 
-async function fixture() {
+async function fixture({migrate=true}={}) {
   const db = new PGlite();
   await db.exec(`
     CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
-    CREATE TABLE users(id bigint PRIMARY KEY,auth_id text,username text);
+    CREATE TABLE users(id bigint PRIMARY KEY,auth_id text,username varchar);
     INSERT INTO users VALUES (1,'actor-auth','operator'),(2,'member-auth','member'),
       (3,'higher-auth','higher'),(4,'legacy-auth','legacy'),(5,'other-auth','other'),
       (6,'7','canonical-numeric'),(7,'collision-auth','legacy-collision');
@@ -29,11 +30,6 @@ async function fixture() {
     INSERT INTO payload.admin_users VALUES (20,'member@fixture.test','admin');
     GRANT ALL ON public."user" TO service_role;
     -- Match production: service_role has no Payload schema/table access.
-    CREATE TABLE membership_subscriptions(user_id text UNIQUE, product_family text,plan_key text,status text,
-      current_period_end timestamptz,cancel_at_period_end boolean,grace_period_ends_at timestamptz,
-      rail text,stripe_subscription_id text,stripe_customer_id text,provider_ref text);
-    CREATE TABLE sneaky_subscriptions(host_id text,plan_id text,status text,current_period_end timestamptz,
-      cancel_at_period_end boolean,grace_period_ends_at timestamptz);
     CREATE TABLE events(id bigint,title text,status text,perk_config jsonb,host_id text);
     CREATE TABLE event_co_organizers(event_id bigint,user_id text,accepted boolean,role text);
     CREATE TABLE tickets(id bigint,event_id bigint,user_id text,status text,checked_in_at timestamptz);
@@ -41,13 +37,15 @@ async function fixture() {
     INSERT INTO events VALUES (10,'Fixture event','active',NULL,'actor-auth');
     INSERT INTO tickets VALUES (100,10,'member-auth','active',NULL);
     GRANT SELECT ON users TO authenticated; GRANT ALL ON users TO service_role;
-    GRANT SELECT ON membership_subscriptions TO service_role;
   `);
-  // The final stacked branch includes this prerequisite from the room repair.
+  await db.exec(existingSchema);
+  if (migrate) await applyMigrations(db);
+  return db;
+}
+async function applyMigrations(db) {
   assert.ok(identityMigration, 'Missing membership identity prerequisite migration');
   await db.exec(readFileSync(new URL(identityMigration, dir), 'utf8'));
   await db.exec(migration);
-  return db;
 }
 async function role(db, role, sub = null) {
   await db.exec('RESET ROLE');
@@ -61,10 +59,87 @@ async function tier(db, id='member-auth') {
   return (await db.query('SELECT is_entitled($1) AS plan',[id])).rows[0].plan;
 }
 
+async function existingContracts(db) {
+  const relations=(await db.query(`SELECT c.relname AS name, pg_get_userbyid(c.relowner) AS owner,
+    c.relrowsecurity AS rls,c.relforcerowsecurity AS force_rls,c.reloptions AS options,
+    ARRAY(SELECT acl::text FROM unnest(c.relacl) acl ORDER BY acl::text) AS acl,
+    (SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',format_type(a.atttypid,a.atttypmod)) ORDER BY a.attnum)
+      FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped) AS columns
+    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND c.relname IN ('membership_subscriptions','sneaky_subscriptions','user_badge_tiers')
+    ORDER BY c.relname`)).rows;
+  const functions=(await db.query(`SELECT p.proname AS name,pg_get_userbyid(p.proowner) AS owner,
+    pg_get_function_arguments(p.oid) AS arguments,pg_get_function_result(p.oid) AS result,p.proconfig AS config,
+    ARRAY(SELECT acl::text FROM unnest(p.proacl) acl ORDER BY acl::text) AS acl
+    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public' AND p.proname IN ('is_entitled','is_entitled_self') ORDER BY p.proname`)).rows;
+  return {relations,functions};
+}
+
+test('migration-first rollout preserves the existing paid schema, badge contract and access audiences without grants',async()=>{
+  const db=await fixture({migrate:false});
+  try {
+    await db.exec(`INSERT INTO membership_subscriptions(user_id,product_family,plan_key,status,current_period_end,rail,stripe_subscription_id,stripe_customer_id,provider_ref)
+      VALUES ('2','dvnt_membership','dvnt_core','active','2099-01-01','web_stripe','fixture-core-sub','fixture-core-customer','fixture-core-provider'),
+        ('higher-auth','dvnt_membership','dvnt_founders_circle','active','2099-01-01','ios_iap',NULL,NULL,'fixture-higher-provider');
+      INSERT INTO sneaky_subscriptions(host_id,plan_id,status,current_period_end,stripe_subscription_id)
+        VALUES ('other-auth','host_25','active','2099-01-01','fixture-legacy-sub');`);
+    const before=await existingContracts(db);
+    const policiesBefore=(await db.query("SELECT * FROM pg_policies WHERE schemaname='public' AND tablename IN ('membership_subscriptions','sneaky_subscriptions') ORDER BY tablename,policyname")).rows;
+    const paidBefore=(await db.query('SELECT * FROM membership_subscriptions ORDER BY user_id')).rows;
+    const legacyBefore=(await db.query('SELECT * FROM sneaky_subscriptions ORDER BY host_id')).rows;
+    for(const name of ['membership_subscription_auth_id(text)','membership_subscription_owned_by_viewer(text)','watch_door_summary(bigint,text)']) {
+      assert.equal((await db.query('SELECT to_regprocedure($1) AS object',[name])).rows[0].object,null);
+    }
+    assert.equal((await db.query("SELECT prosecdef FROM pg_proc WHERE oid='is_entitled_self()'::regprocedure")).rows[0].prosecdef,false);
+    await role(db,'authenticated','member-auth');
+    const oldBadge=(await db.query("SELECT * FROM user_badge_tiers WHERE username='member'")).rows;
+    assert.deepEqual(oldBadge,[{user_id:'2',username:'member',plan_key:'dvnt_core'}]);
+    assert.deepEqual((await db.query("SELECT plan_key FROM membership_subscriptions WHERE user_id='2'")).rows,[{plan_key:'dvnt_core'}]);
+    await db.exec('RESET ROLE');
+    await applyMigrations(db);
+    assert.deepEqual(await existingContracts(db),before,'Existing columns, owners, relation options, ACLs and RPC signatures must be preserved');
+    const policiesAfter=(await db.query("SELECT * FROM pg_policies WHERE schemaname='public' AND tablename IN ('membership_subscriptions','sneaky_subscriptions') ORDER BY tablename,policyname")).rows;
+    assert.deepEqual(policiesAfter.map(({qual,...policy})=>policy),policiesBefore.map(({qual,...policy})=>policy));
+    assert.deepEqual(policiesAfter.find(p=>p.tablename==='sneaky_subscriptions'),policiesBefore.find(p=>p.tablename==='sneaky_subscriptions'));
+    assert.match(policiesAfter.find(p=>p.tablename==='membership_subscriptions').qual,/membership_subscription_owned_by_viewer/);
+    assert.deepEqual((await db.query('SELECT * FROM membership_subscriptions ORDER BY user_id')).rows,paidBefore);
+    assert.deepEqual((await db.query('SELECT * FROM sneaky_subscriptions ORDER BY host_id')).rows,legacyBefore);
+    assert.equal((await db.query('SELECT count(*) AS n FROM membership_grants')).rows[0].n,0);
+    assert.equal((await db.query('SELECT count(*) AS n FROM membership_grant_events')).rows[0].n,0);
+    assert.equal((await db.query("SELECT to_regprocedure('watch_door_summary(bigint,text)') AS object")).rows[0].object,null);
+    for(const name of ['membership_subscription_auth_id(text)','membership_subscription_owned_by_viewer(text)']) {
+      assert.notEqual((await db.query('SELECT to_regprocedure($1) AS object',[name])).rows[0].object,null);
+    }
+    await role(db,'authenticated','member-auth');
+    assert.deepEqual((await db.query("SELECT * FROM user_badge_tiers WHERE username='member'")).rows,oldBadge);
+    assert.deepEqual((await db.query("SELECT plan_key FROM membership_subscriptions WHERE user_id='2'")).rows,[{plan_key:'dvnt_core'}]);
+    assert.equal((await db.query('SELECT is_entitled_self() AS plan')).rows[0].plan,'dvnt_core');
+    assert.equal((await db.query('SELECT * FROM membership_grant_records')).rows.length,0);
+    assert.equal((await db.query("SELECT * FROM membership_subscriptions WHERE user_id='higher-auth'")).rows.length,0);
+    await assert.rejects(db.query("SELECT is_entitled('higher-auth')"),/permission denied/);
+    await assert.rejects(db.query("SELECT membership_subscription_auth_id('higher-auth')"),/permission denied/);
+    await role(db,'authenticated','unbound-auth');
+    assert.equal((await db.query('SELECT is_entitled_self() AS plan')).rows[0].plan,null);
+    await role(db,'authenticated');
+    assert.equal((await db.query('SELECT is_entitled_self() AS plan')).rows[0].plan,null);
+    await role(db,'service_role');
+    assert.equal(await tier(db,'higher-auth'),'dvnt_founders_circle');
+    await assert.rejects(db.query('SELECT * FROM user_badge_tiers'),/permission denied/);
+    await assert.rejects(db.query('SELECT * FROM membership_badge_tiers()'),/permission denied/);
+    await assert.rejects(db.query('SELECT is_entitled_self()'),/permission denied/);
+    await role(db,'anon');
+    for(const sql of ['SELECT * FROM user_badge_tiers','SELECT * FROM membership_badge_tiers()',
+      'SELECT is_entitled_self()',"SELECT is_entitled('member-auth')",'SELECT * FROM membership_grant_records']) {
+      await assert.rejects(db.query(sql),/permission denied/);
+    }
+  }finally{await db.close();}
+});
+
 test('non-expiring VIP grants preserve paid data, are idempotent and have stable actor audit', async () => {
   const db=await fixture();
   try {
-    await db.exec(`INSERT INTO membership_subscriptions VALUES
+    await db.exec(`INSERT INTO membership_subscriptions(user_id,product_family,plan_key,status,current_period_end,cancel_at_period_end,grace_period_ends_at,rail,stripe_subscription_id,stripe_customer_id,provider_ref) VALUES
       ('member-auth','dvnt_membership','dvnt_core','active',now()+interval '30 days',false,NULL,'ios_iap',NULL,NULL,'store-ref'),
       ('higher-auth','dvnt_membership','dvnt_founders_circle','active',now()+interval '30 days',false,NULL,'web_stripe','sub-fixture','cus-fixture','provider-fixture');`);
     const before=(await db.query('SELECT * FROM membership_subscriptions ORDER BY user_id')).rows;
@@ -90,17 +165,19 @@ test('non-expiring VIP grants preserve paid data, are idempotent and have stable
   } finally {await db.close();}
 });
 
-test('revocation and expiry restore paid tier and remove badge/door perks at the same boundary',async()=>{
+test('revocation and expiry restore paid tier and remove badge/access at the same boundary',async()=>{
   const db=await fixture();
   try {
     await role(db,'service_role'); const id=await grant(db);
+    await role(db,'authenticated','member-auth');
     assert.equal((await db.query('SELECT plan_key FROM user_badge_tiers WHERE user_id=\'2\'')).rows[0].plan_key,'dvnt_vip');
-    assert.equal((await db.query("SELECT watch_door_summary(10,'actor-auth') AS s")).rows[0].s.summary.priorityLane,1);
+    await role(db,'service_role');
     await db.query('SELECT revoke_complimentary_vip($1,1,$2,$3)',[id,'Fixture revoked','00000000-0000-4000-8000-000000000010']);
     await db.query('SELECT revoke_complimentary_vip($1,1,$2,$3)',[id,'Fixture revoked','00000000-0000-4000-8000-000000000010']);
     assert.equal(await tier(db),null);
+    await role(db,'authenticated','member-auth');
     assert.equal((await db.query("SELECT * FROM user_badge_tiers WHERE user_id='2'")).rows.length,0);
-    assert.equal((await db.query("SELECT watch_door_summary(10,'actor-auth') AS s")).rows[0].s.summary.priorityLane,0);
+    await role(db,'service_role');
     await grant(db,2,'2099-01-01','00000000-0000-4000-8000-000000000011');
     // Time-boundary fixture mutation is local superuser only. Production ACLs deny it.
     await db.exec('RESET ROLE');
@@ -117,8 +194,8 @@ test('clients cannot grant, revoke, read other grants/audits/tiers or leak auth 
   try {
     await role(db,'service_role'); const id=await grant(db);
     await role(db,'authenticated','member-auth');
-    assert.equal(await tier(db),'dvnt_vip');
-    assert.equal(await tier(db,'higher-auth'),null);
+    assert.equal((await db.query('SELECT is_entitled_self() AS plan')).rows[0].plan,'dvnt_vip');
+    await assert.rejects(db.query("SELECT is_entitled('higher-auth')"),/permission denied/);
     assert.equal((await db.query('SELECT * FROM membership_grant_records')).rows.length,1);
     await assert.rejects(grant(db),/permission denied/);
     await assert.rejects(db.query('SELECT revoke_complimentary_vip($1,1,$2,$3)',[id,'Forged','00000000-0000-4000-8000-000000000090']),/permission denied/);
@@ -127,9 +204,11 @@ test('clients cannot grant, revoke, read other grants/audits/tiers or leak auth 
     }
     await role(db,'authenticated','other-auth');
     assert.equal((await db.query('SELECT * FROM membership_grant_records')).rows.length,0);
-    await role(db,'anon');
     const badges=(await db.query('SELECT * FROM user_badge_tiers')).rows;
     assert.deepEqual(badges,[{user_id:'2',username:'member',plan_key:'dvnt_vip'}]);
+    await role(db,'anon');
+    await assert.rejects(db.query('SELECT * FROM user_badge_tiers'),/permission denied/);
+    await assert.rejects(db.query('SELECT * FROM membership_badge_tiers()'),/permission denied/);
     await assert.rejects(db.query('SELECT * FROM membership_grant_records'),/permission denied/);
     await assert.rejects(grant(db),/permission denied/);
   } finally {await db.close();}
@@ -216,7 +295,9 @@ test('ban/deletion restrictions deny issuance and remove existing comp badge/acc
       await db.exec('RESET ROLE');await db.exec(restrict);
       await role(db,'service_role');
       assert.equal(await tier(db),null);
+      await role(db,'authenticated','member-auth');
       assert.equal((await db.query("SELECT * FROM user_badge_tiers WHERE user_id='2'")).rows.length,0);
+      await role(db,'service_role');
       assert.equal((await db.query("SELECT * FROM membership_grant_records WHERE user_id='member-auth'")).rows.length,0);
       await assert.rejects(grant(db,2,null,'00000000-0000-4000-8000-000000000099'),/unavailable or moderation-restricted/);
     }finally{await db.close();}
