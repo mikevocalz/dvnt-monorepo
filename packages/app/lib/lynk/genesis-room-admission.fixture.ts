@@ -59,7 +59,8 @@ const bundles = await Promise.all(["web", "native"].map((platform) => esbuild.bu
   plugins: [{ name: "genesis-boundaries", setup(build: any) {
     build.onResolve({ filter: /.*/ }, (args: any) => {
       if (Object.hasOwn(boundaries, args.path)) return { path: args.path, namespace: "fixture" };
-      if (args.path === "../room-lifecycle-source" && args.importer.endsWith("useRoomLifecycle.ts")) return { path: "lifecycle-source-fixture", namespace: "fixture" };
+      if (args.path === "./api/supabase" && args.importer.endsWith("useGenesisRoomAdmission.ts")) return { path: "@dvnt/app/features/sneaky-lynk/api/supabase", namespace: "fixture" };
+      if (args.path === "./room-lifecycle-source" && args.importer.endsWith("useRoomLifecycle.ts")) return { path: "lifecycle-source-fixture", namespace: "fixture" };
       if (args.path.startsWith("@dvnt/app/")) return { path: path.join(app, args.path.slice("@dvnt/app/".length)) + ".ts" };
     });
     build.onLoad({ filter: /.*/, namespace: "fixture" }, (args: any) => ({ loader: "tsx", resolveDir: ROOT, contents: boundaries[args.path] }));

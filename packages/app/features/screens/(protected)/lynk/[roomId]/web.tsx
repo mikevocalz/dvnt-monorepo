@@ -19,7 +19,7 @@ import { VideoTile } from "@dvnt/ui";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.web";
 import { useLynkViewer } from "@dvnt/app/lib/lynk/useLynkViewer.web";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { useGenesisRoomAdmission, type GenesisRoomAdmission } from "@dvnt/app/lib/lynk/genesis-room-admission";
+import { useGenesisRoomAdmission, type GenesisRoomAdmission } from "@dvnt/app/features/sneaky-lynk/useGenesisRoomAdmission";
 import { isPublisherRole } from "@dvnt/app/features/sneaky-lynk/publish-roles";
 import { lynkStateLabel, isTerminalLynkState } from "@dvnt/app/lib/lynk/lynkState";
 

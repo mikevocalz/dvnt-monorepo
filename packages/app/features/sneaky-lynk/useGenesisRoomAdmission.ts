@@ -3,12 +3,12 @@ import { AppState } from "react-native";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { videoApi } from "@dvnt/app/features/video/api";
 import type { JoinRoomResponse } from "@dvnt/app/features/video/types";
-import { useRoomLifecycle } from "@dvnt/app/features/video/hooks/useRoomLifecycle";
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk/api/supabase";
-import { useRoomHeartbeat } from "@dvnt/app/features/sneaky-lynk/hooks/useRoomHeartbeat";
-import { useEventLynkWaitingRoom } from "@dvnt/app/features/sneaky-lynk/hooks/useEventLynkWaitingRoom";
-import { leaveRoomSafely } from "@dvnt/app/features/sneaky-lynk/session/leave-room";
-import { classifySneakyLynkError } from "@dvnt/app/features/sneaky-lynk/errors";
+import { useRoomLifecycle } from "@dvnt/app/features/video/useRoomLifecycle";
+import { sneakyLynkApi } from "./api/supabase";
+import { useRoomHeartbeat } from "./hooks/useRoomHeartbeat";
+import { useEventLynkWaitingRoom } from "./hooks/useEventLynkWaitingRoom";
+import { leaveRoomSafely } from "./session/leave-room";
+import { classifySneakyLynkError } from "./errors";
 
 type Phase = "joining" | "admitted" | "waiting" | "error" | "ended" | "suspended";
 interface Admission {

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef } from "react";
 import { AppState } from "react-native";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
-import { createRoomLifecycleWatcher } from "../room-lifecycle";
-import { createRoomLifecycleSource } from "../room-lifecycle-source";
+import { createRoomLifecycleWatcher } from "./room-lifecycle";
+import { createRoomLifecycleSource } from "./room-lifecycle-source";
 
 export interface UseRoomLifecycleOptions {
   roomId?: string | null;

@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { useGenesisRoomAdmission, type GenesisRoomAdmission } from "@dvnt/app/lib/lynk/genesis-room-admission";
+import { useGenesisRoomAdmission, type GenesisRoomAdmission } from "@dvnt/app/features/sneaky-lynk/useGenesisRoomAdmission";
 import { isPublisherRole } from "@dvnt/app/features/sneaky-lynk/publish-roles";
 import { View, Text, Pressable, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
