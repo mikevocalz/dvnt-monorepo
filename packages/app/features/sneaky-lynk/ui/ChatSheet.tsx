@@ -41,14 +41,13 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { Reply, MessageCircleMore, ArrowDown } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import type { SneakyUser } from "../types";
-import type { RoomComment, Mention, RoomCommentAuthor } from "../api/comments";
+import type { RoomComment, Mention } from "../api/comments";
 import { broadcastSenderId } from "../api/comment-anonymity";
 import {
-  fetchRoomComments,
-  postRoomComment,
-  subscribeToRoomComments,
   buildCommentThreads,
 } from "../api/comments";
+
+import { useRoomChat } from "../hooks/useRoomChat";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -77,6 +76,7 @@ interface ChatSheetProps {
   roomId: string;
   currentUser: SneakyUser;
   participants?: SneakyUser[];
+  enabled?: boolean;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -435,6 +435,7 @@ export function ChatSheet({
   roomId,
   currentUser,
   participants = [],
+  enabled = true,
 }: ChatSheetProps) {
   const sheetRef = useRef<React.ComponentRef<typeof TrueSheetComponent>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -442,8 +443,8 @@ export function ChatSheet({
 
   const [inputText, setInputText] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
-  const [comments, setComments] = useState<RoomComment[]>([]);
-  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const { comments, loading: isLoadingComments, error: chatError, send } = useRoomChat({ roomId, currentUser, enabled });
+  const sendingRef = useRef(false);
   const [replyingTo, setReplyingTo] = useState<RoomComment | null>(null);
   const [commentReactions, setCommentReactions] = useState<Record<number, CommentReaction[]>>({});
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
@@ -454,7 +455,6 @@ export function ChatSheet({
   const lastTypingSentAtRef = useRef(0);
   const stopTypingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingExpiryTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const authorDirectoryRef = useRef<Record<string, RoomCommentAuthor>>({});
   // Typing broadcasts reach the whole channel. An anonymous member sends a
   // per-session token and their label, never their auth id or username.
   const typingSessionTokenRef = useRef(Math.random().toString(36).slice(2, 12));
@@ -472,78 +472,9 @@ export function ChatSheet({
     }
   }, [isOpen]);
 
-  const authorDirectory = useMemo(() => {
-    const entries: Array<[string, RoomCommentAuthor]> = [];
-    if (currentUser.id) {
-      entries.push([
-        currentUser.id,
-        {
-          username: currentUser.username,
-          displayName: currentUser.displayName,
-          avatar: currentUser.avatar,
-          isVerified: currentUser.isVerified,
-        },
-      ]);
-    }
-    for (const p of participants) {
-      if (!p.id) continue;
-      entries.push([
-        p.id,
-        { username: p.username, displayName: p.displayName, avatar: p.avatar, isVerified: p.isVerified },
-      ]);
-    }
-    return Object.fromEntries(entries);
-  }, [currentUser, participants]);
-
-  useEffect(() => {
-    authorDirectoryRef.current = authorDirectory;
-  }, [authorDirectory]);
-
-  // Fetch + subscribe to comments
-  useEffect(() => {
-    if (!roomId) return;
-    let unsubscribe: (() => void) | undefined;
-    let cancelled = false;
-
-    (async () => {
-      setIsLoadingComments(true);
-      const fetched = await fetchRoomComments(roomId);
-      if (cancelled) return;
-      setComments(fetched);
-      setIsLoadingComments(false);
-
-      unsubscribe = subscribeToRoomComments(
-        roomId,
-        (newComment) => {
-          setComments((prev) => {
-            if (prev.some((c) => c.id === newComment.id)) return prev;
-            const filtered = prev.filter(
-              (c) =>
-                !(c.isOptimistic && c.body === newComment.body && c.authorId === newComment.authorId),
-            );
-            return [...filtered, newComment];
-          });
-        },
-        {
-          resolveAuthor: (authorId) => authorDirectoryRef.current[authorId],
-          onDeleted: (commentId) =>
-            setComments((prev) => prev.filter((c) => c.id !== commentId)),
-        },
-      );
-    })().catch(() => {
-      if (cancelled) return;
-      setIsLoadingComments(false);
-    });
-
-    return () => {
-      cancelled = true;
-      unsubscribe?.();
-    };
-  }, [roomId]);
-
   // Typing presence channel
   useEffect(() => {
-    if (!roomId || !currentUser.id) return;
+    if (!enabled || !roomId || !currentUser.id) return;
     const channel = supabase.channel(`sneaky-typing-${roomId}`, {
       config: { broadcast: { self: false } },
     });
@@ -584,7 +515,7 @@ export function ChatSheet({
       if (stopTypingTimerRef.current) { clearTimeout(stopTypingTimerRef.current); stopTypingTimerRef.current = null; }
       setTypingUsers({});
     };
-  }, [roomId, currentUser.id, typingSenderId]);
+  }, [roomId, currentUser.id, typingSenderId, enabled]);
 
   const threads = useMemo(() => buildCommentThreads(comments), [comments]);
 
@@ -692,41 +623,15 @@ export function ChatSheet({
     const rootId = replyingTo ? (replyingTo.rootId ?? replyingTo.id) : null;
     const depth = replyingTo ? Math.min((replyingTo.depth || 0) + 1, 2) : 0;
 
-    const optimisticComment: RoomComment = {
-      id: -Date.now(),
-      roomId,
-      authorId: currentUser.id,
-      body,
-      parentId,
-      rootId,
-      depth,
-      mentions,
-      createdAt: new Date().toISOString(),
-      // Carry our own anonymity into the optimistic row too — without it the
-      // sender briefly sees their real name on their own message before the
-      // server row replaces it, which is the moment they would notice.
-      author: {
-        username: currentUser.username,
-        displayName: currentUser.displayName,
-        avatar: currentUser.isAnonymous ? "" : currentUser.avatar,
-        isVerified: currentUser.isVerified,
-        isAnonymous: currentUser.isAnonymous,
-        anonLabel: currentUser.anonLabel,
-      },
-      isOptimistic: true,
-    };
-
-    setComments((prev) => [...prev, optimisticComment]);
-    setInputText("");
-    setReplyingTo(null);
-
-    const result = await postRoomComment({ roomId, authorId: currentUser.id, body, parentId, rootId, depth, mentions, author: optimisticComment.author });
-    if (result) {
-      setComments((prev) => prev.map((c) => c.id === optimisticComment.id ? { ...result, author: optimisticComment.author } : c));
-    } else {
-      setComments((prev) => prev.filter((c) => c.id !== optimisticComment.id));
-    }
-  }, [inputText, replyingTo, roomId, currentUser, extractMentions]);
+    if (!enabled || sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      if (await send(body, { parentId, rootId, depth, mentions })) {
+        setInputText((text) => text.trim() === body ? "" : text);
+        setReplyingTo(null);
+      }
+    } finally { sendingRef.current = false; }
+  }, [inputText, replyingTo, enabled, send, extractMentions]);
 
   const handleReact = useCallback(
     (commentId: number, emoji: string) => {
@@ -776,10 +681,13 @@ export function ChatSheet({
       backgroundColor={SHEET_BG}
       onDismiss={onClose}
       header={
-        <SheetHeader
+        <View>
+        {chatError ? <Text accessibilityRole="alert" style={{ color: "#FC253A", padding: 12 }}>{chatError}</Text> : null}
+      <SheetHeader
           title={`Comments${comments.length > 0 ? ` (${comments.length})` : ""}`}
           onClose={handleRequestClose}
         />
+        </View>
       }
       footer={
         <View>

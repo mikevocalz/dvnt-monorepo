@@ -9,6 +9,18 @@
  * merges what it receives. That is what these events are.
  */
 
+import { peerIdForMember } from "../../features/video/lynk-participants.ts";
+
+/** Match the public media path; wait for a label rather than expose an anon id. */
+export function speakingSenderId(user: {
+  id: string;
+  isAnonymous?: boolean;
+  anonLabel?: string | null;
+}): string | undefined {
+  if (!user.id || (user.isAnonymous && !user.anonLabel)) return undefined;
+  return peerIdForMember(user.id, user.anonLabel);
+}
+
 /** One client telling the room whether it is currently speaking. */
 export interface SpeakingEvent {
   userId: string;

@@ -5,9 +5,8 @@
  * `app/(protected)/sneaky-lynk/billing.tsx`).
  *
  * Law 1 (data is sacred): wires the EXACT native data flow —
- *   - Subscription read: `supabase.from("sneaky_subscriptions").select(...)`
- *     filtered by `host_id`, plus the same Realtime `postgres_changes`
- *     channel that auto-refreshes when the Stripe webhook updates the row.
+ *   - Subscription read: the shared useEntitlements hook reconciles Stripe,
+ *     RevenueCat, and legacy rows using the authenticated account ID.
  *   - Manage billing: the SAME `sneaky-billing-portal` edge function
  *     (auth via `requireBetterAuthToken`), opening the returned hosted
  *     URL with `window.location.assign` (no @stripe/stripe-react-native).
@@ -22,7 +21,7 @@
  * Avatars n/a here. No list of N rows, so no TanStack Virtual needed.
  */
 
-import { useEffect, useCallback } from "react";
+import { useCallback } from "react";
 import { useRouter } from "solito/navigation";
 import {
   ChevronLeft,
@@ -36,7 +35,6 @@ import {
 } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
 import { supabase } from "@dvnt/app/lib/supabase/client";
-import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -44,6 +42,8 @@ import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { PLANS } from "@dvnt/app/lib/subscription/plans";
 import type { PlanKey } from "@dvnt/app/lib/subscription/types";
 import { useSneakyBillingStore } from "../stores/billing-store";
+import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
+import { billingSummary } from "@dvnt/app/lib/subscription/billing-summary";
 
 const ACCENT = "#3FDCFF";
 
@@ -81,20 +81,6 @@ const usd = (cents: number) =>
 /** null = unlimited, matching PlanEntitlements.maxParticipants. */
 const paxOf = (key: PlanKey) => PLANS[key].entitlements.maxParticipants ?? null;
 
-const PLAN_LABELS: Record<
-  string,
-  { name: string; price: string; maxPax: number | null }
-> = Object.fromEntries(
-  Object.entries(LEGACY_ID_TO_PLAN_KEY).map(([legacyId, key]) => [
-    legacyId,
-    {
-      name: PLANS[key].name,
-      price: `${usd(PLANS[key].priceCents)}/mo`,
-      maxPax: paxOf(key),
-    },
-  ]),
-);
-
 const UPGRADE_PLANS: PlanRow[] = (["host_25", "host_50"] as const).map(
   (legacyId, i) => {
     const key = LEGACY_ID_TO_PLAN_KEY[legacyId];
@@ -124,73 +110,16 @@ export function SneakyLynkBillingScreen() {
   const authUser = useAuthStore((s) => s.user);
   const showToast = useUIStore((s) => s.showToast);
 
-  const subscription = useSneakyBillingStore((s) => s.subscription);
-  const isLoading = useSneakyBillingStore((s) => s.isLoading);
+  const { entitlements, records, isLoading, isError, refetch: loadSubscription } = useEntitlements();
+  const { subscription, planInfo, isActive, isFree, canManageStripe, canCheckoutStandalone, store } = billingSummary(records, entitlements);
   const isPortalLoading = useSneakyBillingStore((s) => s.isPortalLoading);
   const showUpgradeModal = useSneakyBillingStore((s) => s.showUpgradeModal);
   const checkoutPlanId = useSneakyBillingStore((s) => s.checkoutPlanId);
-  const setSubscription = useSneakyBillingStore((s) => s.setSubscription);
-  const setIsLoading = useSneakyBillingStore((s) => s.setIsLoading);
   const setIsPortalLoading = useSneakyBillingStore((s) => s.setIsPortalLoading);
   const setShowUpgradeModal = useSneakyBillingStore(
     (s) => s.setShowUpgradeModal,
   );
   const setCheckoutPlanId = useSneakyBillingStore((s) => s.setCheckoutPlanId);
-
-  const FREE_SUB = {
-    plan_id: "free",
-    status: "inactive",
-    current_period_end: null,
-    cancel_at_period_end: false,
-    stripe_subscription_id: null,
-    grace_period_ends_at: null,
-  };
-
-  const loadSubscription = useCallback(async () => {
-    if (!authUser?.id) return;
-    setIsLoading(true);
-    try {
-      const { data } = await supabase
-        .from("sneaky_subscriptions")
-        .select(
-          "plan_id, status, current_period_end, cancel_at_period_end, stripe_subscription_id, grace_period_ends_at",
-        )
-        .eq("host_id", authUser.id)
-        .single();
-      setSubscription(data ?? FREE_SUB);
-    } catch {
-      setSubscription(FREE_SUB);
-    } finally {
-      setIsLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUser?.id, setSubscription, setIsLoading]);
-
-  useEffect(() => {
-    loadSubscription();
-  }, [loadSubscription]);
-
-  // Realtime: auto-refresh when the Stripe webhook updates the subscription row.
-  useEffect(() => {
-    if (!authUser?.id) return;
-    const channel = freshChannel("sneaky-sub-changes-web")
-      .on(
-        "postgres_changes" as any,
-        {
-          event: "*",
-          schema: "public",
-          table: "sneaky_subscriptions",
-          filter: `host_id=eq.${authUser.id}`,
-        },
-        () => {
-          loadSubscription();
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [authUser?.id, loadSubscription]);
 
   const handleManageBilling = useCallback(async () => {
     if (!authUser?.id) return;
@@ -234,7 +163,7 @@ export function SneakyLynkBillingScreen() {
   // Upgrade / change plan — SAME `sneaky-billing-checkout` edge fn as native.
   const handleSubscribe = useCallback(
     async (planId: string) => {
-      if (!authUser?.id || planId === "free") return;
+      if (!authUser?.id || planId === "free" || isLoading || isError || !canCheckoutStandalone) return;
       setCheckoutPlanId(planId);
       try {
         const token = await requireBetterAuthToken();
@@ -292,16 +221,13 @@ export function SneakyLynkBillingScreen() {
       setCheckoutPlanId,
       setShowUpgradeModal,
       loadSubscription,
+      isLoading,
+      isError,
+      canCheckoutStandalone,
     ],
   );
 
-  const planInfo =
-    PLAN_LABELS[subscription?.plan_id ?? "free"] ?? PLAN_LABELS.free;
-  const isActive =
-    subscription?.status === "active" || subscription?.status === "trialing";
-  const isPastDue = subscription?.status === "past_due";
-  const isFree =
-    !subscription?.stripe_subscription_id || subscription?.plan_id === "free";
+  const isPastDue = subscription.status === "past_due";
 
   const periodEndLabel = subscription?.current_period_end
     ? new Date(subscription.current_period_end).toLocaleDateString("en-US", {
@@ -342,10 +268,15 @@ export function SneakyLynkBillingScreen() {
         </button>
       </div>
 
-      {isLoading && !subscription ? (
+      {isLoading ? (
         <div className="flex flex-col items-center justify-center py-24">
           <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
         </div>
+      ) : isError ? (
+        <main className="mx-auto max-w-2xl p-4" role="alert">
+          <p>Could not verify your subscription. Please try again.</p>
+          <button type="button" onClick={loadSubscription}>Retry</button>
+        </main>
       ) : (
         <main className="mx-auto w-full max-w-2xl px-4 py-4 flex flex-col gap-3">
           {/* Current plan card */}
@@ -411,7 +342,7 @@ export function SneakyLynkBillingScreen() {
               <p className="text-xs text-white/60 mt-3">
                 {subscription?.cancel_at_period_end
                   ? `Cancels on ${periodEndLabel}`
-                  : `Renews on the 1st of each month · Next: ${periodEndLabel}`}
+                  : `Current period ends ${periodEndLabel}`}
               </p>
             ) : null}
           </section>
@@ -444,7 +375,7 @@ export function SneakyLynkBillingScreen() {
           ) : null}
 
           {/* Manage billing (only with a stripe sub) */}
-          {!isFree ? (
+          {canManageStripe ? (
             <button
               type="button"
               onClick={handleManageBilling}
@@ -473,17 +404,17 @@ export function SneakyLynkBillingScreen() {
           {/* Upgrade / change plan CTA (web always allowed — no App Store gate) */}
           <button
             type="button"
-            onClick={() => setShowUpgradeModal(true)}
+            onClick={() => store ? showToast("info", "Store subscription", `Manage your subscription in ${store}.`) : canCheckoutStandalone ? setShowUpgradeModal(true) : router.push("/settings/membership")}
             className="flex items-center justify-center gap-2 rounded-2xl py-4"
             style={{ backgroundColor: "#8A40CF" }}
           >
             <Zap size={16} color="#fff" />
             <span className="text-sm font-bold text-white">
-              {isFree ? "Upgrade Plan" : "Change Plan"}
+              {store ? `Manage in ${store}` : canCheckoutStandalone ? (isFree ? "Upgrade Plan" : "Change Plan") : "Manage Membership"}
             </span>
           </button>
 
-          {!isFree ? (
+          {canManageStripe ? (
             <div className="flex flex-col items-center gap-1 mt-2">
               <span className="flex items-center gap-1">
                 <Shield size={11} className="text-white/40" />

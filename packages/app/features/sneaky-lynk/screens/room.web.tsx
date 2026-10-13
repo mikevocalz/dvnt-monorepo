@@ -83,6 +83,7 @@ import { ConnectionBanner, Dialog, RoomTimer } from "@dvnt/ui";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.web";
 import { useSpeakingDetection } from "@dvnt/app/lib/lynk/useSpeakingDetection.web";
 import { useSpeakingPresence } from "@dvnt/app/lib/lynk/useSpeakingPresence";
+import { speakingSenderId } from "@dvnt/app/lib/lynk/speaking-presence";
 import { peerIdForMember } from "@dvnt/app/features/video/lynk-participants";
 import type { LynkState } from "@dvnt/app/lib/lynk/lynkState";
 import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
@@ -99,6 +100,7 @@ import {
   type RoomTransportStatus,
 } from "../session/useRoomSession";
 import { isActive } from "../session/machine";
+import { leaveRoomSafely } from "../session/leave-room";
 import { useRoomHeartbeat } from "../hooks/useRoomHeartbeat";
 import { useRoomReactions } from "../hooks/useRoomReactions";
 import { buildHandQueue, HAND_QUEUE_COPY } from "../ui/hand-queue";
@@ -132,12 +134,10 @@ import { classifySneakyLynkError } from "../errors";
 import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { videoApi } from "@dvnt/app/features/video/api";
 import { useSneakyLynkCaptureBroadcast } from "../hooks/useSneakyLynkCaptureBroadcast";
-import {
-  fetchRoomComments,
-  postRoomComment,
-  subscribeToRoomComments,
-  type RoomComment,
-} from "../api/comments";
+import { useRoomChat } from "../hooks/useRoomChat";
+import { useRoomLifecycle } from "../../video/hooks/useRoomLifecycle";
+import { useRoomMembers } from "../hooks/useRoomMembers";
+import { useRoomEntryScope } from "../hooks/useRoomEntryScope";
 import type { SneakyUser } from "@dvnt/app/features/sneaky-lynk/types";
 import { useRoomStore } from "../stores/room-store";
 import { eventsApi } from "@dvnt/app/lib/api/events";
@@ -207,168 +207,19 @@ function isClosedRoomError(message?: string | null) {
 // never in the screen component.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Room chat — `fetchRoomComments` + realtime `subscribeToRoomComments` +
- *  `postRoomComment` (the EXACT data layer the native ChatSheet uses). */
-function useRoomChat(roomId: string, currentUser: SneakyUser) {
-  const [comments, setComments] = useState<RoomComment[]>([]);
-
-  useEffect(() => {
-    if (!roomId) return;
-    let active = true;
-    void (async () => {
-      const initial = await fetchRoomComments(roomId);
-      if (active) setComments(initial);
-    })();
-    const unsubscribe = subscribeToRoomComments(
-      roomId,
-      (incoming) => {
-        setComments((prev) =>
-          prev.some((c) => c.id === incoming.id) ? prev : [...prev, incoming],
-        );
-      },
-      {
-        onDeleted: (commentId) =>
-          setComments((prev) => prev.filter((c) => c.id !== commentId)),
-      },
-    );
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [roomId]);
-
-  const send = useCallback(
-    async (body: string) => {
-      const trimmed = body.trim();
-      if (!trimmed || !currentUser.id) return;
-      const optimisticId = -Date.now();
-      const author = {
-        username: currentUser.username,
-        displayName: currentUser.displayName,
-        avatar: currentUser.avatar,
-        isVerified: currentUser.isVerified,
-      };
-      setComments((prev) => [
-        ...prev,
-        {
-          id: optimisticId,
-          roomId,
-          authorId: currentUser.id,
-          body: trimmed,
-          parentId: null,
-          rootId: null,
-          depth: 0,
-          mentions: [],
-          createdAt: new Date().toISOString(),
-          author,
-          isOptimistic: true,
-        },
-      ]);
-      const saved = await postRoomComment({
-        roomId,
-        authorId: currentUser.id,
-        body: trimmed,
-        author,
-      });
-      if (saved) {
-        setComments((prev) =>
-          prev.map((c) => (c.id === optimisticId ? saved : c)),
-        );
-      } else {
-        setComments((prev) => prev.filter((c) => c.id !== optimisticId));
-      }
-    },
-    [roomId, currentUser],
-  );
-
-  return { comments, send };
-}
-
-/** Member presence + raised-hand sync — `videoApi.getRoomMembers` (initial)
- *  + `videoApi.subscribeToMembers` (realtime). Feeds the hand-queue FIFO
- *  (`setRaisedHands`) + the participants panel, exactly like the native room. */
-function useRoomMembersSync(roomId: string, localUserId: string | undefined) {
-  const [members, setMembers] = useState<WebMember[]>([]);
+/** Roster reads start after server admission and reconcile on every reconnect. */
+function useRoomMembersSync(roomId: string, localUserId: string | undefined, enabled: boolean) {
+  const { members: roster, error } = useRoomMembers(roomId, localUserId, enabled);
+  const members: WebMember[] = roster.map((m) => ({ ...m, handRaised: !!m.handRaised }));
   const setRaisedHands = useRoomStore((s) => s.setRaisedHands);
-
-  const syncRaisedHands = useCallback(
-    (list: WebMember[]) => {
-      const hands: Record<string, boolean> = {};
-      for (const m of list) {
-        if (m.handRaised && m.status === "active" && m.userId !== localUserId) {
-          hands[m.userId] = true;
-        }
-      }
-      setRaisedHands(hands);
-    },
-    [setRaisedHands, localUserId],
-  );
-
   useEffect(() => {
-    if (!roomId) return;
-    let active = true;
-    void (async () => {
-      const initial = await videoApi.getRoomMembers(roomId);
-      if (!active) return;
-      const mapped: WebMember[] = initial.map((m: any) => ({
-        userId: m.userId,
-        role: m.role,
-        status: m.status ?? "active",
-        handRaised: !!m.handRaised,
-        username: m.username,
-        displayName: m.displayName ?? m.username,
-        avatar: m.avatar,
-      }));
-      setMembers(mapped);
-    })();
-
-    const unsubscribe = videoApi.subscribeToMembers(roomId, (member, type) => {
-      setMembers((prev) => {
-        let next: WebMember[];
-        const projected: WebMember = {
-          userId: member.userId,
-          role: member.role,
-          status: member.status ?? "active",
-          handRaised: !!member.handRaised,
-          username: member.username,
-          displayName: (member as any).displayName ?? member.username,
-          avatar: member.avatar,
-          isAnonymous: (member as any).isAnonymous,
-          anonLabel: (member as any).anonLabel,
-        };
-        if (type === "DELETE" || projected.status !== "active") {
-          next = prev.filter((m) => m.userId !== projected.userId);
-        } else if (prev.some((m) => m.userId === projected.userId)) {
-          next = prev.map((m) =>
-            m.userId === projected.userId ? projected : m,
-          );
-        } else {
-          next = [...prev, projected];
-        }
-        return next;
-      });
-    });
-
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [roomId]);
-
-  /**
-   * Raised hands are DERIVED from the roster, so they are computed after the
-   * roster commits rather than while it is being computed.
-   *
-   * `syncRaisedHands` used to be called from inside the `setMembers` updater.
-   * React runs updater functions during render, so that wrote to the room
-   * store mid-render — "Cannot update a component while rendering a different
-   * component", on every membership change in every room. An effect on the
-   * committed value is the same data one tick later, with none of that.
-   */
+    if (error) useUIStore.getState().showToast("error", "Reconnecting participants", "The room roster couldn't refresh. We'll keep trying.");
+  }, [error]);
   useEffect(() => {
-    syncRaisedHands(members);
-  }, [members, syncRaisedHands]);
-
+    const hands: Record<string, boolean> = {};
+    for (const m of members) if (m.handRaised && m.status === "active" && m.userId !== localUserId) hands[m.userId] = true;
+    setRaisedHands(hands);
+  }, [roster, localUserId, setRaisedHands]);
   return members;
 }
 
@@ -550,6 +401,9 @@ function RoomInner({
   const router = useRouter();
   const authUser = useAuthStore((s) => s.user);
   const showToast = useUIStore((s) => s.showToast);
+  const accountKey = authUser?.authId || authUser?.id || "";
+  const [admission, setAdmission] = useState<{ owner: string; user: SneakyUser } | null>(null);
+  const admitted = admission?.owner === accountKey && !!accountKey;
   const endRoomHistory = useLynkHistoryStore((s) => s.endRoom);
 
   const setServerEndsAt = useRoomUIStore((s) => s.setServerEndsAt);
@@ -566,8 +420,8 @@ function RoomInner({
   // joiner gets — belongs here: without it a guest never asked for a publish
   // token, so the host was hosting people who could see and hear but could
   // never be seen or heard. Camera/mic still start from the pre-join choice.
-  const canPublish = isPublisherRole(localRole);
-  const lynk = useLynkBroadcast(id || undefined, canPublish);
+  const canPublish = admitted && isPublisherRole(localRole);
+  const lynk = useLynkBroadcast(admitted ? id : undefined, canPublish);
 
   // Same session machine as native, now fed from the MoQ lifecycle. It owns
   // "is this room live" and the observability seam follows it.
@@ -649,8 +503,7 @@ function RoomInner({
    * grid, and a promoted co-host never found their own row to learn the new
    * role. Falls back to the auth id only until the join response lands.
    */
-  const storedLocalUserId = useRoomUIStore((s) => s.localUserId);
-  const localUserId = storedLocalUserId ?? authUser?.id;
+  const localUserId = admitted ? admission?.user.id : undefined;
   const isHostRef = useRef(isCreator);
   const isCoHostRef = useRef(false);
   // Per-MOUNT join guard. Must be a local ref, NOT the global store's
@@ -665,14 +518,8 @@ function RoomInner({
   const joinCompletedRef = useRef(false);
 
   // Local identity projected as a SneakyUser for reactions/chat authorship.
-  const currentUser: SneakyUser = {
-    id: authUser?.id ?? "",
-    username: joinAnonymous ? "anon" : authUser?.username ?? "you",
-    displayName: joinAnonymous ? "Anon" : authUser?.name || authUser?.username || "You",
-    avatar: joinAnonymous ? "" : authUser?.avatar ?? "",
-    isVerified: false,
-    isAnonymous: joinAnonymous,
-    anonLabel: joinAnonymous ? "Anon" : null,
+  const currentUser: SneakyUser = admitted && admission ? admission.user : {
+    id: "", username: "", displayName: "", avatar: "", isVerified: false,
   };
 
   // Shared realtime/data wiring (same channels + edge fns as the native room).
@@ -681,11 +528,11 @@ function RoomInner({
   // overlay has a device, an atlas and a pipeline — any failure keeps the DOM
   // path exactly as it was.
   const { reactions, sendReaction } = useRoomReactions({
-    roomId: id,
+    roomId: admitted ? id : "",
     currentUser,
   });
-  const { comments, send: sendChat } = useRoomChat(id, currentUser);
-  const members = useRoomMembersSync(id, localUserId);
+  const { comments, send: sendChat, error: chatError, loading: chatLoading } = useRoomChat({ roomId: id, currentUser, enabled: admitted });
+  const members = useRoomMembersSync(id, localUserId, admitted);
 
   // ── Role changes reach us on the ROSTER, not in the join response ─────────
   // `localRole` is what gates `canPublish`, and it was only ever set once, from
@@ -699,7 +546,7 @@ function RoomInner({
   useEffect(() => {
     const me = members.find((m) => m.userId === localUserId);
     if (me?.role && me.role !== localRole) setLocalRole(me.role);
-  }, [members, authUser?.id, localRole, setLocalRole]);
+  }, [members, localUserId, localRole, setLocalRole]);
   const captureBroadcast = useSneakyLynkCaptureBroadcast({
     roomId: id,
     roomTitle: roomSnapshot?.title || paramTitle || undefined,
@@ -710,9 +557,23 @@ function RoomInner({
     realUsername: authUser?.username ?? undefined,
   });
 
+  const { notifyEnded } = useRoomLifecycle({
+    roomId: id, userId: localUserId, enabled: admitted,
+    connectionStatus: TRANSPORT_STATUS_BY_LYNK_STATE[lynk.state],
+    onEnded: () => {
+      setAdmission(null);
+      lynkRef.current.end();
+      setMicOn(false);
+      setCameraOn(false);
+      setEject({ kind: "room_ended" });
+    },
+  });
+
   // isHostRef, not the derived `isHost` below it: the ref is kept current from
   // the peer's server role (line ~1219) and is the value in scope this early.
   useRoomModerationWatcher(id, localUserId, isHostRef.current, hostMuteLocked, (kind, reason) => {
+    if (kind === "room_ended") { notifyEnded(); return; }
+    setAdmission(null);
     try {
       lynkRef.current.end();
     } catch {
@@ -740,7 +601,7 @@ function RoomInner({
   //    MoQ mints its own token from `lynk-moq-token` inside `useLynkBroadcast`,
   //    keyed off the role this call resolves. ────────────────────────────────
   useEffect(() => {
-    if (joinFiredRef.current || !id) return;
+    if (joinFiredRef.current || !id || !accountKey) return;
     joinFiredRef.current = true;
     setInitStarted(true);
     let cancelled = false;
@@ -802,6 +663,7 @@ function RoomInner({
         fishjamRoomId: room.fishjamRoomId,
       });
       setLocalUserId(joinedUser.id);
+      setAdmission({ owner: accountKey, user: joinedUser });
       isHostRef.current = peer.role === "host";
       isCoHostRef.current = peer.role === "co-host";
 
@@ -827,7 +689,7 @@ function RoomInner({
       if (!joinCompletedRef.current) joinFiredRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, joinAnonymous, roomHasVideo, joinAttempt]);
+  }, [id, accountKey, joinAnonymous, roomHasVideo, joinAttempt]);
 
   // Waiting room: heartbeat until the host starts, then run the join above
   // again so video_join_room still applies bans, capacity and verification.
@@ -881,11 +743,11 @@ function RoomInner({
   // full-screen spinner with a working roster and chat behind it. Transport
   // health is what `ConnectionBanner` (fed by the session machine) is for.
   useEffect(() => {
-    if (phase === "closed" || phase === "error" || phase === "prejoin") return;
+    if (phase === "closed" || phase === "prejoin" || (!admitted && phase === "error")) return;
     if (lynk.state === "error") setErrorState(lynk.error || "Connection failed");
-    else if (localRole) setPhase("connected");
+    else if (admitted && localRole) setPhase("connected");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lynk.state, lynk.error, localRole]);
+  }, [lynk.state, lynk.error, localRole, admitted]);
 
   // The transport owns capture; mirror it into the UI store so the mic/camera
   // buttons can never drift from what is actually being published.
@@ -1059,40 +921,33 @@ function RoomInner({
     })();
   }, [id, isHandRaised, setIsHandRaised, showToast]);
 
+  const leavingRef = useRef(false);
+  const leaveLifetimeRef = useRef({ active: false, epoch: 0 });
+  useEffect(() => {
+    leaveLifetimeRef.current = { active: true, epoch: leaveLifetimeRef.current.epoch + 1 };
+    return () => {
+      leaveLifetimeRef.current = { active: false, epoch: leaveLifetimeRef.current.epoch + 1 };
+    };
+  }, []);
   const doLeave = useCallback(() => {
-    const isHost = isHostRef.current;
-    void (async () => {
-      try {
-        if (isHost) {
-          const result = await sneakyLynkApi.endRoom(id);
-          if (!result.ok && !isClosedRoomError(result.error?.message)) {
-            showToast(
-              "error",
-              "Couldn't close Lynk",
-              result.error?.message || "Try again. The Lynk is still open.",
-            );
-            return;
-          }
-        } else {
-          void sneakyLynkApi.leaveRoom(id);
-        }
-      } catch {
-        // ignore — leaving is idempotent
-      } finally {
-        try {
-          lynkRef.current.end();
-        } catch {
-          // ignore
-        }
+    if (!leaveLifetimeRef.current.active || leavingRef.current) return;
+    const epoch = leaveLifetimeRef.current.epoch;
+    const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch;
+    leavingRef.current = true;
+    void leaveRoomSafely({
+      isCurrent,
+      isHost: isHostRef.current,
+      endRoom: () => sneakyLynkApi.endRoom(id),
+      leaveRoom: () => sneakyLynkApi.leaveRoom(id),
+      onFailure: (message) => showToast("error", "Couldn't close Lynk", message),
+      exit: () => {
+        setAdmission(null);
+        try { lynkRef.current.end(); } catch { /* Already stopped. */ }
         resetRoomStore();
         endRoomHistory(id);
-        // Same exit as the countdown: the Lynks list, never `router.back()`.
-        // Back is wherever you came from, and for a deep link, a refresh, or an
-        // accepted invite that is OUTSIDE the app — so the tap did nothing and
-        // you stayed in the room you just tried to hang up on.
         router.push(LYNKS_LIST_ROUTE);
-      }
-    })();
+      },
+    }).finally(() => { if (isCurrent()) leavingRef.current = false; });
   }, [id, endRoomHistory, resetRoomStore, router, showToast]);
 
   // The leave buttons never end a room silently: a host confirming is a host
@@ -1264,11 +1119,15 @@ function RoomInner({
   const isSelfSpeaking =
     useSpeakingDetection(lynk.localAudioStream) && isMicOn;
   const remoteSpeaking = useSpeakingPresence({
-    roomId: id,
-    userId: localUserId,
+    roomId: admitted ? id : undefined,
+    // Anonymous speakers use the same public peer id as their media path.
+    userId: speakingSenderId(currentUser),
     speaking: isSelfSpeaking,
   });
-  const speakingByUserId: Record<string, boolean> = { ...remoteSpeaking };
+  const speakingByUserId: Record<string, boolean> = {};
+  for (const member of members) {
+    speakingByUserId[member.userId] = !!remoteSpeaking[peerIdForMember(member.userId, member.anonLabel)];
+  }
   if (localUserId) speakingByUserId[localUserId] = isSelfSpeaking;
 
   // ── Build tiles: local capture + roster × discovered MoQ publishers ───────
@@ -1288,7 +1147,7 @@ function RoomInner({
       );
       return {
         key: member.userId,
-        name: member.displayName || member.username || "Guest",
+        name: getSneakyUserLabel(member),
         avatar: member.avatar,
         isLocal: false,
         isHost: member.role === "host",
@@ -1783,7 +1642,10 @@ function RoomInner({
         onClose={closeChat}
         comments={comments}
         onSend={sendChat}
-        currentUserId={authUser?.id}
+        currentUserId={localUserId}
+        loading={chatLoading}
+        error={chatError}
+        disabled={!admitted}
       />
 
       {/* Hand-queue moderation (host) */}
@@ -2117,6 +1979,7 @@ function PreJoinScreen({
 export function SneakyLynkRoomScreen() {
   const router = useRouter();
   const params = useParams();
+  const accountKey = useAuthStore((s) => s.user?.authId || s.user?.id || "");
   const search = useSearchParams();
   const id = String((params as any)?.id ?? "");
   const paramTitle = search?.get("title") ?? undefined;
@@ -2138,6 +2001,7 @@ export function SneakyLynkRoomScreen() {
    */
   const viaInvite = search?.get("viaInvite") === "1";
   const shouldGateJoin = isServerRoom && !isCreator && !viaInvite;
+  const entryScope = useRoomEntryScope(JSON.stringify([id, accountKey, shouldGateJoin]));
 
   const phase = useRoomUIStore((s) => s.phase);
   const roomSnapshot = useRoomUIStore((s) => s.roomSnapshot);
@@ -2148,8 +2012,10 @@ export function SneakyLynkRoomScreen() {
 
   // Pre-join lookup for gated (server, non-creator) rooms.
   useEffect(() => {
-    // Reset stale state from a previous room when (re)entering.
+    // The render-time scope gate prevents a stale connected phase from
+    // mounting a new room/account before this parent effect runs.
     useRoomUIStore.getState().reset();
+    entryScope.initialize();
     if (!shouldGateJoin || !id) {
       setPhase("connecting"); // creators / local rooms skip pre-join
       return;
@@ -2184,7 +2050,7 @@ export function SneakyLynkRoomScreen() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, shouldGateJoin]);
+  }, [id, shouldGateJoin, accountKey, entryScope.initialize]);
 
   // Verified-only: joining a Lynk needs a verified account. The pre-join
   // screen stays up behind the popup.
@@ -2192,16 +2058,17 @@ export function SneakyLynkRoomScreen() {
   const handleJoin = useCallback(
     (anonymous: boolean) => {
       guardVerified("sneaky_lynk", () => {
+        if (!entryScope.isCurrent()) return;
         setJoinAnonymous(anonymous);
         setPhase("joining");
       });
     },
-    [setJoinAnonymous, setPhase, guardVerified],
+    [setJoinAnonymous, setPhase, guardVerified, entryScope.isCurrent],
   );
 
   const roomTitle = roomSnapshot?.title || paramTitle || getLynkDisplayName();
 
-  if (phase === "looking-up") {
+  if (!entryScope.ready || phase === "looking-up") {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[#06070d] text-white">
         <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
@@ -2240,6 +2107,7 @@ export function SneakyLynkRoomScreen() {
   // mounts directly.
   return (
     <RoomInner
+      key={`${id}:${accountKey}`}
       id={id}
       paramTitle={paramTitle}
       roomHasVideo={roomHasVideo}

@@ -38,10 +38,18 @@ export function isSubscriptionActive(
   sub: SubscriptionRecord,
   now: Date = new Date(),
 ): boolean {
+  // Persisted values are runtime input, even though callers have TS types.
+  // Unknown plans/families must never throw or acquire paid capabilities.
+  if (!Object.hasOwn(PLANS, sub.planKey)) return false;
+  if (sub.planKey !== "free" && PLANS[sub.planKey].family !== sub.productFamily) return false;
   switch (sub.status) {
     case "active":
     case "trialing":
-      return true;
+      // Match is_entitled(): a delayed renewal/expiration webhook must not
+      // leave a bounded subscription active forever. Legacy unbounded rows
+      // remain supported; malformed timestamps fail closed.
+      return sub.currentPeriodEnd == null ||
+        new Date(sub.currentPeriodEnd).getTime() > now.getTime();
     case "past_due": {
       // Grace window only.
       if (!sub.gracePeriodEndsAt) return false;
@@ -49,7 +57,7 @@ export function isSubscriptionActive(
     }
     case "canceled": {
       // Honor remaining paid time if it was set to cancel at period end.
-      if (sub.cancelAtPeriodEnd && sub.currentPeriodEnd) {
+      if (sub.cancelAtPeriodEnd === true && sub.currentPeriodEnd) {
         return new Date(sub.currentPeriodEnd).getTime() > now.getTime();
       }
       return false;
@@ -68,7 +76,7 @@ export function selectEffectiveSubscription(
   subs: SubscriptionRecord[],
   now: Date = new Date(),
 ): SubscriptionRecord | null {
-  const active = subs.filter((s) => isSubscriptionActive(s, now));
+  const active = subs.filter((s) => s.planKey !== "free" && isSubscriptionActive(s, now));
   if (active.length === 0) return null;
   const membership = active
     .filter((s) => s.productFamily === "dvnt_membership")

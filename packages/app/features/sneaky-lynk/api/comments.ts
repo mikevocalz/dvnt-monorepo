@@ -11,7 +11,10 @@
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
-import type { SneakyUser } from "../types";
+import {
+  bindRoomSnapshotChanges,
+  createRoomSnapshotSync,
+} from "./room-snapshot-sync";
 import {
   isMemberHandle,
   resolveCommentAuthor,
@@ -21,6 +24,13 @@ import {
 /** Columns a client may read. author_id is not granted. */
 const COMMENT_COLUMNS =
   "id, room_id, author_handle, body, parent_id, root_id, depth, mentions, created_at";
+
+// Local writes can beat their realtime echo while an older snapshot is still
+// hydrating authors. Invalidate those reads as soon as the write is confirmed.
+const commentInvalidators = new Map<string, Set<() => void>>();
+function invalidateRoomComments(roomId: string) {
+  for (const invalidate of commentInvalidators.get(roomId) ?? []) invalidate();
+}
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -66,49 +76,18 @@ export type RoomCommentAuthor = NonNullable<RoomComment["author"]>;
 
 /** Roster for a room addressed by uuid (room_comments.room_id), or null. */
 async function fetchRoomRoster(roomUuid: string): Promise<RosterRow[] | null> {
-  const { data: room } = await supabase
+  const { data: room, error: roomError } = await supabase
     .from("video_rooms")
     .select("id")
     .eq("uuid", roomUuid)
     .maybeSingle();
-  if (!room?.id) return null;
+  if (roomError) throw roomError;
+  if (!room?.id) throw new Error("Room not found or access unavailable");
   const { data, error } = await supabase.rpc("lynk_room_roster", {
     p_room_id: room.id,
   });
-  if (error) {
-    console.error("[RoomComments] roster failed:", error.message);
-    return null;
-  }
+  if (error) throw error;
   return (data as RosterRow[] | null) ?? null;
-}
-
-async function lookupRoomCommentAuthor(
-  authorHandle: string,
-  roomId: string,
-): Promise<{ authorId: string; author: RoomCommentAuthor | undefined }> {
-  const resolved = resolveCommentAuthor(await fetchRoomRoster(roomId), authorHandle);
-  // An anonymous author (or one the roster cannot place) is shown by label
-  // only. A handle is never looked up in users.
-  if (resolved.isAnonymous || isMemberHandle(resolved.authorId)) {
-    return { authorId: resolved.authorId, author: anonymousAuthor(resolved.anonLabel) };
-  }
-  const { data: userData } = await supabase
-    .from("users")
-    .select("username, first_name, avatar:avatar_id(url), verified")
-    .eq("auth_id", resolved.authorId)
-    .single();
-  if (!userData) return { authorId: resolved.authorId, author: undefined };
-  return {
-    authorId: resolved.authorId,
-    author: {
-      username: userData.username || "unknown",
-      displayName: userData.first_name || userData.username || "unknown",
-      avatar: (userData.avatar as any)?.url || "",
-      isVerified: userData.verified || false,
-      isAnonymous: false,
-      anonLabel: null,
-    },
-  };
 }
 
 function anonymousAuthor(anonLabel: string | null): RoomCommentAuthor {
@@ -132,14 +111,13 @@ export async function fetchRoomComments(
     .from("room_comments")
     .select(COMMENT_COLUMNS)
     .eq("room_id", roomId)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(200);
 
-  if (error) {
-    console.error("[RoomComments] fetch error:", error.message);
-    return [];
-  }
-  const rows = (data || []) as any[];
+  if (error) throw error;
+  // Limit the newest messages first, then render them in chronological order.
+  const rows = ((data || []) as any[]).slice().reverse();
   if (rows.length === 0) return [];
 
   // Anonymity is per ROOM (video_room_members.is_anonymous), and the handle
@@ -157,10 +135,11 @@ export async function fetchRoomComments(
 
   const authorsMap: Record<string, any> = {};
   if (namedIds.length > 0) {
-    const { data: users } = await supabase
+    const { data: users, error: usersError } = await supabase
       .from("users")
       .select("auth_id, username, first_name, avatar:avatar_id(url), verified")
       .in("auth_id", namedIds);
+    if (usersError) throw usersError;
     for (const u of users || []) authorsMap[u.auth_id] = u;
   }
 
@@ -245,6 +224,7 @@ export async function postRoomComment(params: {
     console.error("[RoomComments] post error:", res.message);
     return null;
   }
+  invalidateRoomComments(params.roomId);
   return { ...toRoomComment(res.data.comment, params.authorId), author: params.author };
 }
 
@@ -266,61 +246,84 @@ export async function deleteRoomComment(params: {
     console.error("[RoomComments] delete error:", res.message);
     return false;
   }
+  invalidateRoomComments(params.roomId);
   return true;
 }
 
 // ── Real-time subscription ───────────────────────────────────────────
 
+let commentSubscriptionId = 0;
+
+/** Subscribe after admission; onSync is authoritative, including removals. */
 export function subscribeToRoomComments(
   roomId: string,
   onNewComment: (comment: RoomComment) => void,
   options?: {
     resolveAuthor?: (authorId: string) => RoomCommentAuthor | undefined;
     onDeleted?: (commentId: number) => void;
+    onSync?: (comments: RoomComment[]) => void;
+    onError?: (error: unknown) => void;
   },
 ): () => void {
-  const channel = freshChannel(`room-comments:${roomId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "INSERT",
-        schema: "public",
-        table: "room_comments",
-        filter: `room_id=eq.${roomId}`,
-      },
-      async (payload) => {
-        // The payload has no author_id: realtime drops columns the subscriber
-        // cannot SELECT. author_handle is resolved against the roster first,
-        // so a cached directory entry can never name an anonymous author.
-        const row = payload.new as any;
-        if (!row?.author_handle) return;
-        const { authorId, author: looked } = await lookupRoomCommentAuthor(
-          row.author_handle,
-          roomId,
-        );
-        const author = looked?.isAnonymous
-          ? looked
-          : (options?.resolveAuthor?.(authorId) ?? looked);
-        onNewComment({ ...toRoomComment(row, authorId), author });
-      },
-    )
-    .on(
-      "postgres_changes",
-      {
-        event: "DELETE",
-        schema: "public",
-        table: "room_comments",
-        filter: `room_id=eq.${roomId}`,
-      },
-      (payload) => {
-        const id = (payload.old as any)?.id;
-        if (typeof id === "number") options?.onDeleted?.(id);
-      },
-    )
-    .subscribe();
+  let cancelled = false;
+  let previous: RoomComment[] = [];
+  const reportError = (error: unknown) => {
+    if (cancelled) return;
+    console.error("[RoomComments] sync failed:", error);
+    options?.onError?.(error);
+  };
+  const sync = createRoomSnapshotSync({
+    load: () => fetchRoomComments(roomId),
+    onError: reportError,
+    onSnapshot: (snapshot) => {
+      const comments = snapshot.map((comment) => ({
+        ...comment,
+        // A cached profile can never name an anonymous author.
+        author: comment.author?.isAnonymous
+          ? comment.author
+          : (options?.resolveAuthor?.(comment.authorId) ?? comment.author),
+      }));
+      if (options?.onSync) {
+        options.onSync(comments);
+      } else {
+        const before = new Set(previous.map((comment) => comment.id));
+        const after = new Set(comments.map((comment) => comment.id));
+        for (const comment of comments) {
+          if (!before.has(comment.id)) onNewComment(comment);
+        }
+        for (const comment of previous) {
+          if (!after.has(comment.id)) options?.onDeleted?.(comment.id);
+        }
+      }
+      previous = comments;
+    },
+  });
+  const channel = bindRoomSnapshotChanges(
+    freshChannel(`room-comments:${roomId}:consumer-${++commentSubscriptionId}`),
+    "room_comments",
+    roomId,
+    sync.invalidate,
+  ).subscribe((status, error) => {
+    if (cancelled) return;
+    // Taking the first snapshot after subscription closes the fetch/listen
+    // gap; every reconnect also recovers events missed while disconnected.
+    if (status === "SUBSCRIBED") sync.invalidate();
+    else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+      reportError(error ?? new Error(`Comment subscription ${status.toLowerCase()}`));
+    }
+  });
+  const invalidators = commentInvalidators.get(roomId) ?? new Set<() => void>();
+  invalidators.add(sync.invalidate);
+  commentInvalidators.set(roomId, invalidators);
+  sync.invalidate();
 
   return () => {
-    supabase.removeChannel(channel);
+    if (cancelled) return;
+    cancelled = true;
+    sync.stop();
+    invalidators.delete(sync.invalidate);
+    if (invalidators.size === 0) commentInvalidators.delete(roomId);
+    void supabase.removeChannel(channel);
   };
 }
 
@@ -330,13 +333,19 @@ export function subscribeToRoomComments(
 export function buildCommentThreads(comments: RoomComment[]): RoomComment[] {
   const rootComments: RoomComment[] = [];
   const repliesByRootId = new Map<number, RoomComment[]>();
+  const visibleRoots = new Set(comments.filter((comment) => comment.depth === 0).map((comment) => comment.id));
 
   for (const comment of comments) {
     if (comment.depth === 0) {
       rootComments.push({ ...comment, replies: [] });
     } else {
       const rootId = comment.rootId ?? comment.parentId;
-      if (rootId != null) {
+      if (rootId == null || !visibleRoots.has(rootId)) {
+        // The latest-message window can exclude an older thread root. Keep
+        // its in-window replies visible without inventing a parent or changing
+        // their server metadata (reply/moderation actions still need it).
+        rootComments.push({ ...comment, replies: [] });
+      } else {
         if (!repliesByRootId.has(rootId)) {
           repliesByRootId.set(rootId, []);
         }

@@ -94,7 +94,8 @@ export function useLynkBroadcast(
   } | null>(null);
 
   useEffect(() => {
-    if (!isBrowser) return;
+    if (!isBrowser || !roomId) return;
+    urlSignal.current.set(undefined);
     const reload = new Moq.Connection.Reload({
       url: urlSignal.current,
       enabled: true,
@@ -118,6 +119,8 @@ export function useLynkBroadcast(
     setIsLive(false);
     setDevices({ reload, camera, mic });
     return () => {
+      broadcastRef.current?.close();
+      broadcastRef.current = null;
       camera.close();
       mic.close();
       reload.close();
@@ -126,15 +129,15 @@ export function useLynkBroadcast(
       micRef.current = null;
       setDevices(null);
     };
-  }, [isBrowser]);
+  }, [isBrowser, roomId]);
 
   const reload = devices?.reload ?? null;
   const camera = devices?.camera ?? null;
   const mic = devices?.mic ?? null;
 
   useEffect(() => {
-    if (token?.relayUrl) urlSignal.current.set(new URL(token.relayUrl));
-  }, [token?.relayUrl]);
+    urlSignal.current.set(!ended && token?.relayUrl ? new URL(token.relayUrl) : undefined);
+  }, [token?.relayUrl, ended, reload]);
 
   const status = useSignalValue(
     reload?.status ?? new Signal<Moq.Connection.ReloadStatus>("connecting"),
@@ -178,17 +181,31 @@ export function useLynkBroadcast(
   }, [mic, micEnabled, ended, canPublish]);
 
   const goLive = useCallback(async () => {
-    if (!canPublish) return;
-    if (!reload || !camera || !mic || !token || broadcastRef.current) return;
-    broadcastRef.current = new Publish.Broadcast({
+    if (!canPublish || ended) return;
+    if (!reload || !camera || !mic || !token) return;
+    setIsLive(true);
+  }, [reload, camera, mic, token, canPublish, ended]);
+
+  // Publication belongs to this exact room/account path. Token revocation,
+  // role loss or a room switch must close the old broadcast before another
+  // account's connection can be installed.
+  useEffect(() => {
+    if (!isLive || !canPublish || ended || !reload || !camera || !mic || !token?.path) return;
+    const broadcast = new Publish.Broadcast({
       connection: reload.established,
       name: Moq.Path.from(token.path),
       enabled: true,
-      video: { source: camera.source, hd: { enabled: true } },
+      // Web defaults prefer VP9 on some hardware; native MoQ decoders share
+      // H.264 with browsers. Let the SDK probe supported AVC profiles.
+      video: { source: camera.source, hd: { enabled: true, config: { codec: "avc1" } } },
       audio: { enabled: true, source: mic.source },
     });
-    setIsLive(true);
-  }, [reload, camera, mic, token, canPublish]);
+    broadcastRef.current = broadcast;
+    return () => {
+      broadcast.close();
+      if (broadcastRef.current === broadcast) broadcastRef.current = null;
+    };
+  }, [isLive, canPublish, ended, reload, camera, mic, token?.path]);
 
   // State only — the effect above is what touches the device, so the gate can
   // never be bypassed by a toggle that fires before the role has landed.

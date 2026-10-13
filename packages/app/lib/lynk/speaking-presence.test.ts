@@ -41,3 +41,20 @@ test("several speakers coexist", () => {
   m = applySpeakingEvent(m, { userId: "u1", speaking: false });
   assert.deepEqual(m, { u2: true });
 });
+
+test("anonymous voice activity uses the public media peer id and matches the remote tile", async () => {
+  const { speakingSenderId } = await import("./speaking-presence.ts");
+  const { peerIdForMember } = await import("../../features/video/lynk-participants.ts");
+  const sender = speakingSenderId({ id: "private-auth-id", isAnonymous: true, anonLabel: "Anon 7" });
+  assert.equal(sender, "anon-7");
+  const remote = applySpeakingEvent({}, { userId: sender!, speaking: true });
+  assert.equal(remote[peerIdForMember("member:42", "Anon 7")], true);
+  assert.ok(!JSON.stringify(remote).includes("private-auth-id"));
+});
+
+test("an anonymous member without their server label never broadcasts their auth id", async () => {
+  const { speakingSenderId } = await import("./speaking-presence.ts");
+  assert.equal(speakingSenderId({ id: "private-auth-id", isAnonymous: true, anonLabel: null }), undefined);
+  assert.equal(speakingSenderId({ id: "private-auth-id", isAnonymous: true }), undefined);
+  assert.equal(speakingSenderId({ id: "named-user", isAnonymous: false }), "named-user");
+});

@@ -225,6 +225,12 @@ const initialState: VideoRoomStoreState = {
 
 // ── Store ────────────────────────────────────────────────────────────
 
+const PARTICIPANT_DISPLAY_KEYS = [
+  "odId", "oderId", "userId", "username", "displayName", "avatar", "role",
+  "isLocal", "isCameraOn", "isMicOn", "isScreenSharing", "isAnonymous",
+  "anonLabel", "isHandRaised", "isFrontCamera",
+] as const satisfies readonly (keyof Participant)[];
+
 export const useVideoRoomStore = create<VideoRoomStore>((set, get) => ({
   ...initialState,
 
@@ -235,25 +241,17 @@ export const useVideoRoomStore = create<VideoRoomStore>((set, get) => ({
 
   setParticipants: (participants) => {
     const prev = get().participants;
-    // CRITICAL FIX: The bailout logic was TOO strict — it prevented updates when
-    // a remote peer's track.stream went from null → MediaStream (async negotiation).
-    // Now we ONLY bail if:
-    //   1. Same number of participants
-    //   2. Same userId order
-    //   3. Same track EXISTENCE (not stream identity)
-    //   4. If tracks exist, same stream identity OR both null
-    //
-    // This allows the update to propagate when:
-    //   - A track goes from null → populated stream (async WebRTC negotiation)
-    //   - A track goes from stream A → stream B (camera switch, etc.)
+    // A reconnect can replace a MoQ BroadcastInfo without changing the peer or
+    // its audio/video flags. The tile must receive that new object, along with
+    // every displayed roster change. Keep the no-op only for equivalent rows,
+    // retaining the legacy Fishjam track/stream identity checks below.
     if (
       prev.length === participants.length &&
       prev.every((p, i) => {
         const curr = participants[i];
         if (!curr) return false;
-        if (p.userId !== curr.userId) return false;
-        if (p.isCameraOn !== curr.isCameraOn) return false;
-        if (p.isMicOn !== curr.isMicOn) return false;
+        if (PARTICIPANT_DISPLAY_KEYS.some((key) => p[key] !== curr[key])) return false;
+        if (p.broadcast !== curr.broadcast) return false;
 
         // CRITICAL: Detect ANY change in video/audio stream identity.
         // This catches: null→stream, undefined→stream, streamA→streamB

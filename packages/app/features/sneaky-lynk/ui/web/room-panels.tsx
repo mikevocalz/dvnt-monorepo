@@ -19,7 +19,7 @@
  * className only, no <View>/<Text>. Avatars are rounded squares.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Ban,
   Check,
@@ -150,13 +150,21 @@ export function ChatPanel({
   comments,
   onSend,
   currentUserId,
+  loading = false,
+  error = null,
+  disabled = false,
 }: {
   open: boolean;
   onClose: () => void;
   comments: RoomComment[];
-  onSend: (body: string) => void;
+  onSend: (body: string) => Promise<boolean>;
   currentUserId: string | undefined;
+  loading?: boolean;
+  error?: string | null;
+  disabled?: boolean;
 }) {
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -167,18 +175,26 @@ export function ChatPanel({
   }, [open, comments.length]);
 
   const submit = useCallback(
-    (e: React.FormEvent) => {
+    async (e: React.FormEvent) => {
       e.preventDefault();
       const el = inputRef.current;
       if (!el) return;
       // Guarded: the input fed onSend raw, so Enter on an empty field posted a
       // blank message into the room.
       const body = el.value.trim();
-      if (!body) return;
-      onSend(body);
-      el.value = "";
+      if (!body || disabled || sendingRef.current) return;
+      sendingRef.current = true;
+      setSending(true);
+      try {
+        if (await onSend(body)) {
+          if (el.value.trim() === body) el.value = "";
+        }
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
+      }
     },
-    [onSend],
+    [onSend, disabled],
   );
 
   return (
@@ -191,7 +207,7 @@ export function ChatPanel({
       <div ref={scrollRef} className="flex-1 space-y-1 overflow-y-auto px-4 py-3">
         {comments.length === 0 ? (
           <p className="mt-8 text-center text-sm text-white/40">
-            No messages yet. Say hi 👋
+            {loading ? "Loading chat…" : "No messages yet. Say hi 👋"}
           </p>
         ) : (
           comments.map((c, idx) => {
@@ -242,6 +258,7 @@ export function ChatPanel({
           })
         )}
       </div>
+      {error ? <p role="alert" className="px-4 py-2 text-sm text-red-300">{error}</p> : null}
       <form
         onSubmit={submit}
         className="flex items-center gap-2 border-t border-white/8 px-3 py-3"
@@ -250,12 +267,15 @@ export function ChatPanel({
           ref={inputRef}
           type="text"
           placeholder="Message…"
+          aria-label="Message"
+          disabled={disabled || sending}
           maxLength={500}
           className="flex-1 rounded-lg bg-white/8 px-4 py-2.5 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-1 focus:ring-[#3FDCFF]"
         />
         <button
           type="submit"
           aria-label="Send message"
+          disabled={disabled || sending}
           // The hover colour matched the base, so the control gave no feedback.
           className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#3FDCFF] text-black transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
         >

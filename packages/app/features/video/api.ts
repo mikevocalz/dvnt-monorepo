@@ -6,6 +6,10 @@
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
+import {
+  bindRoomSnapshotChanges,
+  createRoomSnapshotSync,
+} from "../sneaky-lynk/api/room-snapshot-sync";
 import type {
   VideoRoom,
   JoinRoomResponse,
@@ -35,13 +39,14 @@ async function resolveRealtimeRoomId(roomId: string): Promise<string | null> {
     return roomId;
   }
 
-  const { data: room } = await supabase
+  const { data: room, error } = await supabase
     .from("video_rooms")
     .select("id")
     .eq("uuid", roomId)
     .single();
 
-  return room?.id ? String(room.id) : null;
+  if (error) throw error;
+  return room?.id != null ? String(room.id) : null;
 }
 
 async function callEdgeFunction<T>(
@@ -126,6 +131,8 @@ async function callEdgeFunction<T>(
     };
   }
 }
+
+let memberSubscriptionId = 0;
 
 export const videoApi = {
   /**
@@ -273,7 +280,7 @@ export const videoApi = {
    */
   async getRoomMembers(roomId: string): Promise<RoomMember[]> {
     const internalRoomId = await resolveRealtimeRoomId(roomId);
-    if (!internalRoomId) return [];
+    if (!internalRoomId) throw new Error("Room not found or access unavailable");
 
     // TWO queries, joined here, rather than one PostgREST embed.
     //
@@ -303,8 +310,8 @@ export const videoApi = {
     if (error || !data) {
       // Loud on purpose. The silent version of this line hid the bug above for
       // as long as the feature has existed.
-      if (error) console.error("[video] roster query failed:", error.message);
-      return [];
+      if (error) throw error;
+      throw new Error("Room roster response was empty");
     }
 
     // Anonymous rows never get a profile lookup, own row included: the tile
@@ -326,9 +333,9 @@ export const videoApi = {
         .select("auth_id, username, first_name, avatar:avatar_id(url)")
         .in("auth_id", authIds);
       if (usersError) {
-        // A missing profile costs a name and an avatar, never a tile — the
-        // member still renders as "Guest".
-        console.error("[video] roster profiles failed:", usersError.message);
+        // A failed request is retryable, not a successful nameless roster.
+        // Missing individual profiles still render as Guest below.
+        throw usersError;
       }
       for (const u of users ?? []) {
         profileByAuthId.set((u as any).auth_id, u as any);
@@ -450,6 +457,7 @@ export const videoApi = {
             filter: `room_id=eq.${realtimeRoomId}`,
           },
           (payload) => {
+            if (cancelled) return;
             const event = payload.new as any;
             // Only process events targeting this user or room-wide events
             if (
@@ -470,7 +478,9 @@ export const videoApi = {
           },
         )
         .subscribe();
-    })();
+    })().catch((error) => {
+      if (!cancelled) console.error("[video] room event subscription failed:", error);
+    });
 
     return () => {
       cancelled = true;
@@ -481,7 +491,9 @@ export const videoApi = {
   },
 
   /**
-   * Subscribe to member changes
+   * Subscribe after admission. Initial and reconnect snapshots come through
+   * onSync; the legacy callback remains available for presence notifications.
+   * DB row payloads are never used to identify anonymous members.
    */
   subscribeToMembers(
     roomId: string,
@@ -489,96 +501,92 @@ export const videoApi = {
       member: RoomMember,
       eventType: "INSERT" | "UPDATE" | "DELETE",
     ) => void,
+    options?: {
+      onSync?: (members: RoomMember[]) => void;
+      onError?: (error: unknown) => void;
+    },
   ) {
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let cancelled = false;
+    let previous: RoomMember[] = [];
+    let hasSnapshot = false;
+    let sync: ReturnType<typeof createRoomSnapshotSync<RoomMember[]>> | null = null;
+    let setupRetry: ReturnType<typeof setTimeout> | undefined;
+    const reportError = (error: unknown) => {
+      if (cancelled) return;
+      console.error("[video] member sync failed:", error);
+      options?.onError?.(error);
+    };
 
-    void (async () => {
+    const start = async () => {
       const realtimeRoomId = await resolveRealtimeRoomId(roomId);
-      if (!realtimeRoomId || cancelled) return;
+      if (cancelled) return;
+      if (!realtimeRoomId) throw new Error("Room not found or access unavailable");
 
-      channel = freshChannel(`video_room_members:${realtimeRoomId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "video_room_members",
-            filter: `room_id=eq.${realtimeRoomId}`,
-          },
-          async (payload) => {
-            const raw = (
-              payload.new && Object.keys(payload.new).length
-                ? payload.new
-                : payload.old
-            ) as any;
-            // Change events no longer carry user_id (no column privilege, see
-            // migration 20261003150200). Read the row back through the
-            // roster RPC, which masks anonymous members the same way the
-            // initial fetch does. A DELETE has only the primary key left.
-            let member = raw;
-            if (payload.eventType !== "DELETE" && raw?.id != null) {
-              const { data: rows } = await supabase.rpc("lynk_room_roster", {
-                p_room_id: realtimeRoomId,
-                p_member_id: raw.id,
-              });
-              const row = (rows as any[] | null)?.[0];
-              if (row) member = { ...raw, ...row, id: row.member_id };
+      sync = createRoomSnapshotSync({
+        load: () => videoApi.getRoomMembers(realtimeRoomId),
+        onError: reportError,
+        onSnapshot: (members) => {
+          const before = new Map(previous.map((member) => [member.userId, member]));
+          const after = new Map(members.map((member) => [member.userId, member]));
+          // Snapshot consumers don't announce everyone as a new arrival on
+          // first admission. Legacy consumers still receive their initial set.
+          if (hasSnapshot || !options?.onSync) {
+            for (const member of members) {
+              const old = before.get(member.userId);
+              if (!old) onMemberChange(member, "INSERT");
+              else if (JSON.stringify(old) !== JSON.stringify(member)) {
+                onMemberChange(member, "UPDATE");
+              }
             }
-            if (!member.user_id) member = { ...member, user_id: `member:${raw?.id}` };
-            const isAnonymous = member.is_anonymous ?? false;
-            const anonLabel = member.anon_label ?? null;
-
-            let userData: {
-              username?: string;
-              first_name?: string;
-              avatar?: { url?: string }[] | { url?: string } | null;
-            } | null = null;
-
-            if (!isAnonymous) {
-              const { data } = await supabase
-                .from("users")
-                .select("username, first_name, avatar:avatar_id(url)")
-                .eq("auth_id", member.user_id)
-                .single();
-              userData = data;
+            for (const member of previous) {
+              if (!after.has(member.userId)) {
+                onMemberChange({ ...member, status: "left", handRaised: false }, "DELETE");
+              }
             }
-
-            onMemberChange(
-              {
-                roomId: member.room_id,
-                userId: member.user_id,
-                role: member.role,
-                status: member.status,
-                handRaised: !!member.hand_raised,
-                joinedAt: member.joined_at,
-                leftAt: member.left_at,
-                username: isAnonymous
-                  ? anonLabel || "Anon"
-                  : userData?.username || undefined,
-                displayName: isAnonymous
-                  ? anonLabel || "Anon"
-                  : userData?.first_name || userData?.username || undefined,
-                avatar: isAnonymous
-                  ? undefined
-                  : Array.isArray(userData?.avatar)
-                    ? userData?.avatar[0]?.url
-                    : userData?.avatar?.url,
-                isAnonymous,
-                anonLabel,
-              },
-              payload.eventType as "INSERT" | "UPDATE" | "DELETE",
-            );
-          },
-        )
-        .subscribe();
-    })();
+          }
+          previous = members;
+          hasSnapshot = true;
+          options?.onSync?.(members);
+        },
+      });
+      // Native room state and presence indicators may subscribe concurrently.
+      // Isolate consumers so freshChannel does not sweep another live listener.
+      channel = bindRoomSnapshotChanges(
+        freshChannel(`video_room_members:${realtimeRoomId}:consumer-${++memberSubscriptionId}`),
+        "video_room_members",
+        realtimeRoomId,
+        sync.invalidate,
+      ).subscribe((status, error) => {
+        if (cancelled) return;
+        if (status === "SUBSCRIBED") sync?.invalidate();
+        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          reportError(error ?? new Error(`Member subscription ${status.toLowerCase()}`));
+        }
+      });
+      // REST can succeed even when the websocket handshake is blocked.
+      // SUBSCRIBED invalidates again to close the initial read/listen gap.
+      sync.invalidate();
+    };
+    const connect = () => {
+      if (cancelled) return;
+      void start().catch((error) => {
+        sync?.stop();
+        sync = null;
+        if (channel) void supabase.removeChannel(channel);
+        channel = null;
+        reportError(error);
+        if (!cancelled) setupRetry = setTimeout(connect, 2_000);
+      });
+    };
+    connect();
 
     return () => {
+      if (cancelled) return;
       cancelled = true;
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
+      if (setupRetry !== undefined) clearTimeout(setupRetry);
+      sync?.stop();
+      if (channel) void supabase.removeChannel(channel);
     };
   },
 };
