@@ -73,6 +73,9 @@ jobs:
       - name: Real Next desktop/mobile routing and profile-session lifecycle
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-profile-completion-navigation.cjs
 
+      - name: Profile percentage hydration and owner-only completion
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-profile-completion-percentage.cjs
+
       - name: Inline captions, draft migration and post editing
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-caption-composer.cjs
 

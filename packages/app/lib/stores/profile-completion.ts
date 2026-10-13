@@ -36,7 +36,7 @@ export function computeProfileCompletion(user: {
   links?: string[];
   /** Counts as a link — see the `links` item below. */
   website?: string;
-} | null): { percent: number; missing: CompletionItem[] } {
+} | null, privateFields?: { hasIdentity: boolean; hasEventAudience: boolean }): { percent: number; missing: CompletionItem[] } {
   if (!user) return { percent: 0, missing: [] };
   // edit-profile keeps one link list and a separate website box, and merges the
   // website into `links` when it saves. So a profile whose only link sits in
@@ -51,8 +51,8 @@ export function computeProfileCompletion(user: {
     // Labels say what the user gets, not what the database wants.
     { key: "photo", label: "Add a photo so people recognize you at events", route: "/feed/profile/edit", weight: 30, done: !!user.avatar },
     { key: "bio", label: "Write a short bio", route: "/feed/profile/edit", weight: 20, done: !!user.bio?.trim() },
-    { key: "identity", label: "Tell us who you are — private, tailors your events", route: "/feed/profile/edit", weight: 20, done: (user.sexuality?.length ?? 0) > 0 },
-    { key: "audience", label: "Choose who you want events with — private", route: "/feed/profile/edit", weight: 10, done: !!user.eventAudience },
+    { key: "identity", label: "Tell us who you are — private, tailors your events", route: "/feed/profile/edit", weight: 20, done: privateFields?.hasIdentity ?? (user.sexuality?.length ?? 0) > 0 },
+    { key: "audience", label: "Choose who you want events with — private", route: "/feed/profile/edit", weight: 10, done: privateFields?.hasEventAudience ?? !!user.eventAudience?.trim() },
     { key: "location", label: "Add your city to see events near you", route: "/feed/profile/edit", weight: 10, done: !!user.location?.trim() },
     { key: "links", label: "Add a link to your profile", route: "/feed/profile/edit", weight: 10, done: hasLink },
   ];

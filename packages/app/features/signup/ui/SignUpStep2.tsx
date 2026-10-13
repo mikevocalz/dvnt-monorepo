@@ -1,3 +1,4 @@
+import { hydrateAuthProfile } from "@dvnt/app/lib/auth/hydrate-auth-profile";
 import { useState, useEffect, useRef } from "react";
 import {
   View,
@@ -295,25 +296,7 @@ export function SignUpStep2() {
       }
 
       if (profile) {
-        setUser({
-          id: profile.id,
-          authId: profile.authId,
-          email: profile.email,
-          username: profile.username,
-          name:
-            profile.name ||
-            (profile as any).firstName ||
-            `${formData.firstName} ${formData.lastName}`,
-          avatar: profile.avatar || "",
-          bio: profile.bio || "",
-          website: (profile as any).website || "",
-          location: profile.location || "",
-          hashtags: (profile as any).hashtags || [],
-          isVerified: profile.isVerified,
-          postsCount: profile.postsCount,
-          followersCount: profile.followersCount,
-          followingCount: profile.followingCount,
-        });
+        setUser(hydrateAuthProfile(profile, (profile as any).firstName || `${formData.firstName} ${formData.lastName}`));
       } else {
         // Fallback to Better Auth data if both sync and profile fetch fail
         console.warn(

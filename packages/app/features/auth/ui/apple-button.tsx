@@ -1,3 +1,4 @@
+import { hydrateAuthProfile } from "@dvnt/app/lib/auth/hydrate-auth-profile";
 import { useState } from "react";
 import { ActivityIndicator, Platform, View } from "react-native";
 import * as AppleAuthentication from "expo-apple-authentication";
@@ -65,21 +66,7 @@ export function AppleButton({ onSuccess, onError }: AppleButtonProps) {
       const profile = await syncAuthUser();
       if (!profile) throw new Error("Failed to sync user profile");
 
-      const user: AppUser = {
-        id: profile.id,
-        email: profile.email,
-        username: profile.username,
-        name: profile.name,
-        avatar: profile.avatar || "",
-        bio: profile.bio || "",
-        website: (profile as any).website || "",
-        location: profile.location || "",
-        hashtags: (profile as any).hashtags || [],
-        isVerified: profile.isVerified,
-        postsCount: profile.postsCount,
-        followersCount: profile.followersCount,
-        followingCount: profile.followingCount,
-      };
+      const user: AppUser = hydrateAuthProfile(profile);
 
       onSuccess(user);
     } catch (error: any) {

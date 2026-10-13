@@ -16,6 +16,7 @@ import {
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { invalidateProfileCompletion } from "@dvnt/app/lib/profile/profile-completion-invalidation";
+import { refreshProfileCompletionPresence } from "@dvnt/app/lib/hooks/use-profile-completion";
 import { resolveAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import type { AppUser } from "@dvnt/app/lib/auth-client";
@@ -106,11 +107,11 @@ function buildProfileCacheData(
     name: user.name || user.username,
     displayName: user.name || user.username,
     bio: user.bio || undefined,
-    avatar: user.avatar || undefined,
+    avatar: user.avatar || "",
     avatarUrl: user.avatar || undefined,
-    website: user.website || undefined,
+    website: user.website || "",
     links: user.links,
-    location: user.location || undefined,
+    location: user.location || "",
     pronouns: user.pronouns || undefined,
     gender: user.gender || undefined,
     hashtags: user.hashtags,
@@ -371,13 +372,13 @@ export function useMyProfile() {
           name: profile.name || profile.username,
           displayName: profile.name || profile.username,
           bio: profile.bio,
-          avatar: resolvedAvatar || undefined,
+          avatar: resolvedAvatar || "",
           avatarUrl: resolvedAvatar || undefined,
-          website: profile.website || undefined,
+          website: profile.website || "",
           links: Array.isArray((profile as any).links)
             ? (profile as any).links
             : undefined,
-          location: profile.location || undefined,
+          location: profile.location || "",
           pronouns: (profile as any).pronouns || undefined,
           gender: (profile as any).gender || undefined,
           followersCount: profile.followersCount || 0,
@@ -636,6 +637,7 @@ export function useUpdateProfile() {
       };
 
       setUser(finalUser);
+      void refreshProfileCompletionPresence(queryClient, finalUser);
       // The optimistic avatar may equal the confirmed value. A store value
       // comparison alone cannot invalidate a progress read made before saving.
       if (variables.avatar !== undefined) invalidateProfileCompletion(baseUser);
