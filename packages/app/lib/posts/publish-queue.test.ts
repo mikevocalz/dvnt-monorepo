@@ -192,14 +192,15 @@ test('invalid media captions are refused before local copies, uploads or API wri
 });
 test('media publish preserves inline hashtags beyond raw 2200 characters and keeps people tags separate', async () => {
   const content = 'x'.repeat(2200) + '\n#Café #東京';
-  let sent;
+  const sent: Array<Parameters<PublishTaskDeps["createPost"]>[0]> = [];
   let people;
   const { deps } = recorder({
-    createPost: async (input) => { sent = input; return { id: 77 }; },
+    createPost: async (input) => { sent.push(input); return { id: 77 }; },
     addPlacedTags: (postId, tags) => { people = { postId, tags }; },
   });
   const placedTags = [{ userId: 9, x: 0.2, y: 0.5, mediaIndex: 0 }];
   await createPublishTask(draft({ content, placedTags }), 'owner-a', deps)(() => {}, () => {});
-  assert.equal(sent.content, content);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].content, content);
   assert.deepEqual(people, { postId: '77', tags: placedTags });
 });
