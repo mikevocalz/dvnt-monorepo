@@ -14,7 +14,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verifySession } from "../_shared/verify-session.ts";
+import { verifySession, corsHeaders } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
@@ -66,23 +66,24 @@ async function stripeGet(endpoint: string): Promise<any> {
   return data;
 }
 
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
 Deno.serve(withSentry("promoter-connect", async (req: Request) => {
+  // Preflight alone is insufficient: browsers also require CORS on every
+  // actual response, including authentication and Stripe error responses.
+  const headers = corsHeaders(req);
+  const json = (data: unknown, status = 200): Response =>
+    new Response(JSON.stringify(data), {
+      status,
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      },
+    });
+
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, Authorization, apikey, x-client-info, x-auth-token, sentry-trace, baggage",
-      },
+      headers,
     });
   }
 
@@ -254,7 +255,7 @@ Deno.serve(withSentry("promoter-connect", async (req: Request) => {
         !link.url || typeof link.url !== "string" ||
         !link.url.startsWith("https://")
       ) {
-        console.error("[promoter-connect] Invalid URL from Stripe:", link.url);
+        console.error("[promoter-connect] Invalid URL from Stripe");
         return json({ error: "Stripe returned an invalid onboarding URL" });
       }
 

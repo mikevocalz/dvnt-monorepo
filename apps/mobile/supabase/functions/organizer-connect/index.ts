@@ -8,7 +8,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verifySession } from "../_shared/verify-session.ts";
+import { verifySession, corsHeaders } from "../_shared/verify-session.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -56,28 +56,24 @@ async function stripeGet(endpoint: string): Promise<any> {
   return data;
 }
 
-// ── Callback HTML pages (served on GET for Stripe redirects) ─
-
-
-// ── JSON response helper ────────────────────────────────────
-
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
 Deno.serve(async (req: Request) => {
+  // Preflight alone is insufficient: browsers also require CORS on every
+  // actual response, including authentication and Stripe error responses.
+  const headers = corsHeaders(req);
+  const json = (data: unknown, status = 200): Response =>
+    new Response(JSON.stringify(data), {
+      status,
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      },
+    });
+
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, Authorization, apikey, x-client-info, x-auth-token, sentry-trace, baggage",
-      },
+      headers,
     });
   }
 
@@ -85,21 +81,17 @@ Deno.serve(async (req: Request) => {
   if (req.method === "GET") {
     // Supabase edge runtime forces text/plain on GET responses and adds
     // CSP: default-src 'none'; sandbox — HTML can never render here.
-    // Redirect to the app's custom scheme instead; openAuthSessionAsync
-    // in the client catches the dvnt:// redirect and closes the browser.
+    // Web returns to the fixed HTTPS app route; native openAuthSessionAsync
+    // catches the dvnt:// redirect and closes its browser session.
     const url = new URL(req.url);
     const callback = url.searchParams.get("callback");
-    if (callback === "return") {
+    if (callback === "return" || callback === "refresh") {
+      const destination = url.searchParams.get("platform") === "web"
+        ? `https://dvntapp.live/feed/events/organizer-setup?stripe_connect=${callback}`
+        : `dvnt://stripe/connect/${callback === "return" ? "success" : "refresh"}`;
       return new Response(null, {
         status: 302,
-        headers: { Location: "dvnt://stripe/connect/success" },
-      });
-    }
-    if (callback === "refresh") {
-      // Link expired — redirect back to the app so the user can retry
-      return new Response(null, {
-        status: 302,
-        headers: { Location: "dvnt://stripe/connect/refresh" },
+        headers: { Location: destination, "Cache-Control": "no-store" },
       });
     }
     return new Response("Not found", { status: 404 });
@@ -128,13 +120,13 @@ Deno.serve(async (req: Request) => {
     // ── Session auth (mandatory) ──────────────────────────
     const host_id = await verifySession(supabase, req);
     if (!host_id) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized — invalid or expired session" }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      return json({ error: "Unauthorized — invalid or expired session" }, 401);
     }
 
-    const { action } = await req.json();
+    const body = await req.json();
+    const { action } = body;
+    const platform = body.platform === "web" ? "web" : "native";
+    const callbackParams = `&platform=${platform}`;
 
     if (action === "start") {
       // Step 1: Check if account already exists
@@ -205,24 +197,20 @@ Deno.serve(async (req: Request) => {
       );
       const link = await stripeRequest("/account_links", {
         account: stripeAccountId,
-        refresh_url: `${FUNCTION_BASE}?callback=refresh`,
-        return_url: `${FUNCTION_BASE}?callback=return`,
+        refresh_url: `${FUNCTION_BASE}?callback=refresh${callbackParams}`,
+        return_url: `${FUNCTION_BASE}?callback=return${callbackParams}`,
         type: "account_onboarding",
       });
 
-      console.log(
-        "[organizer-connect] account link created, url prefix:",
-        typeof link.url === "string"
-          ? link.url.substring(0, 50)
-          : String(link.url),
-      );
+      // Account links grant access to personal information; never log them.
+      console.log("[organizer-connect] account link created");
 
       if (
         !link.url ||
         typeof link.url !== "string" ||
         !link.url.startsWith("https://")
       ) {
-        console.error("[organizer-connect] Invalid URL from Stripe:", link.url);
+        console.error("[organizer-connect] Invalid URL from Stripe");
         return json({ error: "Stripe returned an invalid onboarding URL" });
       }
 
@@ -248,8 +236,8 @@ Deno.serve(async (req: Request) => {
       console.log("[organizer-connect] creating account_onboarding link for", account.stripe_account_id);
       const link = await stripeRequest("/account_links", {
         account: account.stripe_account_id,
-        refresh_url: `${FUNCTION_BASE}?callback=refresh`,
-        return_url: `${FUNCTION_BASE}?callback=return`,
+        refresh_url: `${FUNCTION_BASE}?callback=refresh${callbackParams}`,
+        return_url: `${FUNCTION_BASE}?callback=return${callbackParams}`,
         type: "account_onboarding",
       });
 
