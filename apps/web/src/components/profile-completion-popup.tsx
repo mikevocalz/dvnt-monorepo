@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { ArrowUpRight, Camera, CheckCircle2, ImagePlus, PenLine, Sparkles } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
 import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
+import { subscribeProfileCompletionInvalidation } from "@dvnt/app/lib/profile/profile-completion-invalidation";
 import {
   INITIAL_PROFILE_COMPLETION_CHECK,
   profileCompletionCheckReducer,
@@ -50,6 +51,29 @@ export function ProfileCompletionPopup() {
     check.status === "ready" ? check.progress.step : undefined,
   );
 
+  useEffect(() => useAuthStore.subscribe((next, previous) => {
+    // Observe store transitions synchronously: React can batch logout/login
+    // into one render, even when the same member signs back in. A new session
+    // must never inherit that member's old completion evidence.
+    const previousId = previous.user?.authId || String(previous.user?.id ?? "");
+    const nextId = next.user?.authId || String(next.user?.id ?? "");
+    const wasReady = previous._hasHydrated && previous.isAuthenticated && !!previousId;
+    const isReady = next._hasHydrated && next.isAuthenticated && !!nextId;
+    if (wasReady && (!isReady || previousId !== nextId ||
+        previous.user?.avatar !== next.user?.avatar ||
+        previous.user?.postsCount !== next.user?.postsCount)) {
+      // Profile mutations trigger a fresh server check; optimistic local
+      // avatar/count updates are never accepted as completion themselves.
+      setReload((n) => n + 1);
+    }
+  }), []);
+
+  useEffect(() => subscribeProfileCompletionInvalidation((changedMemberId) => {
+    const currentUser = useAuthStore.getState().user;
+    const currentMemberId = currentUser?.authId || String(currentUser?.id ?? "");
+    if (changedMemberId === currentMemberId) setReload((n) => n + 1);
+  }), []);
+
   useEffect(() => {
     if (!ready || pathname.startsWith("/auth/")) {
       dispatchCheck({ type: "reset" });
@@ -88,8 +112,9 @@ export function ProfileCompletionPopup() {
     incomplete &&
     !verificationPopupOpen;
 
-  // Block both unresolved and failed reads, including the first render after
-  // an account switch, navigation or retry. Purchases and verification stay open.
+  // Block unknown and failed reads, including account/session changes and
+  // retries. Same-member route refreshes retain confirmed server evidence.
+  // Purchases and verification stay open.
   if (ready && allowed && check.status !== "ready" && !verificationPopupOpen) {
     const failed = check.status === "error";
     return (

@@ -9,7 +9,8 @@ export interface ProfileCompletionScope {
 
 export type ProfileCompletionCheck =
   | { status: "idle" }
-  | { status: "pending" | "error"; scope: ProfileCompletionScope }
+  | { status: "pending"; scope: ProfileCompletionScope; progress?: NewMemberProgress }
+  | { status: "error"; scope: ProfileCompletionScope }
   | { status: "ready"; scope: ProfileCompletionScope; progress: NewMemberProgress };
 
 export type ProfileCompletionCheckAction =
@@ -29,7 +30,14 @@ export function profileCompletionCheckReducer(
   action: ProfileCompletionCheckAction,
 ): ProfileCompletionCheck {
   if (action.type === "reset") return INITIAL_PROFILE_COMPLETION_CHECK;
-  if (action.type === "start") return { status: "pending", scope: action.scope };
+  if (action.type === "start") {
+    const previous = readProfileCompletionCheck(state, action.scope);
+    return {
+      status: "pending",
+      scope: action.scope,
+      ...(previous.status === "ready" ? { progress: previous.progress } : {}),
+    };
+  }
   // Late reads cannot unlock a different account, navigation, or retry.
   if (state.status === "idle" || !sameScope(state.scope, action.scope)) return state;
   if (action.type === "reject") return { status: "error", scope: action.scope };
@@ -37,14 +45,19 @@ export function profileCompletionCheckReducer(
 }
 
 /**
- * Compare during render, before an effect can reset stale state. A previous
- * member's completed result is never evidence for the current member.
+ * A route change does not erase server evidence for the same member. Recheck
+ * in the background, preserving both completion and any outstanding required
+ * steps. Initial reads, account/session changes, retries and failed reads still
+ * block. Nothing is persisted or inferred from the local profile.
  */
 export function readProfileCompletionCheck(
   state: ProfileCompletionCheck,
   scope: ProfileCompletionScope,
 ): { status: "pending" | "error" } | { status: "ready"; progress: NewMemberProgress } {
-  if (state.status === "idle" || !sameScope(state.scope, scope)) return { status: "pending" };
-  if (state.status === "ready") return { status: "ready", progress: state.progress };
-  return { status: state.status };
+  if (state.status === "idle" || state.scope.memberId !== scope.memberId ||
+      state.scope.reload !== scope.reload) return { status: "pending" };
+  if (state.status === "ready" || (state.status === "pending" && state.progress)) {
+    return { status: "ready", progress: state.progress! };
+  }
+  return { status: sameScope(state.scope, scope) ? state.status : "pending" };
 }

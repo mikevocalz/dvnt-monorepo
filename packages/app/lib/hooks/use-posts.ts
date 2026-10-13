@@ -13,6 +13,7 @@ import { deriveMediaKind } from "@dvnt/app/lib/api/posts";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import { useCallback, useMemo } from "react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { invalidateProfileCompletion } from "@dvnt/app/lib/profile/profile-completion-invalidation";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { STALE_TIMES, GC_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import { isValidPostId } from "@dvnt/app/lib/validation/post-params";
@@ -643,6 +644,7 @@ export function useCreatePost() {
       // Replace the optimistic post with the real one instead of invalidating
       // This prevents double posts from appearing
       if (newPost?.id) {
+        invalidateProfileCompletion(currentViewer);
         // Update infinite feed - replace temp post with real one
         queryClient.setQueryData(postKeys.feedInfinite(Boolean(newPost.isNSFW)), (old: any) => {
           if (!old?.pages) return old;
@@ -836,6 +838,9 @@ export function useDeletePost() {
       }
     },
     onSuccess: (_result, deletedPostId, context) => {
+      // The count was decremented optimistically. Refresh again now that the
+      // write is committed, even if that count did not change a second time.
+      invalidateProfileCompletion(context?.previousAuthUser);
       if (__DEV__)
         console.log(
           "[useDeletePost] Post deleted successfully:",
