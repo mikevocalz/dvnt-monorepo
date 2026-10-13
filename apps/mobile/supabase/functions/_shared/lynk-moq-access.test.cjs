@@ -124,10 +124,10 @@ function edgeFixture(overrides = {}) {
   new Function('exports', 'require', 'Deno', transpile(path.join(__dirname, '../lynk-moq-token/index.ts')))(
     {}, requireFixture, { env: { get: () => 'fixture-only' }, serve: (value) => { handler = value; } },
   );
-  return { fixture, async invoke() {
+  return { fixture, async invoke(body = { roomId, intent: 'publish' }) {
     const response = await handler(new Request('https://fixture.invalid/lynk-moq-token', {
       method: 'POST', headers: { Authorization: 'Bearer fixture-session', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomId, intent: 'publish' }),
+      body: JSON.stringify(body),
     }));
     return response.json();
   } };
@@ -150,7 +150,7 @@ test('actual edge handler repeats verified/event/private/ban/role gates after pr
     fixture.mutate = () => revoke(fixture);
     const response = await invoke();
     assert.equal(fixture.mints, 1, name);
-    assert.equal(fixture.gates, 2, name);
+    assert.equal(fixture.gates, 3, name);
     assert.equal(response.ok, false, name);
     assert.equal('data' in response, false, name);
   }
@@ -178,4 +178,18 @@ test('edge handler permits valid scoped access, denies ended/kicked rooms before
   invited.fixture.member = null;
   invited.fixture.invite = { id: 1 };
   assert.equal((await invited.invoke()).ok, true);
+});
+
+
+test('verification denial precedes malformed token input without weakening adult validation', async () => {
+  for (const reason of ['underage', 'verification_required']) {
+    const blocked = edgeFixture({ admission: { state: 'blocked', reason } });
+    const response = await blocked.invoke({ roomId: 1 });
+    assert.equal(response.error.code, 'forbidden');
+    assert.equal(response.error.detail.reason, reason);
+    assert.equal(blocked.fixture.mints, 0);
+  }
+  const adult = edgeFixture();
+  assert.equal((await adult.invoke({ roomId: 1 })).error.code, 'validation_error');
+  assert.equal(adult.fixture.mints, 0);
 });

@@ -31,7 +31,7 @@ const bundle=await esbuild.build({stdin:{resolveDir:ROOT,loader:'tsx',contents:`
  const entryJoins=[],entryCallbacks={};
  function EntryChild({scope}){useEffect(()=>{entryJoins.push(scope)},[scope]);return null;}
  function EntryFixture(){const [scope,setScope]=useState('account-a:room-a');const [phase,setPhase]=useState('connected');const entry=useRoomEntryScope(scope);
-  window.fixture.entry={joins:entryJoins,callbacks:entryCallbacks,switch:next=>{setPhase('connected');setScope(next)},join:()=>setPhase('connected')};entryCallbacks[scope]=entry.isCurrent;
+  window.fixture.entry={scope,phase,ready:entry.ready,joins:entryJoins,callbacks:entryCallbacks,switch:next=>{setPhase('connected');setScope(next)},join:()=>setPhase('connected')};entryCallbacks[scope]=entry.isCurrent;
   useEffect(()=>{setPhase('prejoin');entry.initialize()},[scope]);
   return entry.ready&&phase==='connected'?<EntryChild key={scope} scope={scope}/>:null;
  }
@@ -53,13 +53,15 @@ if (process.argv.includes('--dom')) {
  const {JSDOM}=require('jsdom');
  const dom=new JSDOM('<!doctype html><div id="root"></div>',{url:'http://localhost',runScripts:'outside-only',pretendToBeVisual:true});
  const {window}=dom;const errors=[];window.addEventListener('error',e=>errors.push(e.message));window.eval(bundle.outputFiles[0].text);
- const tick=()=>new Promise(r=>setTimeout(r,25));await tick();const f=window.fixture;
+ const tick=()=>new Promise(r=>setTimeout(r,25));
+ const waitFor=async predicate=>{const deadline=Date.now()+3000;while(!predicate()){if(Date.now()>deadline)throw new Error('Fixture did not settle before deadline');await tick()}};
+ await waitFor(()=>window.fixture?.entry?.ready&&window.fixture.entry.phase==='prejoin');const f=window.fixture;
  const update=async(client,patch)=>{f.update(client,patch);await tick()};
  assert.equal(f.entry.joins.length,0,'stale connected phase cannot join before entry reset');
- f.entry.join();await tick();assert.equal(f.entry.joins.join(','),'account-a:room-a');
- f.entry.switch('account-b:room-a');await tick();assert.equal(f.entry.joins.length,1,'account switch must not auto-join');assert.equal(f.entry.callbacks['account-a:room-a'](),false,'old verification callback is inactive');
- f.entry.join();await tick();assert.equal(f.entry.joins.join(','),'account-a:room-a,account-b:room-a');
- f.entry.switch('account-b:room-b');await tick();assert.equal(f.entry.joins.length,2,'room switch must not auto-join');
+ f.entry.join();await waitFor(()=>f.entry.joins.length===1);assert.equal(f.entry.joins.join(','),'account-a:room-a');
+ f.entry.switch('account-b:room-a');await waitFor(()=>f.entry.scope==='account-b:room-a'&&f.entry.ready&&f.entry.phase==='prejoin');assert.equal(f.entry.joins.length,1,'account switch must not auto-join');assert.equal(f.entry.callbacks['account-a:room-a'](),false,'old verification callback is inactive');
+ f.entry.join();await waitFor(()=>f.entry.joins.length===2);assert.equal(f.entry.joins.join(','),'account-a:room-a,account-b:room-a');
+ f.entry.switch('account-b:room-b');await waitFor(()=>f.entry.scope==='account-b:room-b'&&f.entry.ready&&f.entry.phase==='prejoin');assert.equal(f.entry.joins.length,2,'room switch must not auto-join');
  const comment=(id,authorId,body)=>({id,roomId:'room-a',authorId,body,parentId:null,rootId:null,depth:0,mentions:[],createdAt:new Date(1700000000000+id).toISOString(),author:{username:authorId,displayName:authorId,avatar:'',isVerified:true}});
  const members=[{userId:'alice',status:'active',role:'host',handRaised:false},{userId:'bob',status:'active',role:'participant',handRaised:false},{userId:'member:9',status:'active',role:'participant',isAnonymous:true,anonLabel:'Anon 7',handRaised:false}];
  assert.equal(f.subscriptions.length,0,'no pre-admission reads');await update('alice',{enabled:true});await update('bob',{enabled:true});assert.equal(f.subscriptions.length,4);

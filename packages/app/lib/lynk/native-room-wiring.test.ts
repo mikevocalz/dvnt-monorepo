@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { URL } from "node:url";
 
 const route = readFileSync(new URL("../../features/routes/screens/(protected)/sneaky-lynk/room/[id].tsx", import.meta.url), "utf8");
 const hook = readFileSync(new URL("../../features/video/hooks/useVideoRoom.ts", import.meta.url), "utf8");

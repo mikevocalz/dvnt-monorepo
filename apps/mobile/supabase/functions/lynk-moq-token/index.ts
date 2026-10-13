@@ -141,6 +141,15 @@ Deno.serve(async (req) => {
     }
     const userId = sessionResult.userId as string;
 
+    // Preserve the verification-first contract, including malformed requests.
+    // Admission is checked again in the pre/post-mint snapshots below: reading
+    // the request body or contacting the provider may outlive this decision.
+    const initialAdmission = await resolveVerifiedAdmission(supabase, userId);
+    if (initialAdmission.state === "blocked") {
+      const refusal = admissionRefusal(initialAdmission);
+      return errorResponse("forbidden", refusal.message, { reason: refusal.reason });
+    }
+
     // 2. Validate input
     let body: unknown;
     try {
@@ -150,7 +159,7 @@ Deno.serve(async (req) => {
     }
     const parsed = TokenSchema.safeParse(body);
     if (!parsed.success) {
-      return errorResponse("validation_error", parsed.error.errors[0].message);
+      return errorResponse("validation_error", parsed.error.issues[0]?.message ?? "Invalid token request");
     }
     const { roomId, intent } = parsed.data;
 
