@@ -1,3 +1,4 @@
+import { invalidateProfileCompletion } from "../profile/profile-completion-invalidation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
@@ -135,6 +136,7 @@ export function useStartVerification() {
     },
     onSuccess: (data) => {
       if (data.status === "passed") {
+        invalidateProfileCompletion({ authId });
         onboardingCheckpoint("verification.verified");
         queryClient.setQueryData([...ageVerificationKeys.status, authId], "passed");
       }
@@ -149,6 +151,8 @@ export function useStartVerification() {
 /** Re-pull status after returning from the hosted flow. */
 export function useRefreshVerificationStatus() {
   const queryClient = useQueryClient();
-  return () =>
-    queryClient.invalidateQueries({ queryKey: ageVerificationKeys.status });
+  return () => {
+    invalidateProfileCompletion(useAuthStore.getState().user);
+    return queryClient.invalidateQueries({ queryKey: ageVerificationKeys.status });
+  };
 }

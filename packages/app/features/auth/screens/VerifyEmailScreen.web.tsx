@@ -1,3 +1,5 @@
+import { useAuthStore } from "../../../lib/stores/auth-store";
+import { invalidateProfileCompletion } from "../../../lib/profile/profile-completion-invalidation";
 import { useState, useEffect } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { useRouter } from 'solito/navigation';
@@ -16,11 +18,13 @@ export function VerifyEmailScreen() {
   const navigate = ({ to }: { to: string }) => router.push(to);
 
   useEffect(() => {
+    const verifyingMember = useAuthStore.getState().user;
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
     const verify = async () => {
       if (token) {
         const onVerified = () => {
+          invalidateProfileCompletion(verifyingMember);
           setStatus('success');
           toast.success('Email verified', { description: 'Your email has been confirmed' });
           // '/story' is not a route. Bare /story 404s — next.config only

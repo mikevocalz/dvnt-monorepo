@@ -6,6 +6,7 @@ import { Camera, CheckCircle2, ImagePlus, LoaderCircle } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { updateProfile, syncAuthUser } from "@dvnt/app/lib/api/privileged";
+import { invalidateProfileCompletion } from "@dvnt/app/lib/profile/profile-completion-invalidation";
 import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
 
 export default function NewMemberPhotoPage() {
@@ -52,6 +53,7 @@ export default function NewMemberPhotoPage() {
       if (!upload.success || !upload.url)
         throw new Error(upload.error || "Photo upload failed. Please try again.");
       await updateProfile({ avatarUrl: upload.url });
+      invalidateProfileCompletion(user);
       // The upload is NOT a completed step until both the saved media row and
       // the real avatar URL can be read back from the server on this account.
       const status = await fetchNewMemberProgress();

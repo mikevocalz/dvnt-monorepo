@@ -1,16 +1,9 @@
 "use client";
 
-import { useEffect, useReducer, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ArrowUpRight, Camera, CheckCircle2, ImagePlus, PenLine, Sparkles } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
-import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
-import { subscribeProfileCompletionInvalidation } from "@dvnt/app/lib/profile/profile-completion-invalidation";
-import {
-  INITIAL_PROFILE_COMPLETION_CHECK,
-  profileCompletionCheckReducer,
-  readProfileCompletionCheck,
-} from "@dvnt/app/lib/profile/profile-completion-check";
+import { useProfileCompletionSession } from "./profile-completion-session";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useVerifiedOnlyPromptStore } from "@dvnt/app/lib/auth/verified-only-prompt";
 import {
@@ -36,68 +29,13 @@ export function ProfileCompletionPopup() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const verificationPopupOpen = useVerifiedOnlyPromptStore((s) => s.open);
 
-  const [checkState, dispatchCheck] = useReducer(
-    profileCompletionCheckReducer,
-    INITIAL_PROFILE_COMPLETION_CHECK,
-  );
-  const [reload, setReload] = useState(0);
-
   const memberId = user?.authId || String(user?.id ?? "");
   const ready = hydrated && isAuthenticated && !!memberId;
-  const scope = { memberId, pathname, reload };
-  const check = readProfileCompletionCheck(checkState, scope);
+  const { check, retry } = useProfileCompletionSession(memberId, ready, pathname, verificationPopupOpen);
   const allowed = canShowProfileReminderAt(
     pathname,
     check.status === "ready" ? check.progress.step : undefined,
   );
-
-  useEffect(() => useAuthStore.subscribe((next, previous) => {
-    // Observe store transitions synchronously: React can batch logout/login
-    // into one render, even when the same member signs back in. A new session
-    // must never inherit that member's old completion evidence.
-    const previousId = previous.user?.authId || String(previous.user?.id ?? "");
-    const nextId = next.user?.authId || String(next.user?.id ?? "");
-    const wasReady = previous._hasHydrated && previous.isAuthenticated && !!previousId;
-    const isReady = next._hasHydrated && next.isAuthenticated && !!nextId;
-    if (wasReady && (!isReady || previousId !== nextId ||
-        previous.user?.avatar !== next.user?.avatar ||
-        previous.user?.postsCount !== next.user?.postsCount)) {
-      // Profile mutations trigger a fresh server check; optimistic local
-      // avatar/count updates are never accepted as completion themselves.
-      setReload((n) => n + 1);
-    }
-  }), []);
-
-  useEffect(() => subscribeProfileCompletionInvalidation((changedMemberId) => {
-    const currentUser = useAuthStore.getState().user;
-    const currentMemberId = currentUser?.authId || String(currentUser?.id ?? "");
-    if (changedMemberId === currentMemberId) setReload((n) => n + 1);
-  }), []);
-
-  useEffect(() => {
-    if (!ready || pathname.startsWith("/auth/")) {
-      dispatchCheck({ type: "reset" });
-      return;
-    }
-
-    let cancelled = false;
-    const requestScope = { memberId, pathname, reload };
-    dispatchCheck({ type: "start", scope: requestScope });
-
-    void fetchNewMemberProgress()
-      .then((progress) => {
-        if (cancelled) return;
-        dispatchCheck({ type: "resolve", scope: requestScope, progress });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        dispatchCheck({ type: "reject", scope: requestScope });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ready, memberId, pathname, reload]);
 
   // Verification-era signups finish the existing 18+/email UI first. Only a
   // current, successful server read can expose the photo -> first-post stage.
@@ -113,7 +51,7 @@ export function ProfileCompletionPopup() {
     !verificationPopupOpen;
 
   // Block unknown and failed reads, including account/session changes and
-  // retries. Same-member route refreshes retain confirmed server evidence.
+  // retries. Navigation and remounts retain confirmed server evidence for this session.
   // Purchases and verification stay open.
   if (ready && allowed && check.status !== "ready" && !verificationPopupOpen) {
     const failed = check.status === "error";
@@ -151,7 +89,7 @@ export function ProfileCompletionPopup() {
           {failed && <button
             type="button"
             data-autofocus
-            onClick={() => setReload((n) => n + 1)}
+            onClick={retry}
             className="min-h-12 w-full rounded-xl bg-[#FF5BFC] px-6 py-3 font-bold text-black"
           >
             Retry connection

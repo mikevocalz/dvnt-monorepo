@@ -3,6 +3,7 @@
  * Uses cookies + credentials:include — no expo-secure-store, no @better-auth/expo
  */
 
+import { publishSessionBoundary } from "./auth/session-lifecycle";
 import { QueryClient } from "@tanstack/react-query";
 import { logAuth, type SignOutReason } from "./auth/auth-logger";
 // Better Auth client now lives in @dvnt/auth (PROMPT 0 §3); web plumbing stays here.
@@ -25,6 +26,7 @@ const tokenCache = createAccountTokenCache({
   },
   getSession: () => baseAuthClient.getSession(),
   onError: (error) => logAuth("AUTH_REFRESH_FAIL", { error: String(error) }),
+  onSessionBoundary: publishSessionBoundary,
 });
 
 // Both named methods and authClient.signIn.* pass through the same boundary.

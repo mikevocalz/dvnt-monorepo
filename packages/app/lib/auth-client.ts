@@ -5,6 +5,7 @@
  * Provides hooks and methods for sign in, sign up, sign out, and session management.
  */
 
+import { publishSessionBoundary } from "./auth/session-lifecycle";
 import * as SecureStore from "expo-secure-store";
 import { QueryClient } from "@tanstack/react-query";
 import { logAuth, type SignOutReason } from "@dvnt/app/lib/auth/auth-logger";
@@ -30,6 +31,7 @@ const tokenCache = createAccountTokenCache({
   getSession: () => baseAuthClient.getSession(),
   onError: (error) => logAuth("AUTH_REFRESH_FAIL", { error: String(error) }),
   retryDelayMs: 500,
+  onSessionBoundary: publishSessionBoundary,
 });
 
 // Both named methods and authClient.signIn.* pass through the same boundary.

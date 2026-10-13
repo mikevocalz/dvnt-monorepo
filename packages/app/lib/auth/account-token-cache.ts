@@ -17,6 +17,7 @@ export function createAccountTokenCache(options: {
   getIdentity: () => TokenIdentity | null;
   getSession: () => Promise<SessionResult>;
   onError?: (error: unknown) => void;
+  onSessionBoundary?: (state: { ready: boolean; authId?: string }) => void;
   retryDelayMs?: number;
   now?: () => number;
 }) {
@@ -146,6 +147,7 @@ export function createAccountTokenCache(options: {
     loginIdentity = { id: user.id, authId: user.id, email: user.email };
     lastSessionToken = session.token;
     signedOut = false;
+    options.onSessionBoundary?.({ ready: true, authId: user.id });
     return true;
   }
 
@@ -154,6 +156,7 @@ export function createAccountTokenCache(options: {
     const mutation = ++latestMutation;
     mutations += 1;
     invalidate();
+    options.onSessionBoundary?.({ ready: false });
     if (kind === "signOut") {
       signedOut = true;
       signOutConfirmed = false;
@@ -178,6 +181,7 @@ export function createAccountTokenCache(options: {
     } finally {
       mutations -= 1;
       invalidate();
+      options.onSessionBoundary?.({ ready: mutations === 0 && !signedOut, authId: loginIdentity?.authId });
     }
   }
 
