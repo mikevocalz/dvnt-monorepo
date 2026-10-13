@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import { fileURLToPath, URL } from "node:url";
 import path from "node:path";
 
+// Explicitly run by lynk-room-regressions.yml with isolated DOM dependencies;
+// kept outside the dependency-light test:node glob. No test is skipped.
 // Real React screens, admission/API/token hooks and MoQ lifecycle. Only device,
 // relay, authentication and server I/O boundaries are mocked. No live accounts,
 // rooms, cameras, credentials or messages are used.
