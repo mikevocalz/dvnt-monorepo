@@ -52,13 +52,13 @@ test("late account responses cannot overwrite an incomplete current result", () 
   assert.deepEqual(read(current, memberB), { status: "ready", progress: photo });
 });
 
-test("navigation invalidates completed evidence before the next effect and rejects stale reads", () => {
+test("navigation keeps same-member server evidence before and during background refresh", () => {
   const next = { ...memberA, pathname: "/feed/messages" };
   const old = resolved(memberA);
-  assert.deepEqual(read(old, next), { status: "pending" });
+  assert.deepEqual(read(old, next), { status: "ready", progress: complete });
   const pending = reduce(old, { type: "start", scope: next });
   assert.equal(reduce(pending, { type: "resolve", scope: memberA, progress: complete }), pending);
-  assert.deepEqual(read(pending, next), { status: "pending" });
+  assert.deepEqual(read(pending, next), { status: "ready", progress: complete });
 });
 
 test("failure stays closed and retry cannot temporarily reuse the old result", () => {
@@ -89,4 +89,47 @@ test("verification-first and photo-first server results are preserved without in
   ]) {
     assert.deepEqual(read(resolved(memberA, progress), memberA), { status: "ready", progress });
   }
+});
+
+
+test("rapid navigation preserves evidence while accepting only the latest route result", () => {
+  const next = { ...memberA, pathname: "/feed/messages" };
+  const latest = { ...memberA, pathname: "/settings" };
+  const pending = reduce(reduce(resolved(memberA), { type: "start", scope: next }), {
+    type: "start", scope: latest,
+  });
+  assert.deepEqual(read(pending, latest), { status: "ready", progress: complete });
+  assert.equal(reduce(pending, { type: "resolve", scope: next, progress: photo }), pending);
+  assert.equal(reduce(pending, { type: "reject", scope: next }), pending);
+  assert.deepEqual(read(reduce(pending, { type: "resolve", scope: latest, progress: photo }), latest), {
+    status: "ready", progress: photo,
+  });
+});
+
+test("incomplete evidence remains required during navigation and advances only from the server", () => {
+  const next = { ...memberA, pathname: "/feed/create" };
+  const pending = reduce(resolved(memberA, photo), { type: "start", scope: next });
+  assert.deepEqual(read(pending, next), { status: "ready", progress: photo });
+  assert.deepEqual(read(reduce(pending, { type: "resolve", scope: next, progress: complete }), next), {
+    status: "ready", progress: complete,
+  });
+});
+
+test("background failure discards completion and cannot reuse it on another link", () => {
+  const next = { ...memberA, pathname: "/feed/messages" };
+  const pending = reduce(resolved(memberA), { type: "start", scope: next });
+  const failed = reduce(pending, { type: "reject", scope: next });
+  assert.deepEqual(read(failed, next), { status: "error" });
+  assert.deepEqual(read(failed, memberA), { status: "pending" });
+  assert.deepEqual(read(reduce(failed, { type: "start", scope: memberA }), memberA), { status: "pending" });
+});
+
+test("same-member auth or profile generation changes require new server evidence", () => {
+  const freshSession = { ...memberA, reload: 1 };
+  const old = resolved(memberA);
+  assert.deepEqual(read(old, freshSession), { status: "pending" });
+  const pending = reduce(old, { type: "start", scope: freshSession });
+  assert.deepEqual(read(pending, freshSession), { status: "pending" });
+  assert.equal(reduce(pending, { type: "resolve", scope: memberA, progress: complete }), pending);
+  assert.equal(reduce(pending, { type: "reject", scope: memberA }), pending);
 });

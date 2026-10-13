@@ -13,14 +13,16 @@ const photo = { ...complete, step: 'photo', required: true, hasPhoto: false };
 const firstPost = { ...complete, step: 'first_post', required: true, hasPost: false };
 const boundaries = {
   'profile-fixture': `import {useSyncExternalStore} from 'react';
-    const listeners=new Set();let revision=0;
+    const listeners=new Set(),authListeners=new Set();let revision=0;
     export const state={path:'/feed',user:{authId:'a',id:'1'},verification:false,empty:false};
+    export const authSnapshot=()=>({user:state.user,_hasHydrated:true,isAuthenticated:!!state.user});
+    export const subscribeAuth=fn=>{authListeners.add(fn);return()=>authListeners.delete(fn)};
     export const useValue=select=>{useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn)},()=>revision);return select(state)};
-    const update=patch=>{Object.assign(state,patch);revision++;for(const fn of listeners)fn()};
+    const update=patch=>{const previous=authSnapshot();Object.assign(state,patch);revision++;for(const fn of authListeners)fn(authSnapshot(),previous);for(const fn of listeners)fn()};
     window.fixture={requests:[],navigations:[],backgroundClicks:0,update};
     export const router={push:path=>{window.fixture.navigations.push(path);update({path})}};`,
   'next/navigation': `import {useValue,router} from 'profile-fixture';export const usePathname=()=>useValue(s=>s.path);export const useRouter=()=>router;`,
-  '@dvnt/app/lib/stores/auth-store': `import {useValue} from 'profile-fixture';export const useAuthStore=select=>useValue(s=>select({user:s.user,_hasHydrated:true,isAuthenticated:!!s.user}));`,
+  '@dvnt/app/lib/stores/auth-store': `import {useValue,authSnapshot,subscribeAuth} from 'profile-fixture';export const useAuthStore=select=>useValue(()=>select(authSnapshot()));useAuthStore.subscribe=subscribeAuth;useAuthStore.getState=authSnapshot;`,
   '@dvnt/app/lib/auth/verified-only-prompt': `import {useValue} from 'profile-fixture';export const useVerifiedOnlyPromptStore=select=>useValue(s=>select({open:s.verification}));`,
   '@dvnt/app/lib/profile/new-member-progress': `export const fetchNewMemberProgress=()=>new Promise((resolve,reject)=>window.fixture.requests.push({resolve,reject}));`,
   'lucide-react': ['ArrowUpRight','Camera','CheckCircle2','ImagePlus','PenLine','Sparkles','X'].map(name=>`export const ${name}=()=>null;`).join('\n'),
@@ -29,6 +31,8 @@ const boundaries = {
   const build = await esbuild.build({
     stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {useValue} from 'profile-fixture';import {Dialog} from '@dvnt/ui';
       import {ProfileCompletionPopup} from './apps/web/src/components/profile-completion-popup';
+      import {invalidateProfileCompletion} from '@dvnt/app/lib/profile/profile-completion-invalidation';
+      window.fixture.invalidateProfileCompletion=invalidateProfileCompletion;
       function Fixture(){const empty=useValue(s=>s.empty);return <><button id="background" onClick={()=>window.fixture.backgroundClicks++}>Background action</button>{empty?<Dialog open hideClose dismissible={false} onClose={()=>{}} labelledBy="empty-title"><h2 id="empty-title">Waiting without controls</h2></Dialog>:<ProfileCompletionPopup/>}</>}
       createRoot(document.getElementById('root')).render(<Fixture/>);`, resolveDir: ROOT, loader: 'tsx' },
     bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
@@ -90,7 +94,7 @@ const boundaries = {
     await resolve(1,complete);await assertNoDialog();
 
     // A complete -> B incomplete, with A's newer navigation read arriving late.
-    await update({path:'/notifications'});await waitRequests(3);
+    await update({path:'/notifications'});await waitRequests(3);await assertNoDialog();
     await update({user:{authId:'b',id:'2'}});await waitRequests(4);await focusInside();
     await resolve(2,complete);assert.equal(await page.getByRole('dialog').count(),1);
     await resolve(3,photo);await page.getByRole('button',{name:'Add my profile picture'}).waitFor();await focusInside();await dismissFails();
@@ -109,7 +113,7 @@ const boundaries = {
     await update({path:'/feed'});await waitRequests(count+1);await resolve(count,firstPost);
     await page.getByRole('button',{name:'Create my first post'}).waitFor();await focusInside();
     assert.equal(await page.evaluate(()=>document.activeElement.textContent.trim()),'Create my first post');
-    await page.getByRole('button',{name:'Create my first post'}).click();await waitRequests(count+2);await focusInside();
+    await page.getByRole('button',{name:'Create my first post'}).click();await waitRequests(count+2);await assertNoDialog();
     await resolve(count+1,firstPost);await assertNoDialog();
 
     // Exact wallet/purchase routes remain open during both pending and failure.
@@ -138,6 +142,90 @@ const boundaries = {
     await update({path:'/feed',verification:true});await waitRequests(count+1);await assertNoDialog();
     await update({verification:false});await focusInside();
     await resolve(count,{...photo,step:'pending_verification',adultVerified:false});await assertNoDialog();
+    // Completed accounts keep server evidence during repeated ordinary links.
+    count=await page.evaluate(()=>window.fixture.requests.length);
+    await update({user:{authId:'c',id:'3'},path:'/feed'});await waitRequests(count+1);
+    await resolve(count,complete);await assertNoDialog();
+    await page.evaluate(()=>{
+      window.fixture.dialogAppearances=0;
+      new MutationObserver(records=>{for(const record of records)for(const node of record.addedNodes){
+        if(node.nodeType===1&&(node.matches('[role=dialog]')||node.querySelector('[role=dialog]')))window.fixture.dialogAppearances++;
+      }}).observe(document.body,{childList:true,subtree:true});
+    });
+    for(const path of ['/feed/messages','/settings','/feed','/events','/feed/profile','/feed']){
+      count=await page.evaluate(()=>window.fixture.requests.length);
+      await update({path});await waitRequests(count+1);await assertNoDialog();
+      await resolve(count,complete);await assertNoDialog();
+    }
+    assert.equal(await page.evaluate(()=>window.fixture.dialogAppearances),0);
+
+    // A -> B -> A routes: a late first-A success/error cannot replace the last A.
+    count=await page.evaluate(()=>window.fixture.requests.length);
+    for(const path of ['/settings','/events','/settings']){await update({path});await waitRequests(++count);await assertNoDialog()}
+    await resolve(count-1,photo);await page.getByRole('button',{name:'Add my profile picture'}).waitFor();
+    await resolve(count-3,complete);await reject(count-2);
+    await page.getByRole('button',{name:'Add my profile picture'}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Retry connection'}).count(),0);
+
+    // Saved profile/post mutations invalidate evidence, even with no navigation.
+    for(const [user,progress] of [
+      [{authId:'c',id:'3',avatar:'saved-photo'},firstPost],
+      [{authId:'c',id:'3',avatar:'saved-photo',postsCount:1},complete],
+    ]){
+      count=await page.evaluate(()=>window.fixture.requests.length);
+      await update({user});await waitRequests(count+1);
+      await page.getByText('Checking your profile…',{exact:true}).waitFor();
+      await resolve(count,progress);
+      if(progress.step==='complete')await assertNoDialog();
+      else await page.getByRole('button',{name:'Create my first post'}).waitFor();
+    }
+    // An optimistic mutation may fetch the pre-write state. The successful
+    // server write must invalidate it even when avatar/count values are equal.
+    count=await page.evaluate(()=>window.fixture.requests.length);
+    await update({user:{authId:'c',id:'3',avatar:'saved-photo',postsCount:0}});
+    await waitRequests(count+1);await resolve(count,complete);await assertNoDialog();
+    await page.evaluate(()=>window.fixture.invalidateProfileCompletion({authId:'c',id:'3'}));
+    await waitRequests(count+2);await page.getByText('Checking your profile…',{exact:true}).waitFor();
+    await resolve(count+1,firstPost);await page.getByRole('button',{name:'Create my first post'}).waitFor();
+    await update({user:{authId:'c',id:'3',avatar:'saved-photo',postsCount:1}});
+    await waitRequests(count+3);
+    await page.evaluate(()=>window.fixture.invalidateProfileCompletion({authId:'c',id:'3'}));
+    await waitRequests(count+4);
+    await resolve(count+2,firstPost);await page.getByText('Checking your profile…',{exact:true}).waitFor();
+    await resolve(count+3,complete);await assertNoDialog();
+    count=await page.evaluate(()=>window.fixture.requests.length);
+    await page.evaluate(()=>window.fixture.invalidateProfileCompletion({authId:'old-account'}));
+    await assertNoDialog();assert.equal(await page.evaluate(()=>window.fixture.requests.length),count);
+
+    // An ordinary same-value auth-store update does not invalidate completion.
+    count=await page.evaluate(()=>window.fixture.requests.length);
+    await update({user:{authId:'c',id:'3',avatar:'saved-photo',postsCount:1,name:'Updated name'}});
+    await assertNoDialog();assert.equal(await page.evaluate(()=>window.fixture.requests.length),count);
+
+    // React batches both store updates: same member, genuinely new session.
+    await page.evaluate(()=>{
+      window.fixture.update({user:null});
+      window.fixture.update({user:{authId:'c',id:'3',avatar:'saved-photo',postsCount:1}});
+    });
+    await waitRequests(count+1);await page.getByText('Checking your profile…',{exact:true}).waitFor();
+    await resolve(count,complete);await assertNoDialog();
+    // Account A -> B -> A in one turn cannot inherit A's prior completion.
+    count=await page.evaluate(()=>window.fixture.requests.length);
+    await page.evaluate(()=>{
+      window.fixture.update({user:{authId:'d',id:'4'}});
+      window.fixture.update({user:{authId:'c',id:'3',avatar:'saved-photo',postsCount:1}});
+    });
+    await waitRequests(count+1);await page.getByText('Checking your profile…',{exact:true}).waitFor();
+    await resolve(count,complete);await assertNoDialog();
+
+    // A failed background check stays fail-closed and explicit retry is fresh.
+    count=await page.evaluate(()=>window.fixture.requests.length);
+    await update({path:'/notifications'});await waitRequests(count+1);await assertNoDialog();
+    await reject(count);await page.getByRole('button',{name:'Retry connection'}).waitFor();
+    await page.getByRole('button',{name:'Retry connection'}).click();await waitRequests(count+2);
+    await page.getByText('Checking your profile…',{exact:true}).waitFor();
+    await resolve(count+1,complete);await assertNoDialog();
+
     // The shared Dialog also has to retain focus while all controls are absent.
     await update({empty:true});await page.getByText('Waiting without controls').waitFor();await focusInside();
     for(const key of ['Tab','Shift+Tab']){
@@ -147,6 +235,6 @@ const boundaries = {
     assert.equal(await page.getByRole('dialog').count(),1);
     assert.equal(await page.evaluate(()=>window.fixture.backgroundClicks),0);
     assert.deepEqual(errors,[]);
-    console.log('PASS: actual React popup/Dialog pending/error/retry, keyboard focus, Escape/backdrop, account switch/stale results, ordinary route coverage, photo/post ordering, ticket exemptions and verification priority.');
+    console.log('PASS: actual React popup/Dialog pending/error/retry, keyboard focus, Escape/backdrop, account switch/stale results, flicker-free completed navigation, route/account ABA, batched same-member re-login, profile/post mutation refresh, photo/post ordering, ticket exemptions and verification priority.');
   } finally {await browser?.close();await new Promise(resolve=>server.close(resolve))}
 })().catch(error=>{console.error(error);process.exitCode=1});

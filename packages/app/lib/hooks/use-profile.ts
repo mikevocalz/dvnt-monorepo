@@ -15,6 +15,7 @@ import {
 } from "@tanstack/react-query";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { invalidateProfileCompletion } from "@dvnt/app/lib/profile/profile-completion-invalidation";
 import { resolveAvatarUrl } from "@dvnt/app/lib/media/resolveAvatarUrl";
 import { STALE_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import type { AppUser } from "@dvnt/app/lib/auth-client";
@@ -635,6 +636,9 @@ export function useUpdateProfile() {
       };
 
       setUser(finalUser);
+      // The optimistic avatar may equal the confirmed value. A store value
+      // comparison alone cannot invalidate a progress read made before saving.
+      if (variables.avatar !== undefined) invalidateProfileCompletion(baseUser);
       patchCurrentUserEverywhere(
         queryClient,
         context?.optimisticUser || baseUser,
