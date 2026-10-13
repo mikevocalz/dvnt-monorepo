@@ -1,3 +1,4 @@
+import { validatePostCaption } from "./post-caption.ts";
 import type {
   PublishDescriptor,
   PublishMediaFile,
@@ -58,6 +59,8 @@ export function createPublishTask(
     let job = descriptor;
     assertOwner();
     if (job.postKind === "media") {
+      const validation = validatePostCaption(job.content);
+      if (!validation.valid) throw new Error(validation.error);
       // Copy anything still sitting on a picker URI into app storage first, so
       // the next launch can find it. Throws with the real reason when it's gone.
       const files = await Promise.all(

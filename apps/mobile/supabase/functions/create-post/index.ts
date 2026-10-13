@@ -11,6 +11,7 @@ import { resolveAdultVerificationState } from "../_shared/verification-state.ts"
 import { resolveSpicyEligibility } from "../_shared/spicy-eligibility.ts";
 import { spicyPostRefusal } from "../_shared/spicy-post-refusal.ts";
 import { firstPostRefusal } from "../_shared/first-post-gate.ts";
+import { validatePostCaption } from "../_shared/post-caption.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -226,6 +227,17 @@ Deno.serve(async (req) => {
         "Post must include at least one photo or video",
         400,
       );
+    }
+
+    if (postKind === "media") {
+      const captionValidation = validatePostCaption(content);
+      if (!captionValidation.valid) {
+        return errorResponse(
+          "validation_error",
+          captionValidation.error || "Invalid caption",
+          400,
+        );
+      }
     }
 
     // Validate each media item has a valid URL

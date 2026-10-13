@@ -1,3 +1,4 @@
+import { getCaptionMetrics, validatePostCaption, MAX_CAPTION_LENGTH, MAX_CAPTION_RAW_LENGTH } from "@dvnt/app/lib/posts/post-caption";
 import {
   View,
   Text,
@@ -120,6 +121,8 @@ function CreateScreenContent() {
 
   const canAddMore = selectedMedia.length < MAX_PHOTOS;
   const isTextPost = postKind === "text";
+  const captionMetrics = getCaptionMetrics(caption);
+  const captionValidation = validatePostCaption(caption);
   const activeTextSlide = textSlides[activeTextSlideIndex] ?? textSlides[0];
   const hasTextDraft = textSlides.some(
     (slide) => slide.content.trim().length > 0,
@@ -134,7 +137,7 @@ function CreateScreenContent() {
 
   const isValid = isTextPost
     ? areTextSlidesValid
-    : selectedMedia.length > 0;
+    : selectedMedia.length > 0 && captionValidation.valid;
 
   const MAX_ANIMATED_VIDEO_DURATION = 15; // seconds — below this, video posts as a muted autoplay loop
 
@@ -484,10 +487,8 @@ function CreateScreenContent() {
           </View>
         </View>
 
-        {/* Meta block — Add tag, Add Photos, Add location.
-            Lifted above the per-mode content (text composer / media
-            preview / caption) so this stays in the same spot whether
-            the user is on the Media tab or the Text tab. */}
+        {/* Text cards retain their existing separate tag/layout workflow. */}
+        {isTextPost && (
         <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
           <View
             style={{
@@ -594,6 +595,8 @@ function CreateScreenContent() {
             </View>
           )}
         </View>
+
+        )}
 
         {!isTextPost && selectedMedia.length === 0 && (
           <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
@@ -898,9 +901,9 @@ function CreateScreenContent() {
             <UserMentionAutocomplete
               value={caption}
               onChangeText={setCaption}
-              placeholder="Caption (optional)"
+              placeholder="Caption (optional). Add #hashtags here"
               multiline
-              maxLength={2200}
+              maxLength={MAX_CAPTION_RAW_LENGTH}
               style={{
                 fontSize: 16,
                 minHeight: 80,
@@ -914,8 +917,10 @@ function CreateScreenContent() {
                 textAlign: "right",
               }}
             >
-              {caption.length}/2200
+              {captionMetrics.characterCount}/{MAX_CAPTION_LENGTH}
             </Text>
+            <Text style={{ fontSize: 12, color: "#888", marginTop: 6 }}>Hashtags don’t count toward your caption limit.</Text>
+            {!captionValidation.valid && <Text accessibilityRole="alert" style={{ fontSize: 12, color: "#f87171", marginTop: 6 }}>{captionValidation.error}</Text>}
           </View>
         )}
       </KeyboardAwareScrollView>

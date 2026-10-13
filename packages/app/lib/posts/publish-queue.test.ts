@@ -180,3 +180,26 @@ test('failed first-post publish keeps the member on the composer', async () => {
   const saved = queue.getSnapshot().find((job) => job.id === id);
   assert.equal(saved?.status, 'failed');
 });
+
+test('invalid media captions are refused before local copies, uploads or API writes, including resumed jobs', async () => {
+  let copies = 0;
+  const { published, uploads, deps } = recorder({ persistMedia: async (file) => { copies++; return file; } });
+  const task = createPublishTask(draft({ content: 'x'.repeat(2201) + ' #music' }), 'owner-a', deps);
+  await assert.rejects(() => task(() => {}, () => {}), /excluding hashtags/);
+  assert.equal(copies, 0);
+  assert.deepEqual(uploads, []);
+  assert.deepEqual(published, []);
+});
+test('media publish preserves inline hashtags beyond raw 2200 characters and keeps people tags separate', async () => {
+  const content = 'x'.repeat(2200) + '\n#Café #東京';
+  let sent;
+  let people;
+  const { deps } = recorder({
+    createPost: async (input) => { sent = input; return { id: 77 }; },
+    addPlacedTags: (postId, tags) => { people = { postId, tags }; },
+  });
+  const placedTags = [{ userId: 9, x: 0.2, y: 0.5, mediaIndex: 0 }];
+  await createPublishTask(draft({ content, placedTags }), 'owner-a', deps)(() => {}, () => {});
+  assert.equal(sent.content, content);
+  assert.deepEqual(people, { postId: '77', tags: placedTags });
+});

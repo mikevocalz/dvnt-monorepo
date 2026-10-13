@@ -1,3 +1,4 @@
+import { validatePostCaption } from "@dvnt/app/lib/posts/post-caption";
 import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import type { Post } from "@dvnt/app/lib/types";
@@ -767,6 +768,10 @@ export const postsApi = {
       console.log("[Posts] createPost via Edge Function");
 
       const postKind: Post["kind"] = data.kind === "text" ? "text" : "media";
+      if (postKind === "media") {
+        const validation = validatePostCaption(data.content);
+        if (!validation.valid) throw new Error(validation.error);
+      }
       const normalizedSlides =
         postKind === "text"
           ? (data.slides || [data.content || ""]).map((content) =>
