@@ -3,6 +3,7 @@
  * Calls Supabase Edge Functions for video room operations
  */
 
+import { Platform } from "react-native";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
@@ -66,6 +67,8 @@ async function callEdgeFunction<T>(
 
     if (error) {
       let message = error.message || "Edge function error";
+      let code = "internal_error";
+      let detail: Record<string, unknown> | undefined;
       const response = (error as any)?.context;
 
       if (response) {
@@ -75,6 +78,8 @@ async function callEdgeFunction<T>(
             `[VideoApi] ${functionName} http error payload:`,
             payload,
           );
+          code = payload?.error?.code || code;
+          detail = payload?.error?.detail;
           message =
             payload?.error?.message ||
             payload?.message ||
@@ -105,8 +110,9 @@ async function callEdgeFunction<T>(
       return {
         ok: false,
         error: {
-          code: "internal_error",
+          code,
           message,
+          detail,
         },
       };
     }
@@ -156,6 +162,7 @@ export const videoApi = {
     return callEdgeFunction<JoinRoomResponse>("video_join_room", {
       roomId,
       anonymous,
+      platform: Platform.OS,
     });
   },
 

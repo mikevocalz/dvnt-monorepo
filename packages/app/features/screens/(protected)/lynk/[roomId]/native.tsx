@@ -10,6 +10,10 @@
  * otherwise viewer.
  */
 
+import { useEffect, useState } from "react";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useGenesisRoomAdmission, type GenesisRoomAdmission } from "@dvnt/app/lib/lynk/genesis-room-admission";
+import { isPublisherRole } from "@dvnt/app/features/sneaky-lynk/publish-roles";
 import { View, Text, Pressable, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -27,10 +31,21 @@ function Pill({ children }: { children: React.ReactNode }) {
   );
 }
 
-function BroadcasterStage({ roomId }: { roomId: string }) {
+function BroadcasterStage({ roomId, session }: { roomId: string; session: GenesisRoomAdmission }) {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
-  const lynk = useLynkBroadcast(roomId);
+  const [captureOptIn, setCaptureOptIn] = useState(false);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const lynk = useLynkBroadcast(roomId, captureOptIn && isPublisherRole(session.role));
+  useEffect(() => {
+    if (captureOptIn && !lynk.isLive) void lynk.goLive();
+  }, [captureOptIn, lynk.isLive, lynk.goLive]);
+  useEffect(() => {
+    if (captureOptIn && lynk.error) {
+      setCaptureError(lynk.error);
+      setCaptureOptIn(false);
+    }
+  }, [captureOptIn, lynk.error]);
+  useEffect(() => session.onTransportState(lynk.state), [lynk.state, session.onTransportState]);
 
   return (
     <View className="flex-1 bg-[#06070d]">
@@ -55,13 +70,11 @@ function BroadcasterStage({ roomId }: { roomId: string }) {
           {lynkStateLabel(lynk.state, "broadcaster")}
         </Pill>
         <Pressable
-          onPress={() => {
-            lynk.end();
-            router.back();
-          }}
+          disabled={session.leaving}
+          onPress={() => void session.leave()}
           className="rounded-full bg-[#FC253A] px-4 py-1.5"
         >
-          <Text className="text-xs font-semibold text-white">End</Text>
+          <Text className="text-xs font-semibold text-white">{session.leaving ? "Ending…" : session.role === "host" ? "End" : "Leave"}</Text>
         </Pressable>
       </View>
 
@@ -69,9 +82,9 @@ function BroadcasterStage({ roomId }: { roomId: string }) {
         className="absolute left-0 right-0 flex-row items-center justify-center gap-3 px-4"
         style={{ bottom: insets.bottom + 16 }}
       >
-        {!lynk.isLive ? (
-          <Pressable onPress={() => void lynk.goLive()} className="rounded-full bg-[#3FDCFF] px-6 py-3">
-            <Text className="text-sm font-bold text-black">Go Live</Text>
+        {!captureOptIn || !lynk.isLive ? (
+          <Pressable disabled={captureOptIn} onPress={() => { setCaptureError(null); setCaptureOptIn(true); }} className="rounded-full bg-[#3FDCFF] px-6 py-3">
+            <Text className="text-sm font-bold text-black">{captureOptIn ? "Connecting…" : "Go Live"}</Text>
           </Pressable>
         ) : (
           <>
@@ -95,19 +108,19 @@ function BroadcasterStage({ roomId }: { roomId: string }) {
         )}
       </View>
 
-      {lynk.error ? (
+      {captureError || lynk.error ? (
         <View className="absolute left-0 right-0 items-center px-4" style={{ bottom: insets.bottom + 72 }}>
-          <Text className="text-center text-sm text-[#FC253A]">{lynk.error}</Text>
+          <Text className="text-center text-sm text-[#FC253A]">{captureError || lynk.error}</Text>
         </View>
       ) : null}
     </View>
   );
 }
 
-function ViewerStage({ roomId }: { roomId: string }) {
+function ViewerStage({ roomId, session }: { roomId: string; session: GenesisRoomAdmission }) {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const lynk = useLynkViewer(roomId);
+  useEffect(() => session.onTransportState(lynk.state), [lynk.state, session.onTransportState]);
   const empty = lynk.publishers.length === 0;
 
   return (
@@ -141,13 +154,11 @@ function ViewerStage({ roomId }: { roomId: string }) {
             <Text className="text-xs font-semibold text-white">{lynk.muted ? "Unmute" : "Mute"}</Text>
           </Pressable>
           <Pressable
-            onPress={() => {
-              lynk.leave();
-              router.back();
-            }}
+            disabled={session.leaving}
+            onPress={() => void session.leave()}
             className="rounded-full bg-black/60 px-3 py-1"
           >
-            <Text className="text-xs font-semibold text-white">Leave</Text>
+            <Text className="text-xs font-semibold text-white">{session.leaving ? "Ending…" : session.role === "host" ? "End" : "Leave"}</Text>
           </Pressable>
         </View>
       </View>
@@ -155,22 +166,32 @@ function ViewerStage({ roomId }: { roomId: string }) {
   );
 }
 
+function AdmittedRoom({ roomId, requestedBroadcast }: { roomId: string; requestedBroadcast: boolean }) {
+  const router = useRouter();
+  const session = useGenesisRoomAdmission(roomId, () => router.back());
+  return (
+    <View className="flex-1 bg-[#06070d]">
+      {session.admitted ? (
+        requestedBroadcast && isPublisherRole(session.role)
+          ? <BroadcasterStage key={session.mediaKey} roomId={roomId} session={session} />
+          : <ViewerStage key={session.mediaKey} roomId={roomId} session={session} />
+      ) : (
+        <View className="flex-1 items-center justify-center gap-4 p-6">
+          <Text accessibilityRole="text" className="text-center text-white">{session.message || (session.phase === "joining" ? "Joining Lynk…" : "Lynk paused")}</Text>
+          {session.phase === "error" && <Pressable onPress={() => void session.join()}
+            className="rounded-full bg-[#3FDCFF] px-6 py-3"><Text className="font-bold text-black">Try again</Text></Pressable>}
+          <Pressable onPress={() => void session.leave()} className="rounded-full bg-white/10 px-6 py-3"><Text className="text-white">Leave</Text></Pressable>
+        </View>
+      )}
+      {session.admitted && session.message && <Text accessibilityRole="alert" className="p-4 text-center text-[#FC253A]">{session.message}</Text>}
+    </View>
+  );
+}
+
 export default function LynkRoomNative() {
   const params = useLocalSearchParams<{ roomId?: string; isHost?: string }>();
+  const account = useAuthStore((state) => state.user?.authId || state.user?.id || "");
   const roomId = String(params.roomId ?? "");
-  const isHost = params.isHost === "1";
-
-  if (!roomId) {
-    return (
-      <View className="flex-1 items-center justify-center bg-[#06070d]">
-        <Text className="text-white/60">Missing room</Text>
-      </View>
-    );
-  }
-
-  return isHost ? (
-    <BroadcasterStage roomId={roomId} />
-  ) : (
-    <ViewerStage roomId={roomId} />
-  );
+  if (!roomId) return <View className="flex-1 items-center justify-center bg-[#06070d]"><Text className="text-white/60">Missing room</Text></View>;
+  return <AdmittedRoom key={JSON.stringify([roomId, account])} roomId={roomId} requestedBroadcast={params.isHost === "1"} />;
 }
