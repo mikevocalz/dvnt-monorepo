@@ -184,6 +184,22 @@ export function OrganizerSetupScreen() {
     checkStatus();
   }, [checkStatus]);
 
+  // A Stripe return is not proof that onboarding finished. The normal status
+  // read above remains authoritative; consume the marker once, without leaving
+  // an expired Account Link in the browser's Back/Forward path.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("stripe_connect");
+    if (outcome !== "return" && outcome !== "refresh") return;
+    params.delete("stripe_connect");
+    const search = params.toString();
+    window.history.replaceState(window.history.state, "",
+      window.location.pathname + (search ? `?${search}` : "") + window.location.hash);
+    if (outcome === "refresh") {
+      showToast("info", "Stripe setup not finished", "Continue setup to get a fresh Stripe link.");
+    }
+  }, [showToast]);
+
   // Realtime: when the webhook updates organizer_accounts for this host,
   // re-fetch immediately so charges/payouts checkmarks flip without poll.
   useEffect(() => {
@@ -266,8 +282,8 @@ export function OrganizerSetupScreen() {
     setIsOnboarding(true);
     try {
       const result = isRestricted
-        ? await organizerApi.resumeVerification()
-        : await organizerApi.startOnboarding();
+        ? await organizerApi.resumeVerification("web")
+        : await organizerApi.startOnboarding("web");
       if (result.error) {
         showToast("error", "Error", result.error);
         return;

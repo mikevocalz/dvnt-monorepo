@@ -52,7 +52,7 @@ export const organizerApi = {
   /**
    * Start Stripe Connect Express onboarding
    */
-  async startOnboarding(): Promise<OnboardingResult> {
+  async startOnboarding(platform: "web" | "native" = "native"): Promise<OnboardingResult> {
     try {
       const token = await requireBetterAuthToken();
       console.log("[Organizer] startOnboarding: invoking edge function");
@@ -60,7 +60,7 @@ export const organizerApi = {
       const { data, error } = await supabase.functions.invoke(
         "organizer-connect",
         {
-          body: { action: "start" },
+          body: { action: "start", platform },
           headers: { "x-auth-token": token },
         },
       );
@@ -100,16 +100,16 @@ export const organizerApi = {
 
   /**
    * Resume verification for a restricted Stripe account.
-   * Returns an account_update link — use this for accounts that are connected
+   * Returns an account_onboarding link — use this for accounts that are connected
    * but have currently_due requirements (charges or payouts disabled).
    */
-  async resumeVerification(): Promise<OnboardingResult> {
+  async resumeVerification(platform: "web" | "native" = "native"): Promise<OnboardingResult> {
     try {
       const token = await requireBetterAuthToken();
       const { data, error } = await supabase.functions.invoke(
         "organizer-connect",
         {
-          body: { action: "update" },
+          body: { action: "update", platform },
           headers: { "x-auth-token": token },
         },
       );

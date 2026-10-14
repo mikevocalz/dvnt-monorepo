@@ -66,7 +66,7 @@ function harness({ existingAccount = null, cardPayments = "unrequested" } = {}) 
   }).outputText;
   const requireMock = (name) => {
     if (name.startsWith("https://esm.sh/")) return { createClient: () => supabase };
-    if (name.endsWith("/verify-session.ts")) return { verifySession: async () => "user-1" };
+    if (name.endsWith("/verify-session.ts")) return { verifySession: async () => "user-1", corsHeaders: () => ({ "Access-Control-Allow-Origin": "*" }) };
     if (name.endsWith("/sentry.ts")) return { withSentry: (_name, fn) => fn };
     throw new Error(`Unexpected import ${name}`);
   };
