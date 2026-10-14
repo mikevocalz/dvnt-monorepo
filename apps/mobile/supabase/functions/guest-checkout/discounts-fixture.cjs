@@ -26,7 +26,7 @@ function like(pattern,value){
 }
 function fixture(options={}){
  const tables={events:[{id:1,title:'Fixture event',visibility:'public',status:'active',ticketing_enabled:true,
- host_id:'host',fee_mode:options.feeMode||'pass',attendee_name_requirement:'off',start_date:'2099-01-01T20:00:00Z',...options.event}],
+ nsfw:false,host_id:'host',fee_mode:options.feeMode||'pass',attendee_name_requirement:'off',start_date:'2099-01-01T20:00:00Z',...options.event}],
  ticket_types:[{id:TIER,event_id:1,name:'Admission',price_cents:3000,is_active:true,status:'on_sale',tier_visibility:'public',
  quantity_total:100,quantity_sold:0,max_per_user:10,...options.tier}],orders:[],tickets:[],ticket_holds:[],order_timeline:[],
  organizer_accounts:[{host_id:'host',stripe_account_id:'acct_fixture',charges_enabled:true}],
@@ -39,7 +39,7 @@ function fixture(options={}){
   throw Error('Unexpected RPC '+fn);
  },from:table=>{
   assert.ok(table in tables,'unexpected table '+table);
-  let filters=[],op='read',payload,head=false,conflict;
+  let filters=[],op='read',payload,head=false,conflict,selected='*';
   function run(){
    if(options.readError===table&&op==='read')return {data:null,error:{message:'fixture read failure'},count:null};
    let hit=tables[table].filter(row=>filters.every(f=>f(row)));
@@ -58,9 +58,11 @@ function fixture(options={}){
     }else if(op==='update')hit.forEach(row=>Object.assign(row,payload));
     else if(op==='delete')tables[table]=tables[table].filter(row=>!hit.includes(row));
    }
-   return {data:head?null:hit,count:hit.length,error:null};
+   const projected=options.projectSelect && selected!=='*'
+    ? hit.map(row=>Object.fromEntries(selected.split(',').map(key=>[key.trim(),row[key.trim()]]))) : hit;
+   return {data:head?null:projected,count:hit.length,error:null};
   }
-  const q={select(_columns,opts){head=opts?.head===true;return q},eq(k,v){filters.push(row=>row[k]===v);return q},
+  const q={select(columns,opts){selected=columns;head=opts?.head===true;return q},eq(k,v){filters.push(row=>row[k]===v);return q},
    is(k,v){filters.push(row=>v===null?row[k]==null:row[k]===v);return q},
    ilike(k,v){filters.push(row=>like(v,String(row[k]??'')));return q},
    in(k,v){filters.push(row=>v.includes(row[k]));return q},limit(){return q},

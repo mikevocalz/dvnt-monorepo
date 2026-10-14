@@ -9,7 +9,21 @@ on:
       - 'vercel.json'
       - 'apps/web/vercel.json'
       - 'packages/app/lib/ticket-embed/**'
+      - 'packages/app/components/web-app-shell.web.tsx'
+      - 'packages/app/lib/auth/guest-event-route*'
+      - 'packages/app/lib/tickets/guest-purchase-state*'
+      - 'packages/app/lib/events/event-detail-state*'
+      - 'packages/app/lib/api/tickets.ts'
+      - 'packages/app/lib/api/ticket-types-read.test.ts'
+      - 'scripts/test-guest-event-purchase.cjs'
+      - 'scripts/test-guest-event-route-browser.cjs'
       - 'packages/app/features/events/ui/event-widget.web.tsx'
+      - 'packages/app/features/events/*guest-checkout*'
+      - 'packages/app/features/events/event-detail.web.tsx'
+      - 'packages/app/lib/stores/guest-checkout-store.ts'
+      - 'packages/app/lib/tickets/guest-checkout-quote.ts'
+      - 'apps/web/src/app/(frontend)/public/events/**'
+      - 'scripts/test-guest-checkout-browser.cjs'
       - 'packages/app/components/ui/event-widget*'
       - 'scripts/*event-widget*'
       - '.github/workflows/event-ticket-widget.yml'
@@ -28,7 +42,19 @@ jobs:
           node-version: '22'
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: node --test scripts/test-event-widget.cjs
+      - run: node --test scripts/test-event-widget.cjs packages/app/lib/auth/guest-event-route.test.ts packages/app/lib/tickets/guest-purchase-state.test.ts packages/app/lib/events/event-detail-state.test.ts packages/app/lib/api/ticket-types-read.test.ts
+      - name: Install isolated pinned DOM test dependency
+        run: npm install --prefix "$RUNNER_TEMP/dvnt-guest-dom" --ignore-scripts --no-audit --no-fund --no-save jsdom@26.1.0
+      - name: Actual event detail guest loading, retry and tier selection
+        run: NODE_PATH="$RUNNER_TEMP/dvnt-guest-dom/node_modules:$PWD/apps/web/node_modules:$PWD/node_modules" node --test scripts/test-guest-event-purchase.cjs
+      - name: Existing anonymous checkout and guest ticket delivery contracts
+        run: node --test apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs apps/mobile/supabase/functions/get-guest-ticket/index.test.cjs
+      - name: Install Chromium for the existing guest checkout flow
+        run: pnpm --filter web exec playwright install --with-deps chromium
+      - name: Actual guest route hydration and legacy-link recovery
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-guest-event-route-browser.cjs
+      - name: Signed-out checkout sheet and real handler with fixture Stripe
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-guest-checkout-browser.cjs
       - name: Actual widget migration in disposable PostgreSQL
         run: |
           set -euo pipefail

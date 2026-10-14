@@ -105,3 +105,38 @@ test('organizer links only the original event embed generator',()=>{
  assert.equal(organizer.includes('TicketEmbedOrganizerEntry'),false);
  assert.ok(alternate.includes('redirect(') && alternate.includes('/embed'));
 });
+
+// A published widget can outlive its backend release. Both canonical and legacy
+// same-event descriptors must emit the existing public guest-capable route.
+for(const destination of ['public','feed'])test(destination+' descriptor opens the guest-capable event page',async()=>{
+ const d=(await harness().call()).data;
+ d.checkoutUrl=`https://dvntapp.live/${destination}/events/1`;
+ const html=renderEventWidget(d);
+ assert.match(html,/href="https:\/\/dvntapp\.live\/public\/events\/1"/);
+ assert.ok(!html.includes('href="https://dvntapp.live/feed/'));
+ const closed=renderEventWidget({...d,salesOpen:false});
+ assert.match(closed,/href="https:\/\/dvntapp\.live\/public\/events\/1"/);
+ assert.match(closed,/View event on DVNT/);
+});
+for(const destination of ['https://dvntapp.live/public/events/2','https://dvntapp.live/feed/events/2','https://dvntapp.live/public/events/1?next=https://evil.invalid','https://dvntapp.live/public/events/1/organizer','https://evil.invalid/public/events/1'])test('reject mismatched checkout destination '+destination,async()=>{
+ const d=(await harness().call()).data;
+ assert.throws(()=>renderEventWidget({...d,checkoutUrl:destination}));
+});
+test('public numeric event route renders the existing guest-capable screen outside the protected feed shell',()=>{
+ const route=path.join(ROOT,'apps/web/src/app/(frontend)/public/events/[id]');
+ const page=fs.readFileSync(path.join(route,'page.tsx'),'utf8');
+ const client=fs.readFileSync(path.join(route,'event-detail-client.tsx'),'utf8');
+ assert.match(page,/<EventDetailClient/);
+ assert.match(client,/@dvnt\/app\/features\/events\/event-detail.web/);
+ assert.match(client,/m\.EventDetailScreen/);
+ const detail=fs.readFileSync(path.join(ROOT,'packages/app/features/events/event-detail.web.tsx'),'utf8');
+ assert.match(detail,/const idParam = String/);
+ assert.match(detail,/<GuestCheckoutSheet/);
+ // Ancestor route groups must never accidentally introduce the feed auth gate.
+ for(let dir=route;dir!==path.join(ROOT,'apps/web/src');dir=path.dirname(dir)){
+  const layout=path.join(dir,'layout.tsx');
+  if(fs.existsSync(layout))assert.doesNotMatch(fs.readFileSync(layout,'utf8'),/WebAppShell|ProtectedLayout|redirect\(/,layout);
+ }
+ const feed=fs.readFileSync(path.join(ROOT,'apps/web/src/app/(frontend)/feed/layout.tsx'),'utf8');
+ assert.match(feed,/<WebAppShell>/,'member routes still require the authenticated app shell');
+});
