@@ -40,7 +40,8 @@ import { FormField } from "@dvnt/ui";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
-import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
+import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
+import { lynkCreateSummary } from "@dvnt/app/lib/subscription/lynk-create-summary";
 import { useLynkHistoryStore } from "../stores/lynk-history-store";
 import { sneakyLynkApi } from "../api/supabase";
 import { useCreateLynkStore } from "../stores/create-store";
@@ -165,6 +166,7 @@ function ToggleRow({
 }
 
 export function SneakyLynkCreateScreen() {
+  const membership = lynkCreateSummary(useEntitlements());
   const router = useRouter();
   const showToast = useUIStore((s) => s.showToast);
   const authUser = useAuthStore((s) => s.user);
@@ -375,21 +377,11 @@ export function SneakyLynkCreateScreen() {
             borderColor: "rgba(252, 37, 58, 0.2)",
           }}
         >
-          <p className="text-base font-bold mb-1">{getLynkDisplayName()}</p>
-          <p className="text-sm text-white/60 leading-5">
-            Host a private video room for your crew. Rooms with fewer than 5 people under 5
-            minutes are completely free.
-          </p>
-          <div className="flex gap-3 mt-3">
-            <div className="flex-1 rounded-xl p-3 bg-white/5">
-              <p className="text-xs font-bold">$15 / mo</p>
-              <p className="text-[11px] text-white/60 mt-0.5">Up to 15 screens</p>
-            </div>
-            <div className="flex-1 rounded-xl p-3 bg-white/5">
-              <p className="text-xs font-bold">$25 / mo</p>
-              <p className="text-[11px] text-white/60 mt-0.5">Unlimited screens</p>
-            </div>
-          </div>
+          <p className="text-base font-bold mb-1">{membership.title}</p>
+          <p className="text-sm text-white/60 leading-5">{membership.description}</p>
+          {membership.benefits.length > 0 && <ul className="mt-3 space-y-1 text-sm text-white/80">
+            {membership.benefits.map((benefit) => <li key={benefit}>{benefit}</li>)}
+          </ul>}
         </section>
 
         {/* Title */}
