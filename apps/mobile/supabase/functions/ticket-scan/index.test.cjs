@@ -17,7 +17,7 @@ function fakeDb() {
     tickets: [TICKET],
     order_addons: [ADDON],
     events: [{ id: EVENT_ID, host_id: 'staff', perk_config: null }],
-    event_co_organizers: [], users: [], ticket_types: [], membership_subscriptions: [],
+    event_co_organizers: [], users: [], ticket_types: [], effective_membership_tiers: [],
   };
   return {
     rpcCalls,

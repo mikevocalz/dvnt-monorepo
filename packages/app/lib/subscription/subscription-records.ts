@@ -6,6 +6,7 @@ import { membershipOwnerKeys, type SubscriptionReadClient } from "./subscription
 export type MembershipRail = "web_stripe" | "ios_iap" | "play_iap";
 export interface RailedSubscriptionRecord extends SubscriptionRecord {
   rail: MembershipRail | null;
+  source?: "subscription" | "complimentary";
 }
 
 const LEGACY_SNEAKY_PLAN: Record<string, PlanKey> = {
@@ -26,17 +27,20 @@ export async function fetchSubscriptionRecords(
   // schema generics against this fixture interface exceeds TS recursion limits.
   const client = source as SubscriptionReadClient;
   const ownerKeys = await membershipOwnerKeys(client, userId);
-  const [membership, sneaky] = await Promise.all([
+  const [membership, sneaky, grants] = await Promise.all([
     client.from("membership_subscriptions")
       .select("product_family, plan_key, status, rail, current_period_end, cancel_at_period_end, grace_period_ends_at, stripe_subscription_id, stripe_customer_id")
       .in("user_id", ownerKeys),
     client.from("sneaky_subscriptions")
       .select("plan_id, status, current_period_end, cancel_at_period_end, grace_period_ends_at, stripe_subscription_id, stripe_customer_id")
       .eq("host_id", userId),
+    client.from("membership_grant_records")
+      .select("product_family, plan_key, status, rail, source, current_period_end, cancel_at_period_end, grace_period_ends_at, stripe_subscription_id, stripe_customer_id")
+      .eq("user_id", userId),
   ]);
   // A failed lookup is not evidence that a user has the free plan. Reject the
   // whole read rather than reconciling a partial snapshot or caching it as truth.
-  if (membership.error || sneaky.error) {
+  if (membership.error || sneaky.error || grants.error) {
     throw new Error("Could not verify subscription. Please try again.");
   }
   const map = (row: unknown, legacy: boolean): RailedSubscriptionRecord => {
@@ -45,6 +49,7 @@ export async function fetchSubscriptionRecords(
       productFamily: legacy ? "sneaky_lynk" : r.product_family,
       planKey: legacy ? LEGACY_SNEAKY_PLAN[r.plan_id] ?? "free" : r.plan_key,
       status: r.status,
+      source: r.source === "complimentary" ? "complimentary" : "subscription",
       rail: legacy ? "web_stripe" : r.rail ?? null,
       currentPeriodEnd: r.current_period_end,
       cancelAtPeriodEnd: r.cancel_at_period_end,
@@ -56,6 +61,7 @@ export async function fetchSubscriptionRecords(
   return [
     ...(membership.data ?? []).map((r) => map(r, false)),
     ...(sneaky.data ?? []).map((r) => map(r, true)),
+    ...(grants.data ?? []).map((r) => map(r, false)),
   ];
 }
 

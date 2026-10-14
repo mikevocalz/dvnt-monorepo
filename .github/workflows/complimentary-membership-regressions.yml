@@ -1,0 +1,34 @@
+name: Complimentary membership regressions
+on:
+  pull_request:
+    paths:
+      - 'packages/app/lib/subscription/**'
+      - 'packages/app/features/screens/membership/**'
+      - 'apps/mobile/supabase/migrations/*membership*'
+      - 'apps/mobile/supabase/functions/_shared/lynk-subscription.ts'
+      - 'apps/mobile/supabase/functions/get-event-tickets/**'
+      - 'apps/mobile/supabase/functions/ticket-scan/**'
+      - 'scripts/*complimentary*'
+      - 'scripts/fixtures/complimentary-membership-existing-schema.sql'
+      - '.github/workflows/complimentary-membership-regressions.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  grants-and-resolvers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated fixture tools
+        run: npm install --prefix "$RUNNER_TEMP/membership-tests" --no-package-lock --no-save @electric-sql/pglite@0.5.4 typescript@5.9.3
+      - name: Test synthetic grant security and entitlement parity
+        env:
+          PGLITE_MODULE: ${{ runner.temp }}/membership-tests/node_modules/@electric-sql/pglite/dist/index.js
+          NODE_PATH: ${{ runner.temp }}/membership-tests/node_modules
+        run: |
+          node --test scripts/test-complimentary-memberships.mjs scripts/prepare-complimentary-vip-grants.test.mjs
+          node --test packages/app/lib/subscription/*.test.ts apps/mobile/supabase/functions/video_create_room/subscription.test.cjs apps/mobile/supabase/functions/ticket-scan/index.test.cjs
+          node scripts/verify-no-live-identifiers.mjs

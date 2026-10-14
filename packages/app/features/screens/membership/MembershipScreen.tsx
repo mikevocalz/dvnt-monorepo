@@ -9,6 +9,8 @@
  */
 import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useCallback } from "react";
+import { billingSummary } from "@dvnt/app/lib/subscription/billing-summary";
+import { PLAN_RANK } from "@dvnt/app/lib/subscription/plans";
 import Animated from "react-native-reanimated";
 import { Check, Crown, ExternalLink } from "lucide-react-native";
 import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
@@ -69,7 +71,8 @@ async function openPricing(planKey?: PlanKey) {
 }
 
 export function MembershipScreen(_props: MembershipScreenProps = {}) {
-  const { entitlements, isLoading } = useEntitlements();
+  const { entitlements, records, isLoading, isError } = useEntitlements();
+  const { isComplimentary } = billingSummary(records, entitlements);
   const currentKey = entitlements.planKey;
 
   // Web sells DIRECTLY via Stripe (two-rail law: Stripe on web, RC on
@@ -77,6 +80,7 @@ export function MembershipScreen(_props: MembershipScreenProps = {}) {
   // /pricing page makes; on failure fall back to /pricing so the user is
   // never stranded.
   const onUpgrade = useCallback(async (k: PlanKey) => {
+    if (isLoading || isError || (isComplimentary && PLAN_RANK[k] <= PLAN_RANK[currentKey])) return;
     if (Platform.OS !== "web") {
       openPricing(k);
       return;
@@ -113,7 +117,7 @@ export function MembershipScreen(_props: MembershipScreenProps = {}) {
       console.error("[membership] checkout failed", e);
       openPricing(k);
     }
-  }, []);
+  }, [isLoading, isError, isComplimentary, currentKey]);
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
@@ -132,6 +136,8 @@ export function MembershipScreen(_props: MembershipScreenProps = {}) {
         <Animated.Text style={styles.currentText}>
           {isLoading
             ? "Checking your plan…"
+            : isError ? "Could not verify your membership. Please refresh."
+            : isComplimentary ? `You're on complimentary ${PLANS[currentKey].name}`
             : `You're on ${PLANS[currentKey].name}`}
         </Animated.Text>
       </View>
@@ -160,9 +166,9 @@ export function MembershipScreen(_props: MembershipScreenProps = {}) {
             </View>
             <View style={styles.priceRow}>
               <Animated.Text style={styles.price}>
-                {price(p.priceCents)}
+                {isCurrent && isComplimentary ? "Complimentary" : price(p.priceCents)}
               </Animated.Text>
-              <Animated.Text style={styles.per}>/month</Animated.Text>
+              {!(isCurrent && isComplimentary) ? <Animated.Text style={styles.per}>/month</Animated.Text> : null}
             </View>
             {p.positioning ? (
               <Animated.Text style={styles.pos}>{p.positioning}</Animated.Text>
@@ -177,7 +183,7 @@ export function MembershipScreen(_props: MembershipScreenProps = {}) {
               ))}
             </View>
 
-            {!isCurrent && key !== "free" ? (
+            {!isLoading && !isError && !isCurrent && key !== "free" && (!isComplimentary || PLAN_RANK[key] > PLAN_RANK[currentKey]) ? (
               <Pressable
                 onPress={() => onUpgrade(key)}
                 style={[styles.cta, p.recommended && styles.ctaRec]}

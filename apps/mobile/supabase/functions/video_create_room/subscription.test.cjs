@@ -12,12 +12,12 @@ function schema() {
     object: () => ({ safeParse: data => ({ success: true, data }) }) };
 }
 
-for (const failed of [null, 'membership_subscriptions', 'sneaky_subscriptions']) {
+for (const failed of [null, 'membership_subscriptions', 'sneaky_subscriptions', 'membership_grant_records']) {
   test(`create handler: ${failed || 'verified empty subscriptions'} before any room mutation`, async () => {
     const reads = [], calls = [];
     const db = {
       from(table) {
-        assert.ok(['users', 'membership_subscriptions', 'sneaky_subscriptions'].includes(table), `Unexpected table/write: ${table}`);
+        assert.ok(['users', 'membership_subscriptions', 'sneaky_subscriptions', 'membership_grant_records'].includes(table), `Unexpected table/write: ${table}`);
         return { select() {
           const read = async (key, id) => {
             reads.push({ table, key, id });
@@ -47,7 +47,7 @@ for (const failed of [null, 'membership_subscriptions', 'sneaky_subscriptions'])
     assert.equal(result.ok, false);
     assert.equal(result.error.code, failed ? 'internal_error' : 'rate_limited');
     assert.equal(calls.length, failed ? 0 : 1);
-    assert.equal(reads.length, 4);
+    assert.equal(reads.length, 5);
     assert.deepEqual(Array.from(reads.find(r => r.table === 'membership_subscriptions').id), ['auth-fixture', '123']);
     assert.equal(reads.find(r => r.table === 'sneaky_subscriptions').id, 'auth-fixture');
     assert.equal(h.requests.length, 0);

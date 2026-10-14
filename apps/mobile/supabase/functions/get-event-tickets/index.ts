@@ -40,31 +40,6 @@ const PLAN_RANK: Record<string, number> = {
   dvnt_founders_circle: 6,
 };
 
-/**
- * Mirrors `isSubscriptionActive`: active always; past_due only inside the
- * dunning grace window; canceled only while a paid period is still running.
- * A lapsed member confers no perk — that is the spec's law, enforced here so
- * the client can never grant one by being out of date.
- */
-function subscriptionConfersTier(sub: any, now: number): boolean {
-  switch (sub?.status) {
-    case "active":
-      return true;
-    case "past_due":
-      return sub.grace_period_ends_at
-        ? new Date(sub.grace_period_ends_at).getTime() > now
-        : false;
-    case "canceled":
-      return sub.cancel_at_period_end && sub.current_period_end
-        ? new Date(sub.current_period_end).getTime() > now
-        : false;
-    default:
-      return false;
-  }
-}
-
-
-
 // ── Perk resolution (WS-3) ─────────────────────────────────────────────────
 // Mirrors lib/perks/perk-config.ts. Resolved HERE, at query time, so the door
 // never recomputes entitlement under pressure — the roster ships the answer.
@@ -332,12 +307,11 @@ Deno.serve(async (req: Request) => {
 
     // ── Batched holder + tier lookup (WS-1). Two queries for the whole page,
     //    never one per row. `tickets.user_id` is the Better Auth auth id (see
-    //    the table comment), which is exactly what membership_subscriptions
+    //    the table comment), which is exactly what effective_membership_tiers
     //    keys on, so no id translation is needed.
     const holderIds = [
       ...new Set((data || []).map((t: any) => t.user_id).filter(Boolean)),
     ];
-    const nowMs = Date.now();
     const tierByUser = new Map<string, { planKey: string; rank: number }>();
     const nameByUser = new Map<string, string>();
 
@@ -352,9 +326,9 @@ Deno.serve(async (req: Request) => {
     if (holderIds.length > 0) {
       const [subsRes, usersRes] = await Promise.all([
         supabase
-          .from("membership_subscriptions")
+          .from("effective_membership_tiers")
           .select(
-            "user_id, plan_key, status, current_period_end, cancel_at_period_end, grace_period_ends_at",
+            "user_id, plan_key, rank",
           )
           .in("user_id", holderIds),
         supabase
@@ -363,7 +337,6 @@ Deno.serve(async (req: Request) => {
           .in("auth_id", holderIds),
       ]);
       for (const sub of subsRes.data || []) {
-        if (!subscriptionConfersTier(sub, nowMs)) continue;
         const planKey = sub.plan_key as string;
         if (!(planKey in PLAN_RANK)) continue;
         tierByUser.set(sub.user_id, { planKey, rank: PLAN_RANK[planKey] });

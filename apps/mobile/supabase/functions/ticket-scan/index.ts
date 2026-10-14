@@ -136,19 +136,6 @@ const DEFAULT_PERKS: Record<string, number | null> = {
   table_priority: PLAN_RANK.dvnt_vip,
 };
 
-function subConfersTier(sub: any, now: number): boolean {
-  switch (sub?.status) {
-    case "active": return true;
-    case "past_due":
-      return sub.grace_period_ends_at
-        ? new Date(sub.grace_period_ends_at).getTime() > now : false;
-    case "canceled":
-      return sub.cancel_at_period_end && sub.current_period_end
-        ? new Date(sub.current_period_end).getTime() > now : false;
-    default: return false;
-  }
-}
-
 /**
  * Best-effort: a tier lookup must NEVER fail a scan. If this throws or the
  * network hiccups the door still admits on the QR, which is the only thing that
@@ -164,8 +151,8 @@ async function resolveDoorTier(
   try {
     const [subRes, evRes] = await Promise.all([
       supabase
-        .from("membership_subscriptions")
-        .select("plan_key, status, current_period_end, cancel_at_period_end, grace_period_ends_at")
+        .from("effective_membership_tiers")
+        .select("plan_key, rank")
         .eq("user_id", userId)
         .maybeSingle(),
       eventId != null
@@ -173,7 +160,7 @@ async function resolveDoorTier(
         : Promise.resolve({ data: null }),
     ]);
     const sub = subRes?.data;
-    if (!sub || !subConfersTier(sub, Date.now())) return empty;
+    if (subRes.error || !sub) return empty;
     const rank = PLAN_RANK[sub.plan_key];
     if (rank == null) return empty;
 

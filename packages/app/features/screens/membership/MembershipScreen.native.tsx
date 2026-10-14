@@ -33,6 +33,7 @@ import {
   View,
 } from "react-native";
 import { useCallback, useEffect, useMemo } from "react";
+import { billingSummary } from "@dvnt/app/lib/subscription/billing-summary";
 import Animated from "react-native-reanimated";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Crown, Globe, Store } from "lucide-react-native";
@@ -113,7 +114,8 @@ export interface MembershipScreenProps {
 }
 
 export function MembershipScreen({ billing = null }: MembershipScreenProps) {
-  const { entitlements, records, isLoading } = useEntitlements();
+  const { entitlements, records, isLoading, isError } = useEntitlements();
+  const { isComplimentary } = billingSummary(records, entitlements);
   const queryClient = useQueryClient();
   const currentKey = entitlements.planKey;
 
@@ -133,7 +135,7 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
     () =>
       records
         .filter(
-          (r) => r.productFamily === "dvnt_membership" && isSubscriptionActive(r),
+          (r) => r.source !== "complimentary" && r.productFamily === "dvnt_membership" && isSubscriptionActive(r),
         )
         .sort((a, b) => PLAN_RANK[b.planKey] - PLAN_RANK[a.planKey])[0] ?? null,
     [records],
@@ -144,7 +146,7 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
   const crossStoreActive = activeRail !== null && !webRailActive && !ownStoreActive;
   // IAP buy buttons render only when nothing blocks them: fresh subscriber, or
   // tier change on the store this build sells through.
-  const canSell = !!billing && (activeRail === null || ownStoreActive);
+  const canSell = !!billing && !isLoading && !isError && (activeRail === null || ownStoreActive);
 
   // ── RC catalog (server state → TanStack). Prices only — never entitlement.
   const packagesQuery = useQuery({
@@ -192,7 +194,7 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
   const onBuy = useCallback(
     async (planKey: PlanKey) => {
       const pkg = packageByPlan[planKey];
-      if (!billing || !pkg) return;
+      if (!billing || !pkg || !canSell || (isComplimentary && PLAN_RANK[planKey] <= PLAN_RANK[currentKey])) return;
       const store = useMembershipPurchaseStore.getState();
       if (store.purchasingPlanKey || store.restoring) return;
       store.startPurchase(planKey);
@@ -200,7 +202,7 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
       // plan switch instead of stacking a second subscription.
       const googleOldProductId =
         Platform.OS === "android" && ownStoreActive
-          ? (PLANS[currentKey].revenueCatProductId ?? null)
+          ? (PLANS[activeMembership?.planKey ?? currentKey].revenueCatProductId ?? null)
           : null;
       const res = await billing.purchaseMembershipPackage(pkg, {
         googleOldProductId,
@@ -216,7 +218,7 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
         store.purchaseFailed(res.error ?? "Purchase failed. Please try again.");
       }
     },
-    [billing, packageByPlan, ownStoreActive, currentKey, queryClient],
+    [billing, packageByPlan, ownStoreActive, currentKey, queryClient, canSell, isComplimentary, activeMembership?.planKey],
   );
 
   const onRestore = useCallback(async () => {
@@ -282,6 +284,8 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
         <Animated.Text style={styles.currentText}>
           {isLoading
             ? "Checking your plan…"
+            : isError ? "Could not verify your membership. Please refresh."
+            : isComplimentary ? `You're on complimentary ${PLANS[currentKey].name}`
             : `You're on ${PLANS[currentKey].name}`}
         </Animated.Text>
       </View>
@@ -385,7 +389,7 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
             </Animated.Text>
             <Pressable
               onPress={() =>
-                openStoreSubscriptions(PLANS[currentKey].revenueCatProductId)
+                openStoreSubscriptions(PLANS[activeMembership?.planKey ?? currentKey].revenueCatProductId)
               }
               style={styles.railLink}
               accessibilityRole="button"
@@ -403,11 +407,12 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
         const isCurrent = key === currentKey;
         const pkg = packageByPlan[key];
         // Store price when the catalog is loaded; plans.ts fallback otherwise.
-        const priceLabel = pkg?.product.priceString ?? fallbackPrice(p.priceCents);
-        const isPurchasable = canSell && key !== "free" && !isCurrent && !!pkg;
+        const priceLabel = isCurrent && isComplimentary ? "Complimentary" : pkg?.product.priceString ?? fallbackPrice(p.priceCents);
+        const eligibleTier = !isComplimentary || PLAN_RANK[key] > PLAN_RANK[currentKey];
+        const isPurchasable = canSell && eligibleTier && key !== "free" && !isCurrent && !!pkg;
         // Would we sell this plan if the catalog had loaded? Drives the
         // disabled-CTA fallback below.
-        const sellableInPrinciple = canSell && key !== "free" && !isCurrent;
+        const sellableInPrinciple = canSell && eligibleTier && key !== "free" && !isCurrent;
         const ctaUnavailableLabel = unavailableReason
           ? offeringsUnavailableCopy(unavailableReason)
           : "Not available right now";
@@ -432,7 +437,7 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
             </View>
             <View style={styles.priceRow}>
               <Animated.Text style={styles.price}>{priceLabel}</Animated.Text>
-              <Animated.Text style={styles.per}>/month</Animated.Text>
+              {!(isCurrent && isComplimentary) ? <Animated.Text style={styles.per}>/month</Animated.Text> : null}
             </View>
             {p.positioning ? (
               <Animated.Text style={styles.pos}>{p.positioning}</Animated.Text>
@@ -504,7 +509,7 @@ export function MembershipScreen({ billing = null }: MembershipScreenProps) {
       ) : null}
 
       <Animated.Text style={styles.fineprint}>
-        Subscriptions renew monthly through{" "}
+        {isComplimentary ? "Your complimentary membership has no recurring charge. Paid subscriptions renew monthly through " : "Subscriptions renew monthly through "}
         {Platform.OS === "ios" ? "your Apple ID" : "your Google account"} and
         can be cancelled anytime in {OWN_STORE_NAME}. Your membership works
         everywhere you use DVNT.
