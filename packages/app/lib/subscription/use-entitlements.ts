@@ -1,5 +1,7 @@
 /** One entitlement read path for Stripe, RevenueCat, and legacy Sneaky plans. */
 import { useEffect, useState } from "react";
+import { Platform } from "react-native";
+import { entitlementAuthState, readAuthenticatedEntitlements } from "./entitlement-auth-state";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -27,7 +29,10 @@ export interface UseEntitlementsResult {
 export function useEntitlements(): UseEntitlementsResult {
   const userId = useAuthStore((s) => subscriptionAuthId(s.user));
   const authStatus = useAuthStore((s) => s.authStatus);
-  const enabled = authStatus === "authenticated" && !!userId;
+  const hasHydrated = useAuthStore((s) => s._hasHydrated);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const auth = entitlementAuthState({ platform: Platform.OS, authStatus, hasHydrated, isAuthenticated, userId });
+  const enabled = auth.enabled;
   const query = useQuery({
     queryKey: [...ENTITLEMENTS_QUERY_KEY, userId],
     enabled,
@@ -36,7 +41,17 @@ export function useEntitlements(): UseEntitlementsResult {
     refetchInterval: 30_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
-    queryFn: () => fetchSubscriptionRecords(supabase, userId as string),
+    queryFn: () => readAuthenticatedEntitlements({
+      ensureAuthenticated: async () => {
+        const { ensureSupabaseJwt } = await import("../auth/supabase-jwt");
+        return ensureSupabaseJwt();
+      },
+      isCurrentIdentity: () => {
+        const current = useAuthStore.getState();
+        return current.isAuthenticated && subscriptionAuthId(current.user) === userId;
+      },
+      read: () => fetchSubscriptionRecords(supabase, userId as string),
+    }),
   });
   const [now, setNow] = useState(() => Date.now());
   const boundary = nextEntitlementBoundary(query.data ?? [], Date.now());
@@ -50,8 +65,8 @@ export function useEntitlements(): UseEntitlementsResult {
     return () => clearTimeout(timer);
   }, [enabled, boundary, now, query.refetch]);
 
-  const isLoading = authStatus === "loading" || (enabled && query.isPending);
-  const identityError = authStatus === "authenticated" && !userId;
+  const isLoading = auth.loading || (enabled && query.isPending);
+  const identityError = auth.identityError;
   const isError = identityError || (enabled && query.isError);
   const snapshot = entitlementReadSnapshot(query.data,
     isError ? "error" : isLoading ? "loading" : enabled ? "ready" : "signed_out",
