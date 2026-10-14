@@ -26,7 +26,8 @@ import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
-import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
+import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
+import { lynkCreateSummary } from "@dvnt/app/lib/subscription/lynk-create-summary";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
@@ -40,6 +41,7 @@ type Invitee = {
 };
 
 function CreateLynkScreenContent() {
+  const membership = lynkCreateSummary(useEntitlements());
   // Protect room config from capture even before joining
   useSneakyLynkCaptureProtection();
 
@@ -256,36 +258,10 @@ function CreateLynkScreenContent() {
             borderColor: "rgba(252, 37, 58, 0.2)",
           }}
         >
-          <Text className="text-base font-bold text-foreground mb-1">
-            {getLynkDisplayName()}
-          </Text>
-          <Text className="text-sm text-muted-foreground leading-5">
-            Host a private video room for your crew. Rooms with fewer than 5
-            people under 5 minutes are completely free.
-          </Text>
-          <View className="flex-row gap-3 mt-3">
-            <View
-              className="flex-1 rounded-xl p-3"
-              style={{ backgroundColor: "rgba(255,255,255,0.05)" }}
-            >
-              <Text className="text-xs font-bold text-foreground">
-                $15 / mo
-              </Text>
-              <Text className="text-[11px] text-muted-foreground mt-0.5">
-                Up to 15 screens
-              </Text>
-            </View>
-            <View
-              className="flex-1 rounded-xl p-3"
-              style={{ backgroundColor: "rgba(255,255,255,0.05)" }}
-            >
-              <Text className="text-xs font-bold text-foreground">
-                $25 / mo
-              </Text>
-              <Text className="text-[11px] text-muted-foreground mt-0.5">
-                Unlimited screens
-              </Text>
-            </View>
+          <Text className="text-base font-bold text-foreground mb-1">{membership.title}</Text>
+          <Text className="text-sm text-muted-foreground leading-5">{membership.description}</Text>
+          <View className="mt-3 gap-1">
+            {membership.benefits.map((benefit) => <Text key={benefit} className="text-sm text-foreground">{benefit}</Text>)}
           </View>
         </View>
 
