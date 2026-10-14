@@ -31,7 +31,7 @@ function fixture(options={}){
  quantity_total:100,quantity_sold:0,max_per_user:10,...options.tier}],orders:[],tickets:[],ticket_holds:[],order_timeline:[],
  organizer_accounts:[{host_id:'host',stripe_account_id:'acct_fixture',charges_enabled:true}],
  promo_codes:options.promos||[],event_promoters:options.promoters||[],promoter_attributions:[]};
- const writes=[],stripe=[],emails=[],usage=[],logs=[];let serial=0;
+ const writes=[],stripe=[],emails=[],usage=[],logs=[],profileCalls=[];let serial=0;
  const db={rpc:async(fn,args)=>{
   writes.push({table:'rpc',fn,args});
   if(fn==='ticket_hold_create_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
@@ -88,7 +88,7 @@ function fixture(options={}){
     if(name.startsWith('https://esm.sh/@supabase/'))return{createClient:()=>db};
     if(name.endsWith('/hmac-qr.ts'))return{createSignedQrPayload:async()=>({qrToken:'fixture',qrPayload:'fixture'})};
     if(name.endsWith('/ticket-email-delivery.ts'))return{deliverTicketBundleEmail:async(...args)=>emails.push(args[1])};
-    if(name.endsWith('/checkout-profile.ts'))return{recordCheckoutProfileIntake:async()=>{},provisionCheckoutProfile:async()=>null};
+    if(name.endsWith('/checkout-profile.ts'))return{recordCheckoutProfileIntake:async(...args)=>{profileCalls.push({kind:'intake',args})},provisionCheckoutProfile:async(...args)=>{profileCalls.push({kind:'provision',args});return null}};
     return load(path.resolve(path.dirname(full),name));
    }},{filename:full});return exports;
  }
@@ -98,7 +98,7 @@ function fixture(options={}){
   const res=await handler(new Request('https://fixture.invalid/guest-checkout',{method,...(method==='POST'?{body:JSON.stringify(body)}:{})}));
   return {status:res.status,headers:res.headers,data:await res.json()};
  }
- return{tables,writes,stripe,emails,usage,logs,load,call,
+ return{tables,writes,stripe,emails,usage,logs,profileCalls,load,call,
   quote:(body={})=>call({action:'quote',quote_request:{...selection,...body}}),
   pay:(body={})=>call({...selection,...body})};
 }
