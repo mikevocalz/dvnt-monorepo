@@ -135,7 +135,7 @@ import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { videoApi } from "@dvnt/app/features/video/api";
 import { useSneakyLynkCaptureBroadcast } from "../hooks/useSneakyLynkCaptureBroadcast";
 import { useRoomChat } from "../hooks/useRoomChat";
-import { useRoomLifecycle } from "../../video/hooks/useRoomLifecycle";
+import { useRoomLifecycle } from "../../video/useRoomLifecycle";
 import { useRoomMembers } from "../hooks/useRoomMembers";
 import { useRoomEntryScope } from "../hooks/useRoomEntryScope";
 import type { SneakyUser } from "@dvnt/app/features/sneaky-lynk/types";

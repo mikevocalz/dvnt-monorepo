@@ -158,6 +158,9 @@ let fixture: Fixture;
 // The repository's Node typings predate registerHooks; Node 24 runs this API.
 const hooks = (nodeModule as any).registerHooks({
   resolve(specifier: string, context: { parentURL?: string }, next: (specifier: string, context: { parentURL?: string }) => { url: string }) {
+    if (specifier === "react-native") {
+      return { url: `data:text/javascript,${encodeURIComponent('export const Platform = { OS: "web" };')}`, shortCircuit: true };
+    }
     if (["@dvnt/app/lib/supabase/client", "@dvnt/app/lib/supabase/realtime", "@dvnt/app/lib/auth/identity"].includes(specifier)) {
       const viewer = new URL(context.parentURL!).searchParams.get("viewer") ?? "ba-host";
       const source = `const fixture = () => globalThis.__lynkRealtimeFixture;

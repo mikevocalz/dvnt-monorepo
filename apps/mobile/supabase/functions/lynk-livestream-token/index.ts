@@ -1,11 +1,9 @@
 /**
  * Edge Function: lynk-livestream-token
  *
- * NATIVE transport for Lynk Live (host/cohost/speaker publish → many viewers) via
- * Fishjam WHIP/WHEP livestream. The web path uses MoQ (`lynk-moq-token`); native
- * uses this because `@moq/*` has no React-Native client, whereas
- * `@fishjam-cloud/react-native-client` ships first-party `useLivestreamStreamer`/
- * `useLivestreamViewer` that render a real native `MediaStream` in `RTCView`.
+ * Legacy Fishjam WHIP/WHEP transport for Lynk Live. Current native and web
+ * clients use MoQ, but this retained endpoint must enforce the same authoritative
+ * room admission before issuing any publish capability.
  *
  * A Fishjam livestream room is ONE streamer → many viewers, so multi-speaker =
  * one livestream room per publisher (stored on `video_room_members.livestream_id`,
@@ -23,6 +21,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
+import { creatorStandingRefusal, resolveCreatorStanding } from "../_shared/creator-standing.ts";
 // PINNED — see lynk-moq-token for what a floating specifier cost us. The
 // three calls below (createRoom / createLivestreamStreamerToken /
 // createLivestreamViewerToken) all still exist in 0.30.0, so this one was
@@ -40,6 +39,9 @@ const corsHeaders = {
 const Schema = z.object({
   roomId: z.string().uuid(),
   intent: z.enum(["publish", "subscribe"]),
+  // Same compatibility contract as video_join_room: a declared platform is not
+  // device attestation; absent/unknown values keep older native clients working.
+  platform: z.string().max(32).optional(),
 });
 
 type ErrorCode =
@@ -110,126 +112,168 @@ Deno.serve(async (req) => {
       return err("validation_error", "Invalid JSON body");
     }
     const parsed = Schema.safeParse(body);
-    if (!parsed.success) return err("validation_error", parsed.error.errors[0].message);
-    const { roomId, intent } = parsed.data;
+    if (!parsed.success) return err("validation_error", parsed.error.issues[0]?.message ?? "Invalid token request");
+    const { roomId, intent, platform } = parsed.data;
 
-    // 3. Room
-    const { data: room } = await supabase
-      .from("video_rooms")
-      .select("*")
-      .eq("uuid", roomId)
-      .single();
-    if (!room) return err("not_found", "Room not found");
-    if (room.status !== "open") return err("conflict", "Room is no longer open");
-    // Every media transport enforces current admission and schedule before tokens.
-    const eventAccess = await resolveEventRoomAccess(supabase, room, userId);
-    if (!eventAccess.ok) {
-      return err(eventAccess.code, eventAccess.message, eventAccess.detail);
-    }
-    room.ends_at = eventAccess.endsAt;
-    if (room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
-      return err("conflict", "This Lynk's session has ended", { reason: "session_expired" });
-    }
-
-    const internalRoomId = room.id;
-
-    // 4. Ban + membership
-    const { data: isBanned } = await supabase.rpc("is_user_banned_from_room", {
-      p_user_id: userId,
-      p_room_id: internalRoomId,
-    });
-    if (isBanned) return err("forbidden", "You are banned from this room");
-
-    const { data: existingMember } = await supabase
-      .from("video_room_members")
-      .select("*")
-      .eq("room_id", internalRoomId)
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (existingMember?.status === "banned")
-      return err("forbidden", "You are banned from this room");
-
-    const isHostOrCoHost =
-      userId === room.created_by ||
-      existingMember?.role === "host" ||
-      existingMember?.role === "co-host";
-
-    // 5. Private gate (verbatim from video_join_room)
-    if (!room.is_public && !eventAccess.linked) {
-      const hasPriorAccess =
-        !!existingMember &&
-        existingMember.status !== "banned" &&
-        existingMember.status !== "kicked";
-      let hasInvite = false;
-      if (!isHostOrCoHost && !hasPriorAccess) {
-        const { data: invite } = await supabase
-          .from("video_room_invites")
-          .select("id")
-          .eq("room_id", internalRoomId)
-          .eq("user_id", userId)
-          .maybeSingle();
-        hasInvite = !!invite;
+    async function authorizeAccess() {
+      const admission = await resolveVerifiedAdmission(supabase, userId);
+      if (admission.state === "blocked") {
+        const refusal = admissionRefusal(admission);
+        return err("forbidden", refusal.message, { reason: refusal.reason });
       }
-      if (!isHostOrCoHost && !hasPriorAccess && !hasInvite)
-        return err("forbidden", "This private Lynk is invite-only", {
-          reason: "invite_only",
-        });
+
+      // 3. Room
+      const { data: room, error: roomError } = await supabase
+        .from("video_rooms")
+        .select("*")
+        .eq("uuid", roomId)
+        .maybeSingle();
+      if (roomError) throw roomError;
+      if (!room) return err("not_found", "Room not found");
+      if (room.status !== "open") return err("conflict", "Room is no longer open");
+      if (room.room_kind !== "call" && room.app_only === true && platform === "web") {
+        return err("forbidden", "This Lynk is app-only", { reason: "ROOM_APP_ONLY" });
+      }
+      // Every media transport enforces current admission and schedule before tokens.
+      const eventAccess = await resolveEventRoomAccess(supabase, room, userId);
+      if (!eventAccess.ok) {
+        return err(eventAccess.code, eventAccess.message, eventAccess.detail);
+      }
+      room.ends_at = eventAccess.endsAt;
+      if (room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
+        return err("conflict", "This Lynk's session has ended", { reason: "session_expired" });
+      }
+
+      const internalRoomId = room.id;
+
+      // 4. Ban + membership
+      const { data: isBanned, error: banError } = await supabase.rpc("is_user_banned_from_room", {
+        p_user_id: userId,
+        p_room_id: internalRoomId,
+      });
+      if (banError) throw banError;
+      if (isBanned) return err("forbidden", "You are banned from this room");
+
+      const { data: existingMember, error: memberError } = await supabase
+        .from("video_room_members")
+        .select("*")
+        .eq("room_id", internalRoomId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (memberError) throw memberError;
+      if (existingMember && (existingMember.user_id !== userId || existingMember.room_id !== internalRoomId)) {
+        return err("forbidden", "Room membership could not be verified", { reason: "room_join_required" });
+      }
+      if (existingMember?.status === "kicked")
+        return err("forbidden", "You have been removed from this room");
+      if (existingMember?.status === "banned")
+        return err("forbidden", "You are banned from this room");
+
+      const isHostOrCoHost =
+        userId === room.created_by ||
+        existingMember?.role === "host" ||
+        existingMember?.role === "co-host";
+
+      if (room.room_kind !== "call" && isHostOrCoHost) {
+        const standing = await resolveCreatorStanding(supabase, userId);
+        if (standing.state === "refused") {
+          const refusal = creatorStandingRefusal(standing);
+          return err("forbidden", refusal.message, { reason: refusal.reason, code: refusal.code });
+        }
+      }
+
+      // 5. Private gate (verbatim from video_join_room)
+      if (!room.is_public && !eventAccess.linked) {
+        const hasPriorAccess =
+          !!existingMember &&
+          existingMember.status !== "banned" &&
+          existingMember.status !== "kicked";
+        let hasInvite = false;
+        if (!isHostOrCoHost && !hasPriorAccess) {
+          const { data: invite, error: inviteError } = await supabase
+            .from("video_room_invites")
+            .select("id")
+            .eq("room_id", internalRoomId)
+            .eq("user_id", userId)
+            .maybeSingle();
+          if (inviteError) throw inviteError;
+          hasInvite = !!invite;
+        }
+        if (!isHostOrCoHost && !hasPriorAccess && !hasInvite)
+          return err("forbidden", "This private Lynk is invite-only", {
+            reason: "invite_only",
+          });
+      }
+
+      const role = isHostOrCoHost
+        ? userId === room.created_by
+          ? "host"
+          : existingMember?.role ?? "co-host"
+        : existingMember?.role ?? "participant";
+
+      if (intent === "publish") {
+        if (existingMember?.status !== "active") {
+          return err("forbidden", "Join this Lynk before broadcasting", { reason: "room_join_required" });
+        }
+        if (!PUBLISH_ROLES.has(role)) {
+          return err("forbidden", "Not permitted to broadcast in this Lynk", {
+            reason: "publish_not_allowed",
+            role,
+          });
+        }
+      }
+      return { room, internalRoomId, existingMember, role, peerId: peerIdFor(userId, existingMember?.anon_label ?? null) };
     }
 
-    const role = isHostOrCoHost
-      ? userId === room.created_by
-        ? "host"
-        : existingMember?.role ?? "co-host"
-      : existingMember?.role ?? "participant";
+    const before = await authorizeAccess();
+    if (before instanceof Response) return before;
+    const { internalRoomId, existingMember } = before;
 
-    // ── PUBLISH: ensure this user's livestream room + streamer token ──────────
+    // ── PUBLISH: provision media only for an already admitted member ─────────
     if (intent === "publish") {
-      if (role !== "host" && !PUBLISH_ROLES.has(role))
-        return err("forbidden", "Not permitted to broadcast in this Lynk", {
-          reason: "publish_not_allowed",
-          role,
-        });
-
-      const peerId = peerIdFor(userId, existingMember?.anon_label ?? null);
-
-      // Ensure a membership row exists (host may publish before joining).
-      if (!existingMember) {
-        await supabase.from("video_room_members").insert({
-          room_id: internalRoomId,
-          user_id: userId,
-          role,
-          status: "active",
-        });
-      }
-
-      // Create-once livestream room; reuse the stored id across reconnects.
-      let livestreamId: string | null = existingMember?.livestream_id ?? null;
+      // This endpoint never inserts membership or reactivates a departed user.
+      // video_join_room is the only admission path, including for the creator.
+      let livestreamId: string | null = existingMember.livestream_id ?? null;
       if (!livestreamId) {
         const lsRoom = await fishjam.createRoom({ roomType: "livestream" });
         livestreamId = lsRoom.id;
-        await supabase
+        const { data: savedMember, error: saveError } = await supabase
           .from("video_room_members")
-          .update({ livestream_id: livestreamId, status: "active" })
+          .update({ livestream_id: livestreamId })
           .eq("room_id", internalRoomId)
-          .eq("user_id", userId);
+          .eq("user_id", userId)
+          .eq("status", "active")
+          .select("livestream_id")
+          .maybeSingle();
+        if (saveError) throw saveError;
+        if (!savedMember) return err("forbidden", "Your room membership has ended", { reason: "room_join_required" });
       }
 
       const { token } = await fishjam.createLivestreamStreamerToken(livestreamId);
+      const after = await authorizeAccess();
+      if (after instanceof Response) return after;
+      if (after.internalRoomId !== internalRoomId || after.peerId !== before.peerId || after.existingMember?.livestream_id !== livestreamId) {
+        return err("conflict", "Room access changed; rejoin this Lynk");
+      }
       return json({
         ok: true,
-        data: { intent, token, livestreamId, peerId, role },
+        data: { intent, token, livestreamId, peerId: after.peerId, role: after.role },
       });
     }
 
     // ── SUBSCRIBE: a viewer token per ACTIVE publisher in the room ────────────
-    const { data: publishers } = await supabase
-      .from("video_room_members")
-      .select("user_id, role, anon_label, livestream_id")
-      .eq("room_id", internalRoomId)
-      .eq("status", "active")
-      .not("livestream_id", "is", null)
-      .in("role", ["host", "co-host", "speaker"]);
-
+    async function activePublishers() {
+      const { data, error } = await supabase
+        .from("video_room_members")
+        .select("user_id, role, anon_label, livestream_id")
+        .eq("room_id", internalRoomId)
+        .eq("status", "active")
+        .not("livestream_id", "is", null)
+        .in("role", ["host", "co-host", "speaker"]);
+      if (error) throw error;
+      return data ?? [];
+    }
+    const publishers = await activePublishers();
     const streams = await Promise.all(
       (publishers ?? []).map(async (p) => {
         const { token } = await fishjam.createLivestreamViewerToken(p.livestream_id);
@@ -242,7 +286,24 @@ Deno.serve(async (req) => {
       }),
     );
 
-    return json({ ok: true, data: { intent, streams } });
+    const after = await authorizeAccess();
+    if (after instanceof Response) return after;
+    if (before.existingMember?.status === "active" && after.existingMember?.status !== "active") {
+      return err("forbidden", "Your room membership has ended");
+    }
+    if (after.internalRoomId !== internalRoomId) {
+      return err("conflict", "Room access changed; rejoin this Lynk");
+    }
+    // Do not release a viewer token for a publisher that left, was demoted or
+    // changed stream identity while the provider was minting the batch.
+    const currentPublishers = await activePublishers();
+    const currentStreams = streams.filter((stream, index) => currentPublishers.some((publisher) =>
+      publisher.user_id === publishers[index].user_id &&
+      publisher.livestream_id === stream.livestreamId &&
+      publisher.role === stream.role &&
+      peerIdFor(publisher.user_id, publisher.anon_label ?? null) === stream.peerId
+    ));
+    return json({ ok: true, data: { intent, streams: currentStreams } });
   } catch (e) {
     console.error("[lynk-livestream-token] error:", e);
     return err("internal_error", "Failed to mint livestream token");

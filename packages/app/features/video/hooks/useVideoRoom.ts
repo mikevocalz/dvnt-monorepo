@@ -56,7 +56,7 @@ import type {
   RoomMember,
 } from "../types";
 
-import { useRoomLifecycle } from "./useRoomLifecycle";
+import { useRoomLifecycle } from "../useRoomLifecycle";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 min before expiry

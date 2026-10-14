@@ -3,7 +3,7 @@
  *
  * Mints a PATH-SCOPED, SINGLE-PURPOSE Media-over-QUIC (MoQ) token for Sneaky
  * Lynk live rooms (the "Lynk Live" broadcast). This is the MoQ analogue of
- * `video_join_room` — it reuses the EXACT same Better-Auth session verification
+ * `video_join_room` — it reuses the same Better-Auth session verification
  * and private-room authorization gate (host / co-host / prior member / invite /
  * public), then mints a Fishjam MoQ token via `@fishjam-cloud/js-server-sdk`
  * `createMoqAccess({ publishPath | subscribePath })` instead of a WebRTC peer
@@ -12,10 +12,12 @@
  * Roles → paths (multi-speaker model — DECIDED in docs/lynk-moq-fit.md §5.2):
  *   - publish intent → publishPath `lynk/${roomId}/${peerId}` (SPECIFIC path, so
  *     a publisher can only publish AS ITSELF). Authorized only for publish-capable
- *     roles: host / co-host / speaker.
+ *     roles: host / co-host / speaker / participant, with an active membership
+ *     admitted through `video_join_room` (including the room creator).
  *   - subscribe intent → subscribePath `lynk/${roomId}` (BROAD namespace, so the
  *     viewer's `connection.announced` discovers every live publisher and mounts
- *     one tile per path with no reload). Authorized for any permitted member.
+ *     one tile per path with no reload). Preserves the existing eligibility
+ *     gate, which also permits public viewers and invited private nonmembers.
  *
  * A token is single-purpose: a subscribe token can NEVER publish (enforced
  * server-side by which field we pass to createMoqAccess). A broadcaster requests
@@ -30,6 +32,7 @@ import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { mintBoundedMoqAccess, moqAccessFailure } from "../_shared/lynk-moq-access.ts";
+import { creatorStandingRefusal, resolveCreatorStanding } from "../_shared/creator-standing.ts";
 // PINNED. This import used to be bare `npm:@fishjam-cloud/js-server-sdk`, so
 // Deno resolved whatever was latest at deploy time. 0.30.0 renamed
 // `createMoqToken` to `createMoqAccess`, the call below started throwing
@@ -50,6 +53,9 @@ const corsHeaders = {
 const TokenSchema = z.object({
   roomId: z.string().uuid(),
   intent: z.enum(["publish", "subscribe"]),
+  // Match video_join_room: declared runtime gates honest web clients, not
+  // device attestation. Absent/unknown values preserve older native clients.
+  platform: z.string().max(32).optional(),
 });
 
 type ErrorCode =
@@ -161,7 +167,7 @@ Deno.serve(async (req) => {
     if (!parsed.success) {
       return errorResponse("validation_error", parsed.error.issues[0]?.message ?? "Invalid token request");
     }
-    const { roomId, intent } = parsed.data;
+    const { roomId, intent, platform } = parsed.data;
 
     async function authorizeAccess() {
       // Verified-only admission. A client that skips the banner is still refused.
@@ -181,6 +187,11 @@ Deno.serve(async (req) => {
       if (!room) return moqAccessFailure("not_found", "Room not found");
       if (room.status !== "open") {
         return moqAccessFailure("conflict", "Room is no longer open");
+      }
+      // Keep video_join_room's app-only gate ahead of roster/private checks.
+      // Repeat it after mint to withhold pending web credentials if it changes.
+      if (room.room_kind !== "call" && room.app_only === true && platform === "web") {
+        return moqAccessFailure("forbidden", "This Lynk is app-only", { reason: "ROOM_APP_ONLY" });
       }
       // Every media transport enforces current admission and schedule before tokens.
       const eventAccess = await resolveEventRoomAccess(supabase, room, userId);
@@ -213,6 +224,11 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (memberError) throw memberError;
+      // Never inherit another account's or room's role/presence, even if a
+      // stale or incorrectly scoped database result slips past the filters.
+      if (existingMember && (existingMember.user_id !== userId || existingMember.room_id !== internalRoomId)) {
+        return moqAccessFailure("forbidden", "Room membership could not be verified", { reason: "room_join_required" });
+      }
       if (existingMember?.status === "kicked") {
         return moqAccessFailure("forbidden", "You have been removed from this room");
       }
@@ -224,6 +240,19 @@ Deno.serve(async (req) => {
         userId === room.created_by ||
         existingMember?.role === "host" ||
         existingMember?.role === "co-host";
+
+      // Hosting restrictions must survive token renewal, just as they do a
+      // video_join_room reconnect. Ordinary participants remain unaffected.
+      if (room.room_kind !== "call" && isHostOrCoHost) {
+        const standing = await resolveCreatorStanding(supabase, userId);
+        if (standing.state === "refused") {
+          const refusal = creatorStandingRefusal(standing);
+          return moqAccessFailure("forbidden", refusal.message, {
+            reason: refusal.reason,
+            code: refusal.code,
+          });
+        }
+      }
 
       // 6. Private-room access gate (verbatim from video_join_room)
       if (!room.is_public && !eventAccess.linked) {
@@ -251,11 +280,20 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 7. Determine effective role + publish capability
+      // 7. Publish authority comes from admission, never eligibility alone.
+      // A private invite/public room/creator identity permits joining, but only
+      // video_join_room admits that account to the bounded, visible roster.
+      if (intent === "publish" && existingMember?.status !== "active") {
+        return moqAccessFailure("forbidden", "Join this Lynk before broadcasting", {
+          reason: "room_join_required",
+        });
+      }
+
+      // Determine effective role from the server-owned membership/creator.
       const role = isHostOrCoHost
         ? (userId === room.created_by ? "host" : existingMember?.role ?? "co-host")
         : (existingMember?.role ?? "participant");
-      const canPublish = role === "host" || PUBLISH_ROLES.has(role);
+      const canPublish = PUBLISH_ROLES.has(role);
 
       if (intent === "publish" && !canPublish) {
         return moqAccessFailure("forbidden", "Not permitted to broadcast in this Lynk", {

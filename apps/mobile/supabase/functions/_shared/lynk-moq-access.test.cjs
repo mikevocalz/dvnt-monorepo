@@ -12,6 +12,8 @@ function transpile(file) {
 const moduleFixture = { exports: {} };
 new Function('exports', 'module', transpile(path.join(__dirname, 'lynk-moq-access.ts')))(moduleFixture.exports, moduleFixture);
 const { mintBoundedMoqAccess, moqAccessFailure } = moduleFixture.exports;
+const standingFixture = { exports: {} };
+new Function('exports', 'module', transpile(path.join(__dirname, 'creator-standing.ts')))(standingFixture.exports, standingFixture);
 const NOW = Date.parse('2026-10-13T00:00:00Z');
 const roomId = '00000000-0000-4000-8000-000000000001';
 // Intentionally NOT a valid signed token. All issuer and DB operations are in-memory.
@@ -80,18 +82,34 @@ test('scope changes, shortened deadlines, expiry during mint, and unbounded prov
 function edgeFixture(overrides = {}) {
   const fixture = {
     room: { id: 1, uuid: roomId, status: 'open', is_public: true, created_by: 'fixture-host', ends_at: null },
-    member: { status: 'active', role: 'participant', anon_label: null },
-    invite: null, banned: false,
+    member: { room_id: 1, user_id: 'fixture-guest', status: 'active', role: 'participant', anon_label: null },
+    userId: 'fixture-guest', session: null,
+    invite: null, banned: false, creator: null, creatorError: null,
+    memberError: null, forceMemberResult: false,
     admission: { state: 'allowed' },
     event: { ok: true, linked: false, endsAt: null },
-    mints: 0, gates: 0, mutate: () => {}, ...overrides,
+    mints: 0, gates: 0, eventChecks: 0, queries: [], mutate: () => {}, ...overrides,
   };
   const db = {
     from(table) {
+      const filters = [];
+      const record = { table, filters };
+      fixture.queries.push(record);
+      const resolve = async () => {
+        const row = table === 'video_rooms' ? fixture.room
+          : table === 'video_room_members' ? fixture.member
+          : table === 'creator_hosts' ? fixture.creator
+          : table === 'video_room_invites' ? fixture.invite
+          : assert.fail(`Unexpected table; live access forbidden: ${table}`);
+        const error = table === 'creator_hosts' ? fixture.creatorError
+          : table === 'video_room_members' ? fixture.memberError : null;
+        const matches = row && (table === 'video_room_members' && fixture.forceMemberResult || filters.every(([key, value]) => row[key] === value));
+        return { data: matches ? { ...row } : null, error };
+      };
       const query = {
-        select: () => query, eq: () => query,
-        single: async () => ({ data: fixture.room && { ...fixture.room }, error: null }),
-        maybeSingle: async () => ({ data: table === 'video_rooms' ? fixture.room && { ...fixture.room } : table === 'video_room_members' ? fixture.member && { ...fixture.member } : fixture.invite, error: null }),
+        select: () => query,
+        eq: (key, value) => { filters.push([key, value]); return query; },
+        single: resolve, maybeSingle: resolve,
       };
       return query;
     },
@@ -100,12 +118,13 @@ function edgeFixture(overrides = {}) {
   let handler;
   const requireFixture = (specifier) => {
     if (specifier.includes('supabase-js')) return { createClient: () => db };
-    if (specifier.includes('verify-session')) return { verifySessionDetailed: async () => ({ ok: true, userId: 'fixture-guest' }) };
+    if (specifier.includes('verify-session')) return { verifySessionDetailed: async () => fixture.session ?? ({ ok: true, userId: fixture.userId }) };
     if (specifier.includes('verified-admission')) return {
       resolveVerifiedAdmission: async () => { fixture.gates++; return fixture.admission; },
       admissionRefusal: (value) => ({ message: 'fixture admission blocked', reason: value.reason }),
     };
-    if (specifier.includes('event-access')) return { resolveEventRoomAccess: async () => fixture.event };
+    if (specifier.includes('event-access')) return { resolveEventRoomAccess: async () => { fixture.eventChecks++; return fixture.event; } };
+    if (specifier.includes('creator-standing')) return standingFixture.exports;
     if (specifier.includes('lynk-moq-access')) return moduleFixture.exports;
     if (specifier.includes('zod')) return require('zod');
     if (specifier === 'npm:@fishjam-cloud/js-server-sdk@0.30.1') return {
@@ -142,6 +161,11 @@ test('actual edge handler repeats verified/event/private/ban/role gates after pr
     ban: (f) => { f.banned = true; },
     kick: (f) => { f.member.status = 'kicked'; },
     leave: (f) => { f.member.status = 'left'; },
+    invited: (f) => { f.member.status = 'invited'; },
+    memberDeleted: (f) => { f.member = null; },
+    memberAccountChanged: (f) => { f.member.user_id = 'other-account'; },
+    memberRoomChanged: (f) => { f.member.room_id = 2; },
+    memberBanned: (f) => { f.member.status = 'banned'; },
     role: (f) => { f.member.role = 'moderator'; },
     anonymousPath: (f) => { f.member.anon_label = 'Anonymous 2'; },
   };
@@ -176,8 +200,11 @@ test('edge handler permits valid scoped access, denies ended/kicked rooms before
   const invited = edgeFixture();
   invited.fixture.room.is_public = false;
   invited.fixture.member = null;
-  invited.fixture.invite = { id: 1 };
-  assert.equal((await invited.invoke()).ok, true);
+  invited.fixture.invite = { id: 1, room_id: 1, user_id: 'fixture-guest' };
+  assert.equal((await invited.invoke()).error.detail.reason, 'room_join_required');
+  assert.equal(invited.fixture.mints, 0);
+  // Subscribe/spectator admission is intentionally unchanged by the publish fix.
+  assert.equal((await invited.invoke({ roomId, intent: 'subscribe' })).ok, true);
 });
 
 
@@ -192,4 +219,181 @@ test('verification denial precedes malformed token input without weakening adult
   const adult = edgeFixture();
   assert.equal((await adult.invoke({ roomId: 1 })).error.code, 'validation_error');
   assert.equal(adult.fixture.mints, 0);
+});
+
+
+test('publish requires active roster admission even for the creator and invited private guests', async () => {
+  for (const host of [false, true]) {
+    for (const status of [null, 'left', 'invited', 'kicked', 'banned', 'unknown']) {
+      const denied = edgeFixture();
+      if (host) denied.fixture.room.created_by = denied.fixture.userId;
+      if (status === null) denied.fixture.member = null;
+      else denied.fixture.member.status = status;
+      const response = await denied.invoke({ roomId, intent: 'publish', isHost: true });
+      assert.equal(response.ok, false, `${host ? 'creator' : 'guest'}:${status}`);
+      assert.equal(response.error.code, 'forbidden');
+      assert.equal(denied.fixture.mints, 0);
+      assert.equal('data' in response, false);
+    }
+  }
+});
+
+test('active host, co-host, speaker and participant receive only their own signed publish path', async () => {
+  for (const role of ['host', 'co-host', 'speaker', 'participant']) {
+    const allowed = edgeFixture();
+    allowed.fixture.member.role = role;
+    const response = await allowed.invoke({ roomId, intent: 'publish', isHost: false, peerId: 'forged-peer' });
+    assert.equal(response.ok, true, role);
+    assert.equal(response.data.role, role);
+    assert.equal(response.data.peerId, 'fixture-guest');
+    assert.equal(response.data.path, `lynk/${roomId}/fixture-guest`);
+    assert.deepEqual(allowed.fixture.request, { publishPath: response.data.path, ttl: 120 });
+  }
+  const creator = edgeFixture();
+  creator.fixture.room.created_by = creator.fixture.userId;
+  assert.equal((await creator.invoke()).data.role, 'host', 'creator role is server-derived');
+  const viewer = edgeFixture();
+  viewer.fixture.member.role = 'moderator';
+  const response = await viewer.invoke({ roomId, intent: 'publish', isHost: true });
+  assert.equal(response.error.detail.reason, 'publish_not_allowed', 'client host hint grants nothing');
+  assert.equal(viewer.fixture.mints, 0);
+  assert.equal((await viewer.invoke({ roomId, intent: 'subscribe' })).ok, true);
+});
+
+test('membership is scoped to the authenticated account and internal room, never client identity', async () => {
+  for (const mismatch of ['user_id', 'room_id']) {
+    for (const forceMemberResult of [false, true]) {
+      const denied = edgeFixture({ forceMemberResult });
+      denied.fixture.member[mismatch] = mismatch === 'user_id' ? 'other-account' : 2;
+      const response = await denied.invoke({ roomId, intent: 'publish', userId: 'other-account', isHost: true });
+      assert.equal(response.ok, false, `${mismatch}:${forceMemberResult}`);
+      assert.equal(response.error.detail.reason, 'room_join_required');
+      assert.equal(denied.fixture.mints, 0);
+      const query = denied.fixture.queries.find((q) => q.table === 'video_room_members');
+      assert.deepEqual(query.filters, [['room_id', 1], ['user_id', 'fixture-guest']]);
+    }
+  }
+});
+
+test('subscription keeps its existing eligibility boundary and never gains publish authority', async () => {
+  for (const status of [null, 'left', 'invited', 'active']) {
+    const viewer = edgeFixture();
+    if (status === null) viewer.fixture.member = null;
+    else viewer.fixture.member.status = status;
+    const response = await viewer.invoke({ roomId, intent: 'subscribe', isHost: true });
+    assert.equal(response.ok, true, String(status));
+    assert.deepEqual(viewer.fixture.request, { subscribePath: `lynk/${roomId}`, ttl: 120 });
+    assert.equal(response.data.role, 'participant');
+  }
+  const leftDuringMint = edgeFixture();
+  leftDuringMint.fixture.mutate = () => { leftDuringMint.fixture.member.status = 'left'; };
+  assert.equal((await leftDuringMint.invoke({ roomId, intent: 'subscribe' })).ok, false);
+});
+
+test('private and ticket restrictions still apply before mint for both intents', async () => {
+  for (const intent of ['publish', 'subscribe']) {
+    const privateRoom = edgeFixture();
+    privateRoom.fixture.room.is_public = false;
+    privateRoom.fixture.member = null;
+    assert.equal((await privateRoom.invoke({ roomId, intent })).error.detail.reason, 'invite_only');
+    assert.equal(privateRoom.fixture.mints, 0);
+    const ticketed = edgeFixture({ event: { ok: false, code: 'forbidden', message: 'Ticket required', detail: { reason: 'event_ticket_required' } } });
+    assert.equal((await ticketed.invoke({ roomId, intent })).error.detail.reason, 'event_ticket_required');
+    assert.equal(ticketed.fixture.mints, 0);
+    const allowed = edgeFixture({ event: { ok: true, linked: true, endsAt: null } });
+    allowed.fixture.room.is_public = false;
+    assert.equal((await allowed.invoke({ roomId, intent })).ok, true, 'approved event access preserves linked private-room access');
+  }
+});
+
+test('app-only platform gate mirrors join, runs before roster checks, and repeats after mint', async () => {
+  for (const intent of ['publish', 'subscribe']) {
+    for (const platform of ['web', 'ios', 'android', 'unknown', undefined]) {
+      const room = edgeFixture();
+      room.fixture.room.app_only = true;
+      const response = await room.invoke({ roomId, intent, ...(platform === undefined ? {} : { platform }) });
+      assert.equal(response.ok, platform !== 'web', `${intent}:${platform}`);
+      assert.equal(room.fixture.mints, platform === 'web' ? 0 : 1);
+      if (platform === 'web') {
+        assert.equal(response.error.detail.reason, 'ROOM_APP_ONLY');
+        assert.equal(room.fixture.eventChecks, 0);
+        assert.equal(room.fixture.queries.some((q) => q.table === 'video_room_members'), false);
+      }
+    }
+    const changed = edgeFixture();
+    changed.fixture.mutate = () => { changed.fixture.room.app_only = true; };
+    const response = await changed.invoke({ roomId, intent, platform: 'web' });
+    assert.equal(response.error.detail.reason, 'ROOM_APP_ONLY');
+    assert.equal(changed.fixture.mints, 1);
+    assert.equal('data' in response, false);
+  }
+  for (const platform of [null, 1, 'w'.repeat(33)]) {
+    const invalid = edgeFixture();
+    assert.equal((await invalid.invoke({ roomId, intent: 'publish', platform })).error.code, 'validation_error');
+    assert.equal(invalid.fixture.mints, 0);
+  }
+  const call = edgeFixture();
+  call.fixture.room.app_only = true;
+  call.fixture.room.room_kind = 'call';
+  assert.equal((await call.invoke({ roomId, intent: 'publish', platform: 'web' })).ok, true, 'matches join call exemption');
+});
+
+test('creator standing mirrors join for hosts/co-hosts, including suspension during mint', async () => {
+  for (const intent of ['publish', 'subscribe']) {
+    for (const role of ['creator', 'host', 'co-host', 'participant']) {
+      for (const status of ['suspended', 'paused', 'rejected']) {
+        const room = edgeFixture({ creator: { user_id: 'fixture-guest', status } });
+        if (role === 'creator') room.fixture.room.created_by = room.fixture.userId;
+        else room.fixture.member.role = role;
+        const response = await room.invoke({ roomId, intent });
+        assert.equal(response.ok, role === 'participant', `${intent}:${role}:${status}`);
+        assert.equal(room.fixture.mints, role === 'participant' ? 1 : 0);
+        if (role !== 'participant') {
+          assert.equal(response.error.detail.code, 'creator_hosting_closed');
+          assert.equal(response.error.detail.reason, status);
+        }
+      }
+    }
+    const changed = edgeFixture();
+    changed.fixture.member.role = 'co-host';
+    changed.fixture.mutate = () => { changed.fixture.creator = { user_id: changed.fixture.userId, status: 'suspended' }; };
+    const response = await changed.invoke({ roomId, intent });
+    assert.equal(response.error.detail.code, 'creator_hosting_closed');
+    assert.equal(changed.fixture.mints, 1);
+    assert.equal('data' in response, false);
+  }
+});
+
+test('host and co-host membership loss during mint never releases a publish credential', async () => {
+  for (const role of ['creator', 'host', 'co-host']) {
+    for (const status of [null, 'left', 'invited', 'kicked', 'banned']) {
+      const room = edgeFixture();
+      if (role === 'creator') room.fixture.room.created_by = room.fixture.userId;
+      else room.fixture.member.role = role;
+      room.fixture.mutate = () => {
+        if (status === null) room.fixture.member = null;
+        else room.fixture.member.status = status;
+      };
+      const response = await room.invoke();
+      assert.equal(response.ok, false, `${role}:${status}`);
+      assert.equal(room.fixture.mints, 1);
+      assert.equal('data' in response, false);
+    }
+  }
+});
+
+test('invalid sessions and database lookup failures cannot obtain publish authority', async () => {
+  for (const reason of ['missing', 'expired', 'invalid']) {
+    const room = edgeFixture({ session: { ok: false, reason } });
+    assert.equal((await room.invoke()).error.code, 'unauthorized');
+    assert.equal(room.fixture.gates, 0);
+    assert.equal(room.fixture.mints, 0);
+  }
+  const member = edgeFixture({ memberError: { message: 'fixture membership lookup failed' } });
+  assert.equal((await member.invoke()).error.code, 'internal_error');
+  assert.equal(member.fixture.mints, 0);
+  const creator = edgeFixture({ creatorError: { message: 'fixture standing lookup failed' } });
+  creator.fixture.member.role = 'host';
+  assert.equal((await creator.invoke()).error.detail.reason, 'standing_unavailable');
+  assert.equal(creator.fixture.mints, 0);
 });

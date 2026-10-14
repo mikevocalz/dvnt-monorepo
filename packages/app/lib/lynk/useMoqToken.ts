@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Platform } from "react-native";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -57,7 +58,7 @@ export async function fetchMoqToken(
   const { data, error } = await supabase.functions.invoke<EdgeResponse>(
     "lynk-moq-token",
     {
-      body: { roomId, intent },
+      body: { roomId, intent, platform: Platform.OS },
       headers: { Authorization: `Bearer ${authToken}`, "x-auth-token": authToken },
       signal,
     },
@@ -104,6 +105,7 @@ export function useMoqToken(
     scope, token: null, loading: false, error: null,
   });
   const sessionRef = useRef<ReturnType<typeof createMoqTokenSession<MoqToken>> | null>(null);
+  const installedScopeRef = useRef<string | null>(null);
   const refresh = useCallback(() => sessionRef.current?.refresh() ?? Promise.resolve(null), []);
 
   useEffect(() => {
@@ -113,6 +115,7 @@ export function useMoqToken(
       onChange: (next) => setState({ ...next, scope }),
     });
     sessionRef.current = session;
+    installedScopeRef.current = scope;
     // Invalidate synchronously on account changes, even if A → B → A happens
     // before React commits the next effect. No old account's token can land.
     const unsubscribe = useAuthStore.subscribe((s) => {
@@ -126,12 +129,17 @@ export function useMoqToken(
     return () => {
       unsubscribe();
       session.stop();
-      if (sessionRef.current === session) sessionRef.current = null;
+      if (sessionRef.current === session) {
+        sessionRef.current = null;
+        installedScopeRef.current = null;
+      }
     };
   }, [enabled, roomId, intent, accountKey, scope]);
 
   // Hide the previous room/account immediately, before effect cleanup runs.
-  return state.scope === scope && enabled
+  // Re-enabling a previously denied scope must not expose its old error/token
+  // during the render before the replacement session effect is installed.
+  return state.scope === scope && installedScopeRef.current === scope && enabled
     ? { token: state.token, loading: state.loading, error: state.error, refresh }
     : { token: null, loading: false, error: null, refresh };
 }
