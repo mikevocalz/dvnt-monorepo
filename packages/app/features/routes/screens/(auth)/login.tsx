@@ -1,3 +1,4 @@
+import { hydrateAuthProfile } from "@dvnt/app/lib/auth/hydrate-auth-profile";
 import { useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { toast } from "sonner-native";
@@ -98,22 +99,7 @@ export default function LoginScreen() {
 
           if (profile) {
             if (__DEV__) console.log("[Login] Profile loaded, ID:", profile.id);
-            setUser({
-              id: profile.id,
-              authId: profile.authId,
-              email: profile.email,
-              username: profile.username,
-              name: profile.name,
-              avatar: profile.avatar || "",
-              bio: profile.bio || "",
-              website: (profile as any).website || "",
-              location: profile.location || "",
-              hashtags: (profile as any).hashtags || [],
-              isVerified: profile.isVerified,
-              postsCount: profile.postsCount,
-              followersCount: profile.followersCount,
-              followingCount: profile.followingCount,
-            });
+            setUser(hydrateAuthProfile(profile));
             // Replay pending deep link if one was saved, otherwise go to home
             const pending = useDeepLinkStore.getState().pendingLink;
             if (pending) {

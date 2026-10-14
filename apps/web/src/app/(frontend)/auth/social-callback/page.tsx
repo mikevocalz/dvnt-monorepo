@@ -1,4 +1,5 @@
 'use client';
+import { hydrateAuthProfile } from "@dvnt/app/lib/auth/hydrate-auth-profile";
 
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -28,22 +29,7 @@ export default function SocialCallbackPage() {
         if (!(await resumeAuthSession())) throw new Error('No new sign-in session');
         const profile: any = await syncAuthUser();
         if (!profile) throw new Error('no profile');
-        useAuthStore.getState().setUser({
-          id: profile.id,
-          authId: profile.authId,
-          email: profile.email,
-          username: profile.username,
-          name: profile.name,
-          avatar: profile.avatar || '',
-          bio: profile.bio || '',
-          website: profile.website || '',
-          location: profile.location || '',
-          hashtags: profile.hashtags || [],
-          isVerified: profile.isVerified,
-          postsCount: profile.postsCount,
-          followersCount: profile.followersCount,
-          followingCount: profile.followingCount,
-        });
+        useAuthStore.getState().setUser(hydrateAuthProfile(profile));
         const welcomeDone =
           typeof localStorage !== 'undefined' &&
           !!localStorage.getItem(`dvnt-welcome-${profile.id}`);

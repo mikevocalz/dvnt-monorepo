@@ -1,3 +1,4 @@
+import { hydrateAuthProfile } from "@dvnt/app/lib/auth/hydrate-auth-profile";
 import { useEffect, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useForm } from '@tanstack/react-form';
@@ -74,24 +75,7 @@ export function LoginScreen() {
           }
 
           if (profile) {
-            setUser({
-              id: profile.id,
-              // Ticket rows are stamped with this, not with `id`. Dropping it here
-              // left every holder's CTA reading "RSVP" until the next page load.
-              authId: profile.authId,
-              email: profile.email,
-              username: profile.username,
-              name: profile.name,
-              avatar: profile.avatar || '',
-              bio: profile.bio || '',
-              website: profile.website || '',
-              location: profile.location || '',
-              hashtags: profile.hashtags || [],
-              isVerified: profile.isVerified,
-              postsCount: profile.postsCount,
-              followersCount: profile.followersCount,
-              followingCount: profile.followingCount,
-            });
+            setUser(hydrateAuthProfile(profile));
             // First login on this browser → welcome flow (identity + location
             // opt-in). The flow self-skips if the profile already has the data.
             const welcomeDone =

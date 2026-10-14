@@ -1,3 +1,4 @@
+import { hydrateAuthProfile } from "@dvnt/app/lib/auth/hydrate-auth-profile";
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useForm } from '@tanstack/react-form';
@@ -96,7 +97,7 @@ export function SignupScreen() {
           if (data?.user) {
             let profile: any;
             try { profile = await syncAuthUser(); } catch { profile = await auth.getProfile(data.user.id, data.user.email); }
-            if (profile) setUser({ id: profile.id, authId: profile.authId, email: profile.email, username: profile.username, name: profile.name, avatar: profile.avatar || '', bio: profile.bio || '', website: (profile as any).website || '', location: profile.location || '', hashtags: (profile as any).hashtags || [], isVerified: profile.isVerified, postsCount: profile.postsCount, followersCount: profile.followersCount, followingCount: profile.followingCount });
+            if (profile) setUser(hydrateAuthProfile(profile));
             // Account exists so the authenticated Didit session can be minted,
             // but signup is not considered complete until identity verification
             // passes. New-account participation is server-gated by the rollout

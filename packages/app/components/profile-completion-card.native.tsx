@@ -3,27 +3,13 @@ import { View, Text, Pressable } from "react-native";
 import { router } from "expo-router";
 import Svg, { Circle } from "react-native-svg";
 import { ChevronRight } from "lucide-react-native";
-import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useProfileCompletion } from "@dvnt/app/lib/hooks/use-profile-completion";
+import type { CompletionProfile } from "@dvnt/app/lib/profile/completion-sources";
 import {
-  computeProfileCompletion,
   useOnboardingV2Store,
 } from "@dvnt/app/lib/stores/onboarding-v2-store";
 
 const P = "rgb(62, 164, 229)";
-
-/** Drops null/undefined/empty values so a sparse API row cannot blank a field
- *  the auth store already knows about. */
-function pruneEmpty(source: Record<string, any> | null | undefined) {
-  if (!source) return {};
-  const out: Record<string, any> = {};
-  for (const [key, value] of Object.entries(source)) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    out[key] = value;
-  }
-  return out;
-}
 
 /**
  * B2 completion mechanism — NATIVE. Weighted ring + the 3 highest-value
@@ -38,23 +24,19 @@ export function ProfileCompletionCard({
    * database, which made the card ask for a link the user had already added —
    * so the screen's own rule applies here too: API first, store as fallback.
    */
-  profile?: Record<string, any> | null;
+  profile?: CompletionProfile | null;
 } = {}) {
-  const user = useAuthStore((s) => s.user);
   const requestNudge = useOnboardingV2Store((s) => s.requestNudge);
-  // Field-by-field, so a source that omits a key falls back rather than
-  // blanking it. Both sources are partial in different ways.
-  const merged =
-    user || profile ? { ...(user ?? {}), ...pruneEmpty(profile) } : null;
-  const { percent, missing } = computeProfileCompletion(merged as any);
+  const completion = useProfileCompletion(profile);
+  const percent = completion?.percent;
+  const missing = completion?.missing ?? [];
 
   // Session-capped nudge (the cap lives in the store, not here).
   useEffect(() => {
-    if (percent < 60 && missing.length > 0) requestNudge();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (percent !== undefined && percent < 60 && missing.length > 0) requestNudge();
+  }, [percent, missing.length, requestNudge]);
 
-  if (!user || percent >= 100) return null;
+  if (percent === undefined || percent >= 100) return null;
 
   const R = 20;
   const C = 2 * Math.PI * R;
