@@ -567,7 +567,9 @@ export const ticketsApi = {
       return data || [];
     } catch (error) {
       console.error("[Tickets] getTicketTypes error:", error);
-      return [];
+      // A failed read is not a tier-less event. Let the query expose its error
+      // so public buyers can retry instead of entering the free RSVP rail.
+      throw error;
     }
   },
 

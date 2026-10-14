@@ -26,6 +26,7 @@
  * Navigation via solito useRouter; on save → back.
  */
 
+import { getCaptionMetrics, validatePostCaption, MAX_CAPTION_LENGTH, MAX_CAPTION_RAW_LENGTH } from "@dvnt/app/lib/posts/post-caption";
 import { useEffect, useMemo } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { AlertCircle, MapPin, Flame, ImageIcon, Play } from "lucide-react";
@@ -42,7 +43,7 @@ import { useEditPostStore } from "./edit-post-store";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { ownsContent } from "@dvnt/app/lib/profile/same-user";
 
-const MAX_CAPTION = 2200;
+const MAX_CAPTION = MAX_CAPTION_LENGTH;
 
 const inputCls =
   "w-full bg-white/[0.05] border border-white/12 rounded-xl px-3 h-11 text-[15px] text-white placeholder:text-white/40 outline-none focus:border-[#3FDCFF]/60";
@@ -99,7 +100,9 @@ export function EditPostScreen() {
 
   // ── Dirty detection (mirrors native's isDirty) ──
   const hydrated = s.hydratedId === id;
-  const captionOverLimit = s.caption.length > MAX_CAPTION;
+  const captionMetrics = getCaptionMetrics(s.caption);
+  const captionValidation = validatePostCaption(s.caption);
+  const captionOverLimit = isTextPost ? s.caption.length > MAX_CAPTION : !captionValidation.valid;
   const slidesDirty = useMemo(
     () =>
       s.textSlides.length !== s.originalTextSlides.length ||
@@ -421,8 +424,8 @@ export function EditPostScreen() {
               <textarea
                 value={s.caption}
                 onChange={(e) => s.setCaption(e.target.value)}
-                placeholder="Write a caption…"
-                maxLength={MAX_CAPTION + 100}
+                placeholder="Write a caption… Add #hashtags here"
+                maxLength={MAX_CAPTION_RAW_LENGTH}
                 rows={5}
                 className={`${inputCls} h-auto py-2.5 resize-none`}
               />
@@ -431,18 +434,19 @@ export function EditPostScreen() {
               <span
                 className={`text-xs ${captionOverLimit ? "text-red-400 font-semibold" : "text-white/40"}`}
               >
-                {s.caption.length.toLocaleString()}/
+                {captionMetrics.characterCount.toLocaleString()}/
                 {MAX_CAPTION.toLocaleString()}
               </span>
-              {s.caption.includes("#") ? (
+              {captionMetrics.hashtags.length > 0 ? (
                 <span className="text-xs text-[#3FDCFF]/60">
-                  {(s.caption.match(/#\w+/g) || []).length} hashtags
+                  {captionMetrics.hashtags.length} hashtags
                 </span>
               ) : null}
             </div>
+            <p className="mt-1.5 text-xs text-white/40">Hashtags don’t count toward your caption limit.</p>
             {captionOverLimit ? (
               <p className="mt-1 text-xs font-semibold text-red-400">
-                Caption exceeds {MAX_CAPTION.toLocaleString()} characters
+                {captionValidation.error}
               </p>
             ) : null}
           </section>

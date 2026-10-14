@@ -186,17 +186,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Event must be public + selling tickets, not cancelled. Anon never reaches
-    // private/spicy events (the visibility resolver hides them).
+    // This service-role read bypasses RLS and can be called without the UI.
+    // Enforce guest eligibility here before quotes, holds, orders or payments.
     const { data: ev } = await supabase
       .from("events")
-      .select("id, title, visibility, status, ticketing_enabled, host_id, fee_mode, attendee_name_requirement, end_date, start_date, is_hidden, publish_at")
+      .select("id, title, visibility, status, ticketing_enabled, nsfw, host_id, fee_mode, attendee_name_requirement, end_date, start_date, is_hidden, publish_at")
       .eq("id", eventId)
       .single();
     // A guest has no account, so no relationship can open a hidden or
     // not-yet-published event: it reads as missing, like a private one.
-    if (!ev || ev.visibility !== "public" || isUnpublished(ev)) return err("event_not_found", "Event not found.", 404);
-    if (coalesceStatus(ev.status) === "cancelled") return err("event_cancelled", "This event was cancelled.");
+    if (!ev || ev.visibility !== "public" || ev.nsfw === true || isUnpublished(ev)) return err("event_not_found", "Event not found.", 404);
+    if (ev.status === "cancelled" || ev.status === "canceled") return err("event_cancelled", "This event was cancelled.");
+    if (ev.status !== "active" || ev.ticketing_enabled !== true)
+      return err("event_unavailable", "Tickets aren't available for this event.", 409);
     // Card-not-present sales stop 30 min before the event ends — after
     // that the only legitimate way to sell is card-present (Tap to Pay).
     if (isSalesClosed(ev)) return err("sales_closed", "Ticket sales have ended for this event.");
@@ -606,7 +608,3 @@ Deno.serve(async (req) => {
     return err("internal_error", "Could not start checkout.", 500);
   }
 });
-
-function coalesceStatus(s: unknown): string {
-  return typeof s === "string" ? s : "";
-}

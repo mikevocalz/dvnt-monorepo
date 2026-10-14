@@ -7,6 +7,7 @@
 import { Text, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { useMemo } from "react";
+import { parseCaptionParts } from "@dvnt/app/lib/posts/caption-parts";
 import { MENTION_COLOR, HASHTAG_COLOR } from "@dvnt/app/lib/constants/mentions";
 
 interface HashtagTextProps {
@@ -17,12 +18,6 @@ interface HashtagTextProps {
   textStyle?: any;
   color?: string; // Explicit text color - REQUIRED for visibility
   numberOfLines?: number;
-}
-
-interface TextPart {
-  type: "text" | "hashtag" | "mention";
-  content: string;
-  value: string; // hashtag without #, mention without @
 }
 
 // Default text color for visibility on dark backgrounds
@@ -40,55 +35,7 @@ export function HashtagText({
   const router = useRouter();
 
   // Parse text into parts (regular text, hashtags, mentions)
-  const parts = useMemo(() => {
-    if (!text) return [];
-
-    const result: TextPart[] = [];
-    // Match hashtags (#word) and mentions (@word)
-    const regex = /(#[a-zA-Z0-9_]+|@[a-zA-Z0-9_]+)/g;
-    let lastIndex = 0;
-    let match;
-
-    while ((match = regex.exec(text)) !== null) {
-      // Add text before the match
-      if (match.index > lastIndex) {
-        result.push({
-          type: "text",
-          content: text.slice(lastIndex, match.index),
-          value: text.slice(lastIndex, match.index),
-        });
-      }
-
-      // Add the hashtag or mention
-      const fullMatch = match[0];
-      if (fullMatch.startsWith("#")) {
-        result.push({
-          type: "hashtag",
-          content: fullMatch,
-          value: fullMatch.slice(1), // Remove #
-        });
-      } else if (fullMatch.startsWith("@")) {
-        result.push({
-          type: "mention",
-          content: fullMatch,
-          value: fullMatch.slice(1), // Remove @
-        });
-      }
-
-      lastIndex = regex.lastIndex;
-    }
-
-    // Add remaining text
-    if (lastIndex < text.length) {
-      result.push({
-        type: "text",
-        content: text.slice(lastIndex),
-        value: text.slice(lastIndex),
-      });
-    }
-
-    return result;
-  }, [text]);
+  const parts = useMemo(() => parseCaptionParts(text), [text]);
 
   const handleHashtagPress = (hashtag: string) => {
     if (onHashtagPress) {

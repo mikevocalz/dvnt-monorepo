@@ -9,6 +9,7 @@ import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { resolveSpicyEligibility } from "../_shared/spicy-eligibility.ts";
 import { spicyPostRefusal } from "../_shared/spicy-post-refusal.ts";
+import { validatePostCaption } from "../_shared/post-caption.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -128,6 +129,17 @@ Deno.serve(async (req) => {
       const verification = await resolveSpicyEligibility(supabaseAdmin, authUserId);
       if (verification.state !== "approved") {
         return jsonResponse(spicyPostRefusal(verification), 200);
+      }
+    }
+
+    if (post.post_kind !== "text" && content !== undefined) {
+      const captionValidation = validatePostCaption(content);
+      if (!captionValidation.valid) {
+        return errorResponse(
+          "validation_error",
+          captionValidation.error || "Invalid caption",
+          400,
+        );
       }
     }
 

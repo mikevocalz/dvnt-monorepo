@@ -91,6 +91,8 @@ import {
   useTicketViewerIdentityPending,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
+import { resolveGuestPurchase } from "@dvnt/app/lib/tickets/guest-purchase-state";
+import { eventDetailIsResolving } from "@dvnt/app/lib/events/event-detail-state";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
 import { CheckoutPhoneField } from "./checkout-phone-field.web";
 import {
@@ -139,6 +141,7 @@ import {
   tierIsLockedForBuyer,
   effectiveAddonUnitPriceCents,
   tierDisplayPriceCents,
+  tierAvailable,
 } from "@dvnt/app/lib/tickets/pricing";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
 import {
@@ -286,13 +289,16 @@ export function EventDetailScreen() {
   const slug = String((params as any)?.slug ?? "");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const idParam = String((params as any)?.id ?? "");
-  const directId = /^\d+$/.test(idParam) ? Number(idParam) : undefined;
-  const { data: events, isLoading } = useEvents();
+  const directId = /^\d+$/.test(idParam) && Number.isSafeInteger(Number(idParam)) && Number(idParam) > 0
+    ? Number(idParam)
+    : undefined;
+  const eventsQuery = useEvents();
+  const { data: events } = eventsQuery;
   const listEvent = resolveEventByPathSegment(events ?? [], slug);
   // Token lane. A link_only event is invisible to the anon REST list below —
   // that is the point of the tightened events_select_anon policy — so the only
   // way in is the SECURITY DEFINER RPC keyed on the 32-hex share token.
-  const { data: tokenEvent } = useQuery<{ id: number } | null>({
+  const tokenQuery = useQuery<{ id: number } | null>({
     queryKey: ["events", "share-token", slug],
     enabled: isEventShareToken(slug),
     staleTime: 5 * 60 * 1000,
@@ -322,7 +328,7 @@ export function EventDetailScreen() {
   // visibility rides along so the title lane stays public-only: a signed-in
   // member can still list link_only rows, and slugify(title) must not be a
   // second door into one.
-  const { data: slugIndex } = useQuery<
+  const slugIndexQuery = useQuery<
     Array<{
       id: number;
       title?: string;
@@ -332,7 +338,7 @@ export function EventDetailScreen() {
     }>
   >({
     queryKey: ["events", "slug-index"],
-    enabled: !isEventShareToken(slug),
+    enabled: directId === undefined && !!slug && !isEventShareToken(slug),
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -345,6 +351,8 @@ export function EventDetailScreen() {
       return res.ok ? res.json() : [];
     },
   });
+  const tokenEvent = tokenQuery.data;
+  const slugIndex = slugIndexQuery.data;
   // directId first: /feed/events/[id] is the ownership path. A ticket holder,
   // host or staff member opening a cancelled event by id still resolves here —
   // only the slug lane applies the discovery gate.
@@ -353,7 +361,8 @@ export function EventDetailScreen() {
     tokenEvent?.id ??
     listEvent?.id ??
     resolveEventByPathSegment(slugIndex ?? [], slug)?.id;
-  const { data: full } = useEvent(resolvedId ? String(resolvedId) : "");
+  const eventQuery = useEvent(resolvedId ? String(resolvedId) : "");
+  const { data: full } = eventQuery;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const e = (full ?? listEvent) as any;
 
@@ -375,8 +384,8 @@ export function EventDetailScreen() {
   // Comments + the "who's going" attendee list are members-only: logged-out
   // visitors see a blurred teaser with a sign-in prompt, never the real content.
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  // Any write/commerce action requires a session — logged-out visitors are sent
-  // to sign in rather than into a checkout that throws "Not authenticated".
+  // Member-only writes require a session. Public ticket purchases use the
+  // guest handlers below and never treat missing ticket data as an auth gate.
   const gateAuth = (action: () => void) => {
     if (!isAuthenticated) {
       router.push(loginPathWithReturn(pathname));
@@ -552,7 +561,8 @@ export function EventDetailScreen() {
   };
 
   // ── 1. TICKETS — live ticket types + checkout + my-ticket + upgrade ──
-  const { data: liveTicketTypes = [] } = useTicketTypes(eventId);
+  const ticketTypesQuery = useTicketTypes(eventId);
+  const { data: liveTicketTypes = [] } = ticketTypesQuery;
   // Display only — drives the CTA, never opens a pass.
   const {
     primary: myTicketData,
@@ -732,8 +742,25 @@ export function EventDetailScreen() {
     showToast("success", "Unlocked", "A hidden tier is now available.");
   };
 
-  const resolving =
-    (isLoading && !listEvent) || !slugIndex || (!!resolvedId && !full);
+  const resolving = eventDetailIsResolving({
+    hasResolvedId: !!resolvedId,
+    hasSlug: !!slug,
+    detail: eventQuery,
+    isTokenRoute: isEventShareToken(slug),
+    token: tokenQuery,
+    list: eventsQuery,
+    index: slugIndexQuery,
+  });
+  const retryEvent = () => {
+    if (resolvedId) {
+      void eventQuery.refetch();
+    } else if (isEventShareToken(slug)) {
+      void tokenQuery.refetch();
+    } else {
+      void eventsQuery.refetch();
+      void slugIndexQuery.refetch();
+    }
+  };
   // isHost and the callback below BOTH sit above the guards now. The
   // callback is a hook, and it used to run only after `if (!e) return` —
   // so the render where the event resolved called one hook more than the
@@ -849,24 +876,29 @@ export function EventDetailScreen() {
 
   if (!e && resolving) return <Centered>Loading…</Centered>;
   if (!e) {
-    // A signed-out invitee hitting a private event's link must not read
-    // "not found" — their invite only works once they're signed in. Showing
-    // a sign-in prompt to every anonymous miss leaks nothing: the same copy
-    // renders for ids that never existed.
+    // Missing, private and failed anonymous reads get the same neutral state.
+    // A completed null result is not still loading or evidence of an auth gate.
     if (!userId) {
       return (
         <Centered>
           <span className="flex flex-col items-center gap-3 text-center">
             <span>
-              This event is private or invite-only. Sign in to see if you have
-              access.
+              This event is unavailable. It may no longer be public, or it
+              couldn&apos;t be loaded.
             </span>
             <button
               type="button"
-              onClick={() => router.push(loginPathWithReturn(pathname))}
+              onClick={retryEvent}
               className="rounded-xl bg-[#a855f7] px-6 py-3 text-sm font-semibold text-white"
             >
-              Sign in
+              Try again
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/events")}
+              className="text-white/80 underline underline-offset-4"
+            >
+              Browse events
             </button>
           </span>
         </Centered>
@@ -909,6 +941,40 @@ export function EventDetailScreen() {
   // unlocks them. Live ticket_types rows are authoritative for the flags; the
   // event payload's copy is the fallback for older aggregates.
   const liveList = liveTicketTypes as TicketTypeRecord[];
+  const guestPurchaseInput = {
+    event: full,
+    eventPending: eventQuery.isPending || (!full && eventQuery.isFetching),
+    eventError: eventQuery.isError,
+    tiers: ticketTypesQuery.data as TicketTypeRecord[] | undefined,
+    tiersPending:
+      ticketTypesQuery.isPending ||
+      (ticketTypesQuery.isFetching &&
+        (ticketTypesQuery.isError || liveList.length === 0)),
+    tiersError: ticketTypesQuery.isError,
+    unlockedTierIds: unlockedSet,
+  };
+  const guestPurchase = resolveGuestPurchase(guestPurchaseInput);
+  const retryGuestTickets = () => {
+    retryEvent();
+    void ticketTypesQuery.refetch();
+  };
+  const openGuestPurchase = (selectedId?: string) => {
+    const purchase = resolveGuestPurchase({
+      ...guestPurchaseInput,
+      selectedTierId: selectedId,
+    });
+    if (purchase.kind === "rsvp") {
+      openGuestRsvp(eventId, e.title ?? "Event");
+    } else if (purchase.kind === "checkout") {
+      openGuestCheckout({
+        eventId,
+        eventTitle: e.title ?? "Event",
+        tierId: String(purchase.tier.id),
+        tierName: purchase.tier.name,
+        priceCents: tierDisplayPriceCents(purchase.tier),
+      });
+    }
+  };
   const liveById = (tid: unknown) =>
     liveList.find((lt) => String(lt.id) === String(tid));
   const buyerVisibleTiers = tiers.filter((t) => {
@@ -1484,7 +1550,7 @@ export function EventDetailScreen() {
             const allSoldOut =
               sellableTiers.length > 0 &&
               sellableTiers.every(
-                (t) => t.quantity_total - t.quantity_sold <= 0,
+                (t) => tierAvailable(t) <= 0,
               );
             // Free + no ticket tiers → a pure RSVP event (no checkout sheet to
             // open). Authed users RSVP directly into event_rsvps.
@@ -1561,6 +1627,41 @@ export function EventDetailScreen() {
               );
             }
 
+            if (!isAuthenticated && guestPurchase.kind === "loading") {
+              return (
+                <div
+                  role="status"
+                  className="w-full mt-4 h-12 rounded-xl bg-white/5 text-white/60 font-semibold flex items-center justify-center"
+                >
+                  Loading tickets…
+                </div>
+              );
+            }
+            if (
+              !isAuthenticated &&
+              (guestPurchase.kind === "error" ||
+                (guestPurchase.kind === "unavailable" &&
+                  !(allSoldOut && full && !eventQuery.isError && !ticketTypesQuery.isError)))
+            ) {
+              return (
+                <div className="mt-4 rounded-xl border border-white/10 p-4 text-center">
+                  <p role="status" className="text-sm text-white/70">
+                    {guestPurchase.kind === "error"
+                      ? "Tickets couldn't be loaded. Please try again."
+                      : "Tickets are currently unavailable. Please check back soon."}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={retryGuestTickets}
+                    disabled={ticketTypesQuery.isFetching || eventQuery.isFetching}
+                    className="mt-2 text-sm font-semibold text-[#379ED8] disabled:opacity-50"
+                  >
+                    Try again
+                  </button>
+                </div>
+              );
+            }
+
             if (allSoldOut) {
               // 2. WAITLIST — sold out → join/leave waitlist.
               return (
@@ -1599,31 +1700,7 @@ export function EventDetailScreen() {
                 onClick={() => {
                   // Public events, logged out → guest flow, NEVER /login.
                   if (!isAuthenticated) {
-                    // The guest-RSVP sheet only serves truly tier-less free
-                    // events (ticketing_enabled=false → rsvp-issue-guest). A
-                    // TICKETED event whose cheapest tier is $0 still needs
-                    // tier inventory, so it goes through guest-checkout's
-                    // free branch — the RSVP rail rejects ticketed events.
-                    if (!e.price && sellableTiers.length === 0) {
-                      openGuestRsvp(eventId, e.title ?? "Event");
-                      return;
-                    }
-                    const tier = pickDefaultBuyerTier(
-                      sellableTiers,
-                      Number(e.price || 0) > 0,
-                      (candidate) => candidate.price_cents ?? 0,
-                    );
-                    if (tier) {
-                      openGuestCheckout({
-                        eventId,
-                        eventTitle: e.title ?? "Event",
-                        tierId: String(tier.id),
-                        tierName: tier.name,
-                        priceCents: tier.price_cents,
-                      });
-                      return;
-                    }
-                    router.push(loginPathWithReturn(pathname));
+                    openGuestPurchase();
                     return;
                   }
                   // B3: first age-gated action triggers the verify interstitial.
@@ -1876,6 +1953,7 @@ export function EventDetailScreen() {
               button reads as a bug. */}
           {!isCancelledEvent &&
           !hasTicket &&
+          (isAuthenticated || guestPurchase.kind === "unavailable") &&
           tiers.length === 0 &&
           (Number(e.price) || 0) > 0 ? (
             <TicketsOpeningSoonCard
@@ -1903,48 +1981,25 @@ export function EventDetailScreen() {
                   const price = priceCents / 100;
                   const tierId = String(live?.id ?? t.id ?? i);
                   const soldOut = live
-                    ? live.quantity_total - live.quantity_sold <= 0
+                    ? tierAvailable(live) <= 0
                     : false;
                   const isSelected = selectedTierId === tierId;
+                  const guestTierPurchase = resolveGuestPurchase({
+                    ...guestPurchaseInput,
+                    selectedTierId: String(t.id),
+                  });
+                  const guestTierUnavailable =
+                    !isAuthenticated && guestTierPurchase.kind !== "checkout";
                   return (
                     <button
                       key={t.id ?? i}
                       type="button"
-                      disabled={soldOut || hasTicket}
+                      disabled={soldOut || hasTicket || guestTierUnavailable}
                       onClick={() => {
                         if (!isAuthenticated) {
-                          // Branch on the TAPPED TIER's price, not the event's.
-                          //
-                          // `!e.price` asked whether the EVENT was free. An
-                          // event with a $25 tier and a $0 tier has
-                          // `price = 25`, so tapping the free tier fell to the
-                          // final else and threw a logged-out visitor at a
-                          // login wall — on the tier 107 of this event's 110
-                          // guests actually used, from a screen whose own
-                          // comment says "Public events, logged out → guest
-                          // flow, NEVER /login."
-                          if (priceCents > 0 && live) {
-                            openGuestCheckout({
-                              eventId,
-                              eventTitle: e.title ?? "Event",
-                              tierId: String(live.id),
-                              tierName: live.name ?? t.name ?? "Ticket",
-                              priceCents: live.price_cents,
-                            });
-                          } else if (priceCents === 0 && live) {
-                            // $0 tier on a TICKETED event → guest-checkout's
-                            // free branch (tier inventory + order + email).
-                            // The RSVP sheet only fits tier-less free events.
-                            openGuestCheckout({
-                              eventId,
-                              eventTitle: e.title ?? "Event",
-                              tierId: String(live.id),
-                              tierName: live.name ?? t.name ?? "Ticket",
-                              priceCents: 0,
-                            });
-                          } else {
-                            router.push(loginPathWithReturn(pathname));
-                          }
+                          // Both free and paid selections use the fetched row.
+                          // A display-only fallback must never start checkout.
+                          openGuestPurchase(String(t.id));
                           return;
                         }
                         gateAuth(() => {
@@ -1968,6 +2023,13 @@ export function EventDetailScreen() {
                               : "Free"}
                         </span>
                       </div>
+                      {guestTierUnavailable && !soldOut ? (
+                        <p className="mt-1 text-xs text-white/50">
+                          {guestTierPurchase.kind === "loading"
+                            ? "Loading ticket availability…"
+                            : "Currently unavailable"}
+                        </p>
+                      ) : null}
                       {t.description ? (
                         <p className="text-white/55 text-sm mt-1">{t.description}</p>
                       ) : null}
@@ -2703,7 +2765,7 @@ export function EventDetailScreen() {
         open={verifyOpen}
         onClose={() => setVerifyOpen(false)}
         status={verificationStatus}
-        ageLabel={(event as any)?.ageRestriction || "18+"}
+        ageLabel={e?.ageRestriction || "18+"}
       />
     </div>
   );

@@ -17,6 +17,7 @@ import { Main } from "@dvnt/app/components/ui/html";
 import { useRouter, usePathname } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { routeIsImmersive, routeOwnsHeader } from "@dvnt/app/lib/web-chrome";
+import { guestEventRoute } from "@dvnt/app/lib/auth/guest-event-route";
 
 export function WebAppShell({
   children,
@@ -41,10 +42,11 @@ export function WebAppShell({
 
   useEffect(() => {
     if (requireAuth && hasHydrated && !isAuthenticated) {
-      // Logged out → the public landing / main site (not the login screen).
-      router.replace("/");
+      // Existing/shared event links must keep guests on that event. Only the
+      // exact detail route has a public equivalent; member tools stay gated.
+      router.replace(guestEventRoute(pathname, window.location.search) ?? "/");
     }
-  }, [requireAuth, hasHydrated, isAuthenticated, router]);
+  }, [requireAuth, hasHydrated, isAuthenticated, pathname, router]);
 
   // On public surfaces a logged-out visitor sees the (taller) marketing header
   // from SiteChrome → give the content ~100px of clearance; authed app chrome

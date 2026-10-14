@@ -1,8 +1,9 @@
+import { appendLegacyCaptionTags } from "@dvnt/app/lib/posts/post-caption";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
 import type { PostKind, TextPostSlide, TextPostThemeKey } from "@dvnt/app/lib/types";
-import { storage } from "@dvnt/app/lib/utils/storage";
+import { storage, registerUserDataReset } from "@dvnt/app/lib/utils/storage";
 import {
   createTextPostSlide,
   normalizeTextPostSlides,
@@ -224,8 +225,25 @@ export const useCreatePostStore = create<CreatePostState>()(
     }),
     {
       name: "create-post-storage",
+      version: 1,
+      // Legacy media drafts stored hashtags separately. Migrate once, rather
+      // than on mode changes, so text-card tags survive a Media/Text round trip.
+      migrate: (persistedState) => {
+        const draft = persistedState && typeof persistedState === "object" && !Array.isArray(persistedState)
+          ? persistedState as Partial<CreatePostState> : {};
+        if (draft.postKind === "text") return draft;
+        return {
+          ...draft,
+          caption: appendLegacyCaptionTags(
+            typeof draft.caption === "string" ? draft.caption : "",
+            Array.isArray(draft.tags) ? draft.tags : [],
+          ),
+          tags: [],
+        };
+      },
       storage: createJSONStorage(() => storage),
       partialize: (state) => ({
+        caption: state.caption,
         postKind:
           state.postKind === "text" &&
           state.textSlides.some((slide) => slide.content.trim().length > 0)
@@ -249,6 +267,8 @@ export const useCreatePostStore = create<CreatePostState>()(
 
         return {
           ...merged,
+          caption: typeof merged.caption === "string" ? merged.caption : "",
+          tags: Array.isArray(merged.tags) ? merged.tags.filter((tag) => typeof tag === "string") : [],
           textSlides: normalizeTextPostSlides(merged.textSlides),
           activeTextSlideIndex: Math.min(
             Math.max(merged.activeTextSlideIndex ?? 0, 0),
@@ -259,3 +279,5 @@ export const useCreatePostStore = create<CreatePostState>()(
     },
   ),
 );
+
+registerUserDataReset(() => useCreatePostStore.getState().reset());

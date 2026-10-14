@@ -16,6 +16,7 @@
  * Camera links to /feed/camera. Avatars / media tiles are rounded SQUARES, no pills.
  */
 
+import { getCaptionMetrics, validatePostCaption, MAX_CAPTION_LENGTH, MAX_CAPTION_RAW_LENGTH } from "@dvnt/app/lib/posts/post-caption";
 import dynamic from "next/dynamic";
 import { useEffect, useRef } from "react";
 import { useRouter } from "solito/navigation";
@@ -148,6 +149,8 @@ export function CreatePostScreen() {
   }, [cameraResult, setSelectedMedia, showToast]);
 
   const isTextPost = postKind === "text";
+  const captionMetrics = getCaptionMetrics(caption);
+  const captionValidation = validatePostCaption(caption);
   const activeTextSlide = textSlides[activeTextSlideIndex] ?? textSlides[0];
   const canAddMore = selectedMedia.length < MAX_PHOTOS;
 
@@ -158,7 +161,7 @@ export function CreatePostScreen() {
         slide.content.trim().length > 0 &&
         slide.content.trim().length <= TEXT_POST_MAX_LENGTH,
     );
-  const isValid = isTextPost ? areTextSlidesValid : selectedMedia.length > 0;
+  const isValid = isTextPost ? areTextSlidesValid : selectedMedia.length > 0 && captionValidation.valid;
   const busy = ui.isSubmitLocked;
 
   // ---- Media intake (file input → object-URL MediaAssets) ----
@@ -352,8 +355,8 @@ export function CreatePostScreen() {
           })}
         </div>
 
-        {/* Tags */}
-        <div className="mt-4">
+        {/* Text cards retain their existing separate tag/layout workflow. */}
+        {isTextPost ? <div className="mt-4">
           <div className="flex items-center gap-2">
             <div className="flex flex-1 items-center gap-1.5 rounded-xl border border-white/15 bg-[#111] px-3 h-11">
               <Hash size={16} className="text-[#8A40CF]" strokeWidth={2.5} />
@@ -397,6 +400,8 @@ export function CreatePostScreen() {
             </div>
           ) : null}
         </div>
+
+        : null}
 
         {/* One coherent media entry. The dedicated camera route remains
             available to other product surfaces without duplicating controls here. */}
@@ -621,12 +626,14 @@ export function CreatePostScreen() {
             <textarea
               value={caption}
               onChange={(e) => setCaption(e.target.value)}
-              placeholder="Caption (optional)"
-              maxLength={2200}
+              placeholder="Caption (optional). Add #hashtags here"
+              maxLength={MAX_CAPTION_RAW_LENGTH}
               rows={3}
               className="w-full resize-none rounded-xl border border-white/10 bg-white/6 px-3 py-2.5 text-[16px] text-white placeholder:text-white/35 outline-none focus:border-cyan-500/60"
             />
-            <p className="mt-1.5 text-right text-xs text-white/40">{caption.length}/2200</p>
+            <p className="mt-1.5 text-xs text-white/40">Hashtags don’t count toward your caption limit.</p>
+            <p className="mt-1.5 text-right text-xs text-white/40">{captionMetrics.characterCount}/{MAX_CAPTION_LENGTH}</p>
+            {!captionValidation.valid ? <p role="alert" className="mt-1 text-xs text-red-400">{captionValidation.error}</p> : null}
           </div>
         ) : null}
       </div>

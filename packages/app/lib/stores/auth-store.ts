@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isSameUser } from "../profile/same-user";
 import { persist, createJSONStorage } from "zustand/middleware";
 import {
   storage,
@@ -88,6 +89,7 @@ export const useAuthStore = create<AuthStore>()(
 
       setUser: (user) => {
         console.log("[AuthStore] setUser:", user?.id || "null");
+        if (get().user && !isSameUser(get().user, user)) clearUserDataFromStorage();
         const status: AuthStatus = user ? "authenticated" : "unauthenticated";
         set({ user, isAuthenticated: !!user, authStatus: status });
       },
@@ -290,6 +292,7 @@ export const useAuthStore = create<AuthStore>()(
               console.warn(
                 `[AuthStore] IDENTITY MISMATCH: persisted=${persistedUser.email} vs session=${session.user.email}. Clearing stale data.`,
               );
+              clearUserDataFromStorage();
               // Don't set authStatus here — let the rest of loadAuthState handle it
               set({ user: null, isAuthenticated: false });
               const {

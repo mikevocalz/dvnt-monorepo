@@ -19,6 +19,8 @@ import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event
 import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
 import { friendlyUploadError } from "@dvnt/app/lib/media/video-pick-policy";
 
+import { validatePostCaption } from "@dvnt/app/lib/posts/post-caption";
+
 type Draft = ReturnType<typeof useCreatePostStore.getState>;
 
 const queueStorage: PublishQueueStorage = {
@@ -138,6 +140,11 @@ export function usePublishPost() {
     const ownerId = owner?.authId || owner?.id;
     if (!ownerId) throw new Error("Please sign in before sharing a post.");
     const isText = draft.postKind === "text";
+    const mediaCaption = draft.caption;
+    if (!isText) {
+      const validation = validatePostCaption(mediaCaption);
+      if (!validation.valid) throw new Error(validation.error);
+    }
     const tags = draft.tags.length ? `\n${draft.tags.map((tag) => `#${tag}`).join(" ")}` : "";
     const slides = draft.textSlides.map((slide, index) =>
       `${slide.content.trim()}${index === draft.textSlides.length - 1 ? tags : ""}`.trim(),
@@ -157,7 +164,7 @@ export function usePublishPost() {
     const descriptor: PublishDescriptor = {
       operationId: `post-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`,
       postKind: isText ? "text" : "media",
-      content: isText ? slides[0] : draft.caption + tags,
+      content: isText ? slides[0] : mediaCaption,
       slides: isText ? slides : [],
       textTheme: draft.textTheme,
       location: draft.location,

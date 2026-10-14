@@ -60,7 +60,7 @@ export function createEventWidgetHandler(d:{db:any;authenticate:(r:Request)=>Pro
     }
     return json({ok:true,mode:'existing_checkout',allowedOrigin:normalizeEmbedOrigin(setting.data.allowed_origin),
       event:{id:e.id,title:e.title,startDate:e.start_date,timeZone:e.event_tz,location:e.location_name||e.location||'',flyerUrl:e.flyer_image_url||e.cover_image_url||e.image||null},
-      tiers,salesOpen,checkoutUrl:`https://dvntapp.live/public/events/${e.id}`});
+      tiers,salesOpen,checkoutUrl:`https://dvntapp.live/feed/events/${e.id}`});
    }
    if(req.method!=='POST')return json({error:'Method not allowed'},405);
    const user=await d.authenticate(req);if(!user)return json({error:'Sign in to manage this event widget.'},401);

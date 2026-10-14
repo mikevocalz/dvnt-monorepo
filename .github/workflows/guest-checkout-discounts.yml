@@ -38,7 +38,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Real guest handler with explicit database and Stripe fixtures
-        run: node --test apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs
+        run: node --test apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs apps/mobile/supabase/functions/guest-checkout/access.test.cjs
       - run: pnpm exec playwright install --with-deps chromium
       - name: Guest sheet code entry, stale quote protection and reviewed checkout
         run: node scripts/test-guest-checkout-browser.cjs
