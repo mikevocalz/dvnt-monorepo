@@ -1,13 +1,12 @@
 "use client";
 /**
  * GuestCheckoutSheet (web) — signed-out ticket purchase (Phase 5.6.3).
- * Collects email, username, full name, phone and quantity, calls guest-checkout
+ * Collects buyer email, optional name and quantity, calls guest-checkout
  * (which returns a hosted Stripe Checkout Session URL, or issues a free ticket
  * directly), and redirects the browser there. Card data never touches us; on
- * payment the stripe-webhook issues + emails the ticket(s) and sets up the
- * buyer's restricted profile. Signed-in buyers never see this sheet: they
- * already have every field. State in useGuestCheckoutStore and
- * useCheckoutProfileStore (Zustand, no useState).
+ * payment the stripe-webhook issues and emails the ticket(s). Account creation
+ * is optional and separate; guest purchases send no profile-provisioning fields.
+ * State lives in useGuestCheckoutStore (Zustand, no useState).
  */
 import { useEffect } from "react";
 import { Minus, Plus, Lock, CheckCircle2 } from "lucide-react";
@@ -18,17 +17,13 @@ import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
 import { guestQuoteReady, guestQuoteSelectionKey } from "@dvnt/app/lib/tickets/guest-checkout-quote";
 import { useGuestCheckoutQuote } from "./use-guest-checkout-quote.web";
 import { GuestCheckoutCode } from "./guest-checkout-code.web";
-import { useCheckoutProfileStore } from "@dvnt/app/lib/stores/checkout-profile-store";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
-import { CheckoutProfileFields } from "./checkout-profile-fields.web";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function GuestCheckoutSheet() {
   const s = useGuestCheckoutStore();
   useGuestCheckoutQuote();
-  const profile = useCheckoutProfileStore();
-  const resetProfile = profile.reset;
   // Door time in the venue's zone, from the detail query the sheet opened on.
   const { data: event } = useEvent(s.eventId);
   const eventWhen = formatEventWhen((event as any)?.fullDate, event as any);
@@ -36,10 +31,6 @@ export function GuestCheckoutSheet() {
   const eventId = s.eventId;
   const open = s.open;
   const requestKey = s.requestKey;
-  // Fresh fields for every sheet open (requestKey changes per open).
-  useEffect(() => {
-    if (open) resetProfile();
-  }, [open, requestKey, resetProfile]);
   // Fetch this event's attendee-name requirement (anon can read public events).
   useEffect(() => {
     if (!open || !eventId) return;
@@ -83,11 +74,6 @@ export function GuestCheckoutSheet() {
       s.patch({ error: "Enter a valid email." });
       return;
     }
-    const fields = profile.validate(email);
-    if (!fields.ok) {
-      s.patch({ error: fields.message });
-      return;
-    }
     if (namesRequired) {
       for (let i = 0; i < s.quantity; i++) {
         if (!(s.attendeeNames[i] ?? "").trim()) {
@@ -105,11 +91,7 @@ export function GuestCheckoutSheet() {
         ticket_type_id: s.tierId,
         quantity: s.quantity,
         guest_email: email,
-        // The full name doubles as the name on the ticket.
-        guest_name: fields.fields.fullName,
-        username: fields.fields.username,
-        full_name: fields.fields.fullName,
-        phone: fields.fields.phoneE164,
+        guest_name: s.name.trim(),
         idempotency_key: s.requestKey,
         discount_code: s.discountCode,
         promoter_code: s.trackedPromoterCode,
@@ -173,8 +155,7 @@ export function GuestCheckoutSheet() {
             to <b className="text-white">{s.email}</b>, each with its own QR for the door.
           </p>
           <p className="max-w-[300px] text-xs text-white/50">
-            The same email has a link to finish your DVNT profile. Verify your ID in DVNT to
-            post, comment and join rooms.
+            No account is needed to use your ticket. Creating a DVNT account is optional.
           </p>
           <button
             onClick={s.close}
@@ -206,7 +187,18 @@ export function GuestCheckoutSheet() {
           <span className="text-[11px] text-white/40">Your ticket arrives here.</span>
         </label>
 
-        <CheckoutProfileFields onEdit={() => s.patch({ error: null })} />
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium uppercase tracking-wide text-white/45">Name (optional)</span>
+          <input
+            disabled={s.loading}
+            type="text"
+            autoComplete="name"
+            maxLength={120}
+            value={s.name}
+            onChange={(e) => s.patch({ name: e.target.value, error: null })}
+            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#3FDCFF]"
+          />
+        </label>
 
         <div className="flex items-center justify-between">
           <span className="text-sm text-white/70">Quantity</span>
@@ -280,8 +272,7 @@ export function GuestCheckoutSheet() {
         </button>
         <p className="text-center text-[11px] text-white/40">
           {isFree ? "We'll email your free ticket." : "Secure checkout by Stripe."}{" "}
-          Already have an account?{" "}
-          <span className="text-white/60">Sign in and skip these fields.</span>
+          No account or username required.
         </p>
       </div>
       )}

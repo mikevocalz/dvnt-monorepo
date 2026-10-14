@@ -17,8 +17,6 @@ const boundaries={
  '@dvnt/app/components/bottom-sheet.web':`import React from 'react';export const BottomSheet=({open,onClose,title,children})=>open?<section role="dialog"><h1>{title}</h1><button aria-label="Close checkout" onClick={onClose}>Close</button>{children}</section>:null;`,
  '@dvnt/app/lib/hooks/use-events':`export const useEvent=()=>({data:null});`,
  '@dvnt/app/lib/events/event-time':`export const formatEventWhen=()=>'';`,
- '@dvnt/app/lib/stores/checkout-profile-store':`const state={reset:()=>{},validate:()=>({ok:true,fields:{fullName:'Fixture Buyer',username:'fixture',phoneE164:'+12125550123'}})};export const useCheckoutProfileStore=()=>state;`,
- './checkout-profile-fields.web':`export const CheckoutProfileFields=()=>null;`,
  './promoter-ref-store':`export const getPendingPromoterRef=()=>window.__tracked||null;`,
  '@dvnt/app/lib/supabase/client':`export const supabase={from:()=>({select:()=>({eq:()=>({single:()=>Promise.resolve({data:{attendee_name_requirement:'off',refund_policy:'none'}})})})}),functions:{invoke:async(_,options)=>{const response=await fetch('/fixture-api',{method:'POST',body:JSON.stringify(options.body),signal:options.signal});const data=await response.json();return {data,error:null};}}};`,
 };
@@ -47,6 +45,8 @@ const boundaries={
   browser=await chromium.launch({headless:true,channel:'chromium',args:['--no-sandbox','--disable-dev-shm-usage']});
   const page=await browser.newPage({viewport:{width:390,height:844}});const pageErrors=[];page.on('pageerror',e=>pageErrors.push(e.message));
   await page.goto('http://127.0.0.1:'+server.address().port);await page.evaluate(()=>window.begin());
+  assert.equal(await page.getByRole('textbox',{name:/username|mobile number/i}).count(),0);
+  await page.getByRole('textbox',{name:'Name (optional)',exact:true}).fill('Guest Buyer');
   const code=page.getByRole('textbox',{name:'Promo or promoter code'});
   await page.getByRole('button',{name:'Pay $31.75',exact:true}).waitFor();
   await code.fill('save10');await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent?.includes('Pay $31.75')&&b.disabled),{},{timeout:5000});
@@ -69,6 +69,7 @@ const boundaries={
   await page.route('https://checkout.stripe.com/**',route=>route.fulfill({body:'Fixture hosted checkout; no card charge.'}));
   await page.getByRole('button',{name:'Pay $28.68',exact:true}).click();await page.waitForURL('https://checkout.stripe.com/**');
   const payment=calls.find(body=>body.action!=='quote');assert.equal(payment.discount_code,'SAVE10');assert.match(payment.expected_quote_key,/^[a-f0-9]{64}$/);
+  for(const field of ['username','full_name','phone'])assert.equal(Object.hasOwn(payment,field),false,field+' must not provision an account');
   assert.equal(f.tables.orders.at(-1).total_cents,2868);assert.equal(f.stripe.length,1);
   assert.deepEqual(pageErrors,[],'no unexpected browser errors');
   console.log('PASS: visible mobile code field, apply/remove, quantity repricing, invalid code, stale quote, new-event reset, reviewed checkout payload and redirect (fixture Stripe).');

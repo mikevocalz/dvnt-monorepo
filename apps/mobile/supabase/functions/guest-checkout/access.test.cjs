@@ -53,3 +53,14 @@ test('already-issued free orders remain recoverable after an event becomes ineli
   assert.equal(replay.data.idempotent,true);assert.equal(replay.data.free,true);
   assert.equal(f.tables.tickets.length,issued);assert.equal(f.emails.length,sent);assert.equal(f.stripe.length,0);
 });
+
+for (const [label,tier] of [['paid',{}],['free',{price_cents:0}]]) {
+  test(`${label} email-only guest checkout does not provision an account or intake`,async()=>{
+    const f=fixture({tier});
+    const result=await f.pay({guest_name:'Guest Buyer'});
+    assert.equal(result.status,200);
+    assert.equal(result.data.ok,true);
+    assert.deepEqual(f.profileCalls,[]);
+    assert.equal(f.tables.orders.length,1);
+  });
+}
