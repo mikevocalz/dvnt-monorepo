@@ -73,6 +73,9 @@ jobs:
       - name: Real Next desktop/mobile routing and profile-session lifecycle
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-profile-completion-navigation.cjs
 
+      - name: Restored web membership resolves through React Query
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-membership-web-hydration.cjs
+
       - name: Profile percentage hydration and owner-only completion
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-profile-completion-percentage.cjs
 
