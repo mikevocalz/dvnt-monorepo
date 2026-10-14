@@ -1,4 +1,5 @@
 import test from "node:test";
+import { URL } from "node:url";
 import assert from "node:assert/strict";
 import { canDeleteComment, removeComment } from "./deletion.ts";
 
