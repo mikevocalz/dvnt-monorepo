@@ -19,6 +19,7 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { usePathname } from 'solito/navigation';
+import { useGuestCheckoutStore } from '@dvnt/app/lib/stores/guest-checkout-store';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
 import { AppShell } from '@dvnt/app/components/app-shell';
 import { routeIsImmersive } from '@dvnt/app/lib/web-chrome';
@@ -68,6 +69,12 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? '/';
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
+  const guestCheckoutOpen = useGuestCheckoutStore((s) => s.open);
+  const checkoutEventId = useGuestCheckoutStore((s) => s.eventId);
+  // Scope to this event's active guest checkout; stale state must not hide
+  // navigation elsewhere. Keep children in the same slot to preserve checkout.
+  const hideMarketingChrome = guestCheckoutOpen &&
+    pathname.replace(/\/$/, '') === `/public/events/${checkoutEventId}`;
 
   // Hydration guard (DVNT-WEB-9): zustand-persist rehydrates from localStorage
   // synchronously, so a signed-in visitor's FIRST client render could pick the
@@ -121,13 +128,13 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   // the old resize-time worklet crash class is gone — DVNT-WEB-6.)
   return (
     <>
-      <ChromeErrorBoundary label="header">
+      {!hideMarketingChrome && <ChromeErrorBoundary label="header">
         <GlassHeader webWindowScroll={pathname === '/'} />
-      </ChromeErrorBoundary>
+      </ChromeErrorBoundary>}
       {children}
-      <ChromeErrorBoundary label="footer">
+      {!hideMarketingChrome && <ChromeErrorBoundary label="footer">
         <Footer />
-      </ChromeErrorBoundary>
+      </ChromeErrorBoundary>}
     </>
   );
 }
