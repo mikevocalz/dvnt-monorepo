@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { URL } from "node:url";
 import { guestEventRoute } from "./guest-event-route.ts";
 
 test("legacy event details retain their event and safe checkout query data", () => {
