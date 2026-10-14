@@ -1,4 +1,5 @@
 import { memo, useCallback } from "react";
+import { DeleteCommentAction } from "./delete-comment-action";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Heart } from "lucide-react-native";
 import { UserAvatar } from "@dvnt/app/components/ui/avatar";
@@ -175,6 +176,8 @@ export function CommentRow({
               </Pressable>
             ) : null}
           </View>
+
+          <DeleteCommentAction comment={comment} postId={postId} />
 
           {canViewReplies ? (
             <Pressable
