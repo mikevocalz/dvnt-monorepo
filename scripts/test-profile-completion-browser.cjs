@@ -98,7 +98,7 @@ async function runScenarios(page, errors) {
   const invalidate = async (member = {authId:'b',id:'2'}) => { await page.evaluate(m => window.fixture.invalidateProfileCompletion(m), member); await settle(); };
   const focusInside = async () => page.waitForFunction(() => !!document.activeElement?.closest('[role=dialog]'));
   const assertNoDialog = async () => page.waitForFunction(() => !document.querySelector('[role=dialog]'));
-  const pending = async () => { await page.getByText('Checking your profile…', {exact:true}).waitFor(); await focusInside(); };
+  const pending = async () => { await assertNoDialog(); };
   const unchangedRequests = async (count, message) => { await settle(); assert.equal(await requestCount(), count, message); };
   const photoButton = () => page.getByRole('button', {name:'Add my profile picture'});
   const postButton = () => page.getByRole('button', {name:'Create my first post'});
@@ -120,11 +120,11 @@ async function runScenarios(page, errors) {
   await unchangedRequests(0, 'unhydrated auth snapshot updates do not read');
   await update({hydrated:true});
 
-  // Unknown state fails closed and never activates the app behind the dialog.
-  await waitRequests(1); await pending(); await dismissFails();
-  for (const key of ['Tab','Shift+Tab','Tab','Shift+Tab']) { await page.keyboard.press(key); await focusInside(); }
-  await page.locator('#profile-completion-status-title').focus(); await page.keyboard.press('Enter'); await focusInside();
-  assert.equal(await page.evaluate(() => window.fixture.backgroundClicks), 0);
+  // Unknown state checks silently; it does not trap navigation or focus.
+  // Server-side participation gates still enforce required verification.
+  await waitRequests(1); await pending();
+  await page.locator('#background').focus();
+  assert.equal(await page.getByRole('dialog').count(), 0);
   await reject(0); await retryButton().waitFor(); await focusInside(); await dismissFails();
   // Dismissal checks move focus, so re-mount the error host to verify autofocus.
   await update({hostKey:1}); await retryButton().waitFor();
@@ -204,7 +204,7 @@ async function runScenarios(page, errors) {
     await unchangedRequests(count + 1, 'leaving an exempt route reuses the failure and stays fail-closed');
   }
   // Every gate state exposes a usable path to tickets with no extra request.
-  for (const state of ['pending','error','photo','first_post']) {
+  for (const state of ['error','photo','first_post']) {
     await update({path:'/feed'}); count = await requestCount();
     await invalidate(); await waitRequests(count + 1);
     if (state === 'error') { await reject(count); await retryButton().waitFor(); }
@@ -391,7 +391,7 @@ async function runScenarios(page, errors) {
   assert.equal(await page.getByRole('dialog').count(), 1);
   assert.equal(await page.evaluate(() => window.fixture.backgroundClicks), 0);
   assert.deepEqual(errors, []);
-  console.log('PASS: real React popup/Dialog; fail-closed pending/error/retry; focus and non-dismissal; zero-read route/auth snapshot/remount stability; member/session ABA and stale generations; unmounted logout/invalidation; authoritative photo/post ordering; ticket/purchase exemptions; verification priority; throttled background freshness.');
+  console.log('PASS: real React popup/Dialog; silent pending checks; error retry; focus and non-dismissal; zero-read route/auth snapshot/remount stability; member/session ABA and stale generations; unmounted logout/invalidation; authoritative photo/post ordering; ticket/purchase exemptions; verification priority; throttled background freshness.');
 }
 
 (async () => {

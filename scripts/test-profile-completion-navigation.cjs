@@ -203,7 +203,7 @@ async function runBrowser(baseURL, evidenceFile) {
       });
       await page.evaluate(() => window.profileNavigation.setHostMounted(true));
       await page.waitForFunction(n => window.profileNavigation.progress.requests.length === n + 1, initial.requests);
-      await page.getByText('Checking your profile…', { exact: true }).waitFor();
+      await noDialog();
       await page.evaluate(() => window.profileNavigation.settle()); await noDialog();
       await checkpoint('same-member re-login while popup host absent');
 
@@ -216,7 +216,7 @@ async function runBrowser(baseURL, evidenceFile) {
         window.profileNavigation.publishSessionBoundary({ ready: true, authId });
       });
       await page.waitForFunction(n => window.profileNavigation.progress.requests.length === n + 1, beforeBoundary);
-      await page.getByText('Checking your profile…', { exact: true }).waitFor();
+      await noDialog();
       await page.evaluate(() => window.profileNavigation.settle()); await noDialog();
       await checkpoint('same-ID explicit authentication session replacement');
 
@@ -227,7 +227,7 @@ async function runBrowser(baseURL, evidenceFile) {
         const before = (await read()).requests;
         await page.evaluate(result_ => { window.profileNavigation.progress.result = result_; window.profileNavigation.invalidate(); }, result);
         await page.waitForFunction(n => window.profileNavigation.progress.requests.length === n + 1, before);
-        await page.getByText('Checking your profile…', { exact: true }).waitFor();
+        await noDialog();
         await page.evaluate(() => window.profileNavigation.settle());
         await page.getByRole('button', { name: action, exact: true }).waitFor();
         await checkpoint(label);

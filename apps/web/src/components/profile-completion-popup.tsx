@@ -50,14 +50,13 @@ export function ProfileCompletionPopup() {
     incomplete &&
     !verificationPopupOpen;
 
-  // Block unknown and failed reads, including account/session changes and
-  // retries. Navigation and remounts retain confirmed server evidence for this session.
-  // Purchases and verification stay open.
-  if (ready && allowed && check.status !== "ready" && !verificationPopupOpen) {
-    const failed = check.status === "error";
+  // Profile reads run silently. Never interrupt navigation with a loading
+  // dialog, including initial hydration, account changes and explicit refreshes.
+  // Confirmed missing requirements still use the mandatory setup dialog below.
+  if (ready && allowed && check.status === "error" && !verificationPopupOpen) {
     return (
       <Dialog
-        key={failed ? "retry" : "pending"}
+        key="retry"
         open
         onClose={() => {}}
         hideClose
@@ -66,8 +65,8 @@ export function ProfileCompletionPopup() {
         labelledBy="profile-completion-status-title"
       >
         <div
-          role={failed ? "alert" : "status"}
-          aria-live={failed ? "assertive" : "polite"}
+          role="alert"
+          aria-live="assertive"
           className="space-y-4 py-2 text-center text-white"
         >
           <p className="text-xs font-black uppercase tracking-[0.3em] text-[#FF5BFC]">
@@ -76,24 +75,20 @@ export function ProfileCompletionPopup() {
           <h2
             id="profile-completion-status-title"
             className="text-2xl font-black"
-            tabIndex={failed ? undefined : 0}
-            data-autofocus={failed ? undefined : true}
           >
-            {failed ? "We couldn't confirm your profile yet." : "Checking your profile…"}
+            We couldn't confirm your profile yet.
           </h2>
           <p className="text-sm leading-6 text-white/70">
-            {failed
-              ? "Reconnect so DVNT can verify your profile picture and first post."
-              : "Confirming your saved profile picture and first post."}
+            Reconnect so DVNT can verify your profile picture and first post.
           </p>
-          {failed && <button
+          <button
             type="button"
             data-autofocus
             onClick={retry}
             className="min-h-12 w-full rounded-xl bg-[#FF5BFC] px-6 py-3 font-bold text-black"
           >
             Retry connection
-          </button>}
+          </button>
           <button
             type="button"
             onClick={() => router.push("/feed/events/my-tickets")}
