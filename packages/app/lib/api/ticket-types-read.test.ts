@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { URL } from "node:url";
 
 // Exercise the actual API method with an isolated read-only Supabase fixture.
 // Extracting this dependency-free method avoids booting native auth modules.
