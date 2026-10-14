@@ -174,3 +174,20 @@ test("token cache never outlives server expiry", async () => {
   clock += 11_000;
   assert.equal(await cache.getToken(), "token-2");
 });
+
+test("only actual auth mutations change the completion session boundary, not token refresh", async () => {
+  const boundaries: { ready: boolean; authId?: string }[] = [];
+  const cache = createAccountTokenCache({
+    getIdentity: () => ({ id: "a", authId: "a" }),
+    getSession: async () => ({ data: { user: { id: "a" }, session: { token: "fictional-session" } } }),
+    onSessionBoundary: (state) => boundaries.push(state),
+  });
+  await cache.getToken(); cache.invalidate(); await cache.getToken();
+  assert.equal(boundaries.length, 0);
+  await cache.mutate("signIn", async () => ({ data: { user: { id: "a" } } }));
+  assert.deepEqual(boundaries, [{ ready: false }, { ready: true, authId: "a" }]);
+  await cache.mutate("signOut", async () => ({}));
+  assert.equal(boundaries.at(-1)?.ready, false);
+  await cache.mutate("signIn", async () => ({ data: { user: { id: "a" } } }));
+  assert.equal(boundaries.at(-1)?.ready, true);
+});

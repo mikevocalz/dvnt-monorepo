@@ -67,6 +67,12 @@ jobs:
       - name: Profile entry, account switches, keyboard focus and ticket access
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-profile-completion-browser.cjs
 
+      - name: Reproduce deployed popup lifecycle regression in real Next
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-profile-completion-navigation.cjs --baseline-regression
+
+      - name: Real Next desktop/mobile routing and profile-session lifecycle
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-profile-completion-navigation.cjs
+
       - name: Inline captions, draft migration and post editing
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-caption-composer.cjs
 

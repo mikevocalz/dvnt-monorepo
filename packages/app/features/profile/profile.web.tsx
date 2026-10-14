@@ -22,6 +22,7 @@
  * Local UI state (avatar lightbox) lives in a tiny Zustand store, never useState.
  */
 
+import { invalidateProfileCompletion } from "@dvnt/app/lib/profile/profile-completion-invalidation";
 import { useEffect, useMemo, useRef } from "react";
 import { useWindowScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
 import { useRouter } from "solito/navigation";
@@ -253,6 +254,7 @@ export function ProfileScreen() {
       }
       try {
         await usersApi.updateAvatar(uploadResult.url);
+        invalidateProfileCompletion(user);
       } catch {
         if (user) setUser({ ...user, avatar: previousAvatar });
         showToast("error", "Error", "Couldn't save changes. Try again.");
