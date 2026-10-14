@@ -39,25 +39,45 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
   // One reactive URL signal feeds Connection.Reload; token refresh updates it.
   const urlSignal = useRef(new Signal<URL | undefined>(undefined));
   const reloadRef = useRef<Moq.Connection.Reload | null>(null);
-  const backends = useRef(new Map<string, Watch.MultiBackend>());
+  const backends = useRef(new Map<string, {
+    backend: Watch.MultiBackend;
+    broadcast: Watch.Broadcast;
+  }>());
 
   const [muted, setMutedState] = useState(false);
   const [volume, setVolumeState] = useState(1);
-  const [ended] = useState(false);
+  const [ended, setEnded] = useState(false);
+  const [reload, setReload] = useState<Moq.Connection.Reload | null>(null);
 
-  // Build the Reload connection once.
-  if (!reloadRef.current && typeof window !== "undefined") {
-    reloadRef.current = new Moq.Connection.Reload({
+  // Effects own construction AND cleanup. A render-created connection is
+  // already closed after StrictMode/Fast Refresh replays effects; React need
+  // not render between cleanup and setup to rebuild it.
+  useEffect(() => {
+    setEnded(false);
+    if (!roomId || typeof window === "undefined") return;
+    urlSignal.current.set(undefined);
+    const connection = new Moq.Connection.Reload({
       url: urlSignal.current,
       enabled: true,
     });
-  }
-  const reload = reloadRef.current;
+    reloadRef.current = connection;
+    setReload(connection);
+    return () => {
+      for (const entry of backends.current.values()) {
+        entry.backend.close();
+        entry.broadcast.close();
+      }
+      backends.current.clear();
+      connection.close();
+      if (reloadRef.current === connection) reloadRef.current = null;
+      setReload((current: Moq.Connection.Reload | null) => current === connection ? null : current);
+    };
+  }, [roomId]);
 
   // Push the relay URL into the signal whenever the token (re)mints.
   useEffect(() => {
-    if (token?.relayUrl) urlSignal.current.set(new URL(token.relayUrl));
-  }, [token?.relayUrl]);
+    urlSignal.current.set(!ended && token?.relayUrl ? new URL(token.relayUrl) : undefined);
+  }, [token?.relayUrl, ended, reload]);
 
   // Reactive connection status + announced publisher paths.
   const status = useSignalValue(
@@ -85,9 +105,10 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
   // Detach backends for publishers that dropped.
   useEffect(() => {
     const live = new Set(publishers.map((p) => p.path));
-    for (const [path, backend] of backends.current) {
+    for (const [path, entry] of backends.current) {
       if (!live.has(path)) {
-        backend.close();
+        entry.backend.close();
+        entry.broadcast.close();
         backends.current.delete(path);
       }
     }
@@ -98,53 +119,56 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
       const existing = backends.current.get(path);
       if (!canvas) {
         if (existing) {
-          existing.close();
+          existing.backend.close();
+          existing.broadcast.close();
           backends.current.delete(path);
         }
         return;
       }
       if (existing) {
-        existing.element.set(canvas);
+        existing.backend.element.set(canvas);
         return;
       }
-      if (!reload) return;
+      if (!reload || reloadRef.current !== reload || ended) return;
+      const broadcast = new Watch.Broadcast({
+        connection: reload.established,
+        name: Moq.Path.from(path),
+        enabled: true,
+      });
       const backend = new Watch.MultiBackend({
         element: canvas,
-        broadcast: new Watch.Broadcast({
-          connection: reload.established,
-          name: Moq.Path.from(path),
-          enabled: true,
-        }),
+        broadcast,
         latency: "real-time",
         paused: false,
       });
       backend.audio.muted.set(muted);
       backend.audio.volume.set(volume);
-      backends.current.set(path, backend);
+      backends.current.set(path, { backend, broadcast });
     },
-    [reload, muted, volume],
+    [reload, muted, volume, ended],
   );
 
   const setMuted = useCallback((m: boolean) => {
     setMutedState(m);
-    for (const b of backends.current.values()) b.audio.muted.set(m);
+    for (const b of backends.current.values()) b.backend.audio.muted.set(m);
   }, []);
 
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
     setVolumeState(clamped);
-    for (const b of backends.current.values()) b.audio.volume.set(clamped);
+    for (const b of backends.current.values()) b.backend.audio.volume.set(clamped);
   }, []);
 
   const leave = useCallback(() => {
-    for (const b of backends.current.values()) b.close();
+    setEnded(true);
+    for (const b of backends.current.values()) {
+      b.backend.close();
+      b.broadcast.close();
+    }
     backends.current.clear();
     reloadRef.current?.close();
     reloadRef.current = null;
   }, []);
-
-  // Teardown on unmount (privacy: stop pulling media when we leave).
-  useEffect(() => () => leave(), [leave]);
 
   const state = deriveLynkState({
     hasToken: !!token,

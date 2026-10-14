@@ -31,7 +31,7 @@ const EMPTY: SpeakingMap = {};
 
 export interface UseSpeakingPresenceOptions {
   roomId: string | undefined;
-  /** The local user — used to publish, and to ignore our own echo. */
+  /** Public media peer id, from speakingSenderId; never an anonymous auth id. */
   userId: string | undefined;
   /** Local voice activity, from `useSpeakingDetection`. */
   speaking: boolean;

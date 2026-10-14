@@ -69,6 +69,8 @@ import type {
   RCPackageLike,
   OfferingsResultLike,
 } from "@dvnt/app/features/screens/membership/billing";
+import { billingSummary } from "@dvnt/app/lib/subscription/billing-summary";
+import { fetchSubscriptionRecords, subscriptionAuthId } from "@dvnt/app/lib/subscription/subscription-records";
 import { offeringsUnavailableCopy } from "@dvnt/app/features/screens/membership/billing";
 import { useSneakyPurchaseStore } from "../stores/sneaky-purchase-store";
 import { useSneakyLynkCaptureProtection } from "../hooks/useSneakyLynkCaptureProtection";
@@ -193,7 +195,7 @@ function NativeSneakySubscriptionModal({
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const queryClient = useQueryClient();
-  const { entitlements, records, isLoading } = useEntitlements();
+  const { entitlements, records, isLoading, isError, refetch } = useEntitlements();
   const currentKey = entitlements.planKey;
 
   const purchasingPlanKey = useSneakyPurchaseStore((s) => s.purchasingPlanKey);
@@ -235,7 +237,7 @@ function NativeSneakySubscriptionModal({
   // Buy buttons render only for a fresh subscriber or an own-store sneaky
   // tier switch — never over a web-rail or other-store subscription.
   const canSell =
-    !!billing && !isLoading && !webRailActive && !crossStoreActive;
+    !!billing && !isLoading && !isError && !webRailActive && !crossStoreActive;
   const currentSneakyKey: PlanKey | null = ownStoreSneaky?.planKey ?? null;
 
   // ── RC catalog (server state → TanStack). Prices only — never entitlement.
@@ -313,7 +315,7 @@ function NativeSneakySubscriptionModal({
   const onBuy = useCallback(
     async (planKey: PlanKey) => {
       const pkg = packageByPlan[planKey];
-      if (!billing || !pkg) return;
+      if (!billing || !pkg || !canSell) return;
       const store = useSneakyPurchaseStore.getState();
       if (store.purchasingPlanKey || store.restoring) return;
       store.startPurchase(planKey);
@@ -337,7 +339,7 @@ function NativeSneakySubscriptionModal({
         store.purchaseFailed(res.error ?? "Purchase failed. Please try again.");
       }
     },
-    [billing, packageByPlan, currentSneakyKey, queryClient],
+    [billing, packageByPlan, currentSneakyKey, queryClient, canSell],
   );
 
   const onRestore = useCallback(async () => {
@@ -570,6 +572,12 @@ function NativeSneakySubscriptionModal({
             </View>
           ) : null}
 
+          {isError ? (
+            <Pressable onPress={refetch} accessibilityRole="button" accessibilityLabel="Retry subscription verification" className="rounded-2xl p-4">
+              <Text className="text-sm text-foreground">Could not verify your subscription. Tap to retry.</Text>
+            </Pressable>
+          ) : null}
+
           {/* Tier cards — canonical Sneaky tiers from plans.ts */}
           {SNEAKY_PLAN_KEYS.map((key) => {
             const p = PLANS[key];
@@ -748,6 +756,9 @@ function StripeSubscriptionModal({
   useSneakyLynkCaptureProtection();
 
   const authUser = useAuthStore((s) => s.user);
+  const { entitlements, records, isLoading, isError, refetch } = useEntitlements();
+  const { canCheckoutStandalone } = billingSummary(records, entitlements);
+  const canSell = !isLoading && !isError && canCheckoutStandalone;
   const showToast = useUIStore((s) => s.showToast);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
@@ -770,7 +781,7 @@ function StripeSubscriptionModal({
 
   const handleSubscribe = useCallback(
     async (planId: string) => {
-      if (!authUser?.id || planId === "free") return;
+      if (!subscriptionAuthId(authUser) || planId === "free" || !canSell) return;
       setLoadingPlanId(planId);
 
       try {
@@ -798,6 +809,7 @@ function StripeSubscriptionModal({
               ? "Stripe updated your plan and billed the prorated difference."
               : "Stripe updated your plan and applied any prorated credit to your next invoice.",
           );
+          refetch();
           onSubscribed?.(data.plan_id || planId);
           onClose();
           return;
@@ -827,19 +839,17 @@ function StripeSubscriptionModal({
           });
 
           if (result.type === "cancel" || result.type === "dismiss") {
-            const { data: sub } = await supabase
-              .from("sneaky_subscriptions")
-              .select("status, plan_id")
-              .eq("host_id", authUser.id)
-              .single();
-
-            if (sub?.status === "active" || sub?.status === "trialing") {
+            const latest = await fetchSubscriptionRecords(supabase, subscriptionAuthId(authUser)!);
+            const requestedKey = planId === "host_25" ? "sneaky_tier_1" : "sneaky_tier_2";
+            const activated = latest.some((r) => r.planKey === requestedKey && isSubscriptionActive(r));
+            refetch();
+            if (activated) {
               showToast(
                 "success",
                 "Subscribed!",
-                `You are now on the ${STRIPE_PLANS.find((p) => p.id === sub.plan_id)?.name} plan.`,
+                `You are now on the ${STRIPE_PLANS.find((p) => p.id === planId)?.name} plan.`,
               );
-              onSubscribed?.(sub.plan_id);
+              onSubscribed?.(planId);
               onClose();
             }
           }
@@ -862,7 +872,7 @@ function StripeSubscriptionModal({
         setLoadingPlanId(null);
       }
     },
-    [authUser?.id, onClose, onSubscribed, showToast],
+    [authUser, onClose, onSubscribed, showToast, canSell, refetch],
   );
 
   if (!visible) return null;
@@ -930,6 +940,14 @@ function StripeSubscriptionModal({
           bounces={false}
           contentContainerStyle={{ gap: 10, paddingBottom: 16 }}
         >
+          {isError ? (
+            <Pressable onPress={refetch} accessibilityRole="button">
+              <Text className="text-sm text-foreground">Could not verify your subscription. Tap to retry.</Text>
+            </Pressable>
+          ) : !isLoading && !canCheckoutStandalone ? (
+            <Text className="text-sm text-foreground">Your existing plan includes Sneaky Lynk. Manage it in membership settings or the store where you subscribed.</Text>
+          ) : null}
+
           {STRIPE_PLANS.map((plan) => {
             const isCurrentPlan = plan.id === currentPlan;
             const isSelected = plan.id === selectedPlan;
@@ -1016,7 +1034,7 @@ function StripeSubscriptionModal({
                 {!isFree && !isCurrentPlan && isSelected && (
                   <Pressable
                     onPress={() => handleSubscribe(plan.id)}
-                    disabled={!!loadingPlanId}
+                    disabled={!!loadingPlanId || !canSell}
                     className="mt-3 rounded-xl py-3 flex-row items-center justify-center gap-2"
                     style={{
                       backgroundColor: "#8A40CF",

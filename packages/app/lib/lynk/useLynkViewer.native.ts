@@ -17,9 +17,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSession, useBroadcasts } from "react-native-moq";
+import { useBroadcasts } from "react-native-moq";
 import type { BroadcastInfo, SessionState } from "react-native-moq";
 import { useMoqToken } from "./useMoqToken";
+import { useNativeMoqSession } from "./useNativeMoqSession";
 import { deriveLynkState, type MoqConnectionStatus } from "./lynkState";
 import type { LynkPublisher, LynkViewerBase } from "./types";
 
@@ -50,22 +51,15 @@ export function useLynkViewer(
   roomId: string | undefined,
 ): UseLynkViewerNativeResult {
   const { token, error: tokenError } = useMoqToken(roomId, "subscribe", !!roomId);
-  const session = useSession(token?.relayUrl ?? "");
 
   const [muted, setMutedState] = useState(false);
   const [volume, setVolumeState] = useState(1);
   const [ended, setEnded] = useState(false);
+  useEffect(() => { setEnded(false); }, [roomId]);
+  const session = useNativeMoqSession(token?.relayUrl, !ended);
 
   const namespace = token?.namespace ?? (roomId ? `lynk/${roomId}` : "");
-  const { connect, disconnect } = session;
-
-  // Connect once the relay URL exists. `session.url` is read at connect() time,
-  // so a token refresh that changes the URL reconnects on the new one.
-  useEffect(() => {
-    if (!token?.relayUrl || ended) return;
-    connect();
-    return () => disconnect();
-  }, [token?.relayUrl, ended, connect, disconnect]);
+  const { disconnect } = session;
 
   const broadcasts = useBroadcasts(session, namespace);
 

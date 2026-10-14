@@ -56,6 +56,9 @@ import type {
   RoomMember,
 } from "../types";
 
+import { useRoomLifecycle } from "./useRoomLifecycle";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 min before expiry
 
 interface UseVideoRoomOptions {
@@ -89,6 +92,13 @@ export function useVideoRoom({
   // Subscribe to full state for return value; use getState() in callbacks.
   const store = useVideoRoomStore();
   const getStore = useVideoRoomStore.getState;
+  const owner = useAuthStore((s) => s.user?.authId || s.user?.id || "");
+  const admissionKey = JSON.stringify([roomId, owner]);
+  const [admittedKey, setAdmittedKey] = useState<string | null>(null);
+  const admissionKeyRef = useRef(admissionKey);
+  admissionKeyRef.current = admissionKey;
+  const joinEpoch = useRef(0);
+  const admitted = admittedKey === admissionKey && !!owner;
 
   // ── Media transport (MoQ) ─────────────────────────────────────────
   // Role decides publish capability, and it only exists after video_join_room
@@ -101,8 +111,8 @@ export function useVideoRoom({
   // every joiner gets — was missing, so a guest never asked for a publish
   // token and the host was hosting people who could see and hear but could
   // never be seen or heard.
-  const canPublish = isPublisherRole(localRole);
-  const media = useLynkBroadcast(roomId || undefined, canPublish);
+  const canPublish = admitted && isPublisherRole(localRole);
+  const media = useLynkBroadcast(admitted ? roomId : undefined, canPublish);
 
   // The roster carries identity for remote tiles (MoQ paths carry none).
   const [members, setMembers] = useState<RoomMember[]>([]);
@@ -187,6 +197,8 @@ export function useVideoRoom({
 
   const handleEject = useCallback(
     (payload: EjectPayload) => {
+      ++joinEpoch.current;
+      setAdmittedKey(null);
       getStore().setEjected(payload);
       mediaRef.current.end();
       clearTokenTimer();
@@ -196,11 +208,21 @@ export function useVideoRoom({
   );
 
   const handleRoomEnded = useCallback(() => {
+    ++joinEpoch.current;
+    setAdmittedKey(null);
+    setMembers([]);
+    unsubscribeMembersRef.current?.();
     getStore().setRoomEnded();
     mediaRef.current.end();
     clearTokenTimer();
     onRoomEndedRef.current?.();
   }, [clearTokenTimer, getStore]);
+
+  const { notifyEnded } = useRoomLifecycle({
+    roomId, userId: admitted ? store.localUser?.id : undefined,
+    enabled: admitted, onEnded: handleRoomEnded,
+    connectionStatus: store.connectionState.status,
+  });
 
   const setMicEnabled = useCallback(
     async (enabled: boolean) => {
@@ -250,7 +272,7 @@ export function useVideoRoom({
           }
           break;
         case "room_ended":
-          handleRoomEnded();
+          notifyEnded();
           break;
         // Host mute is a LOCK, not a remote microphone switch: muting stops
         // publishing and blocks self-unmute; lifting it restores the
@@ -293,11 +315,13 @@ export function useVideoRoom({
           break;
       }
     },
-    [handleEject, handleRoomEnded, getStore, setMicEnabled],
+    [handleEject, notifyEnded, getStore, setMicEnabled],
   );
 
   const scheduleTokenRefresh = useCallback(
     (expiresAt: Date) => {
+      const epoch = joinEpoch.current;
+      const key = admissionKeyRef.current;
       clearTokenTimer();
 
       const now = Date.now();
@@ -307,12 +331,14 @@ export function useVideoRoom({
       console.log(`[useVideoRoom] Token refresh scheduled in ${delay / 1000}s`);
 
       tokenRefreshTimerRef.current = setTimeout(async () => {
+        if (epoch !== joinEpoch.current || key !== admissionKeyRef.current) return;
         try {
           console.log("[useVideoRoom] Refreshing token...");
           const result = await videoApi.refreshToken(
             roomId,
             currentJtiRef.current || undefined,
           );
+          if (epoch !== joinEpoch.current || key !== admissionKeyRef.current) return;
 
           if (!result.ok) {
             console.error("[useVideoRoom] Token refresh failed:", result.error);
@@ -328,6 +354,7 @@ export function useVideoRoom({
           tokenExpiresAtRef.current = new Date(result.data!.expiresAt);
           scheduleTokenRefresh(tokenExpiresAtRef.current);
         } catch (err) {
+          if (epoch !== joinEpoch.current || key !== admissionKeyRef.current) return;
           console.error("[useVideoRoom] Token refresh error:", err);
           onErrorRef.current?.("Failed to refresh session");
         }
@@ -337,6 +364,8 @@ export function useVideoRoom({
   );
 
   const join = useCallback(async () => {
+    const epoch = ++joinEpoch.current;
+    const key = admissionKeyRef.current;
     if (getStore().isEjected) {
       onErrorRef.current?.("You have been removed from this room");
       return false;
@@ -346,6 +375,7 @@ export function useVideoRoom({
 
     try {
       const result = await videoApi.joinRoom(roomId, anonymousRef.current);
+      if (epoch !== joinEpoch.current || key !== admissionKeyRef.current) return false;
 
       if (!result.ok) {
         getStore().setConnectionStatus("error", result.error?.message);
@@ -389,6 +419,8 @@ export function useVideoRoom({
         anonLabel: user.anonLabel || null,
       });
 
+      setAdmittedKey(key);
+
       // Media needs no explicit join: writing localUser above flips
       // `canPublish`, which mints the MoQ token, connects the session and
       // trips the go-live effect below.
@@ -400,12 +432,13 @@ export function useVideoRoom({
 
       // Identity for remote tiles comes from the roster, not from the
       // transport — MoQ paths carry no metadata.
-      setMembers(await videoApi.getRoomMembers(roomId));
+      setMembers([]);
 
       // Schedule token refresh
       scheduleTokenRefresh(tokenExpiresAtRef.current);
 
       // Subscribe to room events
+      unsubscribeEventsRef.current?.();
       unsubscribeEventsRef.current = videoApi.subscribeToRoomEvents(
         roomId,
         user.id,
@@ -413,22 +446,19 @@ export function useVideoRoom({
       );
 
       // Subscribe to member changes
-      unsubscribeMembersRef.current = videoApi.subscribeToMembers(
-        roomId,
-        (member, eventType) => {
-          console.log(
-            "[useVideoRoom] Member change:",
-            eventType,
-            member.userId,
-          );
-          // Re-read rather than patch: joins, leaves and role changes all land
-          // here and the roster is small (max 10 members per room).
-          void videoApi.getRoomMembers(roomId).then(setMembers);
+      unsubscribeMembersRef.current?.();
+      unsubscribeMembersRef.current = videoApi.subscribeToMembers(roomId, () => {}, {
+        onSync: (snapshot) => {
+          if (epoch === joinEpoch.current && key === admissionKeyRef.current) setMembers(snapshot);
         },
-      );
+        onError: () => {
+          if (epoch === joinEpoch.current && key === admissionKeyRef.current) onErrorRef.current?.("Participants couldn't refresh. Reconnecting…");
+        },
+      });
 
       return true;
     } catch (err) {
+      if (epoch !== joinEpoch.current || key !== admissionKeyRef.current) return false;
       console.error("[useVideoRoom] Join error:", err);
       getStore().setConnectionStatus("error", "Connection failed");
       onErrorRef.current?.("Failed to connect to room");
@@ -439,6 +469,9 @@ export function useVideoRoom({
   const leave = useCallback(async () => {
     console.log("[useVideoRoom] Leaving room...");
 
+    ++joinEpoch.current;
+    setAdmittedKey(null);
+    setMembers([]);
     clearTokenTimer();
     unsubscribeEventsRef.current?.();
     unsubscribeMembersRef.current?.();
@@ -607,6 +640,7 @@ export function useVideoRoom({
   useEffect(() => {
     return () => {
       if (!roomIdRef.current) return;
+      ++joinEpoch.current;
       clearTokenTimer();
       unsubscribeEventsRef.current?.();
       unsubscribeMembersRef.current?.();
@@ -619,6 +653,8 @@ export function useVideoRoom({
   // Spread store state so consumers get reactive updates via Zustand.
   return {
     room: store.room,
+    isAdmitted: admitted,
+    notifyRoomEnded: notifyEnded,
     localUser: store.localUser,
     participants: store.participants,
     connectionState: store.connectionState,

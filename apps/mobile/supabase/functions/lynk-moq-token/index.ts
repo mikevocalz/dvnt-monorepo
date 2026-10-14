@@ -29,13 +29,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
+import { mintBoundedMoqAccess, moqAccessFailure } from "../_shared/lynk-moq-access.ts";
 // PINNED. This import used to be bare `npm:@fishjam-cloud/js-server-sdk`, so
 // Deno resolved whatever was latest at deploy time. 0.30.0 renamed
 // `createMoqToken` to `createMoqAccess`, the call below started throwing
 // TypeError, and every MoQ join — web AND native, product AND genesis — came
 // back as `internal_error: Failed to mint MoQ token`. A silent server-side
 // break with no client change is exactly what a floating range buys you.
-import { FishjamClient } from "npm:@fishjam-cloud/js-server-sdk@0.30.0";
+// 0.30.1 adds the provider-signed TTL field (seconds). Keep this pinned.
+import { FishjamClient } from "npm:@fishjam-cloud/js-server-sdk@0.30.1";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
@@ -139,7 +141,9 @@ Deno.serve(async (req) => {
     }
     const userId = sessionResult.userId as string;
 
-    // Verified-only admission. A client that skips the banner is still refused.
+    // Preserve the verification-first contract, including malformed requests.
+    // Admission is checked again in the pre/post-mint snapshots below: reading
+    // the request body or contacting the provider may outlive this decision.
     const admission = await resolveVerifiedAdmission(supabase, userId);
     if (admission.state === "blocked") {
       const refusal = admissionRefusal(admission);
@@ -155,127 +159,146 @@ Deno.serve(async (req) => {
     }
     const parsed = TokenSchema.safeParse(body);
     if (!parsed.success) {
-      return errorResponse("validation_error", parsed.error.errors[0].message);
+      return errorResponse("validation_error", parsed.error.issues[0]?.message ?? "Invalid token request");
     }
     const { roomId, intent } = parsed.data;
 
-    // 3. Room must exist + be open
-    const { data: room } = await supabase
-      .from("video_rooms")
-      .select("*")
-      .eq("uuid", roomId)
-      .single();
-    if (!room) return errorResponse("not_found", "Room not found");
-    if (room.status !== "open") {
-      return errorResponse("conflict", "Room is no longer open");
-    }
-    // Every media transport enforces current admission and schedule before tokens.
-    const eventAccess = await resolveEventRoomAccess(supabase, room, userId);
-    if (!eventAccess.ok) {
-      return errorResponse(eventAccess.code, eventAccess.message, eventAccess.detail);
-    }
-    room.ends_at = eventAccess.endsAt;
-    if (room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
-      return errorResponse("conflict", "This Lynk's session has ended", { reason: "session_expired" });
-    }
-
-    const internalRoomId = room.id;
-
-    // 4. Ban check
-    const { data: isBanned } = await supabase.rpc("is_user_banned_from_room", {
-      p_user_id: userId,
-      p_room_id: internalRoomId,
-    });
-    if (isBanned) {
-      return errorResponse("forbidden", "You are banned from this room");
-    }
-
-    // 5. Existing membership (drives role + private-access)
-    const { data: existingMember } = await supabase
-      .from("video_room_members")
-      .select("*")
-      .eq("room_id", internalRoomId)
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (existingMember?.status === "banned") {
-      return errorResponse("forbidden", "You are banned from this room");
-    }
-
-    const isHostOrCoHost =
-      userId === room.created_by ||
-      existingMember?.role === "host" ||
-      existingMember?.role === "co-host";
-
-    // 6. Private-room access gate (verbatim from video_join_room)
-    if (!room.is_public && !eventAccess.linked) {
-      const hasPriorAccess =
-        !!existingMember &&
-        existingMember.status !== "banned" &&
-        existingMember.status !== "kicked";
-
-      let hasInvite = false;
-      if (!isHostOrCoHost && !hasPriorAccess) {
-        const { data: invite } = await supabase
-          .from("video_room_invites")
-          .select("id")
-          .eq("room_id", internalRoomId)
-          .eq("user_id", userId)
-          .maybeSingle();
-        hasInvite = !!invite;
+    async function authorizeAccess() {
+      // Verified-only admission. A client that skips the banner is still refused.
+      const admission = await resolveVerifiedAdmission(supabase, userId);
+      if (admission.state === "blocked") {
+        const refusal = admissionRefusal(admission);
+        return moqAccessFailure("forbidden", refusal.message, { reason: refusal.reason });
       }
 
-      if (!isHostOrCoHost && !hasPriorAccess && !hasInvite) {
-        return errorResponse("forbidden", "This private Lynk is invite-only", {
-          reason: "invite_only",
+      // 3. Room must exist + be open
+      const { data: room, error: roomError } = await supabase
+        .from("video_rooms")
+        .select("*")
+        .eq("uuid", roomId)
+        .maybeSingle();
+      if (roomError) throw roomError;
+      if (!room) return moqAccessFailure("not_found", "Room not found");
+      if (room.status !== "open") {
+        return moqAccessFailure("conflict", "Room is no longer open");
+      }
+      // Every media transport enforces current admission and schedule before tokens.
+      const eventAccess = await resolveEventRoomAccess(supabase, room, userId);
+      if (!eventAccess.ok) {
+        return moqAccessFailure(eventAccess.code, eventAccess.message, eventAccess.detail);
+      }
+      room.ends_at = eventAccess.endsAt;
+      if (room.ends_at && Date.parse(room.ends_at) <= Date.now()) {
+        return moqAccessFailure("conflict", "This Lynk's session has ended", { reason: "session_expired" });
+      }
+
+      const internalRoomId = room.id;
+
+      // 4. Ban check
+      const { data: isBanned, error: banError } = await supabase.rpc("is_user_banned_from_room", {
+        p_user_id: userId,
+        p_room_id: internalRoomId,
+      });
+      if (banError) throw banError;
+      if (isBanned) {
+        return moqAccessFailure("forbidden", "You are banned from this room");
+      }
+
+      // 5. Existing membership (drives role + private-access)
+      const { data: existingMember, error: memberError } = await supabase
+        .from("video_room_members")
+        .select("*")
+        .eq("room_id", internalRoomId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (memberError) throw memberError;
+      if (existingMember?.status === "kicked") {
+        return moqAccessFailure("forbidden", "You have been removed from this room");
+      }
+      if (existingMember?.status === "banned") {
+        return moqAccessFailure("forbidden", "You are banned from this room");
+      }
+
+      const isHostOrCoHost =
+        userId === room.created_by ||
+        existingMember?.role === "host" ||
+        existingMember?.role === "co-host";
+
+      // 6. Private-room access gate (verbatim from video_join_room)
+      if (!room.is_public && !eventAccess.linked) {
+        const hasPriorAccess =
+          !!existingMember &&
+          existingMember.status !== "banned" &&
+          existingMember.status !== "kicked";
+
+        let hasInvite = false;
+        if (!isHostOrCoHost && !hasPriorAccess) {
+          const { data: invite, error: inviteError } = await supabase
+            .from("video_room_invites")
+            .select("id")
+            .eq("room_id", internalRoomId)
+            .eq("user_id", userId)
+            .maybeSingle();
+          if (inviteError) throw inviteError;
+          hasInvite = !!invite;
+        }
+
+        if (!isHostOrCoHost && !hasPriorAccess && !hasInvite) {
+          return moqAccessFailure("forbidden", "This private Lynk is invite-only", {
+            reason: "invite_only",
+          });
+        }
+      }
+
+      // 7. Determine effective role + publish capability
+      const role = isHostOrCoHost
+        ? (userId === room.created_by ? "host" : existingMember?.role ?? "co-host")
+        : (existingMember?.role ?? "participant");
+      const canPublish = role === "host" || PUBLISH_ROLES.has(role);
+
+      if (intent === "publish" && !canPublish) {
+        return moqAccessFailure("forbidden", "Not permitted to broadcast in this Lynk", {
+          reason: "publish_not_allowed",
+          role,
         });
       }
+
+      // 8. Build the scoped path + mint the single-purpose MoQ token
+      const peerId = peerIdFor(userId, existingMember?.anon_label ?? null);
+      const namespace = `lynk/${roomId}`;
+      const path = intent === "publish" ? `${namespace}/${peerId}` : namespace;
+
+      return { ok: true as const, access: { role, peerId, path, namespace, endsAt: room.ends_at ?? null, memberStatus: existingMember?.status ?? null } };
     }
-
-    // 7. Determine effective role + publish capability
-    const role = isHostOrCoHost
-      ? (userId === room.created_by ? "host" : existingMember?.role ?? "co-host")
-      : (existingMember?.role ?? "participant");
-    const canPublish = role === "host" || PUBLISH_ROLES.has(role);
-
-    if (intent === "publish" && !canPublish) {
-      return errorResponse("forbidden", "Not permitted to broadcast in this Lynk", {
-        reason: "publish_not_allowed",
-        role,
-      });
-    }
-
-    // 8. Build the scoped path + mint the single-purpose MoQ token
-    const peerId = peerIdFor(userId, existingMember?.anon_label ?? null);
-    const namespace = `lynk/${roomId}`;
-    const path = intent === "publish" ? `${namespace}/${peerId}` : namespace;
 
     const fishjam = new FishjamClient({ fishjamId, managementToken });
-    // `createMoqAccess` (0.30.0) returns BOTH the token and a ready connection
-    // URL with the JWT already embedded. Use the URL it gives us rather than
-    // rebuilding `https://relay.fishjam.io/${fishjamId}?jwt=` by hand: the relay
-    // host is Fishjam's to choose, and hardcoding it here is a second thing to
-    // get wrong the day it moves.
-    const { token, connection_url: relayUrl } =
-      intent === "publish"
-        ? await fishjam.createMoqAccess({ publishPath: path })
-        : await fishjam.createMoqAccess({ subscribePath: path });
+    // Both publish and subscribe credentials are signed, single-purpose, short
+    // lived, and released only after a second authoritative admission check.
+    const access = await mintBoundedMoqAccess({
+      intent,
+      authorize: authorizeAccess,
+      mint: (config) => fishjam.createMoqAccess(config),
+    });
+    if (!access.ok) {
+      return errorResponse(access.error.code, access.error.message, access.error.detail);
+    }
 
     return jsonResponse({
       ok: true,
       data: {
-        token,
-        relayUrl,
+        token: access.token,
+        relayUrl: access.relayUrl,
         fishjamId,
         intent,
-        role,
-        peerId,
+        role: access.access.role,
+        peerId: access.access.peerId,
         // The publisher's own path (publish) or the room namespace (subscribe).
-        path,
+        path: access.access.path,
         // The room namespace — viewers subscribe here to discover all publishers.
-        namespace,
-        // Mirror video_join_room's 1h client-side refresh cadence.
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        namespace: access.access.namespace,
+        // The issued JWT expiry, never a synthetic lifetime from response time.
+        expiresAt: access.expiresAt,
       },
     });
   } catch (err) {

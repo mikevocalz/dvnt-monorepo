@@ -103,6 +103,7 @@ import { ConnectionBanner, RoomTimer, type ConnectionPhase } from "@dvnt/ui";
 import { HOST_MUTE_COPY } from "@dvnt/app/lib/video/host-mute";
 import { bannerPhaseFor, useRoomSession } from "@dvnt/app/features/sneaky-lynk/session/useRoomSession";
 import { isActive } from "@dvnt/app/features/sneaky-lynk/session/machine";
+import { leaveRoomSafely } from "@dvnt/app/features/sneaky-lynk/session/leave-room";
 import { useRoomHeartbeat } from "@dvnt/app/features/sneaky-lynk/hooks/useRoomHeartbeat";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
@@ -703,6 +704,7 @@ function SneakyLynkRoomScreenContent({
   if (isServerRoom) {
     return (
       <ServerRoom
+        key={id}
         id={id}
         paramTitle={paramTitle}
         roomHasVideo={roomHasVideo}
@@ -1198,9 +1200,9 @@ function ServerRoom({
     (room?: SneakyRoom | null, reason?: string) => {
       if (room) setRoomSnapshot(room);
       setClosedReason(reason || "This Lynk has ended and can't be reopened.");
-      endRoomHistory(id, room?.listeners ?? storeListeners.length);
+      endRoomHistory(id, room?.listeners ?? useRoomStore.getState().listeners.length);
     },
-    [endRoomHistory, id, storeListeners.length],
+    [endRoomHistory, id],
   );
 
   const videoRoom = useVideoRoom({
@@ -1315,10 +1317,10 @@ function ServerRoom({
   // host with the real username so moderators see the full picture
   // while the public room banner only carries the anon label.
   const captureBroadcast = useSneakyLynkCaptureBroadcast({
-    roomId: id,
+    roomId: videoRoom.isAdmitted ? id : undefined,
     roomTitle:
       videoRoom.room?.title || roomSnapshot?.title || paramTitle || undefined,
-    localUserId: localUser.id,
+    localUserId: videoRoom.isAdmitted ? localUser.id : undefined,
     localUsername: localUser.displayName || localUser.username,
     hostUserId: roomSnapshot?.host?.id,
     attributable: !localUser.isAnonymous,
@@ -1522,6 +1524,7 @@ function ServerRoom({
           }));
 
           if (room.status === "ended") {
+            videoRoomRef.current.notifyRoomEnded();
             setClosedReason("This Lynk has ended and can't be reopened.");
           }
         },
@@ -1534,43 +1537,7 @@ function ServerRoom({
   }, [id, paramTitle, roomHasVideo]);
 
   useEffect(() => {
-    if (!id || !videoRoom.localUser?.id || connectionState !== "connected") {
-      return;
-    }
-
-    let cancelled = false;
-
-    void (async () => {
-      const members = await videoApi.getRoomMembers(id);
-      if (cancelled) return;
-
-      const nextRaisedHands = members.reduce<Record<string, boolean>>(
-        (acc, member) => {
-          if (member.status === "active" && member.handRaised) {
-            acc[member.userId] = true;
-          }
-          return acc;
-        },
-        {},
-      );
-
-      setRaisedHands(nextRaisedHands);
-      setIsHandRaised(!!nextRaisedHands[videoRoom.localUser?.id || ""]);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    connectionState,
-    id,
-    setIsHandRaised,
-    setRaisedHands,
-    videoRoom.localUser?.id,
-  ]);
-
-  useEffect(() => {
-    if (!id || !videoRoom.localUser?.id) return;
+    if (!id || !videoRoom.isAdmitted || !videoRoom.localUser?.id) return;
 
     const unsubscribe = videoApi.subscribeToMembers(id, (member, eventType) => {
       const nextRaised = member.status === "active" && !!member.handRaised;
@@ -1593,13 +1560,20 @@ function ServerRoom({
       }
 
       if (
-        eventType === "UPDATE" &&
-        (member.status === "left" ||
+        (eventType === "DELETE" || eventType === "UPDATE") &&
+        (eventType === "DELETE" || member.status === "left" ||
           member.status === "kicked" ||
           member.status === "banned")
       ) {
         showPresenceEvent("leave", `${label} left`);
       }
+    }, {
+      onSync: (members) => {
+        const hands: Record<string, boolean> = {};
+        for (const member of members) if (member.status === "active" && member.handRaised) hands[member.userId] = true;
+        setRaisedHands(hands);
+        setIsHandRaised(!!hands[videoRoom.localUser?.id || ""]);
+      },
     });
 
     return () => {
@@ -1613,8 +1587,10 @@ function ServerRoom({
     id,
     setIsHandRaised,
     setRaisedHand,
+    setRaisedHands,
     showPresenceEvent,
     videoRoom.localUser?.id,
+    videoRoom.isAdmitted,
   ]);
 
   useEffect(() => {
@@ -1794,77 +1770,41 @@ function ServerRoom({
   const roomTitle =
     videoRoom.room?.title || roomSnapshot?.title || paramTitle || "Room";
 
+  const leavingRef = useRef(false);
+  const leaveLifetimeRef = useRef({ active: false, epoch: 0 });
+  useEffect(() => {
+    leaveLifetimeRef.current = { active: true, epoch: leaveLifetimeRef.current.epoch + 1 };
+    return () => {
+      leaveLifetimeRef.current = { active: false, epoch: leaveLifetimeRef.current.epoch + 1 };
+    };
+  }, []);
+
   const doLeave = useCallback(async () => {
-    // Optimistic leave — navigate + tear down local state IMMEDIATELY,
-    // fire the backend call in the background. The user's tap feels
-    // instant (Zoom/Meet parity) instead of waiting on a round-trip.
-    //
-    // HOST path keeps its previous confirm-before-navigate behavior
-    // for the "end room for everyone" call — that action is consequential
-    // (it evicts every other participant) and we want to avoid a
-    // UX where the host "left" but the room stays open due to a
-    // silently-failed end request. Non-host leave is idempotent and
-    // safe to fire-and-forget.
-    if (isHost) {
-      const result = await sneakyLynkApi.endRoom(id);
-      if (!result.ok && !isClosedRoomError(result.error?.message)) {
-        console.error(
-          "[SneakyLynk:Server] Failed to end room in DB:",
-          result.error?.message,
-        );
-        showToast(
-          "error",
-          "Couldn't close Lynk",
-          result.error?.message || "Try again. The Lynk is still open.",
-        );
-        return;
-      }
-
-      if (result.ok) {
-        console.log("[SneakyLynk:Server] Room ended in DB:", id);
-      } else {
-        console.warn(
-          "[SneakyLynk:Server] Room already closed or unavailable:",
-          result.error?.message,
-        );
-      }
-    }
-
-    reset();
-    endRoomHistory(id, storeListeners.length);
-    router.push(LYNKS_LIST_ROUTE);
-
-    // Fire-and-forget — the user is already gone. Surface a background
-    // log for ops; do NOT toast on failure because the user's already
-    // on the previous screen and a "leave failed" toast post-leave is
-    // confusing UX. The server will reconcile the participant count on
-    // its own (Fishjam disconnect + heartbeat). Hosts skip this — they
-    // already ended the room above.
-    if (isHost) return;
-    sneakyLynkApi
-      .leaveRoom(id)
-      .then((result) => {
-        if (!result.ok && !isClosedRoomError(result.error?.message)) {
-          console.error(
-            "[SneakyLynk:Server] Background leaveRoom failed:",
-            result.error?.message,
-          );
-        } else if (result.ok) {
-          console.log("[SneakyLynk:Server] Background leaveRoom ok:", id);
-        }
-      })
-      .catch((err) => {
-        console.error("[SneakyLynk:Server] Background leaveRoom threw:", err);
+    if (!leaveLifetimeRef.current.active || leavingRef.current) return;
+    const epoch = leaveLifetimeRef.current.epoch;
+    const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch;
+    leavingRef.current = true;
+    try {
+      // Hosts confirm the server end before leaving. Guest teardown is local
+      // and immediate; an old room's completion cannot navigate a new account.
+      await leaveRoomSafely({
+        isCurrent,
+        isHost,
+        endRoom: () => sneakyLynkApi.endRoom(id),
+        leaveRoom: () => sneakyLynkApi.leaveRoom(id),
+        onFailure: (message) => showToast("error", "Couldn't close Lynk", message),
+        exit: () => {
+          const listenerCount = useRoomStore.getState().listeners.length;
+          void videoRoomRef.current.leave();
+          reset();
+          endRoomHistory(id, listenerCount);
+          router.push(LYNKS_LIST_ROUTE);
+        },
       });
-  }, [
-    router,
-    id,
-    endRoomHistory,
-    reset,
-    storeListeners.length,
-    isHost,
-    showToast,
-  ]);
+    } finally {
+      if (isCurrent()) leavingRef.current = false;
+    }
+  }, [router, id, endRoomHistory, reset, isHost, showToast]);
 
   // A host leaving ends the room for everyone, so the tap asks first —
   // one stray press used to kill a live Lynk (and every invite sent from it).
@@ -2345,6 +2285,7 @@ function ServerRoom({
   return (
     <View style={{ flex: 1 }}>
       <RoomLayout
+        admitted={videoRoom.isAdmitted}
         insets={insets}
         connectionState={connectionState}
         hostMuteLocked={videoRoom.hostMuteLocked}
@@ -2572,6 +2513,7 @@ function ServerRoom({
 // ── Shared Room Layout (pure presentation) ──────────────────────────
 
 function RoomLayout({
+  admitted = true,
   insets,
   connectionState,
   hostMuteLocked,
@@ -2615,6 +2557,7 @@ function RoomLayout({
   timerDurationMs,
   timerStartedAt,
 }: {
+  admitted?: boolean;
   insets: any;
   connectionState: "connecting" | "connected" | "reconnecting" | "disconnected";
   /** Host is holding the local participant muted — the mic control says so
@@ -2676,8 +2619,8 @@ function RoomLayout({
   // the same flag suppressed the RN renderer — so any failure in that chain
   // showed nothing at all rather than falling back.
   const { reactions, sendReaction } = useRoomReactions({
-    roomId,
-    currentUser: localUser,
+    roomId: admitted ? roomId : "",
+    currentUser: admitted ? localUser : { ...localUser, id: "" },
   });
   // Bottom padding below the speaker grid so the controls bar never
   // clips participant name labels rendered on the last row of tiles.
@@ -3046,6 +2989,7 @@ function RoomLayout({
           onClose={onCloseChat}
           roomId={roomId}
           currentUser={localUser}
+          enabled={admitted}
           participants={allParticipants.map((p) => p.user)}
         />
       </View>
@@ -3062,12 +3006,15 @@ export default function SneakyLynkRoomScreen({
   billing?: SneakyBilling | null;
 }) {
   const router = useRouter();
+  const { id: roomId } = useLocalSearchParams<{ id: string }>();
+  const accountKey = useAuthStore((s) => s.user?.authId || s.user?.id || "signed-out");
+  const roomAccountKey = JSON.stringify([roomId, accountKey]);
   return (
     <GlobalErrorBoundary
       screenName="SneakyLynkRoom"
       onGoBack={() => router.back()}
     >
-      <SneakyLynkRoomScreenContent billing={billing} />
+      <SneakyLynkRoomScreenContent key={roomAccountKey} billing={billing} />
     </GlobalErrorBoundary>
   );
 }

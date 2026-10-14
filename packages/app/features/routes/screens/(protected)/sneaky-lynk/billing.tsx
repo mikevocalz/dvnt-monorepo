@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
   Platform,
 } from "react-native";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "expo-router";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -29,7 +29,6 @@ import {
 } from "lucide-react-native";
 import * as WebBrowser from "expo-web-browser";
 import { supabase } from "@dvnt/app/lib/supabase/client";
-import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
@@ -37,25 +36,9 @@ import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { SneakySubscriptionModal } from "@dvnt/app/features/sneaky-lynk";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import type { SneakyBilling } from "@dvnt/app/features/screens/membership/billing";
+import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
+import { billingSummary } from "@dvnt/app/lib/subscription/billing-summary";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
-
-interface Subscription {
-  plan_id: string;
-  status: string;
-  current_period_end: string | null;
-  cancel_at_period_end: boolean;
-  stripe_subscription_id: string | null;
-  grace_period_ends_at: string | null;
-}
-
-const PLAN_LABELS: Record<
-  string,
-  { name: string; price: string; maxPax: number | null }
-> = {
-  free: { name: "Free", price: "$0/mo", maxPax: 5 },
-  host_25: { name: "Host 15", price: "$15/mo", maxPax: 15 },
-  host_50: { name: "Unlimited", price: "$25/mo", maxPax: null },
-};
 
 function BillingScreenContent({
   billing = null,
@@ -71,74 +54,10 @@ function BillingScreenContent({
   const authUser = useAuthStore((s) => s.user);
   const showToast = useUIStore((s) => s.showToast);
 
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { entitlements, records, isLoading, isError, refetch: loadSubscription } = useEntitlements();
+  const { subscription, planInfo, isActive, isFree, canManageStripe, store } = billingSummary(records, entitlements);
   const [isPortalLoading, setIsPortalLoading] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-
-  const loadSubscription = useCallback(async () => {
-    if (!authUser?.id) return;
-    setIsLoading(true);
-    try {
-      const { data } = await supabase
-        .from("sneaky_subscriptions")
-        .select(
-          "plan_id, status, current_period_end, cancel_at_period_end, stripe_subscription_id, grace_period_ends_at",
-        )
-        .eq("host_id", authUser.id)
-        .single();
-
-      setSubscription(
-        data ?? {
-          plan_id: "free",
-          status: "inactive",
-          current_period_end: null,
-          cancel_at_period_end: false,
-          stripe_subscription_id: null,
-          grace_period_ends_at: null,
-        },
-      );
-    } catch {
-      setSubscription({
-        plan_id: "free",
-        status: "inactive",
-        current_period_end: null,
-        cancel_at_period_end: false,
-        stripe_subscription_id: null,
-        grace_period_ends_at: null,
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [authUser?.id]);
-
-  useEffect(() => {
-    loadSubscription();
-  }, [loadSubscription]);
-
-  // Realtime: auto-refresh when webhook updates subscription
-  useEffect(() => {
-    if (!authUser?.id) return;
-
-    const channel = freshChannel("sneaky-sub-changes")
-      .on(
-        "postgres_changes" as any,
-        {
-          event: "*",
-          schema: "public",
-          table: "sneaky_subscriptions",
-          filter: `host_id=eq.${authUser.id}`,
-        },
-        () => {
-          loadSubscription();
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [authUser?.id, loadSubscription]);
 
   const handleManageBilling = useCallback(async () => {
     if (!authUser?.id) return;
@@ -187,12 +106,7 @@ function BillingScreenContent({
     }
   }, [authUser?.id, loadSubscription, showToast]);
 
-  const planInfo = PLAN_LABELS[subscription?.plan_id ?? "free"];
-  const isActive =
-    subscription?.status === "active" || subscription?.status === "trialing";
-  const isPastDue = subscription?.status === "past_due";
-  const isFree =
-    !subscription?.stripe_subscription_id || subscription?.plan_id === "free";
+  const isPastDue = subscription.status === "past_due";
 
   const periodEndLabel = subscription?.current_period_end
     ? new Date(subscription.current_period_end).toLocaleDateString("en-US", {
@@ -224,6 +138,11 @@ function BillingScreenContent({
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : isError ? (
+        <View className="p-4 gap-3">
+          <Text accessibilityRole="alert" className="text-foreground">Could not verify your subscription. Please try again.</Text>
+          <Pressable onPress={loadSubscription}><Text className="text-foreground">Retry</Text></Pressable>
         </View>
       ) : (
         <ScrollView
@@ -308,7 +227,7 @@ function BillingScreenContent({
               <Text className="text-xs text-muted-foreground mt-3">
                 {subscription?.cancel_at_period_end
                   ? `Cancels on ${periodEndLabel}`
-                  : `Renews on the 1st of each month · Next: ${periodEndLabel}`}
+                  : `Current period ends ${periodEndLabel}`}
               </Text>
             )}
           </View>
@@ -341,7 +260,7 @@ function BillingScreenContent({
           )}
 
           {/* Manage billing button (only if has stripe sub) */}
-          {!isFree && (
+          {canManageStripe && (
             <Pressable
               onPress={handleManageBilling}
               disabled={isPortalLoading}
@@ -401,13 +320,13 @@ function BillingScreenContent({
             >
               <Zap size={16} color="#fff" />
               <Text className="text-sm font-sans-bold text-white">
-                {isFree ? "Upgrade Plan" : "Change Plan"}
+                {store ? "Manage Store Plan" : isFree ? "Upgrade Plan" : "Change Plan"}
               </Text>
             </Pressable>
           )}
 
           {/* iOS compliance */}
-          {!isFree && (
+          {canManageStripe && (
             <View className="items-center justify-center gap-1 mt-2">
               <View className="flex-row items-center gap-1">
                 <Shield size={11} color="#666" />

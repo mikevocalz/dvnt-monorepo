@@ -152,3 +152,38 @@ test("produced-event access + partner-discount eligibility", () => {
   assert.equal(appliesPartnerDiscount(vip, { isProduced: false, partnerDiscountEligible: true }), false);
   assert.equal(appliesPartnerDiscount(founders, { isProduced: false, partnerDiscountEligible: false }), false);
 });
+
+for (const status of ["active", "trialing"] as const) {
+  test(`${status}: bounded periods expire even without a webhook`, () => {
+    for (const currentPeriodEnd of [past, NOW.toISOString(), "invalid", ""]) {
+      assert.equal(resolveEntitlements(sub({ planKey: "dvnt_vip", status, currentPeriodEnd }), NOW).planKey, "free");
+    }
+    for (const currentPeriodEnd of [future, null, undefined]) {
+      assert.equal(resolveEntitlements(sub({ planKey: "dvnt_vip", status, currentPeriodEnd }), NOW).planKey, "dvnt_vip");
+    }
+  });
+}
+
+test("missing, invalid, or boundary grace never grants paid access", () => {
+  for (const gracePeriodEndsAt of [null, undefined, "invalid", NOW.toISOString()]) {
+    assert.equal(resolveEntitlements(sub({ planKey: "dvnt_vip", status: "past_due", gracePeriodEndsAt }), NOW).planKey, "free");
+  }
+});
+
+test("free membership rows do not hide a paid standalone Sneaky subscription", () => {
+  assert.equal(resolveEntitlementsForUser([
+    sub({ planKey: "free" }),
+    sub({ productFamily: "sneaky_lynk", planKey: "sneaky_tier_2" }),
+  ], NOW).planKey, "sneaky_tier_2");
+});
+
+test("unknown plans and inconsistent family values fail closed", () => {
+  for (const planKey of ["unknown", "constructor", "__proto__"]) {
+    assert.equal(resolveEntitlements(sub({ planKey: planKey as any }), NOW).planKey, "free");
+  }
+  assert.equal(resolveEntitlements(sub({ productFamily: "sneaky_lynk", planKey: "dvnt_vip" }), NOW).planKey, "free");
+});
+
+test("refund/cancel-now cannot retain paid-through privileges", () => {
+  assert.equal(resolveEntitlements(sub({ planKey: "dvnt_vip", status: "canceled", currentPeriodEnd: future, cancelAtPeriodEnd: false }), NOW).planKey, "free");
+});

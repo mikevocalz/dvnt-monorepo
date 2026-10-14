@@ -12,13 +12,15 @@
  * `requireBetterAuthToken()` (the calling feature included — see
  * `features/video/api.ts`). We reuse THAT seam verbatim to share a shape with the
  * calling feature rather than introduce a second, drifting auth path. Better-Auth
- * token refresh is owned by `requireBetterAuthToken`; MoQ-token refresh (on the
- * 1h expiry) is owned here.
+ * token refresh is owned by `requireBetterAuthToken`; MoQ-token refresh follows
+ * the server's signed-token expiry and is owned here.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { createMoqTokenSession, MoqTokenRequestError, type MoqTokenState } from "./moq-token-session";
 
 export type MoqIntent = "publish" | "subscribe";
 
@@ -49,6 +51,7 @@ interface EdgeResponse {
 export async function fetchMoqToken(
   roomId: string,
   intent: MoqIntent,
+  signal?: AbortSignal,
 ): Promise<MoqToken> {
   const authToken = await requireBetterAuthToken();
   const { data, error } = await supabase.functions.invoke<EdgeResponse>(
@@ -56,14 +59,22 @@ export async function fetchMoqToken(
     {
       body: { roomId, intent },
       headers: { Authorization: `Bearer ${authToken}`, "x-auth-token": authToken },
+      signal,
     },
   );
 
   if (error) {
-    throw new Error(error.message || "Failed to fetch MoQ token");
+    const status = error.context?.status;
+    throw new MoqTokenRequestError(
+      error.message || "Failed to fetch MoQ token",
+      !status || status === 408 || status === 429 || status >= 500,
+    );
   }
   if (!data?.ok || !data.data) {
-    throw new Error(data?.error?.message || "MoQ token denied");
+    throw new MoqTokenRequestError(
+      data?.error?.message || "MoQ token denied",
+      !data?.error?.code || data.error.code === "internal_error",
+    );
   }
   return data.data;
 }
@@ -77,52 +88,50 @@ export interface UseMoqTokenResult {
 }
 
 /**
- * Reactive token holder that auto-refreshes shortly before the 1h expiry, the
- * same cadence as the calling feature's `video_refresh_token`.
+ * Reactive token holder that refreshes before the server's signed expiry.
+ * Transient failures retry within this room/account lifetime; a separate hard
+ * expiry removes media authority even when the renewal request is hung.
  */
 export function useMoqToken(
   roomId: string | undefined,
   intent: MoqIntent,
   enabled = true,
 ): UseMoqTokenResult {
-  const [token, setToken] = useState<MoqToken | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mounted = useRef(true);
-
-  const refresh = useCallback(async (): Promise<MoqToken | null> => {
-    if (!roomId) return null;
-    setLoading(true);
-    setError(null);
-    try {
-      const next = await fetchMoqToken(roomId, intent);
-      if (!mounted.current) return next;
-      setToken(next);
-      // Schedule a refresh 60s before expiry.
-      if (timer.current) clearTimeout(timer.current);
-      const ms = Math.max(
-        15_000,
-        new Date(next.expiresAt).getTime() - Date.now() - 60_000,
-      );
-      timer.current = setTimeout(() => void refresh(), ms);
-      return next;
-    } catch (e) {
-      if (mounted.current) setError(e instanceof Error ? e.message : "Token error");
-      return null;
-    } finally {
-      if (mounted.current) setLoading(false);
-    }
-  }, [roomId, intent]);
+  const accountKey = useAuthStore((s) => JSON.stringify([s.user?.id ?? null, s.user?.authId ?? null]));
+  const [accountEpoch, setAccountEpoch] = useState(0);
+  const scope = JSON.stringify([roomId, intent, accountKey, accountEpoch, enabled]);
+  const [state, setState] = useState<MoqTokenState<MoqToken> & { scope: string }>({
+    scope, token: null, loading: false, error: null,
+  });
+  const sessionRef = useRef<ReturnType<typeof createMoqTokenSession<MoqToken>> | null>(null);
+  const refresh = useCallback(() => sessionRef.current?.refresh() ?? Promise.resolve(null), []);
 
   useEffect(() => {
-    mounted.current = true;
-    if (enabled && roomId) void refresh();
+    if (!enabled || !roomId) return;
+    const session = createMoqTokenSession({
+      fetchToken: (signal) => fetchMoqToken(roomId, intent, signal),
+      onChange: (next) => setState({ ...next, scope }),
+    });
+    sessionRef.current = session;
+    // Invalidate synchronously on account changes, even if A → B → A happens
+    // before React commits the next effect. No old account's token can land.
+    const unsubscribe = useAuthStore.subscribe((s) => {
+      const nextOwner = JSON.stringify([s.user?.id ?? null, s.user?.authId ?? null]);
+      if (nextOwner !== accountKey) {
+        session.stop();
+        setAccountEpoch((epoch) => epoch + 1);
+      }
+    });
+    void session.refresh();
     return () => {
-      mounted.current = false;
-      if (timer.current) clearTimeout(timer.current);
+      unsubscribe();
+      session.stop();
+      if (sessionRef.current === session) sessionRef.current = null;
     };
-  }, [enabled, roomId, refresh]);
+  }, [enabled, roomId, intent, accountKey, scope]);
 
-  return { token, loading, error, refresh };
+  // Hide the previous room/account immediately, before effect cleanup runs.
+  return state.scope === scope && enabled
+    ? { token: state.token, loading: state.loading, error: state.error, refresh }
+    : { token: null, loading: false, error: null, refresh };
 }

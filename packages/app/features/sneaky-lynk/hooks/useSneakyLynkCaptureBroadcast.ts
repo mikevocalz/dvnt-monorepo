@@ -47,6 +47,7 @@ import { Platform } from "react-native";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { messagesApi } from "@dvnt/app/lib/api/messages-impl";
+import { captureBroadcastIdentity } from "../api/capture-broadcast-identity";
 import { getLynkRoomLowercaseName } from "@dvnt/app/lib/branding/lynk-branding";
 import {
   useSneakyLynkCaptureStore,
@@ -106,6 +107,15 @@ export function useSneakyLynkCaptureBroadcast({
   );
   const reset = useSneakyLynkCaptureStore((s) => s.reset);
 
+  const publicSession = useRef({ key: "", token: "" });
+  const publicSessionKey = JSON.stringify([roomId, localUserId, attributable]);
+  if (publicSession.current.key !== publicSessionKey) {
+    publicSession.current = { key: publicSessionKey, token: Math.random().toString(36).slice(2, 14) };
+  }
+  const { actorId: senderId, actorUsername: senderUsername } = captureBroadcastIdentity({
+    id: localUserId || "", username: localUsername, attributable,
+  }, publicSession.current.token);
+
   const channelRef = useRef<RealtimeChannel | null>(null);
   const cancelledRef = useRef(false);
   const lastLocalEventRef = useRef<{ kind: CaptureKind; at: number } | null>(
@@ -146,9 +156,9 @@ export function useSneakyLynkCaptureBroadcast({
     const channel = supabase.channel(`sneaky-capture-${roomId}`, {
       config: {
         broadcast: { self: false },
-        // Keyed by user so a reconnect replaces the stale entry instead of
-        // leaving a ghost web peer pinning the disclosure chip on.
-        presence: { key: localUserId },
+        // Stable within this session; anonymous members use an opaque token.
+        // Presence keys are public too, even when tracked metadata is not.
+        presence: { key: senderId },
       },
     });
 
@@ -160,7 +170,7 @@ export function useSneakyLynkCaptureBroadcast({
         at?: number;
       } | null;
       if (!payload || !payload.actorId) return;
-      if (payload.actorId === localUserId) return;
+      if (payload.actorId === senderId) return;
 
       const kind: CaptureEvent["kind"] =
         payload.kind === "recording_start" || payload.kind === "recording_stop"
@@ -225,7 +235,7 @@ export function useSneakyLynkCaptureBroadcast({
       channelRef.current = null;
       reset();
     };
-  }, [roomId, localUserId, reset]);
+  }, [roomId, localUserId, senderId, reset]);
 
   const notifyLocalCapture = useCallback((kind: CaptureKind = "screenshot") => {
     if (cancelledRef.current) return;
@@ -258,9 +268,7 @@ export function useSneakyLynkCaptureBroadcast({
 
     // Fan-out. If the user is anonymous, broadcast a generic attribution
     // so the privacy signal still reaches the room without outing them.
-    const broadcastUsername = attributable
-      ? localUsername || "Someone"
-      : "Someone";
+    const broadcastUsername = senderUsername;
     const channel = channelRef.current;
     if (!channel) return;
     channel
@@ -269,7 +277,7 @@ export function useSneakyLynkCaptureBroadcast({
         event: "capture",
         payload: {
           kind,
-          actorId: localUserId,
+          actorId: senderId,
           actorUsername: broadcastUsername,
           at: event.at,
           platform: Platform.OS,
@@ -297,7 +305,7 @@ export function useSneakyLynkCaptureBroadcast({
         kind,
       });
     }
-  }, [attributable, localUserId, localUsername]);
+  }, [localUserId, localUsername, senderId, senderUsername]);
 
   const notifyLocalScreenshot = useCallback(() => {
     notifyLocalCapture("screenshot");

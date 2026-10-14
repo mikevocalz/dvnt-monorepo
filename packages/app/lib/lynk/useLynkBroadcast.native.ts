@@ -30,13 +30,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  useSession,
   usePublisher,
   useCamera,
   useMicrophone,
 } from "react-native-moq";
 import type { CameraTrack, PublishTrack } from "react-native-moq";
 import { useMoqToken } from "./useMoqToken";
+import { useNativeMoqSession } from "./useNativeMoqSession";
 import {
   useLynkViewer,
   connectionStatusFromSession,
@@ -69,7 +69,14 @@ export function useLynkBroadcast(
   const [micEnabled, setMicEnabledState] = useState(true);
   const [ended, setEnded] = useState(false);
 
-  const session = useSession(token?.relayUrl ?? "");
+  // A new admission (including effect replay) owns a fresh transport lifetime.
+  // Explicit end() remains terminal until this room lifetime is replaced.
+  useEffect(() => {
+    setEnded(false);
+    setIsLive(false);
+  }, [roomId]);
+
+  const session = useNativeMoqSession(token?.relayUrl, !ended && canPublish);
   const publisher = usePublisher(session);
   // `enabled: false` stops the native capture outright — that IS camera-off on
   // this transport; there is no separate "publish black frames" mode.
@@ -87,15 +94,8 @@ export function useLynkBroadcast(
   // `playAndRecord` and can starve other audio libraries (`insufficientPriority`).
   const mic = useMicrophone({ enabled: micEnabled && !ended && canPublish });
 
-  const { connect, disconnect } = session;
+  const { disconnect } = session;
   const { publish, stop } = publisher;
-
-  // Connect as soon as the publish token mints, so Go Live is instant.
-  useEffect(() => {
-    if (!token?.relayUrl || ended) return;
-    connect();
-    return () => disconnect();
-  }, [token?.relayUrl, ended, connect, disconnect]);
 
   // `publish()` snapshots its track list, so every change to the track set
   // (mic mute, camera off) has to re-publish. Keeping the list in one memo
@@ -115,11 +115,15 @@ export function useLynkBroadcast(
   // re-fires when the connection lands after Go Live was tapped, so the tap
   // never has to race the handshake.
   useEffect(() => {
-    if (!isLive || !token?.path || ended) return;
+    if (!isLive || !token?.path || ended || !canPublish) return;
     if (session.state !== "connected") return;
     publish({ path: token.path, tracks });
     publishedPath.current = token.path;
-  }, [isLive, token?.path, tracks, ended, publish, session.state]);
+    return () => {
+      stop();
+      publishedPath.current = null;
+    };
+  }, [isLive, token?.path, tracks, ended, canPublish, publish, stop, session.state]);
 
   const goLive = useCallback(async () => {
     if (!token || isLive || !canPublish) return;
