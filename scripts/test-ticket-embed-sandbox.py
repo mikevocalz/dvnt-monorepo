@@ -6,12 +6,16 @@ Stripe test card reference: https://docs.stripe.com/testing#cards
 """
 import json, os, re, time, urllib.parse, urllib.request
 from pathlib import Path
+from ticket_embed_sandbox_helpers import sandbox_buyer_email
 from playwright.sync_api import sync_playwright, expect
 required=['TICKET_EMBED_SANDBOX_HOST_URL','TICKET_EMBED_SANDBOX_ID','TICKET_EMBED_SANDBOX_EMAIL','STRIPE_TEST_SECRET_KEY']
 missing=[key for key in required if not os.environ.get(key)]
 if missing:
     raise SystemExit('RELEASE BLOCKED: real sandbox purchase is not configured. Missing: '+', '.join(missing))
 host_url=os.environ[required[0]]; embed_id=os.environ[required[1]]; email=os.environ[required[2]]; key=os.environ[required[3]]
+email=sandbox_buyer_email(email,os.environ.get('GITHUB_RUN_ID',''),os.environ.get('GITHUB_RUN_ATTEMPT','1'))
+# Derived addresses must be masked too; GitHub only masks the original secret.
+if os.environ.get('GITHUB_ACTIONS')=='true':print('::add-mask::'+email)
 production={'dvntapp.live','www.dvntapp.live','dvnt.live','www.dvnt.live'}
 assert re.fullmatch(r'(sk|rk)_test_[A-Za-z0-9]+',key),'Only a Stripe TEST key is permitted'
 assert re.fullmatch(r'[a-fA-F0-9-]{36}',embed_id),'A disposable embed ID is required'
@@ -133,6 +137,14 @@ with sync_playwright() as p:
                     try:
                         session=stripe('GET','/checkout/sessions/'+session_id)
                         print('Stripe session status:',session.get('status'),'payment status:',session.get('payment_status'))
+                        # Only cancel this run's verified, unpaid test session. The
+                        # normal cancel endpoint expires Stripe before releasing inventory.
+                        if session.get('livemode') is False and session.get('status')=='open' and session.get('payment_status')=='unpaid':
+                            cancel=widget.get_by_role('button',name='Cancel checkout',exact=True)
+                            if cancel.count() and cancel.is_visible():
+                                cancel.click()
+                                expect(frame.locator('#quantity')).to_have_value('1',timeout=30000)
+                                print('Abandoned sandbox checkout cancelled')
                     except Exception:print('Stripe session status unavailable')
             for f in page.frames:
                 if not (urllib.parse.urlparse(f.url).hostname or '').endswith('.stripe.com'):continue
