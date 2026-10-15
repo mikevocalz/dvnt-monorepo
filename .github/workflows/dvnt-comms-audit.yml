@@ -16,4 +16,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node --test scripts/test-dvnt-comms-audit.cjs
+      - run: node --test apps/mobile/supabase/functions/_shared/brand-outbox.test.cjs
