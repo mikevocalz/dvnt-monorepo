@@ -103,7 +103,8 @@ with sync_playwright() as p:
             if billing_name.count() and billing_name.first.is_visible():billing_name.first.fill('DVNT Sandbox Test')
             postal=f.locator('input[name="billingPostalCode"],input[autocomplete="postal-code"]')
             if postal.count() and postal.first.is_visible():postal.first.fill('10001')
-            button=f.get_by_role('button',name=re.compile(r'^Pay(?:\s|$)'))
+            # Do not mistake Stripe's alternate 'Pay with Link' button for submit.
+            button=f.locator('button[type="submit"]').filter(has_text=re.compile(r'^Pay(?:\s+\$[0-9,.]+)?$'))
             if button.count()==1 and button.is_visible():button.click();submitted=True;break
         assert submitted,'Stripe submit button not found; do not bypass checkout by confirming an unrelated PaymentIntent'
         expect(widget.get_by_role('link',name='Open ticket 1')).to_be_visible(timeout=120000)
@@ -124,6 +125,19 @@ with sync_playwright() as p:
     finally:
         if not result['passed']:
             print('Sandbox API results:',json.dumps(api_results))
+            if observed['checkout']:
+                session_id=observed['checkout']['clientSecret'].split('_secret_')[0]
+                if re.fullmatch(r'cs_test_[A-Za-z0-9]+',session_id):
+                    try:
+                        session=stripe('GET','/checkout/sessions/'+session_id)
+                        print('Stripe session status:',session.get('status'),'payment status:',session.get('payment_status'))
+                    except Exception:print('Stripe session status unavailable')
+            for f in page.frames:
+                if not (urllib.parse.urlparse(f.url).hostname or '').endswith('.stripe.com'):continue
+                try:
+                    print('Stripe form state:',f.locator('input').evaluate_all('(inputs)=>inputs.map(i=>({name:i.name,type:i.type,empty:!i.value,valid:i.validity.valid,invalid:i.getAttribute("aria-invalid")}))'))
+                    print('Stripe submit buttons:',f.locator('button[type="submit"]').all_text_contents())
+                except Exception:pass
             print('Embed requests:',*trail[-15:],sep='\n  ')
         browser.close()
         Path('ticket-embed-sandbox-result.json').write_text(json.dumps(result,indent=2))
