@@ -54,9 +54,9 @@ export function gateDecision(
   return "prompt";
 }
 
-/** An under-18 document has no retry, so there is nothing to verify again. */
+/** An under-18 document or an operator denial has no retry, so there is nothing to verify again. */
 export function canVerify(reason: AdmissionReason | null | undefined): boolean {
-  return reason !== "underage";
+  return reason !== "underage" && reason !== "operator_denied";
 }
 
 const REFUSAL_REASONS: ReadonlySet<string> = new Set<AdmissionReason>([
@@ -66,6 +66,7 @@ const REFUSAL_REASONS: ReadonlySet<string> = new Set<AdmissionReason>([
   "age_evidence_missing",
   "underage",
   "restricted_profile",
+  "operator_denied",
 ]);
 
 /**
@@ -113,6 +114,8 @@ export function readAdmissionRefusal(body: unknown): AdmissionReason | null {
   if (err?.code === "verification_required" || b.code === "verification_required") {
     return reasonOf(err?.reason) ?? reasonOf(detail?.reason) ?? reasonOf(b.reason) ?? "verification_required";
   }
+  // An operator denial has its own code so the popup never offers the ID flow.
+  if (err?.code === "account_restricted" || b.code === "account_restricted") return "operator_denied";
   if (err?.code === "forbidden" || b.code === "forbidden") {
     return reasonOf(detail?.reason) ?? reasonOf(b.reason);
   }
