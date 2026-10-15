@@ -151,4 +151,79 @@ REVOKE ALL ON FUNCTION public.lynk_admit_member_atomic(integer, text, boolean)
 GRANT EXECUTE ON FUNCTION public.lynk_admit_member_atomic(integer, text, boolean)
   TO service_role;
 
+
+-- Accepting a co-host invite also allocates a seat. It must use the same lock
+-- and capacity allocator as an ordinary join; an invite is not a capacity
+-- override, and a decline or an already-resolved invite grants nothing.
+CREATE OR REPLACE FUNCTION public.lynk_accept_cohost_atomic(
+  p_invite_id integer,
+  p_user_id text
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $function$
+DECLARE
+  v_room_id integer;
+  v_room public.video_rooms%ROWTYPE;
+  v_invite public.lynk_cohost_invites%ROWTYPE;
+  v_admission jsonb;
+BEGIN
+  IF p_invite_id IS NULL OR nullif(btrim(p_user_id), '') IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'invalid_input');
+  END IF;
+  -- First find the parent lock key. Pending status and recipient are checked
+  -- again AFTER the lock, so two accepting devices cannot both accept.
+  SELECT room_id INTO v_room_id
+  FROM public.lynk_cohost_invites WHERE id = p_invite_id;
+  IF v_room_id IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'invite_not_found');
+  END IF;
+  SELECT * INTO v_room FROM public.video_rooms
+    WHERE id = v_room_id FOR UPDATE;
+  IF NOT FOUND OR v_room.room_kind IS DISTINCT FROM 'lynk'
+     OR v_room.status IS DISTINCT FROM 'open'
+     OR (v_room.ends_at IS NOT NULL AND v_room.ends_at <= now()) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'room_ended');
+  END IF;
+  SELECT * INTO v_invite FROM public.lynk_cohost_invites
+    WHERE id = p_invite_id FOR UPDATE;
+  IF v_invite.id IS NULL OR v_invite.room_id IS DISTINCT FROM v_room_id
+     OR v_invite.invitee_id IS DISTINCT FROM p_user_id THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'invite_not_found');
+  END IF;
+  IF v_invite.status IS DISTINCT FROM 'pending' THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'invite_resolved');
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.video_room_members
+    WHERE room_id=v_room_id AND user_id=p_user_id
+      AND status IN ('banned','kicked')
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'member_banned');
+  END IF;
+
+  v_admission := public.lynk_admit_member_atomic(v_room_id,p_user_id,false);
+  IF coalesce((v_admission->>'ok')::boolean,false) IS NOT TRUE THEN
+    RETURN v_admission;
+  END IF;
+
+  UPDATE public.video_room_members SET role='co-host'
+    WHERE room_id=v_room_id AND user_id=p_user_id
+      AND role IS DISTINCT FROM 'host';
+  UPDATE public.lynk_cohost_invites
+    SET status='accepted', responded_at=now()
+    WHERE id=p_invite_id;
+
+  RETURN jsonb_build_object(
+    'ok', true, 'role', 'co-host', 'roomId', v_room.uuid,
+    'current', v_admission->'current'
+  );
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.lynk_accept_cohost_atomic(integer, text)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.lynk_accept_cohost_atomic(integer, text)
+  TO service_role;
+
 COMMIT;
