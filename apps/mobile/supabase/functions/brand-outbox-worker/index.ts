@@ -351,8 +351,15 @@ Deno.serve(async (req: Request) => {
             subject: copy.subject,
             html: copy.body.replace(/\n/g, "<br/>"),
           });
-          providerMessageId = id;
-          receipt = { channel: "email", providerId: id, at: new Date().toISOString() };
+          // The provider returns null when RESEND_API_KEY is missing. An HTTP
+          // success from this worker must never be misread as email delivery.
+          if (!id) {
+            outcome = "transient_error";
+            error = "email_provider_unconfigured_or_no_receipt";
+          } else {
+            providerMessageId = id;
+            receipt = { channel: "email", providerId: id, at: new Date().toISOString() };
+          }
         } catch (err) {
           outcome = "transient_error";
           error = String((err as Error)?.message || err);
