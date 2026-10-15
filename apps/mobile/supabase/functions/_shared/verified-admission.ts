@@ -187,9 +187,12 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
 
 /** The refusal body every participation rail returns, so one client handler covers all of them. */
 export function admissionRefusal(verdict: AdmissionVerdict) {
+  // operator_denied gets its own code: re-verifying cannot lift it, so it must
+  // not open the ID-verification prompt that verification_required does.
   return {
     code: verdict.reason === "profile_photo_required" || verdict.reason === "first_post_required"
-      ? "profile_completion_required" : "verification_required",
+      ? "profile_completion_required"
+      : verdict.reason === "operator_denied" ? "account_restricted" : "verification_required",
     reason: verdict.reason,
     message: verdict.message ?? blockedMessage("verification_required"),
   };
@@ -245,8 +248,18 @@ export async function resolveVerifiedAdmission(
       message: `We can't confirm your access right now. Try again in a moment and ${PARTICIPATION} will open if your account is verified.`,
     };
   }
-  const policy: AdmissionPolicy & { allowlist?: unknown; denylist?: unknown } | null =
-    policyResult?.data ?? null;
+  // No policy row is not "enforcement off". The denylist lives on that row, so
+  // reading a missing row as not_enforced would admit a denied account.
+  if (!policyResult?.data) {
+    console.error("[verified-admission] policy row missing");
+    return {
+      state: "blocked",
+      reason: "verification_required",
+      deadline: null,
+      message: `We can't confirm your access right now. Try again in a moment and ${PARTICIPATION} will open if your account is verified.`,
+    };
+  }
+  const policy: AdmissionPolicy & { allowlist?: unknown; denylist?: unknown } = policyResult.data;
   const has = (list: unknown) => Array.isArray(list) && list.map(String).includes(userId);
 
   const verdict = decideVerifiedAdmission({

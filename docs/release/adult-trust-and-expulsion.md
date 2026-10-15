@@ -1,6 +1,6 @@
 # DVNT adult access and repeat-expulsion review (A01/A02/A03/A05/A06)
 
-**Current code change:** operator denylist now outranks a previously passed ID, allowlist and enforcement grace. This closes a direct participation bypass in `decideVerifiedAdmission`. No production policy or denylist row was changed. Baseline adult-checkout/protected-surface personas remain in `apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs`.
+**Current code change:** operator denylist now outranks a previously passed ID, allowlist and enforcement grace. This closes a direct participation bypass in `decideVerifiedAdmission`. No production policy or denylist row was changed. Ticket purchase and ticket claim stay blocked for an operator-denied account, and a missing policy row blocks them too: both fail closed on purpose. Baseline adult-checkout/protected-surface personas remain in `apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs`.
 
 ## Still required before closing IDs
 
