@@ -31,7 +31,11 @@ import {
   verifyBrandSender,
 } from "../_shared/brand-sender.ts";
 import { NEW_PROFILE_WINDOW } from "../_shared/brand-follow.ts";
-import { campaignMessage, transition } from "../_shared/brand-outbox.ts";
+import {
+  campaignMessage,
+  messageOperationId,
+  transition,
+} from "../_shared/brand-outbox.ts";
 import {
   ensureDirectConversation,
   postConversationMessage,
@@ -412,8 +416,11 @@ Deno.serve(async (req: Request) => {
  * rows are written first and the send is membership-checked.
  *
  * A retry after a lost completion acknowledgement reuses messages.operation_id
- * under the same sender. The database unique index guarantees exactly one DM
- * per campaign-recipient key; the insert helper verifies the replay payload.
+ * under the same sender. operation_id is a uuid column, so the provider key is
+ * mapped to a deterministic UUID (messageOperationId) and the original key
+ * stays in metadata.idempotencyKey. The database unique index guarantees
+ * exactly one DM per campaign-recipient key; the insert helper verifies the
+ * replay payload.
  */
 async function sendDirectMessage(
   supabase: any,
@@ -435,7 +442,7 @@ async function sendDirectMessage(
     senderId: sender.userId,
     content: body,
     metadata: { automated: true, brandAnnouncement: true, idempotencyKey },
-    operationId: idempotencyKey,
+    operationId: await messageOperationId(idempotencyKey),
   });
 }
 

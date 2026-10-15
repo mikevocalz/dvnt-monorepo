@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'apps/mobile/supabase/functions/_shared/conversation-delivery.ts'
+      - 'apps/mobile/supabase/functions/_shared/brand-outbox.ts'
       - 'apps/mobile/supabase/functions/brand-outbox-worker/**'
       - 'apps/mobile/supabase/functions/send-message/**'
       - 'apps/mobile/supabase/migrations/*messages_operation_id.sql'

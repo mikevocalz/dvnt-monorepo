@@ -12,6 +12,10 @@ const { PGlite } = require("@electric-sql/pglite");
 const { postConversationMessage } = await import(
   "../apps/mobile/supabase/functions/_shared/conversation-delivery.ts"
 );
+const { messageOperationId, providerIdempotencyKey } = await import(
+  "../apps/mobile/supabase/functions/_shared/brand-outbox.ts"
+);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const migration = readFileSync(resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../apps/mobile/supabase/migrations/20261015033000_messages_operation_id.sql",
@@ -33,21 +37,27 @@ test("additive message operation index rejects sender-scoped duplicates without 
     `);
     await db.exec(migration);
     await db.exec(migration);
-    await db.exec(`
-      INSERT INTO messages(conversation_id,sender_id,content,operation_id)
-      VALUES (2,11,'hello','welcome_dm_v2:11:dm');
-    `);
+    const op = await messageOperationId("welcome_dm_v2:11:dm");
+    const {rows:[col]} = await db.query(
+      "SELECT data_type FROM information_schema.columns WHERE table_name='messages' AND column_name='operation_id'");
+    assert.equal(col.data_type, "uuid");
+    const {rows:idx} = await db.query(
+      "SELECT indexname FROM pg_indexes WHERE tablename='messages' AND indexname LIKE 'messages_sender_operation%'");
+    assert.deepEqual(idx.map(r=>r.indexname), ["messages_sender_operation_unique"]);
+    // The raw provider key is not a uuid; storing it is what broke brand DMs.
     await assert.rejects(
-      db.exec(`INSERT INTO messages(conversation_id,sender_id,content,operation_id)
-        VALUES (2,11,'hello again','welcome_dm_v2:11:dm');`),
+      db.query("INSERT INTO messages(conversation_id,sender_id,content,operation_id) VALUES (2,11,'raw',$1)",
+        ["welcome_dm_v2:11:dm"]),
+      /invalid input syntax for type uuid/,
+    );
+    await db.query("INSERT INTO messages(conversation_id,sender_id,content,operation_id) VALUES (2,11,'hello',$1)", [op]);
+    await assert.rejects(
+      db.query("INSERT INTO messages(conversation_id,sender_id,content,operation_id) VALUES (2,11,'hello again',$1)", [op]),
       /duplicate key/,
     );
     // Unique per sender, not globally; other senders may choose same UUID.
-    await db.exec(`
-      INSERT INTO messages(conversation_id,sender_id,content,operation_id)
-      VALUES (2,12,'different sender','welcome_dm_v2:11:dm');
-      INSERT INTO messages(conversation_id,sender_id,content) VALUES (2,11,'new legacy');
-    `);
+    await db.query("INSERT INTO messages(conversation_id,sender_id,content,operation_id) VALUES (2,12,'different sender',$1)", [op]);
+    await db.exec("INSERT INTO messages(conversation_id,sender_id,content) VALUES (2,11,'new legacy');");
     const {rows}=await db.query("SELECT count(*)::int AS n FROM messages");
     assert.equal(rows[0].n,5);
   } finally { await db.close(); }
@@ -147,4 +157,20 @@ test("legacy sends without operation IDs are still allowed",async()=>{
   const two=await postConversationMessage(db,args);
   assert.notEqual(one.messageId,two.messageId);
   assert.equal(db.messages.length,2);
+});
+
+test("brand DM operation id is a deterministic v5-style UUID per provider key",async()=>{
+  const key=providerIdempotencyKey("profile_photo_v1",613,"dm");
+  const a=await messageOperationId(key);
+  assert.match(a,UUID);
+  assert.equal(a[14],"5");
+  assert.ok("89ab".includes(a[19]));
+  assert.equal(await messageOperationId(key),a);
+  const others=await Promise.all([
+    messageOperationId(providerIdempotencyKey("profile_photo_v1",614,"dm")),
+    messageOperationId(providerIdempotencyKey("welcome_dm_v2",613,"dm")),
+    messageOperationId(providerIdempotencyKey("profile_photo_v1",613,"email")),
+  ]);
+  assert.equal(new Set([a,...others]).size,4);
+  for(const id of others) assert.match(id,UUID);
 });

@@ -44,6 +44,25 @@ export function providerIdempotencyKey(
   return `${campaignVersion}:${recipientId}:${channel}`;
 }
 
+/**
+ * messages.operation_id is a uuid column (20260905120000_watch_message_delivery),
+ * so the provider key cannot be stored there as-is. SHA-256 of
+ * "brand-dm:" + key, first 16 bytes, with version-5 and RFC 4122 variant bits
+ * set: the same key always maps to the same UUID, so a replay still hits
+ * messages_sender_operation_unique.
+ */
+export async function messageOperationId(idempotencyKey: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`brand-dm:${idempotencyKey}`),
+  );
+  const b = new Uint8Array(digest).slice(0, 16);
+  b[6] = (b[6] & 0x0f) | 0x50;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const hex = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export interface TransitionResult {
   state: OutboxState;
   /** True when a retry is expected — the row goes back to queued. */
