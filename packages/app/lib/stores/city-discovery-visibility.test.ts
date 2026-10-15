@@ -5,6 +5,8 @@ import {
   applyFindEventsMode,
   applyRevokeCityVisibility,
   DEFAULT_VISIBILITY_DURATION_ID,
+  PRECISE_PROXIMITY_GRANT_DEFAULT,
+  readPreciseProximityGrant,
   formatVisibilityExpiry,
   readCityVisibility,
   readVisibilityDurationId,
@@ -108,4 +110,15 @@ test("the expiry line names a time today and a date when it is not today", () =>
   assert.match(sameDay, /^\d{1,2}:\d{2}\s?(AM|PM)$/);
   const laterWeek = formatVisibilityExpiry(NOW + 7 * 24 * HOUR, NOW);
   assert.match(laterWeek, /^[A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2}\s?(AM|PM)$/);
+});
+
+test("the city grant never implies consent for approximate member distance", () => {
+  assert.equal(PRECISE_PROXIMITY_GRANT_DEFAULT, false);
+  for (const value of [undefined, null, false, 1, "true", { enabled: true }]) {
+    assert.equal(readPreciseProximityGrant(value), false);
+  }
+  assert.equal(readPreciseProximityGrant(true), true);
+  const cityGranted = applyCityVisibility(off, ATL, HOUR, NOW);
+  assert.ok(readCityVisibility(cityGranted.cityVisibility, NOW));
+  assert.equal(readPreciseProximityGrant((cityGranted as any).preciseProximityGrant), false);
 });

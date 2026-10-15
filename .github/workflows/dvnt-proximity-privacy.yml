@@ -1,0 +1,24 @@
+name: Consent-based proximity privacy
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/member-proximity/**'
+      - 'apps/mobile/supabase/migrations/*member_proximity_presence.sql'
+      - 'apps/mobile/supabase/migrations/*member_proximity_presence_purge.sql'
+      - 'apps/mobile/supabase/functions/_shared/db-rate-limit.ts'
+      - 'packages/app/lib/api/member-proximity.ts'
+      - 'packages/app/lib/hooks/use-member-proximity.ts'
+      - 'packages/app/components/member-proximity-sync.web.tsx'
+      - 'scripts/test-proximity-privacy.cjs'
+      - '.github/workflows/dvnt-proximity-privacy.yml'
+permissions:
+  contents: read
+jobs:
+  privacy-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test scripts/test-proximity-privacy.cjs
