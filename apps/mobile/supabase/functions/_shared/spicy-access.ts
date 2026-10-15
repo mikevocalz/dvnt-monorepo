@@ -12,6 +12,10 @@
  * viewer with date_of_birth later than today minus 18 years, whatever its
  * status. A failed read of that table hides SPICY (fails closed).
  *
+ * An operator-denied account (verified_admission_policy.denylist) never sees
+ * SPICY either, matching verified_participation_allowed(). A failed or missing
+ * policy read also hides SPICY.
+ *
  * Feed and profile reads run on the service role and bypass RLS, so they have
  * to apply this themselves. Direct PostgREST reads are covered by the
  * spicy_requires_verified_viewer policies (20261003170200).
@@ -36,6 +40,16 @@ export async function viewerMaySeeSpicy(
 ): Promise<boolean> {
   if (typeof viewerAuthId !== "string" || viewerAuthId.length === 0) return false;
   try {
+    const policy = await db
+      .from("verified_admission_policy")
+      .select("denylist")
+      .eq("id", 1)
+      .maybeSingle();
+    if (policy.error || !policy.data) {
+      console.warn("[spicy-access] admission policy read failed; hiding SPICY", policy.error?.message ?? "no policy row");
+      return false;
+    }
+    if (Array.isArray(policy.data.denylist) && policy.data.denylist.includes(viewerAuthId)) return false;
     const { data, error } = await db
       .from("identity_verifications")
       .select("user_id")

@@ -50,13 +50,7 @@ import {
 } from "@dvnt/app/lib/utils/safe-profile-mappers";
 import { ProfileMasonryGrid } from "./ProfileMasonryGrid.web";
 import { ProfilePronounsPill } from "./ProfilePronounsPill.web";
-import { useCities } from "@dvnt/app/lib/hooks/use-cities";
-import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
-import {
-  matchCity,
-  proximityLabel,
-  resolveViewerPosition,
-} from "@dvnt/app/lib/proximity";
+import { useMemberProximity } from "@dvnt/app/lib/hooks/use-member-proximity";
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -184,64 +178,15 @@ export function UserProfileScreen() {
 
   const user = userData as any;
 
-  // "X miles away" — city-level only. The figure is the distance from the
-  // viewer's position (device fix, picked city, or own profile city) to the
-  // centroid of the city this member stated, never to them personally.
-  const { data: cities } = useCities();
-  const viewerDeviceLat = useEventsLocationStore((s) => s.deviceLat);
-  const viewerDeviceLng = useEventsLocationStore((s) => s.deviceLng);
-  const viewerActiveCity = useEventsLocationStore((s) => s.activeCity);
-
-  // Web never boot-locates like native does, so a viewer who granted the
-  // browser geolocation at some point still had deviceLat/Lng empty and the
-  // proximity badge had nothing to measure from. Read the fix ONLY when the
-  // permission is already granted — same no-prompt rule useBootLocation
-  // follows; anything else would pop a permission sheet on a profile view.
-  useEffect(() => {
-    if (viewerDeviceLat && viewerDeviceLng) return;
-    if (typeof navigator === "undefined" || !navigator.geolocation) return;
-    let cancelled = false;
-    void navigator.permissions
-      ?.query({ name: "geolocation" as PermissionName })
-      .then((status) => {
-        if (cancelled || status.state !== "granted") return;
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            if (cancelled) return;
-            useEventsLocationStore
-              .getState()
-              .setDeviceLocation(pos.coords.latitude, pos.coords.longitude);
-          },
-          () => {},
-          { enableHighAccuracy: false, timeout: 8000 },
-        );
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [viewerDeviceLat, viewerDeviceLng]);
-  const profileCity = matchCity(user?.location, cities ?? []);
-  const proximity = useMemo(() => {
-    // Distance to yourself is always "In your city" — not worth a line.
-    if (!profileCity || isOwnProfile) return null;
-    const viewer = resolveViewerPosition({
-      deviceLat: viewerDeviceLat,
-      deviceLng: viewerDeviceLng,
-      activeCity: viewerActiveCity,
-      viewerLocationText: currentUser?.location,
-      cities: cities ?? [],
-    });
-    return viewer ? proximityLabel(viewer, profileCity) : null;
-  }, [
-    profileCity,
-    isOwnProfile,
-    viewerDeviceLat,
-    viewerDeviceLng,
-    viewerActiveCity,
-    currentUser?.location,
-    cities,
-  ]);
+  // A displayed distance is permitted ONLY after both members explicitly
+  // opted into the server-backed, expiring proximity contract. Coordinates are
+  // never computed from profile-city centroids or browser permission alone.
+  const { data: proximityResult } = useMemberProximity(
+    !isOwnProfile ? (user?.username || safeUsername) : null,
+  );
+  const proximity = proximityResult?.kind === "distance"
+    ? proximityResult.label
+    : null;
 
   const isFollowing = user?.isFollowing === true;
   const profileAvatarUrl = resolveAvatarUrl(user?.avatar);

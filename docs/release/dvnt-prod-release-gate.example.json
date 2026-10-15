@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "baseline": "2026-10-15",
+  "checks": [
+    {
+      "id": "stripe-testmode-guest-checkout-ticket-qr-refund",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "guest-checkout-event-preserved",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "ticket-embed-responsive-web-mobile",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "payout-setup-reminder",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "seller-1-stripe-kyc-complete",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "seller-2-stripe-kyc-complete",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "vip-grants-and-badges",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "profile-photo-first-post-blocking",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "profile-popup-persistence",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "hashtags-and-broadcast-event-link",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "web-comment-delete-confirm-cancel-retry",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "sentry-DVNT-WEB-1X-viewport-transition",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "edge-alerts-516-517-root-cause",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "native-build-and-ota-device",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    },
+    {
+      "id": "production-rollback-and-no-main-merge",
+      "status": "pending",
+      "buildSha": "",
+      "environment": "",
+      "evidenceUrl": "",
+      "verifiedAt": "",
+      "reviewer": "",
+      "notes": "Not verified on production/devices"
+    }
+  ]
+}

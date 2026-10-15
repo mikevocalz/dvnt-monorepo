@@ -353,13 +353,25 @@ test('spicy-access: signed-out is refused without a database read', async () => 
   assert.equal(await viewerMaySeeSpicy(db, ''), false);
   assert.equal(reads, 0);
 });
-test('spicy-access: one identity_verifications read per call', async () => {
+test('spicy-access: one policy read and one identity_verifications read per call', async () => {
   const { viewerMaySeeSpicy } = loadSpicyAccess();
   const fake = fakeDb(seed());
   const tablesRead = [];
   const db = { from: t => { tablesRead.push(t); return fake.db.from(t); } };
   assert.equal(await viewerMaySeeSpicy(db, PERSONAS.adult.authId), true);
-  assert.deepEqual(tablesRead, ['identity_verifications']);
+  assert.deepEqual(tablesRead, ['verified_admission_policy', 'identity_verifications']);
+});
+test('spicy-access: an operator-denied adult never sees SPICY', async () => {
+  const { viewerMaySeeSpicy } = loadSpicyAccess();
+  const tables = seed();
+  tables.verified_admission_policy = [{ ...tables.verified_admission_policy[0], denylist: [PERSONAS.adult.authId] }];
+  assert.equal(await viewerMaySeeSpicy(fakeDb(tables).db, PERSONAS.adult.authId), false);
+});
+test('spicy-access: a missing policy row hides SPICY', async () => {
+  const { viewerMaySeeSpicy } = loadSpicyAccess();
+  const tables = seed();
+  tables.verified_admission_policy = [];
+  assert.equal(await viewerMaySeeSpicy(fakeDb(tables).db, PERSONAS.adult.authId), false);
 });
 test('spicy-access: a failed identity_verifications read hides SPICY', async () => {
   const { viewerMaySeeSpicy } = loadSpicyAccess();

@@ -24,6 +24,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { parseMemberHandle } from "../_shared/room-member-handle.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
+import { resolveCreatorStanding, creatorStandingRefusal } from "../_shared/creator-standing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -307,38 +309,45 @@ Deno.serve(async (req) => {
         return jsonResponse({ ok: true, data: { status: "declined" } });
       }
 
-      // ACCEPT is the privileged write: it is what actually grants the seat.
-      // Upsert, because the invitee may never have been in the room — accepting
-      // from a notification is a join AND a promotion in one step.
-      const { data: existing } = await supabase
-        .from("video_room_members")
-        .select("id")
-        .eq("room_id", room.id)
-        .eq("user_id", callerId)
-        .maybeSingle();
-
-      const memberWrite = existing
-        ? supabase
-            .from("video_room_members")
-            .update({ role: "co-host", status: "active", left_at: null })
-            .eq("id", existing.id)
-        : supabase.from("video_room_members").insert({
-            room_id: room.id,
-            user_id: callerId,
-            role: "co-host",
-            status: "active",
-          });
-
-      const { error: memberError } = await memberWrite;
-      if (memberError) {
-        console.error("[Edge:lynk-cohost-invite] member:", memberError.message);
-        return errorResponse("internal_error", "Couldn't add you as co-host");
+      // Accepting an invitation grants a seat AND a privileged role. Recheck
+      // adult admission at execution time; a pending invite is not permission
+      // to bypass later verification or age-policy changes.
+      const admission = await resolveVerifiedAdmission(supabase, callerId);
+      if (admission.state === "blocked") {
+        const refusal = admissionRefusal(admission);
+        return errorResponse("forbidden", refusal.message);
+      }
+      // An invite can grant a hosting role, so suspension/pausing must apply
+      // here just as it does to room creation and hosting reconnects.
+      const standing = await resolveCreatorStanding(supabase, callerId);
+      if (standing.state === "refused") {
+        return errorResponse("forbidden", creatorStandingRefusal(standing).message);
       }
 
-      await supabase
-        .from("lynk_cohost_invites")
-        .update({ status: "accepted", responded_at: new Date().toISOString() })
-        .eq("id", inviteId);
+      // The room's parent row is locked by this RPC and the ordinary join
+      // path, preventing invite acceptance from exceeding the final seat.
+      // Accept, join, role change and invitation status update commit together.
+      const { data: accepted, error: memberError } = await supabase.rpc(
+        "lynk_accept_cohost_atomic",
+        { p_invite_id: inviteId, p_user_id: callerId },
+      );
+      if (memberError) {
+        console.error("[Edge:lynk-cohost-invite] admission:", memberError.message);
+        return errorResponse("internal_error", "Couldn't join as co-host");
+      }
+      if (!accepted?.ok) {
+        if (accepted?.reason === "room_full")
+          return errorResponse("conflict", "That Lynk is full");
+        if (accepted?.reason === "room_ended")
+          return errorResponse("conflict", "That Lynk has ended");
+        if (accepted?.reason === "member_banned")
+          return errorResponse("forbidden", "You cannot join this room");
+        if (accepted?.reason === "invite_resolved")
+          return errorResponse("conflict", "This invitation has already been answered");
+        if (accepted?.reason === "inviter_unavailable")
+          return errorResponse("conflict", "The original host is no longer able to invite co-hosts");
+        return errorResponse("not_found", "Invite not found");
+      }
 
       // The room listens on this channel; an accepted invite has to look like
       // any other role change to clients already in the room.

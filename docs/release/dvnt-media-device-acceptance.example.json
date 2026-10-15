@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "baseline": "2026-10-14",
+  "results": [
+    {
+      "id": "P06-ios-small-story-video",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "P06-android-large-event-video",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "P06-web-post-video-10pct-stall",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "P06-ios-permission-denied-retry",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "P10-ios-story-profile-link",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "P10-android-story-profile-link",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "P10-web-story-profile-link",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "S05-ios-web-cross-device-host-mute",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "S05-android-web-cross-device-host-mute",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "S10-ios-capture-foreground",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "S10-android-capture-flag-secure",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    },
+    {
+      "id": "S10-web-screenshot-warning-limit",
+      "status": "pending",
+      "notes": "Real-device acceptance not yet performed",
+      "device": "",
+      "osVersion": "",
+      "buildSha": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": ""
+    }
+  ]
+}

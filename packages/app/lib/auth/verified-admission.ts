@@ -35,6 +35,7 @@ export type AdmissionReason =
   | "verification_incomplete"
   | "age_evidence_missing"
   | "underage"
+  | "operator_denied"
   | "restricted_profile";
 
 export interface AdmissionVerdict {
@@ -68,6 +69,8 @@ function blockedMessage(reason: AdmissionReason): string {
       return `Your ID didn't show a readable date of birth. Submit it again to reopen ${PARTICIPATION}.`;
     case "underage":
       return `Your ID shows you're under 18. DVNT is 18+, so ${PARTICIPATION} stay closed.`;
+    case "operator_denied":
+      return "This account cannot access DVNT community features. Contact support if you believe this decision is incorrect.";
     case "restricted_profile":
       return "Verify your ID to start posting, commenting, messaging and joining rooms. Your tickets are already in your account.";
     default:
@@ -96,6 +99,12 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
 
   if (documentAge !== null && documentAge >= 0 && documentAge < 18) {
     return { state: "blocked", reason: "underage", deadline: null, message: blockedMessage("underage") };
+  }
+
+  // A verified document never overrides an operator-denied account.
+  // Keep this aligned with the server admission decision.
+  if (input.denied) {
+    return { state: "blocked", reason: "operator_denied", deadline: null, message: blockedMessage("operator_denied") };
   }
 
   const policy = input.policy ?? null;

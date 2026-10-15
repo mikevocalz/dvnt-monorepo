@@ -1,0 +1,23 @@
+name: DVNT adult denial precedence
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/_shared/verified-admission.ts'
+      - 'packages/app/lib/auth/verified-admission.ts'
+      - 'apps/mobile/supabase/migrations/20261015121000_denylist_outranks_verified_adult.sql'
+      - 'scripts/test-adult-denylist.mjs'
+      - 'scripts/test-adult-denylist-migration.cjs'
+      - '.github/workflows/dvnt-adult-denylist.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  age-and-ban-personas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test scripts/test-adult-denylist.mjs
+      - run: node scripts/test-adult-denylist-migration.cjs

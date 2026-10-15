@@ -79,6 +79,18 @@ export function readCityVisibility(
   return { cityId: g.cityId, cityName: g.cityName, expiresAt: g.expiresAt };
 }
 
+/**
+ * Device-coordinate sharing is a distinct consent from city visibility.
+ * The app has no precise-location consent screen yet. There is no setter:
+ * no code may publish coordinates simply because city visibility is on.
+ */
+export const PRECISE_PROXIMITY_GRANT_DEFAULT = false;
+
+/** Only an explicit boolean true could ever count as user consent. */
+export function readPreciseProximityGrant(value: unknown): boolean {
+  return value === true;
+}
+
 /** State the two settings share, so their independence is testable on its own. */
 export interface DiscoveryVisibilityState {
   locationMode: LocationMode;
@@ -125,6 +137,15 @@ export function applyRevokeCityVisibility<T extends DiscoveryVisibilityState>(
  * Shared so the native and web settings screens cannot drift into saying two
  * different things about who can see what.
  */
+export const PRECISE_PROXIMITY_COPY = {
+  toggleLabel: "Share approximate distance with members",
+  toggleDescription:
+    "Separate from city visibility. Only members who also opt in can see a broad distance range, not your GPS coordinates. Sharing stops when your city visibility expires.",
+  unavailable:
+    "Turn on city visibility first. Your device must also have location available.",
+  revoke: "Stop sharing distance",
+} as const;
+
 export const CITY_VISIBILITY_COPY = {
   sectionTitle: "City visibility",
   toggleLabel: "Let members see the city I'm in",
