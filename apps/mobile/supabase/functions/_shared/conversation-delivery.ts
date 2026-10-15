@@ -6,12 +6,13 @@
  * on the same conversations + conversations_rels rows a person's DM does.
  * Neither caller writes a messages row without a membership row.
  *
- * send-message still owns the client send. Push fan-out, media metadata and
- * operation-id replay live there and the worker needs none of them.
- * ponytail: postConversationMessage is the minimum write — membership check,
- * insert, last_message_at. If the worker ever needs push or media, move
- * send-message's body in here rather than copying it.
+ * send-message still owns the client send. Push fan-out and media metadata
+ * live there; both send-message and the worker use the same persisted
+ * sender-scoped operation id for safe retries. This helper keeps membership
+ * validation and the minimal conversation write contract.
  */
+
+import { canonicalJSON } from "../send-message/idempotency.ts";
 
 type Db = {
   from: (table: string) => any;
@@ -112,6 +113,8 @@ export async function postConversationMessage(
     senderId: number;
     content: string;
     metadata?: Record<string, unknown>;
+    /** Stable sender-scoped key for retries; legacy messages may omit it. */
+    operationId?: string;
   },
 ): Promise<MessageResult> {
   const { data: membership } = await supabase
@@ -134,12 +137,34 @@ export async function postConversationMessage(
   if (args.metadata && Object.keys(args.metadata).length > 0) {
     payload.metadata = args.metadata;
   }
+  if (args.operationId) payload.operation_id = args.operationId;
 
   const { data: message, error: insertError } = await supabase
     .from("messages")
     .insert(payload)
     .select()
     .single();
+
+  if (insertError?.code === "23505" && args.operationId) {
+    // A prior send committed but the outbox worker never saw its ACK. Recover
+    // the exact same message instead of creating a second one. Never accept
+    // an operation reused with different recipient/conversation/body/copy.
+    const { data: existing, error: replayError } = await supabase
+      .from("messages")
+      .select("id, conversation_id, content, metadata")
+      .eq("sender_id", args.senderId)
+      .eq("operation_id", args.operationId)
+      .maybeSingle();
+    if (replayError || !existing) {
+      return { ok: false, error: "Could not recover previous message" };
+    }
+    if (Number(existing.conversation_id) !== args.conversationId ||
+        existing.content !== args.content ||
+        canonicalJSON(existing.metadata || {}) !== canonicalJSON(args.metadata || {})) {
+      return { ok: false, error: "Operation key belongs to a different message" };
+    }
+    return { ok: true, messageId: String(existing.id) };
+  }
 
   if (insertError || !message) {
     console.error("[conversation-delivery] Insert error:", insertError);
