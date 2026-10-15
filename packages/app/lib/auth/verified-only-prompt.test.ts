@@ -101,6 +101,13 @@ test("closing a grace popup (backdrop, Esc, back) does not run the action", () =
   assert.equal(ran, 0);
 });
 
+test("an operator denial reads back as operator_denied and hides the verify button", () => {
+  const refusal = admissionRefusal({ state: "blocked", reason: "operator_denied", deadline: null, message: "x" } as AdmissionVerdict);
+  assert.equal(readAdmissionRefusal({ ok: false, error: { code: refusal.code, message: refusal.message } }), "operator_denied");
+  assert.equal(readAdmissionRefusal({ ok: false, error: { code: "forbidden", message: refusal.message, detail: { reason: "operator_denied" } } }), "operator_denied");
+  assert.equal(canVerify("operator_denied"), false);
+});
+
 test("underage hides the verify button, every other refusal shows it", () => {
   assert.equal(UNDERAGE.reason, "underage");
   assert.equal(canVerify(UNDERAGE.reason), false);
