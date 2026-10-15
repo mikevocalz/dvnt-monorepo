@@ -58,6 +58,7 @@ export type AdmissionReason =
   | "verification_incomplete"
   | "age_evidence_missing"
   | "underage"
+  | "operator_denied"
   | "restricted_profile"
   | "profile_photo_required"
   | "first_post_required";
@@ -98,6 +99,8 @@ function blockedMessage(reason: AdmissionReason): string {
       return `Your ID didn't show a readable date of birth. Submit it again to reopen ${PARTICIPATION}.`;
     case "underage":
       return `Your ID shows you're under 18. DVNT is 18+, so ${PARTICIPATION} stay closed.`;
+    case "operator_denied":
+      return "This account cannot access DVNT community features. Contact support if you believe this decision is incorrect.";
     case "profile_photo_required":
       return "Before joining the DVNT community, upload a profile photo and save it successfully.";
     case "first_post_required":
@@ -129,6 +132,13 @@ export function decideVerifiedAdmission(input: AdmissionContext): AdmissionVerdi
   // the rollout configuration says. The age gate only ever tightens.
   if (documentAge.code === "AGE_RESTRICTED") {
     return { state: "blocked", reason: "underage", deadline: null, message: blockedMessage("underage") };
+  }
+
+  // The operator denylist must outrank both a previously passed ID and an
+  // allowlist/grace switch. Previously a passed document silently overrode a
+  // denylist decision; no UI gate could repair a server-side bypass.
+  if (input.denied) {
+    return { state: "blocked", reason: "operator_denied", deadline: null, message: blockedMessage("operator_denied") };
   }
 
   const policy = input.policy ?? null;
