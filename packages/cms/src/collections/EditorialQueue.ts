@@ -1,4 +1,4 @@
-import type { CollectionConfig } from "payload";
+import type { CollectionConfig, CollectionSlug } from "payload";
 import { isAdminPlus, canModerate } from "../access/roles";
 export const EditorialQueue: CollectionConfig = {
  slug:"editorial-queue",
@@ -7,7 +7,7 @@ export const EditorialQueue: CollectionConfig = {
  admin:{group:"Editorial",useAsTitle:"headline",defaultColumns:["headline","channel","stage","scheduledAt"]},
  fields:[
    {name:"headline",type:"text",required:true},
-   {name:"channel",type:"relationship",relationTo:"editorial-channels",required:true},
+   {name:"channel",type:"relationship",relationTo:"editorial-channels" as CollectionSlug,required:true},
    {name:"body",type:"textarea",required:true},
    {name:"stage",type:"select",defaultValue:"draft",required:true,options:[
      {label:"Draft",value:"draft"},{label:"Review",value:"review"},
