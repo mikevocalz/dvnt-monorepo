@@ -2,6 +2,7 @@
 
 import { useRouter } from "solito/navigation";
 import { X } from "lucide-react";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
   usePrivacySettings,
   useUpdatePrivacySettings,
@@ -91,6 +92,8 @@ function CityVisibilitySection() {
   const showMeInCity = useEventsLocationStore((s) => s.showMeInCity);
   const hideMeInCity = useEventsLocationStore((s) => s.hideMeInCity);
   const preciseOptIn = useEventsLocationStore((s) => s.preciseProximityGrant);
+  const preciseOwner = useEventsLocationStore((s) => s.preciseProximityOwnerAuthId);
+  const authId = useAuthStore((s) => s.user?.authId);
   const setPreciseOptIn = useEventsLocationStore((s) => s.setPreciseProximityGrant);
   const deviceLat = useEventsLocationStore((s) => s.deviceLat);
   const deviceLng = useEventsLocationStore((s) => s.deviceLng);
@@ -184,9 +187,9 @@ function CityVisibilitySection() {
           </div>
           <Switch
             label={PROXIMITY_COPY.toggleLabel}
-            checked={Boolean(grant && preciseOptIn)}
-            disabled={(!grant || !hasDeviceLocation) && !preciseOptIn}
-            onChange={setPreciseOptIn}
+            checked={Boolean(grant && preciseOptIn && preciseOwner === authId)}
+            disabled={(!grant || !hasDeviceLocation) && preciseOwner !== authId}
+            onChange={(checked) => setPreciseOptIn(checked, authId ?? null)}
           />
         </div>
       </div>
