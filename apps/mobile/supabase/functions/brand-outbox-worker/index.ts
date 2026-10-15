@@ -31,7 +31,7 @@ import {
   verifyBrandSender,
 } from "../_shared/brand-sender.ts";
 import { NEW_PROFILE_WINDOW } from "../_shared/brand-follow.ts";
-import { campaignMessage, transition } from "../_shared/brand-outbox.ts";
+import { campaignMessage, transition, validEmailProviderReceipt } from "../_shared/brand-outbox.ts";
 import {
   ensureDirectConversation,
   postConversationMessage,
@@ -353,7 +353,7 @@ Deno.serve(async (req: Request) => {
           });
           // The provider returns null when RESEND_API_KEY is missing. An HTTP
           // success from this worker must never be misread as email delivery.
-          if (!id) {
+          if (!validEmailProviderReceipt(id)) {
             outcome = "transient_error";
             error = "email_provider_unconfigured_or_no_receipt";
           } else {
