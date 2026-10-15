@@ -2,7 +2,7 @@ import type { CollectionBeforeChangeHook, CollectionSlug } from "payload";
 import {
   validateEditorialReview,
   type ReviewMutation,
-} from "../../editorial/review-gate";
+} from "../../editorial/review-gate.ts";
 import type { EditorialStage } from "../../editorial/lanes";
 
 const STAGES = new Set<EditorialStage>([
