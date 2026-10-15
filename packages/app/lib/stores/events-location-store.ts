@@ -55,6 +55,8 @@ interface EventsLocationState {
   setDeviceLocation: (lat: number, lng: number) => void;
   addRecentCity: (city: City) => void;
   setVisibilityDuration: (id: VisibilityDurationId) => void;
+  /** Separate explicit opt-in for device-coordinate proximity, never implicit from city visibility. */
+  setPreciseProximityGrant: (enabled: boolean) => void;
   /** Start a bounded grant for `city`. Never called by a find-events action. */
   showMeInCity: (city: City) => void;
   /** One-tap revoke. */
@@ -110,6 +112,12 @@ export const useEventsLocationStore = create<EventsLocationState>()(
 
       setVisibilityDuration: (id) => set({ visibilityDurationId: id }),
 
+      setPreciseProximityGrant: (enabled) => set((state) => ({
+        preciseProximityGrant: enabled === true &&
+          readCityVisibility(state.cityVisibility, Date.now()) !== null,
+      })),
+
+
       showMeInCity: (city) =>
         set((s) =>
           applyCityVisibility(
@@ -120,7 +128,11 @@ export const useEventsLocationStore = create<EventsLocationState>()(
           ),
         ),
 
-      hideMeInCity: () => set((s) => applyRevokeCityVisibility(s)),
+      hideMeInCity: () => set((s) => ({
+        ...applyRevokeCityVisibility(s),
+        // City permission cannot leave a stale separate coordinate grant on.
+        preciseProximityGrant: false,
+      })),
 
       setWeatherData: (data, cityId) =>
         set({
