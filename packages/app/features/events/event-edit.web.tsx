@@ -1,3 +1,5 @@
+"use client";
+import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 /**
  * Edit Event — WEB (@dvnt/app/features/events/event-edit). Real web port of the
  * native editor `(protected)/events/[id]/edit.tsx`. Single-page sectioned form
@@ -9,16 +11,11 @@
  * Conventions: NativeWind interop OFF — Tailwind className on raw DOM tags only,
  * no <View>/<Text>. State lives in the dedicated Zustand edit store (never
  * useState). Date/time via <input type="datetime-local">. Cover/flyer via file
- * input + object-URL preview (rounded SQUARE). Navigation via solito useRouter.
+ * input + object-URL preview (9:16 portrait). Navigation via solito useRouter.
  */
-"use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  MAX_VIDEO_SECONDS,
-  isWithinVideoLimit,
-  readVideoDurationSec,
-} from "@dvnt/app/lib/media/video-duration.web";
+import { useEventFlyerPreparation } from "@dvnt/app/lib/media/use-event-flyer-preparation.web";
 import { useParams, useRouter } from "solito/navigation";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import {
@@ -137,6 +134,7 @@ export function EventEditScreen() {
   const currentUser = useAuthStore((state) => state.user);
   const s = useEventEditStore();
   const flyerRef = useRef<HTMLInputElement>(null);
+  const flyerPreparation = useEventFlyerPreparation(id);
   const [tierLoadFailed, setTierLoadFailed] = useState(false);
   // A flyer video upload can run for minutes; a bare "Saving…" for that long
   // reads as a hung app, which is what "it won't let me upload" looks like.
@@ -273,7 +271,7 @@ export function EventEditScreen() {
   // ── Save (mirrors native handleSave: event row + tier CRUD diff) ──
   const saveLock = useRef(false);
   const handleSave = async () => {
-    if (!id || saveLock.current || updateEventMutation.isPending || uploadPct != null) return;
+    if (!id || saveLock.current || updateEventMutation.isPending || uploadPct != null || flyerPreparation.isBusy()) return;
     if (!s.title.trim()) {
       showToast("error", "Error", "Title is required");
       return;
@@ -573,48 +571,39 @@ export function EventEditScreen() {
    */
   const onFlyerPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    const input = e.currentTarget;
-    if (!file) return;
-    const isVideo = file.type.startsWith("video/");
-    // Server caps event-video at 50MB (media-upload SIZE_LIMITS) — reject at
-    // pick time instead of after a full multi-minute upload.
-    if (isVideo && file.size > 50 * 1024 * 1024) {
-      showToast(
-        "error",
-        "Video too large",
-        `That video is ${Math.round(file.size / (1024 * 1024))}MB — the limit is 50MB. Pick a shorter clip.`,
-      );
-      e.currentTarget.value = "";
-      return;
-    }
-    if (isVideo) {
-      // Length is the other server limit, and the only one that used to be
-      // discovered after a full upload. 60s passes; 61 does not.
-      const durationSec = await readVideoDurationSec(file);
-      if (!isWithinVideoLimit(durationSec)) {
-        showToast(
-          "error",
-          "Video too long",
-          `That clip is ${Math.round(durationSec ?? 0)}s — flyers are ${MAX_VIDEO_SECONDS}s or less.`,
-        );
-        input.value = "";
-        return;
+    e.currentTarget.value = "";
+    if (!file || saveLock.current) return;
+    const isVideo = file.type.startsWith("video/") || /\.(mp4|mov|m4v)$/i.test(file.name);
+    try {
+      let prepared = file;
+      if (isVideo) {
+        const result = await flyerPreparation.prepare(file);
+        if (!result) return;
+        prepared = result;
+      } else {
+        if (!file.type.startsWith("image/")) return;
+        flyerPreparation.cancel();
       }
-    }
-    const url = URL.createObjectURL(file);
-    if (isVideo) {
-      if (s.flyerImage && s.flyerMediaType === "image" && !s.flyerFallbackImage) {
-        s.setFlyerFallbackImage(s.flyerImage);
+      const url = URL.createObjectURL(prepared);
+      const current = useEventEditStore.getState();
+      if (isVideo) {
+        if (current.flyerImage && current.flyerMediaType === "image" && !current.flyerFallbackImage) {
+          current.setFlyerFallbackImage(current.flyerImage);
+        }
+        current.setFlyerImage(url);
+        current.setFlyerMediaType("video");
+      } else if (current.flyerMediaType === "video" && current.flyerImage) {
+        current.setFlyerFallbackImage(url);
+      } else {
+        current.setFlyerImage(url);
+        current.setFlyerMediaType("image");
       }
-      s.setFlyerImage(url);
-      s.setFlyerMediaType("video");
-    } else if (s.flyerMediaType === "video" && s.flyerImage) {
-      s.setFlyerFallbackImage(url);
-    } else {
-      s.setFlyerImage(url);
-      s.setFlyerMediaType("image");
+      if (prepared !== file) {
+        showToast("success", "Video ready", `${(prepared.size / (1024 * 1024)).toFixed(1)}MB, original resolution. Review the preview before saving.`);
+      }
+    } catch (error) {
+      showToast("error", "Couldn't prepare video", error instanceof Error ? error.message : "Please try an MP4 under 50MB.");
     }
-    input.value = "";
   };
 
   if (isLoading || s.hydratedId !== id) {
@@ -663,7 +652,7 @@ export function EventEditScreen() {
           onClick={handleSave}
           // Uploads run BEFORE the mutation starts, so isPending alone left
           // Done tappable for the whole upload — a second tap re-uploads.
-          disabled={updateEventMutation.isPending || uploadPct != null}
+          disabled={updateEventMutation.isPending || uploadPct != null || flyerPreparation.isPreparing}
           className="text-[16px] font-semibold text-[#3FDCFF] disabled:text-white/40"
         >
           {uploadPct != null || updateEventMutation.isPending ? "Saving…" : "Done"}
@@ -723,20 +712,27 @@ export function EventEditScreen() {
           </div>
         </Section>
 
-        {/* Flyer — rounded square, image or video */}
+        {/* Flyer — 9:16 portrait, image or video */}
         <Section title="Flyer (Optional)">
+              <p className="mb-2 text-xs text-white/55">Large videos are prepared on this device to fit the 50MB upload limit. Original resolution is kept; review the preview for quality.</p>
+              {flyerPreparation.isPreparing ? (
+                <div className="mb-3 flex items-center gap-3 text-sm text-white/75">
+                  <span role="status" aria-live="polite">Preparing video… {flyerPreparation.progress ?? 0}%</span>
+                  <button type="button" className="underline" onClick={flyerPreparation.cancel}>Cancel</button>
+                </div>
+              ) : null}
           <p className="text-xs text-white/45 -mt-1">
-            Photo or video · 3:5 portrait · up to 60 sec
+            {EVENT_FLYER_GUIDANCE}
           </p>
           {s.flyerImage ? (
             <div
               className="relative rounded-2xl overflow-hidden bg-white/[0.04]"
-              style={{ width: "60%", aspectRatio: "3 / 5" }}
+              style={{ width: "60%", aspectRatio: EVENT_FLYER_ASPECT }}
             >
               {s.flyerMediaType === "video" ? (
                 <video
                   src={s.flyerImage}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                   autoPlay
                   loop
                   muted
@@ -747,11 +743,12 @@ export function EventEditScreen() {
                 <img
                   src={s.flyerImage}
                   alt=""
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                 />
               )}
               <button
                 onClick={() => {
+                  flyerPreparation.cancel();
                   // Removing a video promotes its poster, so the event keeps a
                   // flyer instead of dropping to the generated fallback.
                   if (s.flyerMediaType === "video" && s.flyerFallbackImage) {
@@ -774,7 +771,7 @@ export function EventEditScreen() {
             <button
               onClick={() => flyerRef.current?.click()}
               className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-white/20 text-white/50"
-              style={{ width: "60%", aspectRatio: "3 / 5" }}
+              style={{ width: "60%", aspectRatio: EVENT_FLYER_ASPECT }}
             >
               <Plus size={24} />
               <span className="text-xs font-medium">Add Flyer</span>

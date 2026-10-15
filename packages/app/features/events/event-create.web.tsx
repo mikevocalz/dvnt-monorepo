@@ -1,3 +1,4 @@
+import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 /**
  * Create Event — WEB (@dvnt/app/features/events/event-create).
  *
@@ -27,11 +28,7 @@ import {
   type ReactElement,
 } from "react";
 import { useRouter } from "solito/navigation";
-import {
-  MAX_VIDEO_SECONDS,
-  isWithinVideoLimit,
-  readVideoDurationSec,
-} from "@dvnt/app/lib/media/video-duration.web";
+import { useEventFlyerPreparation } from "@dvnt/app/lib/media/use-event-flyer-preparation.web";
 import { getAuthIdFromStore } from "@dvnt/app/lib/auth/identity";
 import {
   Calendar,
@@ -184,6 +181,7 @@ export function CreateEventScreen() {
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   const publishLock = useRef(false);
+  const flyerPreparation = useEventFlyerPreparation();
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
@@ -255,7 +253,7 @@ export function CreateEventScreen() {
   }, []);
 
   const saveDraft = async () => {
-    if (s.isSavingDraft) return;
+    if (s.isSavingDraft || flyerPreparation.isBusy()) return;
     s.setIsSavingDraft(true);
     try {
       const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
@@ -330,7 +328,7 @@ export function CreateEventScreen() {
       showToast("error", "Almost there", first || "Check the highlighted fields.");
       return;
     }
-    if (publishLock.current || busy || createEvent.isPending) return;
+    if (publishLock.current || busy || createEvent.isPending || flyerPreparation.isBusy()) return;
     publishLock.current = true;
     const publishingAuthId = getAuthIdFromStore();
     setBusy(true);
@@ -719,46 +717,32 @@ export function CreateEventScreen() {
   // image when there's no video makes it the primary.
   const onVideoFlyerPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    const input = e.currentTarget;
-    if (!file) return;
-    if (!file.type.startsWith("video/")) return;
-    // Server caps event-video at 50MB (media-upload SIZE_LIMITS) — reject at
-    // pick time instead of after a full multi-minute upload.
-    if (file.size > 50 * 1024 * 1024) {
-      showToast(
-        "error",
-        "Video too large",
-        `That video is ${Math.round(file.size / (1024 * 1024))}MB — the limit is 50MB. Pick a shorter clip.`,
-      );
-      e.currentTarget.value = "";
-      return;
+    e.currentTarget.value = "";
+    if (!file || publishLock.current) return;
+    try {
+      const prepared = await flyerPreparation.prepare(file);
+      if (!prepared) return;
+      // Use the latest store after encoding: another image may have been
+      // selected while this operation was running.
+      const current = useCreateEventStore.getState();
+      if (current.flyerImage && current.flyerMediaType === "image" && !current.flyerFallbackImage) {
+        current.setFlyerFallbackImage(current.flyerImage);
+      }
+      current.setFlyerImage(URL.createObjectURL(prepared));
+      current.setFlyerMediaType("video");
+      if (prepared !== file) {
+        showToast("success", "Video ready", `${(prepared.size / (1024 * 1024)).toFixed(1)}MB, original resolution. Review the preview before publishing.`);
+      }
+    } catch (error) {
+      showToast("error", "Couldn't prepare video", error instanceof Error ? error.message : "Please try an MP4 under 50MB.");
     }
-    // Length is the other server limit, and the only one that used to be
-    // discovered after a full upload. 60s passes; 61 does not.
-    const durationSec = await readVideoDurationSec(file);
-    if (!isWithinVideoLimit(durationSec)) {
-      showToast(
-        "error",
-        "Video too long",
-        `That clip is ${Math.round(durationSec ?? 0)}s — flyers are ${MAX_VIDEO_SECONDS}s or less.`,
-      );
-      input.value = "";
-      return;
-    }
-    // If an image had been picked as primary, demote it to the fallback
-    // slot so the user doesn't lose it.
-    if (s.flyerImage && s.flyerMediaType === "image" && !s.flyerFallbackImage) {
-      s.setFlyerFallbackImage(s.flyerImage);
-    }
-    s.setFlyerImage(URL.createObjectURL(file));
-    s.setFlyerMediaType("video");
-    input.value = "";
   };
 
   const onImageFlyerPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) return;
+    flyerPreparation.cancel();
     const url = URL.createObjectURL(file);
     if (s.flyerMediaType === "video" && s.flyerImage) {
       // Video is in the primary slot — this image becomes the fallback.
@@ -782,14 +766,14 @@ export function CreateEventScreen() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => void saveDraft()}
-              disabled={s.isSavingDraft || publishing || !s.hasDraft()}
+              disabled={s.isSavingDraft || publishing || flyerPreparation.isPreparing || !s.hasDraft()}
               className="h-10 px-4 rounded-full border border-white/15 bg-white/5 text-sm font-semibold text-white disabled:opacity-40"
             >
               {s.isSavingDraft ? "Saving…" : s.serverDraftId ? "Update draft" : "Save draft"}
             </button>
             <button
               onClick={() => guardVerified("host_event", () => void publish())}
-              disabled={publishing}
+              disabled={publishing || flyerPreparation.isPreparing}
               className="h-10 px-5 rounded-full bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-40"
             >
               {publishing ? "Publishing…" : "Publish"}
@@ -949,6 +933,14 @@ export function CreateEventScreen() {
             </Section>
 
             <Section title="Media">
+              <p className="mb-3 text-xs text-white/55">{EVENT_FLYER_GUIDANCE}</p>
+              <p className="mb-2 text-xs text-white/55">Large videos are prepared on this device to fit the 50MB upload limit. Original resolution is kept; review the preview for quality.</p>
+              {flyerPreparation.isPreparing ? (
+                <div className="mb-3 flex items-center gap-3 text-sm text-white/75">
+                  <span role="status" aria-live="polite">Preparing video… {flyerPreparation.progress ?? 0}%</span>
+                  <button type="button" className="underline" onClick={flyerPreparation.cancel}>Cancel</button>
+                </div>
+              ) : null}
               {/* Two flyer slots: video is priority. When both are filled,
                   the video plays and the image is the still-fallback /
                   poster. When only one is filled, that one is the flyer. */}
@@ -956,11 +948,11 @@ export function CreateEventScreen() {
                 {/* Video flyer (priority). */}
                 <div className="flex flex-col gap-1.5">
                   <span className={labelCls}>Video flyer (priority)</span>
-                  <label className="relative flex h-40 cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-dashed border-white/20 bg-white/[0.03] text-white/55">
+                  <label style={{ aspectRatio: EVENT_FLYER_ASPECT }} className="relative flex w-full cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-dashed border-white/20 bg-white/[0.03] text-white/55">
                     {isVideo && s.flyerImage ? (
                       <video
                         src={s.flyerImage}
-                        className="absolute inset-0 h-full w-full object-cover"
+                        className="absolute inset-0 h-full w-full object-contain"
                         muted
                         playsInline
                       />
@@ -982,6 +974,7 @@ export function CreateEventScreen() {
                     <button
                       type="button"
                       onClick={() => {
+                        flyerPreparation.cancel();
                         // Promote the fallback (if any) into the primary
                         // slot when the video is removed — user keeps any
                         // still they uploaded.
@@ -1004,7 +997,7 @@ export function CreateEventScreen() {
                 {/* Image flyer (primary fallback). */}
                 <div className="flex flex-col gap-1.5">
                   <span className={labelCls}>Flyer image</span>
-                  <label className="relative flex h-40 cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-dashed border-white/20 bg-white/[0.03] text-white/55">
+                  <label style={{ aspectRatio: EVENT_FLYER_ASPECT }} className="relative flex w-full cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-dashed border-white/20 bg-white/[0.03] text-white/55">
                     {(() => {
                       const url = isVideo ? s.flyerFallbackImage : s.flyerImage;
                       return url ? (
@@ -1012,7 +1005,7 @@ export function CreateEventScreen() {
                         <img
                           src={url}
                           alt=""
-                          className="absolute inset-0 h-full w-full object-cover"
+                          className="absolute inset-0 h-full w-full object-contain"
                         />
                       ) : (
                         <>

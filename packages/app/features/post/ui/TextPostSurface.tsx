@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { View, Text, type StyleProp, type ViewStyle } from "react-native";
+import { View, type StyleProp, type ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { HashtagText } from "@dvnt/app/components/ui/hashtag-text";
 import { TextPostBadgeLogo } from "./TextPostBadgeLogo";
@@ -163,19 +163,7 @@ function TextPostSurfaceComponent({
             }}
           />
 
-          {variant !== "grid" ? (
-            <Text
-              style={{
-                marginTop: 18,
-                color: palette.textSecondary,
-                fontSize: 13,
-                fontWeight: "600",
-                textAlign: "center",
-              }}
-            >
-              Let's connect, share and build community
-            </Text>
-          ) : (
+          {variant === "grid" ? (
             <View
               style={{
                 marginTop: 16,
@@ -185,7 +173,7 @@ function TextPostSurfaceComponent({
                 backgroundColor: palette.accent,
               }}
             />
-          )}
+          ) : null}
         </View>
       </LinearGradient>
     </View>

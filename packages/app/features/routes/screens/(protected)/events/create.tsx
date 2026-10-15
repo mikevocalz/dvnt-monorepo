@@ -1,3 +1,4 @@
+import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import { useEffect, useCallback, useMemo, useState, useRef } from "react";
 import * as Haptics from "expo-haptics";
@@ -1967,7 +1968,7 @@ function CreateEventScreenContent() {
               </View>
             </View>
 
-            {/* Flyer (Optional) — image or video, 3:5 aspect ratio */}
+            {/* Flyer (Optional) — image or video, 9:16 portrait */}
             <View className="mb-6">
               <View className="flex-row justify-between items-center mb-3">
                 <View>
@@ -1975,7 +1976,7 @@ function CreateEventScreenContent() {
                     Flyer (Optional)
                   </Text>
                   <Text className="text-xs text-muted-foreground mt-0.5">
-                    Photo or video · 3:5 portrait · up to 60 sec
+                    {EVENT_FLYER_GUIDANCE}
                   </Text>
                 </View>
               </View>
@@ -1983,14 +1984,14 @@ function CreateEventScreenContent() {
               {flyerImage ? (
                 <View
                   className="relative rounded-2xl overflow-hidden self-start"
-                  style={{ width: "60%", aspectRatio: 3 / 5 }}
+                  style={{ width: "60%", aspectRatio: EVENT_FLYER_ASPECT }}
                 >
                   {flyerMediaType === "video" ? (
                     <DVNTAnimatedVideoView
                       uri={flyerImage}
                       width="100%"
                       height="100%"
-                      contentFit="cover"
+                      contentFit="contain"
                       isPlaying
                       muted={false}
                     />
@@ -1998,7 +1999,7 @@ function CreateEventScreenContent() {
                     <Image
                       source={{ uri: flyerImage }}
                       style={{ width: "100%", height: "100%" }}
-                      contentFit="cover"
+                      contentFit="contain"
                     />
                   )}
                   <Pressable
@@ -2052,7 +2053,7 @@ function CreateEventScreenContent() {
                     }
                   }}
                   className="bg-card rounded-2xl items-center justify-center border-2 border-dashed border-border self-start"
-                  style={{ width: "60%", aspectRatio: 3 / 5 }}
+                  style={{ width: "60%", aspectRatio: EVENT_FLYER_ASPECT }}
                 >
                   <View className="items-center justify-center gap-2">
                     <View className="w-12 h-12 rounded-xl bg-muted items-center justify-center">

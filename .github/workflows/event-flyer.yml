@@ -1,0 +1,51 @@
+name: Event flyer preparation
+on:
+  pull_request:
+    paths:
+      - 'packages/app/lib/media/**'
+      - 'packages/app/lib/events/flyer-layout*'
+      - 'packages/app/components/event/EventFlyer.web.tsx'
+      - 'packages/app/features/post/ui/TextPostSurface.tsx'
+      - 'packages/app/features/routes/screens/(protected)/events/**'
+      - 'scripts/test-flyer-layout-render.cjs'
+      - 'packages/app/features/events/event-create.web.tsx'
+      - 'packages/app/features/events/event-edit.web.tsx'
+      - 'packages/app/package.json'
+      - 'pnpm-lock.yaml'
+      - 'scripts/test-event-video-browser.cjs'
+      - '.github/workflows/event-flyer.yml'
+permissions:
+  contents: read
+jobs:
+  flyer-video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Upload policy, quality budget, size and complete-output checks
+        run: node --test packages/app/lib/events/flyer-layout.test.ts packages/app/lib/media/upload-policy.test.ts packages/app/lib/media/video-quality.test.ts packages/app/lib/media/video-pick-policy.test.ts packages/app/lib/media/event-video-preparation.test.ts
+      - name: Install isolated browser test tools and exact application encoder
+        run: |
+          CODEC_VERSION=$(node -p "require('./packages/app/package.json').dependencies.mediabunny")
+          npm install --prefix "$RUNNER_TEMP/dvnt-flyer" --ignore-scripts --no-audit --no-fund --no-save "mediabunny@$CODEC_VERSION" esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          node "$RUNNER_TEMP/dvnt-flyer/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Render actual portrait flyer and text post surfaces
+        run: NODE_PATH="$RUNNER_TEMP/dvnt-flyer/node_modules" node scripts/test-flyer-layout-render.cjs
+      - name: Real 111MiB portrait MP4 to under 50MiB, original resolution, frames and audio
+        env:
+          FLYER_TEST_OUTPUT_DIR: ${{ runner.temp }}/dvnt-flyer-evidence
+        run: NODE_PATH="$RUNNER_TEMP/dvnt-flyer/node_modules" node scripts/test-event-video-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: event-flyer-encode-evidence
+          path: ${{ runner.temp }}/dvnt-flyer-evidence/result.json
+          if-no-files-found: ignore
+          retention-days: 7

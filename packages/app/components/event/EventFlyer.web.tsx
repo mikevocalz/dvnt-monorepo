@@ -1,5 +1,6 @@
 "use client";
 
+import { EVENT_FLYER_ASPECT } from "@dvnt/app/lib/events/flyer-layout";
 import { useState } from "react";
 import { color } from "@dvnt/app/lib/theme";
 import { useEventDominantColor } from "@dvnt/app/lib/color/useEventDominantColor";
@@ -20,7 +21,7 @@ export interface EventFlyerProps {
   autoplay?: boolean;
   /** Force the static representation (wallet, share card, OG, scanner) — never video. */
   staticOnly?: boolean;
-  /** Aspect ratio (w/h). Default 3/4 portrait flyer. */
+  /** Aspect ratio (w/h). Default 9:16 portrait flyer. */
   aspect?: number;
   className?: string;
   rounded?: number;
@@ -38,7 +39,7 @@ export function EventFlyer({
   media,
   autoplay = false,
   staticOnly = false,
-  aspect = 3 / 4,
+  aspect = EVENT_FLYER_ASPECT,
   className,
   rounded = 16,
 }: EventFlyerProps) {
@@ -109,7 +110,7 @@ export function EventFlyer({
           playsInline
           autoPlay={autoplay}
           onError={() => setVideoFailed(true)}
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }}
         />
       ) : hasStatic ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -117,7 +118,7 @@ export function EventFlyer({
           src={staticSrc!}
           alt={media.title}
           onError={() => setImgFailed(true)}
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }}
         />
       ) : (
         fallback
