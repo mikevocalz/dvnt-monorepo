@@ -7,8 +7,8 @@
  * Idempotent on replay: the tickets upsert ignores duplicates on the
  * (stripe_checkout_session_id, order_index) partial unique index
  * (migration 20260915190000), so a second call inserts 0 rows and skips
- * the side effects (quantity_sold, capacity alerts, promo, guest email)
- * while still repairing order money-state + timeline.
+ * the side effects (quantity_sold, capacity alerts, promo)
+ * while still repairing order money-state and retrying unsent guest email.
  */
 
 import { createSignedQrPayload } from "./hmac-qr.ts";
@@ -230,22 +230,7 @@ export async function issueTicketsForCheckoutSession(
       await incrementPromoUsage(supabase, metadata.promo_code_id);
     }
 
-    // ── Guest tickets: ONE bundle email built from the order's
-    // authoritative ticket rows — not just the rows this call inserted
-    // (a partial-replay edge could otherwise email an incomplete set).
-    // Delivery state persists on the order; failure never rolls back
-    // fulfillment.
-    if (isGuestPurchase && orderRow?.id) {
-      // The guest's restricted profile, from the fields stored when the
-      // session was created. Idempotent, best-effort, and before the email so
-      // the email can name the account. No intake row means an older client.
-      const profile = await finalizeCheckoutProfile(supabase, session.id, logPrefix);
-      await deliverTicketBundleEmail(supabase, orderRow.id, {
-        kind: "fulfillment",
-        logPrefix,
-        profileUsername: profile.status === "created" ? profile.username : null,
-      });
-    }
+
   }
 
   // ── Update order → paid + add timeline ────────
@@ -253,21 +238,6 @@ export async function issueTicketsForCheckoutSession(
   // monotonic and repairs an order left payment_pending by a crashed
   // first attempt.
   if (orderRow) {
-    // Replay self-heal: tickets already existed so the issued>0 block
-    // above was skipped — but if the first attempt's email never went
-    // out (Resend down, crash mid-send), this replay retries it. The
-    // delivery module no-ops when status is already 'sent'.
-    if (isGuestPurchase && issued === 0) {
-      // A crash between issuance and finalize leaves the intake pending; the
-      // replay finishes it. Already-finalized intakes return their result.
-      const profile = await finalizeCheckoutProfile(supabase, session.id, logPrefix);
-      await deliverTicketBundleEmail(supabase, orderRow.id, {
-        kind: "retry",
-        logPrefix,
-        profileUsername: profile.status === "created" ? profile.username : null,
-      });
-    }
-
     // Get payment method details from charge
     let pmBrand = null;
     let pmLast4 = null;
@@ -312,6 +282,18 @@ export async function issueTicketsForCheckoutSession(
       paymentMethodLast4: pmLast4,
       paidAt: new Date().toISOString(),
     });
+
+    // Delivery requires an authoritative paid order. Persist money-state first
+    // on both first issuance and replay, otherwise delivery exits order_not_paid.
+    // The delivery helper remains idempotent and refuses newer refunded states.
+    if (isGuestPurchase) {
+      const profile = await finalizeCheckoutProfile(supabase, session.id, logPrefix);
+      await deliverTicketBundleEmail(supabase, orderRow.id, {
+        kind: issued > 0 ? "fulfillment" : "retry",
+        logPrefix,
+        profileUsername: profile.status === "created" ? profile.username : null,
+      });
+    }
 
     // Replay (issued === 0): repair money-state but don't add a second
     // payment_authorized/payment_captured pair to the timeline.

@@ -58,6 +58,8 @@ function harness(options={}) {
       log.push(`${patch?'update':'select'}:${table}`);
       if(faults.table===table)return {data:null,error:{message:'private database failure'}};
       const rows=tables[table].filter(row=>filters.every(f=>f(row)));
+      if(table==='ticket_holds' && patch?.status && !['active','converted','expired'].includes(patch.status))
+        return {data:null,error:{message:'ticket_holds_status_check'}};
       if(patch)rows.forEach(row=>Object.assign(row,patch));
       return {data:copy(rows.map(row=>columns==='*'?row:Object.fromEntries(columns.split(',').map(key=>key.trim()).map(key=>[key,row[key]])))),error:null};
     }
@@ -79,7 +81,7 @@ function harness(options={}) {
     }
     if(name==='ticket_embed_cancel_unattached'){
       const a=tables.ticket_embed_checkout_attempts.find(a=>a.id===args.p_id);
-      if(!a.stripe_session_id){a.state='cancelled';tables.ticket_holds.find(h=>h.id===a.hold_id).status='released';tables.orders.find(o=>o.id===a.order_id).status='payment_failed';}
+      if(!a.stripe_session_id){a.state='cancelled';tables.ticket_holds.find(h=>h.id===a.hold_id).status='expired';tables.orders.find(o=>o.id===a.order_id).status='payment_failed';}
       return {data:copy(a),error:null};
     }
     if(name==='ticket_embed_attach_session'){
@@ -239,7 +241,7 @@ test('unknown cancellation outcome retains the inventory hold',async()=>{
 test('confirmed Stripe expiration releases only this attempt hold',async()=>{
   const h=harness();await h.open();h.tables.ticket_holds.push({id:randomUUID(),status:'active'});
   const r=await h.call('cancel',h.identity);assert.equal(r.body.state,'expired');
-  assert.equal(h.tables.ticket_holds[0].status,'released');assert.equal(h.tables.ticket_holds[1].status,'active');
+  assert.equal(h.tables.ticket_holds[0].status,'expired');assert.equal(h.tables.ticket_holds[1].status,'active');
 });
 test('paid cancellation cannot release held inventory or restart payment',async()=>{
   const h=harness();await h.open();const session=[...h.sessions.values()][0];session.status='complete';session.payment_status='paid';
@@ -247,7 +249,7 @@ test('paid cancellation cannot release held inventory or restart payment',async(
 });
 test('expired never-exposed attempt can recover from a provider outage without a second charge',async()=>{
   const h=harness({faults:{stripe:true}});await h.open();h.advance(36*60000);
-  const r=await h.call('resume',h.identity);assert.equal(r.body.state,'expired');assert.equal(h.tables.ticket_holds[0].status,'released');assert.equal(h.sessions.size,0);
+  const r=await h.call('resume',h.identity);assert.equal(r.body.state,'expired');assert.equal(h.tables.ticket_holds[0].status,'expired');assert.equal(h.sessions.size,0);
 });
 test('refund status is not misrepresented as tickets ready',async()=>{
   const h=harness();await h.open();h.tables.orders[0].status='partially_refunded';assert.equal((await h.call('status',h.identity)).body.state,'partially_refunded');
@@ -268,5 +270,5 @@ test('unattached cancellation is durable and cannot later expose the provider se
  const h=harness({faults:{lostResponse:true}});await h.open();assert.equal(h.sessions.size,1);
  const cancelled=await h.call('cancel',h.identity);assert.equal(cancelled.body.state,'expired');
  const resumed=await h.call('resume',h.identity);assert.equal(resumed.body.state,'expired');assert.equal(resumed.body.clientSecret,undefined);
- assert.equal(h.tables.ticket_holds[0].status,'released');
+ assert.equal(h.tables.ticket_holds[0].status,'expired');
 });

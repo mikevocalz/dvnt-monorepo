@@ -226,7 +226,7 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
       if(session.status==='expired') {
         // Only a confirmed provider expiry may release this hold. No cleanup on
         // a timeout, decline, closing the dialog, or a client-reported success.
-        checked(await db.from('ticket_holds').update({status:'released'}).eq('id',attempt.hold_id).eq('status','active'));
+        checked(await db.from('ticket_holds').update({status:'expired'}).eq('id',attempt.hold_id).eq('status','active'));
         return json({state:'expired'});
       }
       return await status(attempt,session);

@@ -95,7 +95,7 @@ CREATE TABLE public.orders (
 );
 CREATE TABLE public.ticket_holds (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),user_id text,ticket_type_id uuid REFERENCES ticket_types(id),event_id integer,
- quantity integer,payment_intent_id text,status text,expires_at timestamptz,guest_email text,hold_kind text
+ quantity integer,payment_intent_id text,status text CHECK(status IN ('active','converted','expired')),expires_at timestamptz,guest_email text,hold_kind text
 );
 CREATE TABLE public.cart_holds(tier_id uuid REFERENCES ticket_types(id),qty integer,released boolean,expires_at timestamptz);
 CREATE TABLE public.tickets(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),ticket_type_id uuid REFERENCES ticket_types(id),guest_email text,status text);
@@ -107,7 +107,8 @@ await sql(migration('20260915172318_atomic_legacy_ticket_hold.sql'));
 await sql(migration('20260919120000_promoter_code_v2.sql'));
 await sql(migration('20261011204000_event_ticket_widgets.sql'));
 await sql(migration('20261011233500_unified_ticket_embed_checkout.sql'));
-console.log('PASS: real canonical hold, promoter attribution and both embed migrations applied');
+await sql(migration('20261015190000_embed_cancel_hold_status.sql'));
+console.log('PASS: real canonical hold, promoter attribution and embed migrations with hold-status repair applied');
 const ORIGIN='https://events.example.com',PROOF='a'.repeat(64),REQUEST='b'.repeat(64);
 const fees=(price,quantity=1)=>{
  const pct=Math.round(price*.025), per=quantity*100, fee=pct+per;
@@ -204,7 +205,7 @@ await check('session attachment is atomic, repeatable and refuses replacement ID
  assert.equal(state.stripe_checkout_session_id,attached.stripe_session_id);assert.equal(state.payment_intent_id,attached.stripe_session_id);
 });
 await check('released hold prevents secret publication/attachment without updating order',async()=>{
- const f=await fixture(),a=await prepare(f);await sql("UPDATE ticket_holds SET status='released' WHERE id=$1",[a.hold_id]);
+ const f=await fixture(),a=await prepare(f);await sql("UPDATE ticket_holds SET status='expired' WHERE id=$1",[a.hold_id]);
  await assert.rejects(attach(a),/hold_unavailable/);
  assert.equal((await sql('SELECT stripe_checkout_session_id FROM orders WHERE id=$1',[a.order_id]))[0].stripe_checkout_session_id,null);
 });
@@ -242,7 +243,7 @@ await check('cancelling a never-disclosed session serializes against later attac
  const f=await fixture(),a=await prepare(f);
  const cancelled=(await sql('SELECT ticket_embed_cancel_unattached($1) AS a',[a.id]))[0].a;
  assert.equal(cancelled.state,'cancelled');await assert.rejects(attach(a),/attempt_cancelled/);
- assert.equal((await sql('SELECT status FROM ticket_holds WHERE id=$1',[a.hold_id]))[0].status,'released');
+ assert.equal((await sql('SELECT status FROM ticket_holds WHERE id=$1',[a.hold_id]))[0].status,'expired');
  const next=await prepare(f);assert.notEqual(next.order_id,a.order_id);
 });
 await check('unattached cancellation never releases an already-attached session',async()=>{
