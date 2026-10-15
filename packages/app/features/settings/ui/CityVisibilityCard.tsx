@@ -13,6 +13,7 @@
 
 import { View, Text, Pressable } from "react-native";
 import { Switch } from "@dvnt/app/components/ui/switch";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useSyncMemberProximityPresence } from "@dvnt/app/lib/hooks/use-member-proximity";
 import {
   useEventsLocationStore,
@@ -34,6 +35,8 @@ export function CityVisibilityCard() {
   const showMeInCity = useEventsLocationStore((s) => s.showMeInCity);
   const hideMeInCity = useEventsLocationStore((s) => s.hideMeInCity);
   const preciseOptIn = useEventsLocationStore((s) => s.preciseProximityGrant);
+  const preciseOwner = useEventsLocationStore((s) => s.preciseProximityOwnerAuthId);
+  const authId = useAuthStore((s) => s.user?.authId);
   const setPreciseOptIn = useEventsLocationStore((s) => s.setPreciseProximityGrant);
   const deviceLat = useEventsLocationStore((s) => s.deviceLat);
   const deviceLng = useEventsLocationStore((s) => s.deviceLng);
@@ -135,9 +138,9 @@ export function CityVisibilityCard() {
           ) : null}
         </View>
         <Switch
-          checked={Boolean(grant && preciseOptIn)}
-          disabled={(!grant || !hasDeviceLocation) && !preciseOptIn}
-          onCheckedChange={setPreciseOptIn}
+          checked={Boolean(grant && preciseOptIn && preciseOwner === authId)}
+          disabled={(!grant || !hasDeviceLocation) && preciseOwner !== authId}
+          onCheckedChange={(checked) => setPreciseOptIn(checked, authId ?? null)}
         />
       </View>
     </View>
