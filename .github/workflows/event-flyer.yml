@@ -5,6 +5,11 @@ on:
       - 'packages/app/lib/media/**'
       - 'packages/app/lib/events/flyer-layout*'
       - 'packages/app/components/event/EventFlyer.web.tsx'
+      - 'packages/app/components/event/FeedEventCard.web.tsx'
+      - 'packages/app/components/event/feed-event-card-shape*'
+      - 'packages/app/components/feed/**'
+      - 'packages/app/features/home/screen.web.tsx'
+      - 'scripts/test-feed-flyer-render.cjs'
       - 'packages/app/features/post/ui/TextPostSurface.tsx'
       - 'packages/app/features/routes/screens/(protected)/events/**'
       - 'scripts/test-flyer-layout-render.cjs'
@@ -29,15 +34,19 @@ jobs:
           node-version: '24'
       - name: Upload policy, quality budget, size and complete-output checks
         run: node --test packages/app/lib/events/flyer-layout.test.ts packages/app/lib/media/upload-policy.test.ts packages/app/lib/media/video-quality.test.ts packages/app/lib/media/video-pick-policy.test.ts packages/app/lib/media/event-video-preparation.test.ts
+      - name: Feed portrait sizing and masonry regression checks
+        run: node --test packages/app/components/event/feed-event-card-shape.test.ts packages/app/components/feed/*.test.ts
       - name: Install isolated browser test tools and exact application encoder
         run: |
           CODEC_VERSION=$(node -p "require('./packages/app/package.json').dependencies.mediabunny")
-          npm install --prefix "$RUNNER_TEMP/dvnt-flyer" --ignore-scripts --no-audit --no-fund --no-save "mediabunny@$CODEC_VERSION" esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3
+          npm install --prefix "$RUNNER_TEMP/dvnt-flyer" --ignore-scripts --no-audit --no-fund --no-save "mediabunny@$CODEC_VERSION" esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 jsdom@26.1.0
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
           node "$RUNNER_TEMP/dvnt-flyer/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Render actual portrait flyer and text post surfaces
         run: NODE_PATH="$RUNNER_TEMP/dvnt-flyer/node_modules" node scripts/test-flyer-layout-render.cjs
+      - name: Render actual feed flyers on web and native
+        run: FEED_FLYER_BROWSER=1 NODE_PATH="$RUNNER_TEMP/dvnt-flyer/node_modules" node scripts/test-feed-flyer-render.cjs
       - name: Real 111MiB portrait MP4 to under 50MiB, original resolution, frames and audio
         env:
           FLYER_TEST_OUTPUT_DIR: ${{ runner.temp }}/dvnt-flyer-evidence

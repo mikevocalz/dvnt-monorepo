@@ -1,36 +1,19 @@
-import { CONTENT_MAX_WIDTH } from "@dvnt/app/components/layout/screen-shell";
+import { EVENT_FLYER_ASPECT } from "../../lib/events/flyer-layout.ts";
 
-/**
- * Shape of the inline feed event card — shared by the web card, the native card
- * and the web masonry packer.
- *
- * It lives in its own module because the numbers have drifted before: when the
- * packer repeated the card's height instead of importing it, the column below
- * reserved the wrong height and left a void in the grid. One definition, three
- * consumers.
- */
+/** Feed flyers use the same uncropped portrait canvas as the event page. */
+export const CARD_ASPECT = EVENT_FLYER_ASPECT;
+/** Keep portrait flyers readable without becoming tablet-sized posters. */
+export const CARD_MAX_WIDTH = 384;
+/** Separate details from the artwork; also reserved by the web masonry packer. */
+export const CARD_DETAILS_HEIGHT = 200;
+export const CARD_HORIZONTAL_PADDING = 4;
+export const CARD_VERTICAL_PADDING = 12;
 
-/**
- * Landscape rounded rectangle. An event in the feed reads as a wide banner, not
- * as another portrait tile competing with the posts around it.
- *
- * A RATIO rather than a fixed height: a fixed height ignores the width it is
- * given, so the same card was a squat letterbox in a wide column and too tall
- * in a narrow one.
- */
-export const CARD_ASPECT = 16 / 9;
-
-/**
- * Width ceiling for the native card, which spans the FULL feed width rather
- * than sitting in a masonry column like the web one. `max-w-3xl` = 48rem.
- *
- * Capping the WIDTH rather than clamping the height keeps one rule: the card is
- * 16:9 at every size, so a phone and a tablet show the same shape instead of
- * the tablet quietly getting a different, flatter card. The old fixed 200pt
- * height stretched to 1024pt on iPad and read as a 5:1 sliver — the band of
- * empty space above the title.
- */
-export const CARD_MAX_WIDTH = CONTENT_MAX_WIDTH;
+/** Exact rendered extent, including the outer padding and the details panel. */
+export function feedEventCardHeight(width: number): number {
+  const mediaWidth = Math.max(0, Math.min(width, CARD_MAX_WIDTH) - CARD_HORIZONTAL_PADDING * 2);
+  return mediaWidth / CARD_ASPECT + CARD_DETAILS_HEIGHT + CARD_VERTICAL_PADDING * 2;
+}
 
 /**
  * Shape of the event cards on the Events screen and the public events tab.

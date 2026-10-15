@@ -44,9 +44,9 @@ import {
 } from "@dvnt/app/components/feed/masonry-pack";
 import {
   FeedEventCard,
-  CARD_ASPECT as EVENT_CARD_ASPECT,
   type FeedEventCardData,
 } from "@dvnt/app/components/event/FeedEventCard.web";
+import { feedEventCardHeight } from "@dvnt/app/components/event/feed-event-card-shape";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
 import { useFeedRealtime } from "@dvnt/app/lib/hooks/use-feed-realtime";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
@@ -91,7 +91,7 @@ const GAP = 10;
  * down the feed until a spanning card was painted over a post ~270px below
  * where its spacer sat. Pinning it makes the packer's arithmetic true again.
  */
-const eventCardHeight = (width: number) => width / EVENT_CARD_ASPECT + 24;
+const eventCardHeight = feedEventCardHeight;
 const MAX_W = 1320;
 const VARIATION = 0.3;
 
