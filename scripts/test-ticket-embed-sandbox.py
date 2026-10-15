@@ -20,10 +20,11 @@ production={'dvntapp.live','www.dvntapp.live','dvnt.live','www.dvnt.live'}
 assert re.fullmatch(r'(sk|rk)_test_[A-Za-z0-9]+',key),'Only a Stripe TEST key is permitted'
 assert re.fullmatch(r'[a-fA-F0-9-]{36}',embed_id),'A disposable embed ID is required'
 assert urllib.parse.urlparse(host_url).scheme=='https' and urllib.parse.urlparse(host_url).hostname not in production,'Never run acceptance on production'
-def stripe(method,path,params=None):
+def stripe(method,path,params=None,idempotency_key=None):
     body=urllib.parse.urlencode(params).encode() if params is not None else None
     req=urllib.request.Request('https://api.stripe.com/v1'+path,data=body,method=method,
-        headers={'Authorization':'Bearer '+key,'Content-Type':'application/x-www-form-urlencoded','Stripe-Version':'2025-02-24.acacia'})
+        headers={'Authorization':'Bearer '+key,'Content-Type':'application/x-www-form-urlencoded','Stripe-Version':'2025-02-24.acacia',
+                 **({'Idempotency-Key':idempotency_key} if idempotency_key else {})})
     with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
 result={'commit':os.environ.get('GITHUB_SHA','local'),'real_stripe_sandbox':True,'passed':False}
 with sync_playwright() as p:
@@ -125,22 +126,40 @@ with sync_playwright() as p:
         session=stripe('GET','/checkout/sessions/'+session_id)
         assert session['livemode'] is False and session['payment_status']=='paid'
         assert session['client_reference_id']==observed['fulfilled']['orderId']
-        assert len(observed['fulfilled']['tickets'])==1 and observed['fulfilled']['emailStatus']=='sent','Verify QR issuance and staging email delivery before release'
+        assert len(observed['fulfilled']['tickets'])==1,'Expected exactly one issued ticket'
+        # Issuance is committed before the email provider responds. Keep polling
+        # this same authenticated attempt until delivery is confirmed separately.
+        status_url=descriptor['siteOrigin'].rstrip('/')+'/embed/api'
+        host=urllib.parse.urlparse(host_url)
+        identity=json.loads(page.evaluate('(key)=>sessionStorage.getItem(key)','dvnt-ticket-checkout-v1:'+embed_id))
+        deadline=time.monotonic()+120
+        while observed['fulfilled'].get('emailStatus')!='sent' and time.monotonic()<deadline:
+            page.wait_for_timeout(2000)
+            response=page.request.post(status_url,headers={**bypass_headers(status_url),'Origin':host.scheme+'://'+host.netloc},
+                data={'action':'status','embedId':embed_id,**identity})
+            if response.ok:
+                delivery=response.json()
+                if delivery.get('state')=='fulfilled':observed['fulfilled']=delivery
+        assert observed['fulfilled'].get('emailStatus')=='sent','Staging ticket email was not confirmed sent within 120 seconds'
         for ticket in observed['fulfilled']['tickets']:
             assert urllib.parse.urlparse(ticket['url']).hostname not in production
             assert page.request.get(ticket['url'],headers=bypass_headers(ticket['url'])).ok,'Issued test ticket cannot be opened'
-        refund=stripe('POST','/refunds',{'payment_intent':session['payment_intent']})
+        refund=stripe('POST','/refunds',{'payment_intent':session['payment_intent']},idempotency_key='dvnt-sandbox-refund-'+session_id)
         assert refund['status']=='succeeded','Sandbox refund did not succeed'
         result.update(passed=True,payment=True,one_order=True,qr_ticket=True,email_delivery=True,refund=True)
     finally:
         if not result['passed']:
             print('Sandbox API results:',json.dumps(api_results))
+            if observed['fulfilled']:print('Fulfillment:',len(observed['fulfilled'].get('tickets',[])),'tickets; email status:',observed['fulfilled'].get('emailStatus'))
             if observed['checkout']:
                 session_id=observed['checkout']['clientSecret'].split('_secret_')[0]
                 if re.fullmatch(r'cs_test_[A-Za-z0-9]+',session_id):
                     try:
                         session=stripe('GET','/checkout/sessions/'+session_id)
                         print('Stripe session status:',session.get('status'),'payment status:',session.get('payment_status'))
+                        if session.get('livemode') is False and session.get('payment_status')=='paid':
+                            refund=stripe('POST','/refunds',{'payment_intent':session['payment_intent']},idempotency_key='dvnt-sandbox-refund-'+session_id)
+                            print('Failed acceptance test refund:',refund.get('status'))
                         # Only cancel this run's verified, unpaid test session. The
                         # normal cancel endpoint expires Stripe before releasing inventory.
                         if session.get('livemode') is False and session.get('status')=='open' and session.get('payment_status')=='unpaid':
