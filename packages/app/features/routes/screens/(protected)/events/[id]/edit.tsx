@@ -1,3 +1,4 @@
+import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 /**
  * Edit Event Screen
@@ -1027,7 +1028,7 @@ function EditEventScreenContent() {
                 Flyer (Optional)
               </Text>
               <Text className="text-xs text-muted-foreground mt-0.5">
-                Photo or video · 3:5 portrait · up to 60 sec
+                {EVENT_FLYER_GUIDANCE}
               </Text>
             </View>
           </View>
@@ -1035,14 +1036,14 @@ function EditEventScreenContent() {
           {flyerImage ? (
             <View
               className="relative rounded-2xl overflow-hidden self-start"
-              style={{ width: "60%", aspectRatio: 3 / 5 }}
+              style={{ width: "60%", aspectRatio: EVENT_FLYER_ASPECT }}
             >
               {flyerMediaType === "video" ? (
                 <DVNTAnimatedVideoView
                   uri={flyerImage}
                   width="100%"
                   height="100%"
-                  contentFit="cover"
+                  contentFit="contain"
                   isPlaying
                   muted={false}
                 />
@@ -1050,7 +1051,7 @@ function EditEventScreenContent() {
                 <Image
                   source={{ uri: flyerImage }}
                   style={{ width: "100%", height: "100%" }}
-                  contentFit="cover"
+                  contentFit="contain"
                 />
               )}
               <Pressable
@@ -1103,7 +1104,7 @@ function EditEventScreenContent() {
               }}
               style={{
                 width: "60%",
-                aspectRatio: 3 / 5,
+                aspectRatio: EVENT_FLYER_ASPECT,
                 borderRadius: 16,
                 borderWidth: 2,
                 borderStyle: "dashed",

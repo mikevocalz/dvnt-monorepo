@@ -307,6 +307,7 @@
     "i18next": "^26.0.5",
     "i18next-http-backend": "^4.0.1",
     "lucide-react-native": "^1.8.0",
+    "mediabunny": "1.61.5",
     "nativewind": "5.0.0-preview.4",
     "pg": "^8.18.0",
     "react-anticapture": "^0.1.5",

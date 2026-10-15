@@ -1,3 +1,4 @@
+import { EVENT_FLYER_ASPECT } from "@dvnt/app/lib/events/flyer-layout";
 import { useCheckoutCode } from "./use-checkout-code.web";
 import { canContinueWithCheckoutCode } from "@dvnt/app/lib/payments/checkout-code";
 import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
@@ -1279,7 +1280,8 @@ export function EventDetailScreen() {
               muted
               loop
               playsInline
-              className="w-full aspect-video object-cover"
+              className="mx-auto w-full max-w-sm object-contain"
+              style={{ aspectRatio: EVENT_FLYER_ASPECT }}
             />
           ) : coverPosterUrl ? (
             // eslint-disable-next-line @next/next/no-img-element

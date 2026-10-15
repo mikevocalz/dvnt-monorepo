@@ -1981,7 +1981,7 @@ function EventDetailScreenContent() {
               landing in place. */}
           <ZoomTarget>
           <View style={s.heroImageContainer}>
-            <Animated.View style={[s.heroImageContainer, heroParallaxStyle]}>
+            <Animated.View style={[s.heroImageContainer, !eventData.flyerVideoUrl && heroParallaxStyle]}>
               {/* Video flyer is the preferred hero medium when the organizer
                   uploaded one — it's the headline asset they crafted for the
                   event. Falls back to the static cover image, then to a brand
@@ -1990,9 +1990,9 @@ function EventDetailScreenContent() {
                 <DVNTAnimatedVideoView
                   uri={eventData.flyerVideoUrl}
                   width="100%"
-                  height="120%"
-                  style={s.heroImage}
-                  contentFit="cover"
+                  height="100%"
+                  style={{ width: "100%", height: "100%" }}
+                  contentFit="contain"
                   muted
                 />
               ) : event.image ? (
