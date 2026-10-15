@@ -79,6 +79,18 @@ export function readCityVisibility(
   return { cityId: g.cityId, cityName: g.cityName, expiresAt: g.expiresAt };
 }
 
+/**
+ * Device-coordinate sharing is a distinct consent from city visibility.
+ * The app has no precise-location consent screen yet. There is no setter:
+ * no code may publish coordinates simply because city visibility is on.
+ */
+export const PRECISE_PROXIMITY_GRANT_DEFAULT = false;
+
+/** Only an explicit boolean true could ever count as user consent. */
+export function readPreciseProximityGrant(value: unknown): boolean {
+  return value === true;
+}
+
 /** State the two settings share, so their independence is testable on its own. */
 export interface DiscoveryVisibilityState {
   locationMode: LocationMode;
