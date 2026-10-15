@@ -49,6 +49,28 @@ Required reusable skills across engineering reviews: [expo/skills](https://githu
 
 Known blockers: sandbox event host URL/embed ID/test buyer; live media devices; email provider delivery receipts; 2 seller-managed KYC completion; Sentry ticket-page viewport transition; author approval for editorial automation/free creator offer. None can be waved away by a green unit test.
 
+## Current draft PRs (October 15, 2026)
+
+Every URL below is an actual GitHub draft PR, **not merged or deployed**. Status is work-in-progress; tests/acceptance remain distinct.
+
+| PR | Original IDs or cross-cutting scope | Status of code/verification |
+|---|---|---|
+| [#94](https://github.com/mikevocalz/dvnt-monorepo/pull/94) | S08; atomic Lynk capacity and cohost seat admission | Code + isolated Postgres tests; real device/capacity acceptance pending |
+| [#95](https://github.com/mikevocalz/dvnt-monorepo/pull/95) | Message operation IDs; R01/T01 delivery reliability prerequisite | Code + isolated tests; migration/provider acceptance pending |
+| [#96](https://github.com/mikevocalz/dvnt-monorepo/pull/96) | Entire original 65-item mapping and specialist role roster | Coordination/docs/tests only |
+| [#97](https://github.com/mikevocalz/dvnt-monorepo/pull/97) | A01, A02, A03, A05, A06 | Denylist bypass fix + persona tests; identity repeat-ban/legacy-policy acceptance pending |
+| [#98](https://github.com/mikevocalz/dvnt-monorepo/pull/98) | P04, P05, S09 | Consent-based proximity foundation; UI/native and anonymous-room delivery pending |
+| [#99](https://github.com/mikevocalz/dvnt-monorepo/pull/99) | P06, P10, S05, S10 | Physical-device acceptance matrix pending |
+| [#100](https://github.com/mikevocalz/dvnt-monorepo/pull/100) | E07, E10, T10, S01, S03, S12 | Private event, test checkout and two-device acceptance matrix pending |
+| [#101](https://github.com/mikevocalz/dvnt-monorepo/pull/101) | T01, T03, T07, T09, R01, R05, R06, W01 | Read-only delivery audit + provider/consent acceptance pending |
+| [#102](https://github.com/mikevocalz/dvnt-monorepo/pull/102) | S06 | Host spotlight contract, screen-share gate; real MoQ/native implementation pending |
+| [#103](https://github.com/mikevocalz/dvnt-monorepo/pull/103) | S07 | Disabled tip eligibility contract; processor authorization and charge system pending |
+| [#104](https://github.com/mikevocalz/dvnt-monorepo/pull/104) | C01, C02, C03, C04 | Ten disabled editorial lanes and Payload queue scaffold; publishing implementation pending |
+| [#105](https://github.com/mikevocalz/dvnt-monorepo/pull/105) | D01, D02, D03 | Approved-offer policy contract; creator/business terms still missing |
+| [#106](https://github.com/mikevocalz/dvnt-monorepo/pull/106) | Production release verification across newer fixes | 15-case evidence gate; live/provider acceptance pending |
+
+**Subagents:** Specialist instructions/skills are packaged in `.agents/closeout/ROLE-ROSTER.md` for execution by compatible coding-agent runners. Their presence does NOT indicate an autonomous background run already happened.
+
 ## Baseline release gate
 
 - All 36 unresolved IDs have exactly one primary workstream; no item is marked DONE without evidence.
