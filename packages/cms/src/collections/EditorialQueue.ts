@@ -1,10 +1,12 @@
 import type { CollectionConfig, CollectionSlug } from "payload";
 import { isAdminPlus, canModerate } from "../access/roles";
+import { enforceEditorialReview } from "./hooks/editorial-review";
 export const EditorialQueue: CollectionConfig = {
  slug:"editorial-queue",
  dbName:"editorial_queue",
  access:{read:canModerate,create:canModerate,update:canModerate,delete:isAdminPlus},
  admin:{group:"Editorial",useAsTitle:"headline",defaultColumns:["headline","channel","stage","scheduledAt"]},
+ hooks:{beforeChange:[enforceEditorialReview]},
  fields:[
    {name:"headline",type:"text",required:true},
    {name:"channel",type:"relationship",relationTo:"editorial-channels" as CollectionSlug,required:true},
