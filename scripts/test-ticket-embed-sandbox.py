@@ -61,6 +61,9 @@ with sync_playwright() as p:
         assert descriptor.get('testMode') is True,'Refusing to reserve live inventory: descriptor must confirm test mode'
         assert urllib.parse.urlparse(descriptor['siteOrigin']).hostname not in production,'Staging must use a non-production ticket platform'
         preview_hosts.add(urllib.parse.urlparse(descriptor['siteOrigin']).hostname)
+        # The descriptor precedes the deferred widget script. Wait for tierChanged()
+        # to populate quantity before filling attendee fields or clicking its button.
+        expect(frame.locator('#quantity')).to_have_value('1',timeout=30000)
         frame.locator('#buyer-name').fill('DVNT Sandbox Test')
         frame.locator('#buyer-email').fill(email)
         for field in frame.locator('#attendees input').all():field.fill('Sandbox Attendee')
@@ -81,6 +84,11 @@ with sync_playwright() as p:
             while time.monotonic()<deadline:
                 for f in page.frames:
                     if not (urllib.parse.urlparse(f.url).hostname or '').endswith('.stripe.com'):continue
+                    # A recognized test email can open Link's verification form.
+                    # Stay on the card path instead of requiring an emailed code.
+                    skip=f.get_by_role('button',name='Pay without Link',exact=True)
+                    if skip.count() and skip.first.is_visible():
+                        skip.first.click()
                     target=f.locator(selectors)
                     if target.count() and target.first.is_visible():target.first.fill(value);return
                 page.wait_for_timeout(250)
@@ -91,6 +99,8 @@ with sync_playwright() as p:
         submitted=False
         for f in page.frames:
             if not (urllib.parse.urlparse(f.url).hostname or '').endswith('.stripe.com'):continue
+            billing_name=f.locator('input[name="billingName"],input[autocomplete="cc-name"]')
+            if billing_name.count() and billing_name.first.is_visible():billing_name.first.fill('DVNT Sandbox Test')
             postal=f.locator('input[name="billingPostalCode"],input[autocomplete="postal-code"]')
             if postal.count() and postal.first.is_visible():postal.first.fill('10001')
             button=f.get_by_role('button',name=re.compile(r'^Pay(?:\s|$)'))
