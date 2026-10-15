@@ -42,6 +42,8 @@ interface EventsLocationState {
   cityVisibility: CityVisibilityGrant | null;
   /** Explicit device-coordinate consent: no UI setter exists; defaults off. */
   preciseProximityGrant: boolean;
+  /** Auth principal who explicitly enabled coordinate sharing on this device. */
+  preciseProximityOwnerAuthId: string | null;
   /** How long the next grant lasts. Remembered so the member picks once. */
   visibilityDurationId: VisibilityDurationId;
   weatherData: WeatherDay[] | null;
@@ -56,7 +58,7 @@ interface EventsLocationState {
   addRecentCity: (city: City) => void;
   setVisibilityDuration: (id: VisibilityDurationId) => void;
   /** Separate explicit opt-in for device-coordinate proximity, never implicit from city visibility. */
-  setPreciseProximityGrant: (enabled: boolean) => void;
+  setPreciseProximityGrant: (enabled: boolean, ownerAuthId: string | null) => void;
   /** Start a bounded grant for `city`. Never called by a find-events action. */
   showMeInCity: (city: City) => void;
   /** One-tap revoke. */
@@ -85,6 +87,7 @@ export const useEventsLocationStore = create<EventsLocationState>()(
       recentCities: [],
       cityVisibility: null,
       preciseProximityGrant: PRECISE_PROXIMITY_GRANT_DEFAULT,
+      preciseProximityOwnerAuthId: null,
       visibilityDurationId: DEFAULT_VISIBILITY_DURATION_ID,
       weatherData: null,
       weatherCityId: null,
@@ -112,10 +115,15 @@ export const useEventsLocationStore = create<EventsLocationState>()(
 
       setVisibilityDuration: (id) => set({ visibilityDurationId: id }),
 
-      setPreciseProximityGrant: (enabled) => set((state) => ({
-        preciseProximityGrant: enabled === true &&
-          readCityVisibility(state.cityVisibility, Date.now()) !== null,
-      })),
+      setPreciseProximityGrant: (enabled, ownerAuthId) => set((state) => {
+        const permitted = enabled === true &&
+          typeof ownerAuthId === "string" && ownerAuthId.trim().length > 0 &&
+          readCityVisibility(state.cityVisibility, Date.now()) !== null;
+        return {
+          preciseProximityGrant: permitted,
+          preciseProximityOwnerAuthId: permitted ? ownerAuthId : null,
+        };
+      }),
 
 
       showMeInCity: (city) =>
@@ -132,6 +140,7 @@ export const useEventsLocationStore = create<EventsLocationState>()(
         ...applyRevokeCityVisibility(s),
         // City permission cannot leave a stale separate coordinate grant on.
         preciseProximityGrant: false,
+        preciseProximityOwnerAuthId: null,
       })),
 
       setWeatherData: (data, cityId) =>
@@ -160,6 +169,7 @@ export const useEventsLocationStore = create<EventsLocationState>()(
         recentCities: state.recentCities,
         cityVisibility: state.cityVisibility,
         preciseProximityGrant: state.preciseProximityGrant,
+        preciseProximityOwnerAuthId: state.preciseProximityOwnerAuthId,
         visibilityDurationId: state.visibilityDurationId,
         weatherData: state.weatherData,
         weatherCityId: state.weatherCityId,
