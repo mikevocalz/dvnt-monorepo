@@ -1,0 +1,22 @@
+name: DVNT communications safety contract
+on:
+  pull_request:
+    paths:
+      - 'scripts/audit-dvnt-comms-readonly.sql'
+      - 'scripts/test-dvnt-comms-audit.cjs'
+      - 'docs/release/dvnt-comms-delivery.md'
+      - '.github/workflows/dvnt-comms-audit.yml'
+permissions:
+  contents: read
+jobs:
+  aggregate-only-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node --test scripts/test-dvnt-comms-audit.cjs
+      - run: node --test apps/mobile/supabase/functions/_shared/brand-outbox.test.cjs

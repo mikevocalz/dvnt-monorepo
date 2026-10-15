@@ -11,6 +11,11 @@
  * Growth only. Tickets, receipts and order mail never enter this outbox.
  */
 
+/** A provider submission without a durable acceptance ID cannot be 'sent'. */
+export function validEmailProviderReceipt(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 export type OutboxState =
   | "queued"
   | "sending"
