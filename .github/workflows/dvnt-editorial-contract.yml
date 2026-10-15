@@ -1,0 +1,20 @@
+name: DVNT editorial profile contract
+on:
+  pull_request:
+    paths:
+      - 'packages/cms/src/editorial/**'
+      - 'packages/cms/src/collections/Editorial*'
+      - 'packages/cms/src/payload.config.ts'
+      - 'docs/release/dvnt-editorial-closeout.md'
+      - '.github/workflows/dvnt-editorial-contract.yml'
+permissions:
+  contents: read
+jobs:
+  editorial:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test packages/cms/src/editorial/*.test.ts
