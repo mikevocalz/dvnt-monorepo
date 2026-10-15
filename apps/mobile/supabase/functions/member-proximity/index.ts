@@ -130,17 +130,25 @@ Deno.serve(async (req: Request) => {
   const action = typeof body?.action === "string" ? body.action : "";
   if (!action) return json({ ok: false, error: "Missing action" }, 400);
 
+  // Withdrawal of location consent must work even when identity verification
+  // expired, the account was suspended, or the admission policy changed.
+  // A user never has to earn permission to STOP sharing their coordinates.
+  if (action === "revoke") {
+    const { error } = await db.from("member_proximity_presence")
+      .delete().eq("user_id", authUserId);
+    if (error) {
+      console.error("[member-proximity] revoke failed:", error.code);
+      return json({ ok: false, error: "Could not stop proximity sharing. Please retry." }, 503);
+    }
+    return json({ ok: true, data: { revoked: true } });
+  }
+
   const admission = await resolveVerifiedAdmission(db, authUserId);
   if (admission.state === "blocked") {
     return json(
       { ok: false, error: admission.message || "Adult verification is required", code: admission.reason },
       403,
     );
-  }
-
-  if (action === "revoke") {
-    await db.from("member_proximity_presence").delete().eq("user_id", authUserId);
-    return json({ ok: true, data: { revoked: true } });
   }
 
   if (action === "publish") {
@@ -227,7 +235,9 @@ Deno.serve(async (req: Request) => {
     db.from("blocks").select("id").eq("blocker_id", viewer.id).eq("blocked_id", target.id).maybeSingle(),
     db.from("blocks").select("id").eq("blocker_id", target.id).eq("blocked_id", viewer.id).maybeSingle(),
   ]);
-  if (blockedForward.data || blockedReverse.data) {
+  // An unreadable block relationship cannot be interpreted as permission.
+  if (blockedForward.error || blockedReverse.error ||
+      blockedForward.data || blockedReverse.data) {
     return json({ ok: true, data: { kind: "unavailable", label: null } });
   }
 
