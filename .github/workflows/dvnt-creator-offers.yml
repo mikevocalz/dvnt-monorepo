@@ -1,0 +1,18 @@
+name: DVNT creator offer activation safety
+on:
+  pull_request:
+    paths:
+      - 'packages/app/features/sneaky-lynk/creator/**'
+      - 'docs/release/dvnt-creator-offer-decisions.md'
+      - '.github/workflows/dvnt-creator-offers.yml'
+permissions:
+  contents: read
+jobs:
+  creator-eligibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test packages/app/features/sneaky-lynk/creator/*.test.ts
