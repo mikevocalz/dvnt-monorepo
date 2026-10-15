@@ -28,7 +28,7 @@ with sync_playwright() as p:
     bypass=os.environ.get('TICKET_EMBED_SANDBOX_BYPASS')
     preview_hosts={urllib.parse.urlparse(host_url).hostname}
     def bypass_headers(url):
-        return {'x-vercel-protection-bypass':bypass,'x-vercel-set-bypass-cookie':'true'} if bypass and urllib.parse.urlparse(url).hostname in preview_hosts else {}
+        return {'x-vercel-protection-bypass':bypass} if bypass and urllib.parse.urlparse(url).hostname in preview_hosts else {}
     browser=p.chromium.launch(headless=True); context=browser.new_context(); page=context.new_page()
     context.route('**/*',lambda route:route.continue_(headers={**route.request.headers,**bypass_headers(route.request.url)}))
     page.set_default_timeout(60000)
@@ -55,7 +55,7 @@ with sync_playwright() as p:
         for field in frame.locator('#attendees input').all():field.fill('Sandbox Attendee')
         frame.get_by_role('button',name='Review total').click()
         pay=frame.get_by_role('button',name=re.compile(r'^Pay \$'))
-        expect(pay).to_be_visible();pay.click()
+        expect(pay).to_be_visible(timeout=30000);pay.click()
         deadline=time.monotonic()+60
         while not observed['checkout'] and time.monotonic()<deadline:page.wait_for_timeout(250)
         assert observed['checkout'] and observed['checkout']['publishableKey'].startswith('pk_test_'),'Refusing to send test-card data to live Stripe'
