@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "results": [
+    {
+      "id": "guest-checkout-selected-event",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "private-event-invitee-can-view",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "private-event-forwarded-link-denied",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "private-event-cross-account-profile",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "paid-ticket-verified-room-admitted",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "paid-ticket-unverified-room-denied",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "comp-claim-admitted-once",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "nonbuyer-and-expired-link-denied",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "web-host-native-guest-media",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "native-host-web-guest-media",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "room-host-end-reconnect-denied",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "offline-reconnect-and-background",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "micah-dc-qr-ticket-finance-reconciliation",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    },
+    {
+      "id": "stripe-test-purchase-issue-wallet-refund",
+      "status": "pending",
+      "environment": "",
+      "buildSha": "",
+      "testId": "",
+      "evidenceUrl": "",
+      "testedAt": "",
+      "tester": "",
+      "notes": "Not run; provider/device evidence required"
+    }
+  ]
+}
