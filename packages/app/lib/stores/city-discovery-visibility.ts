@@ -137,6 +137,15 @@ export function applyRevokeCityVisibility<T extends DiscoveryVisibilityState>(
  * Shared so the native and web settings screens cannot drift into saying two
  * different things about who can see what.
  */
+export const PRECISE_PROXIMITY_COPY = {
+  toggleLabel: "Share approximate distance with members",
+  toggleDescription:
+    "Separate from city visibility. Only members who also opt in can see a broad distance range, not your GPS coordinates. Sharing stops when your city visibility expires.",
+  unavailable:
+    "Turn on city visibility first. Your device must also have location available.",
+  revoke: "Stop sharing distance",
+} as const;
+
 export const CITY_VISIBILITY_COPY = {
   sectionTitle: "City visibility",
   toggleLabel: "Let members see the city I'm in",
