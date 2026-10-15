@@ -30,7 +30,10 @@ with sync_playwright() as p:
     def bypass_headers(url):
         return {'x-vercel-protection-bypass':bypass} if bypass and urllib.parse.urlparse(url).hostname in preview_hosts else {}
     browser=p.chromium.launch(headless=True); context=browser.new_context(); page=context.new_page()
-    context.route('**/*',lambda route:route.continue_(headers={**route.request.headers,**bypass_headers(route.request.url)}))
+    def add_bypass(route):
+        extra=bypass_headers(route.request.url)
+        route.continue_(headers={**route.request.headers,**extra}) if extra else route.continue_()
+    context.route('**/*',add_bypass)
     page.set_default_timeout(60000)
     observed={'checkout':None,'fulfilled':None}
     def observe(response):
@@ -41,6 +44,10 @@ with sync_playwright() as p:
             if data.get('state')=='fulfilled':observed['fulfilled']=data
         except Exception:pass
     page.on('response',observe)
+    # Failure evidence without secrets: status and path of every embed API call, and failed requests.
+    trail=[]
+    page.on('response',lambda r:trail.append(f'{r.status} {r.request.method} {urllib.parse.urlparse(r.url).path}') if urllib.parse.urlparse(r.url).path.startswith('/embed') else None)
+    page.on('requestfailed',lambda r:trail.append(f'FAILED {r.method} {urllib.parse.urlparse(r.url).path} {r.failure}'))
     try:
         page.goto(host_url,wait_until='domcontentloaded')
         widget=page.locator(f'[data-dvnt-ticket-embed="{embed_id}"]')
@@ -55,7 +62,11 @@ with sync_playwright() as p:
         for field in frame.locator('#attendees input').all():field.fill('Sandbox Attendee')
         frame.get_by_role('button',name='Review total').click()
         pay=frame.get_by_role('button',name=re.compile(r'^Pay \$'))
-        expect(pay).to_be_visible(timeout=30000);pay.click()
+        try:expect(pay).to_be_visible(timeout=30000)
+        except AssertionError:
+            print('Widget button:',frame.locator('#continue').text_content(),'| widget error:',frame.locator('#error').text_content())
+            print('Embed requests:',*trail[-15:],sep='\n  ');raise
+        pay.click()
         deadline=time.monotonic()+60
         while not observed['checkout'] and time.monotonic()<deadline:page.wait_for_timeout(250)
         assert observed['checkout'] and observed['checkout']['publishableKey'].startswith('pk_test_'),'Refusing to send test-card data to live Stripe'
