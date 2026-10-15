@@ -34,6 +34,16 @@ const CONFIGURED = {
   DVNT_BRAND_OUTBOX_ENABLED: 'true',
 };
 
+test('an email is never marked sent without a provider acceptance receipt', () => {
+  for (const absent of [null, undefined, '', '   ', 0, false]) {
+    assert.equal(outbox.validEmailProviderReceipt(absent), false);
+    const state = outbox.transition('sending', 'transient_error', 1);
+    assert.equal(state.state, 'queued');
+  }
+  assert.equal(outbox.validEmailProviderReceipt('provider_accepted_id_123'), true);
+  assert.equal(outbox.transition('sending', 'delivered', 1).state, 'sent');
+});
+
 test('the provider idempotency key is the unique key, so a retry cannot become a second message', () => {
   const key = outbox.providerIdempotencyKey('welcome_dm_v1', 7, 'dm');
   assert.equal(key, 'welcome_dm_v1:7:dm');
