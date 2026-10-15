@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { memberProximityApi } from "@dvnt/app/lib/api/member-proximity";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -23,9 +23,9 @@ export const memberProximityKeys = {
  * Two grants are needed to publish a coordinate, not one. `cityVisibility`
  * consents to a city name, and it is read through `readCityVisibility` so the
  * shape is validated instead of hand-checked. Device GPS additionally needs
- * `preciseProximityGrant`, which defaults off and has no consent surface yet,
- * so the publish branch is inert today and this hook revokes instead. That is
- * the honest reading of the city grant, which carries no coordinate.
+ * `preciseProximityGrant`, which defaults off, is tied to the signed-in
+ * account and can only be enabled through the separate privacy control.
+ * A queued revocation cannot be overwritten by an older in-flight publish.
  */
 export function useSyncMemberProximityPresence() {
   const authId = useAuthStore((s) => s.user?.authId);
@@ -33,49 +33,56 @@ export function useSyncMemberProximityPresence() {
   const storedPreciseGrant = useEventsLocationStore(
     (s) => s.preciseProximityGrant,
   );
+  const grantOwner = useEventsLocationStore((s) => s.preciseProximityOwnerAuthId);
   const latitude = useEventsLocationStore((s) => s.deviceLat);
   const longitude = useEventsLocationStore((s) => s.deviceLng);
   const { data: verification, isLoading } = useVerificationState();
+  const queue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     if (!authId || isLoading) return;
 
-    const liveGrant = readCityVisibility(storedGrant, Date.now());
-    const preciseGrant = readPreciseProximityGrant(storedPreciseGrant);
-    const hasCoords =
-      typeof latitude === "number" &&
-      typeof longitude === "number" &&
-      latitude !== 0 &&
-      longitude !== 0;
+    // Serialize these writes. An old location publish may be in flight when
+    // someone hits "Stop sharing". Issuing revoke in parallel lets the older
+    // publish complete last and silently restore the location record.
+    queue.current = queue.current.catch(() => {}).then(async () => {
+      // Account switches invalidate consent owned by another login. Every
+      // request must be scoped to the current Better Auth principal.
+      if (useAuthStore.getState().user?.authId !== authId) return;
 
-    if (
-      preciseGrant &&
-      verification?.state === "approved" &&
-      liveGrant &&
-      hasCoords
-    ) {
-      void memberProximityApi
-        .publish({
-          latitude,
-          longitude,
+      // Read the newest store snapshot at execution time, not the stale
+      // captured state from when this action was queued.
+      const location = useEventsLocationStore.getState();
+      const liveGrant = readCityVisibility(location.cityVisibility, Date.now());
+      const consentForThisAccount =
+        readPreciseProximityGrant(location.preciseProximityGrant) &&
+        location.preciseProximityOwnerAuthId === authId;
+      const lat = location.deviceLat;
+      const lng = location.deviceLng;
+      const validCoords =
+        typeof lat === "number" && Number.isFinite(lat) && Math.abs(lat) <= 90 &&
+        typeof lng === "number" && Number.isFinite(lng) && Math.abs(lng) <= 180;
+
+      if (consentForThisAccount && liveGrant && validCoords &&
+          verification?.state === "approved") {
+        await memberProximityApi.publish({
+          latitude: lat,
+          longitude: lng,
           cityId: liveGrant.cityId,
           shareUntil: new Date(liveGrant.expiresAt).toISOString(),
-        })
-        .catch((error) => {
-          console.warn("[member-proximity] publish failed", error);
         });
-      return;
-    }
-
-    // Revoke on explicit off/expiry, on a missing precise-location grant, and
-    // whenever adult verification is not approved. This cannot expose a
-    // coordinate; failure leaves the previous server row subject to its own
-    // share_until deadline.
-    void memberProximityApi.revoke().catch(() => {});
+      } else {
+        // Withdrawal remains available after verification expiry or ban.
+        await memberProximityApi.revoke();
+      }
+    }).catch((error) => {
+      console.warn("[member-proximity] sync failed", error);
+    });
   }, [
     authId,
     storedGrant,
     storedPreciseGrant,
+    grantOwner,
     latitude,
     longitude,
     verification?.state,
