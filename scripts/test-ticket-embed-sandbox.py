@@ -36,10 +36,14 @@ with sync_playwright() as p:
     context.route('**/*',add_bypass)
     page.set_default_timeout(60000)
     observed={'checkout':None,'fulfilled':None}
+    api_results=[]
     def observe(response):
         if urllib.parse.urlparse(response.url).path!='/embed/api' or response.request.method!='POST':return
         try:
             data=response.json()
+            action=(response.request.post_data_json or {}).get('action')
+            # Log protocol metadata only, never buyer data, tokens, or payment secrets.
+            api_results.append({'action':action,'status':response.status,'state':data.get('state'),'code':data.get('code')})
             if data.get('clientSecret'):observed['checkout']=data
             if data.get('state')=='fulfilled':observed['fulfilled']=data
         except Exception:pass
@@ -52,7 +56,7 @@ with sync_playwright() as p:
         page.goto(host_url,wait_until='domcontentloaded')
         widget=page.locator(f'[data-dvnt-ticket-embed="{embed_id}"]')
         frame=widget.frame_locator('iframe')
-        expect(frame.locator('#dvnt-data')).to_be_attached()
+        expect(frame.locator('#dvnt-data')).to_be_attached(timeout=30000)
         descriptor=json.loads(frame.locator('#dvnt-data').text_content())
         assert descriptor.get('testMode') is True,'Refusing to reserve live inventory: descriptor must confirm test mode'
         assert urllib.parse.urlparse(descriptor['siteOrigin']).hostname not in production,'Staging must use a non-production ticket platform'
@@ -69,7 +73,8 @@ with sync_playwright() as p:
         pay.click()
         deadline=time.monotonic()+60
         while not observed['checkout'] and time.monotonic()<deadline:page.wait_for_timeout(250)
-        assert observed['checkout'] and observed['checkout']['publishableKey'].startswith('pk_test_'),'Refusing to send test-card data to live Stripe'
+        assert observed['checkout'],'No checkout session returned by the sandbox API'
+        assert observed['checkout']['publishableKey'].startswith('pk_test_'),'Refusing to send test-card data to live Stripe'
         assert observed['checkout']['totals']['total']<=5000,'Use a test ticket costing at most $50'
         def field(selectors,value):
             deadline=time.monotonic()+60
@@ -107,6 +112,9 @@ with sync_playwright() as p:
         assert refund['status']=='succeeded','Sandbox refund did not succeed'
         result.update(passed=True,payment=True,one_order=True,qr_ticket=True,email_delivery=True,refund=True)
     finally:
+        if not result['passed']:
+            print('Sandbox API results:',json.dumps(api_results))
+            print('Embed requests:',*trail[-15:],sep='\n  ')
         browser.close()
         Path('ticket-embed-sandbox-result.json').write_text(json.dumps(result,indent=2))
 print('PASS: real sandbox payment, server-confirmed order, QR access, email delivery and refund. No live transaction.')
