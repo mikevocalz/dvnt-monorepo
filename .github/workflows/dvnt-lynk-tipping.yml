@@ -1,0 +1,18 @@
+name: DVNT Lynk tipping preflight
+on:
+  pull_request:
+    paths:
+      - 'packages/app/features/sneaky-lynk/payments/**'
+      - 'docs/release/lynk-tipping-risk-and-plan.md'
+      - '.github/workflows/dvnt-lynk-tipping.yml'
+permissions:
+  contents: read
+jobs:
+  eligibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test packages/app/features/sneaky-lynk/payments/*.test.ts
