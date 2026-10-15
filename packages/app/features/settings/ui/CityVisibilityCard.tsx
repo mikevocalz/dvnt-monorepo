@@ -19,6 +19,7 @@ import {
 } from "@dvnt/app/lib/stores/events-location-store";
 import {
   CITY_VISIBILITY_COPY as COPY,
+  PRECISE_PROXIMITY_COPY as PROXIMITY_COPY,
   formatVisibilityExpiry,
   VISIBILITY_DURATIONS,
 } from "@dvnt/app/lib/stores/city-discovery-visibility";
@@ -29,7 +30,12 @@ export function CityVisibilityCard() {
   const setDuration = useEventsLocationStore((s) => s.setVisibilityDuration);
   const showMeInCity = useEventsLocationStore((s) => s.showMeInCity);
   const hideMeInCity = useEventsLocationStore((s) => s.hideMeInCity);
+  const preciseOptIn = useEventsLocationStore((s) => s.preciseProximityGrant);
+  const setPreciseOptIn = useEventsLocationStore((s) => s.setPreciseProximityGrant);
+  const deviceLat = useEventsLocationStore((s) => s.deviceLat);
+  const deviceLng = useEventsLocationStore((s) => s.deviceLng);
   const grant = useActiveCityVisibility();
+  const hasDeviceLocation = Number.isFinite(deviceLat) && Number.isFinite(deviceLng);
 
   const onToggle = (next: boolean) => {
     if (!next) return hideMeInCity();
@@ -109,6 +115,27 @@ export function CityVisibilityCard() {
             {activeCity ? COPY.offNote : COPY.noCity}
           </Text>
         )}
+      </View>
+      <View className="mx-4 h-px bg-border" />
+      <View className="flex-row items-center justify-between p-4">
+        <View className="flex-1 pr-4">
+          <Text className="font-semibold text-foreground">
+            {PROXIMITY_COPY.toggleLabel}
+          </Text>
+          <Text className="mt-1 text-sm text-muted-foreground">
+            {PROXIMITY_COPY.toggleDescription}
+          </Text>
+          {!grant || !hasDeviceLocation ? (
+            <Text className="mt-2 text-xs text-muted-foreground">
+              {PROXIMITY_COPY.unavailable}
+            </Text>
+          ) : null}
+        </View>
+        <Switch
+          checked={Boolean(grant && preciseOptIn)}
+          disabled={(!grant || !hasDeviceLocation) && !preciseOptIn}
+          onCheckedChange={setPreciseOptIn}
+        />
       </View>
     </View>
   );
