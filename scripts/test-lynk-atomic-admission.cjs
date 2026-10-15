@@ -169,7 +169,7 @@ test('cohost acceptance reserves capacity, marks invitation once, and cannot res
       INSERT INTO public.lynk_cohost_invites(room_id,inviter_id,invitee_id)
         VALUES (7,'host','cohost'),(7,'host','late'),(8,'host','banned');
       INSERT INTO public.video_room_members(room_id,user_id,role)
-        VALUES (7,'host','host');
+        VALUES (7,'host','host'),(8,'host','host');
     `);
     const accept = async (inviteId, identity) => (await db.query(
       'SELECT public.lynk_accept_cohost_atomic($1,$2) AS result',
@@ -201,6 +201,7 @@ test('cohost role promotion retains an anonymous participant identity', async ()
   try{
     const joined=await admit(db,8,'private',true);
     assert.equal(joined.anonLabel,'Anon 1');
+    await db.exec("INSERT INTO video_room_members(room_id,user_id,role) VALUES (8,'host','host')");
     await db.exec("INSERT INTO lynk_cohost_invites(room_id,inviter_id,invitee_id) VALUES(8,'host','private')");
     const {rows}=await db.query("SELECT public.lynk_accept_cohost_atomic(1,'private') AS result");
     assert.equal(rows[0].result.ok,true);
@@ -208,5 +209,36 @@ test('cohost role promotion retains an anonymous participant identity', async ()
     assert.equal(members[0].is_anonymous,true);
     assert.equal(members[0].anon_label,'Anon 1');
     assert.equal(members[0].role,'co-host');
+  } finally {await db.close();}
+});
+
+test('old invitations cannot grant a cohost seat after the inviter loses authority', async () => {
+  const db=await fixture();
+  try {
+    await db.exec(`
+      INSERT INTO video_room_members(room_id,user_id,role,status)
+      VALUES (7,'host','host','active');
+      INSERT INTO lynk_cohost_invites(room_id,inviter_id,invitee_id)
+      VALUES (7,'host','future-cohost');
+      UPDATE video_room_members SET status='left' WHERE room_id=7 AND user_id='host';
+    `);
+    const {rows}=await db.query("SELECT public.lynk_accept_cohost_atomic(1,'future-cohost') AS result");
+    assert.equal(rows[0].result.reason,'inviter_unavailable');
+    assert.equal((await db.query("SELECT status FROM lynk_cohost_invites WHERE id=1")).rows[0].status,'pending');
+    assert.equal((await db.query("SELECT count(*)::integer AS n FROM video_room_members WHERE user_id='future-cohost'")).rows[0].n,0);
+  } finally {await db.close();}
+});
+
+test('a demoted inviter cannot authorize a new hosting role',async()=>{
+  const db=await fixture();
+  try {
+    await db.exec(`
+      INSERT INTO video_room_members(room_id,user_id,role,status)
+      VALUES (7,'host','participant','active');
+      INSERT INTO lynk_cohost_invites(room_id,inviter_id,invitee_id)
+      VALUES (7,'host','future-cohost');
+    `);
+    const {rows}=await db.query("SELECT public.lynk_accept_cohost_atomic(1,'future-cohost') AS result");
+    assert.equal(rows[0].result.reason,'inviter_unavailable');
   } finally {await db.close();}
 });
