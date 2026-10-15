@@ -256,13 +256,18 @@ test('mass admit does not bypass capacity: start writes no room membership', asy
   assert.deepEqual([...new Set(h.writes.map((w) => w.table))].sort(), ['event_lynk_lifecycle', 'event_lynk_waiting']);
   assert.equal(h.tables.video_room_members.length, 0);
 
-  // ...and in video_join_room the capacity gate still runs after the event
-  // admission check for every non-call join.
+  // The admission guard is still after event ticket/private checks, but the
+  // seat check and insert now happen together in a row-locked SQL RPC. Do not
+  // regress to a racy client count + separate member insert.
   const join = fs.readFileSync(path.join(__dirname, '../video_join_room/index.ts'), 'utf8');
   const access = join.indexOf('resolveEventRoomAccess(supabase, room, userId)');
-  const capacity = join.indexOf('participantCount >= room.max_participants');
-  const insert = join.indexOf('.from("video_room_members")\n          .insert(');
-  assert.ok(access > 0 && capacity > access && insert > capacity, 'capacity check must sit between admission and the member insert');
+  const atomic = join.indexOf('"lynk_admit_member_atomic"');
+  assert.ok(access > 0 && atomic > access, 'atomic seat admission must follow the event access gate');
+  assert.ok(!join.includes('participantCount >= room.max_participants'), 'racy pre-insert capacity checks are forbidden');
+  const migration = fs.readFileSync(path.join(__dirname, '../../migrations/20261015031100_lynk_atomic_member_admission.sql'), 'utf8');
+  assert.match(migration, /FOR UPDATE/);
+  assert.match(migration, /v_current >= v_room\.max_participants/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.lynk_admit_member_atomic/);
 });
 
 test('the lifecycle migration never makes a room live on its own', () => {
