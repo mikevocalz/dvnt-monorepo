@@ -24,3 +24,28 @@ test('distance response stays coarse and never returns member GPS coordinates',(
   assert.match(api,/\"under_1\"/);
   assert.ok(!/kind: \"distance\";\s*latitude/.test(api));
 });
+
+test('restricted users retain the ability to withdraw previously shared GPS',()=>{
+  const revoke=edge.indexOf('if (action === "revoke")');
+  const admission=edge.indexOf('const admission = await resolveVerifiedAdmission');
+  assert.ok(revoke>0 && admission>revoke, 'revoke must precede access enforcement');
+  assert.match(edge,/Could not stop proximity sharing/);
+});
+test('unreadable block relationships fail closed',()=>{
+  assert.match(edge,/blockedForward\.error \|\| blockedReverse\.error/);
+});
+test('the profile never fabricates mileage from city or device centroids',()=>{
+  const profile=read('packages/app/features/profile/user-profile.web.tsx');
+  assert.doesNotMatch(profile,/resolveViewerPosition|proximityLabel|matchCity/);
+  assert.match(profile,/useMemberProximity/);
+});
+test('native and web controls require distinct consent and expire with city sharing',()=>{
+  const store=read('packages/app/lib/stores/events-location-store.ts');
+  const web=read('packages/app/features/settings/privacy.web.tsx');
+  const native=read('packages/app/features/settings/ui/CityVisibilityCard.tsx');
+  assert.match(store,/setPreciseProximityGrant/);
+  assert.match(store,/readCityVisibility\(state\.cityVisibility, Date\.now\(\)\)/);
+  assert.match(store,/preciseProximityGrant: false/);
+  assert.match(web,/PROXIMITY_COPY\.toggleLabel/);
+  assert.match(native,/PROXIMITY_COPY\.toggleLabel/);
+});
