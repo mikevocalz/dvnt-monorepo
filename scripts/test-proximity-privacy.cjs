@@ -49,3 +49,18 @@ test('native and web controls require distinct consent and expire with city shar
   assert.match(web,/PROXIMITY_COPY\.toggleLabel/);
   assert.match(native,/PROXIMITY_COPY\.toggleLabel/);
 });
+
+test('proximity consent is tied to an account and cannot leak to a different login',()=>{
+  const store=read('packages/app/lib/stores/events-location-store.ts');
+  const hook=read('packages/app/lib/hooks/use-member-proximity.ts');
+  assert.match(store,/preciseProximityOwnerAuthId/);
+  assert.match(store,/setPreciseProximityGrant: \(enabled, ownerAuthId\)/);
+  assert.match(hook,/location\.preciseProximityOwnerAuthId === authId/);
+  assert.match(hook,/useAuthStore\.getState\(\)\.user\?\.authId !== authId/);
+});
+test('withdrawal waits behind an unfinished publish and reads current preference',()=>{
+  const hook=read('packages/app/lib/hooks/use-member-proximity.ts');
+  assert.match(hook,/queue\.current = queue\.current\.catch/);
+  assert.match(hook,/useEventsLocationStore\.getState\(\)/);
+  assert.match(hook,/await memberProximityApi\.revoke\(\)/);
+});
