@@ -13,6 +13,7 @@ import {
 } from "@dvnt/app/lib/stores/events-location-store";
 import {
   CITY_VISIBILITY_COPY as COPY,
+  PRECISE_PROXIMITY_COPY as PROXIMITY_COPY,
   formatVisibilityExpiry,
   VISIBILITY_DURATIONS,
 } from "@dvnt/app/lib/stores/city-discovery-visibility";
@@ -89,7 +90,12 @@ function CityVisibilitySection() {
   const setDuration = useEventsLocationStore((s) => s.setVisibilityDuration);
   const showMeInCity = useEventsLocationStore((s) => s.showMeInCity);
   const hideMeInCity = useEventsLocationStore((s) => s.hideMeInCity);
+  const preciseOptIn = useEventsLocationStore((s) => s.preciseProximityGrant);
+  const setPreciseOptIn = useEventsLocationStore((s) => s.setPreciseProximityGrant);
+  const deviceLat = useEventsLocationStore((s) => s.deviceLat);
+  const deviceLng = useEventsLocationStore((s) => s.deviceLng);
   const grant = useActiveCityVisibility();
+  const hasDeviceLocation = Number.isFinite(deviceLat) && Number.isFinite(deviceLng);
 
   const onToggle = (next: boolean) => {
     if (!next) return hideMeInCity();
@@ -163,6 +169,25 @@ function CityVisibilitySection() {
               {activeCity ? COPY.offNote : COPY.noCity}
             </p>
           )}
+        </div>
+        <div className="flex items-center justify-between gap-4 border-t border-white/8 py-4">
+          <div className="flex-1 pr-4">
+            <p className="font-semibold text-white">
+              {PROXIMITY_COPY.toggleLabel}
+            </p>
+            <p className="mt-1 text-sm text-white/60">
+              {PROXIMITY_COPY.toggleDescription}
+            </p>
+            {!grant || !hasDeviceLocation ? (
+              <p className="mt-2 text-xs text-white/45">{PROXIMITY_COPY.unavailable}</p>
+            ) : null}
+          </div>
+          <Switch
+            label={PROXIMITY_COPY.toggleLabel}
+            checked={Boolean(grant && preciseOptIn)}
+            disabled={(!grant || !hasDeviceLocation) && !preciseOptIn}
+            onChange={setPreciseOptIn}
+          />
         </div>
       </div>
     </>
