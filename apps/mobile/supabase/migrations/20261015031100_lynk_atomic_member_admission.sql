@@ -202,6 +202,13 @@ BEGIN
   ) THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'member_banned');
   END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.video_room_members
+    WHERE room_id=v_room_id AND user_id=p_user_id
+      AND status='active' AND role='host'
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'already_host');
+  END IF;
 
   v_admission := public.lynk_admit_member_atomic(v_room_id,p_user_id,false);
   IF coalesce((v_admission->>'ok')::boolean,false) IS NOT TRUE THEN
