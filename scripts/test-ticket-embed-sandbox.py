@@ -108,6 +108,10 @@ with sync_playwright() as p:
             if billing_name.count() and billing_name.first.is_visible():billing_name.first.fill('DVNT Sandbox Test')
             postal=f.locator('input[name="billingPostalCode"],input[autocomplete="postal-code"]')
             if postal.count() and postal.first.is_visible():postal.first.fill('10001')
+            # Link's optional save-details opt-in requires a phone number.
+            # This acceptance covers a one-time card payment, not Link enrollment.
+            save_details=f.locator('input[name="enableStripePass"]')
+            if save_details.count() and save_details.is_checked():save_details.uncheck()
             # Submit the populated card form. Its DOM text also includes a hidden
             # 'Processing' label, so matching raw text would miss the real button.
             button=f.locator('button[type="submit"]')
@@ -145,7 +149,7 @@ with sync_playwright() as p:
                                 cancel.click()
                                 expect(frame.locator('#quantity')).to_have_value('1',timeout=30000)
                                 print('Abandoned sandbox checkout cancelled')
-                    except Exception:print('Stripe session status unavailable')
+                    except Exception as error:print('Sandbox status/cleanup failed:',type(error).__name__)
             for f in page.frames:
                 if not (urllib.parse.urlparse(f.url).hostname or '').endswith('.stripe.com'):continue
                 try:
