@@ -13,6 +13,7 @@
 
 import { View, Text, Pressable } from "react-native";
 import { Switch } from "@dvnt/app/components/ui/switch";
+import { useSyncMemberProximityPresence } from "@dvnt/app/lib/hooks/use-member-proximity";
 import {
   useEventsLocationStore,
   useActiveCityVisibility,
@@ -25,6 +26,8 @@ import {
 } from "@dvnt/app/lib/stores/city-discovery-visibility";
 
 export function CityVisibilityCard() {
+  // Native privacy settings commit explicit publish/revoke while the screen is visible.
+  useSyncMemberProximityPresence();
   const activeCity = useEventsLocationStore((s) => s.activeCity);
   const durationId = useEventsLocationStore((s) => s.visibilityDurationId);
   const setDuration = useEventsLocationStore((s) => s.setVisibilityDuration);
