@@ -9,6 +9,7 @@ on:
       - 'packages/app/lib/lynk/**'
       - 'packages/app/lib/subscription/**'
       - 'packages/app/lib/video/**'
+      - 'apps/mobile/supabase/functions/video_join_room/**'
       - 'apps/mobile/supabase/functions/video_create_room/**'
       - 'apps/mobile/supabase/functions/video_end_room/**'
       - 'apps/mobile/supabase/functions/lynk-moq-token/**'
@@ -16,7 +17,9 @@ on:
       - 'apps/mobile/supabase/functions/_shared/lynk-*'
       - 'apps/mobile/supabase/functions/_shared/subscription-owner.ts'
       - 'apps/mobile/supabase/migrations/*membership_subscription_owner_reads.sql'
+      - 'apps/mobile/supabase/migrations/*lynk_atomic_member_admission.sql'
       - 'scripts/test-subscription-owner-rls.cjs'
+      - 'scripts/test-lynk-atomic-admission.cjs'
       - 'scripts/test-lynk-room-browser.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   push:
@@ -30,11 +33,14 @@ on:
       - 'packages/app/lib/video/**'
       - 'apps/mobile/supabase/functions/lynk-moq-token/**'
       - 'apps/mobile/supabase/functions/lynk-livestream-token/**'
+      - 'apps/mobile/supabase/functions/video_join_room/**'
       - 'apps/mobile/supabase/functions/video_create_room/**'
       - 'apps/mobile/supabase/functions/video_end_room/**'
       - 'apps/mobile/supabase/functions/_shared/subscription-owner.ts'
       - 'apps/mobile/supabase/migrations/*membership_subscription_owner_reads.sql'
+      - 'apps/mobile/supabase/migrations/*lynk_atomic_member_admission.sql'
       - 'scripts/test-subscription-owner-rls.cjs'
+      - 'scripts/test-lynk-atomic-admission.cjs'
   workflow_dispatch:
 permissions:
   contents: read
@@ -53,7 +59,7 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/lynk-tests/node_modules
         run: |
           node --test packages/app/features/sneaky-lynk/publish-roles.test.ts packages/app/features/sneaky-lynk/api/*.test.ts packages/app/features/sneaky-lynk/session/*.test.ts packages/app/features/sneaky-lynk/ui/*.test.ts packages/app/lib/video/*.test.ts packages/app/lib/events/event-lynk.test.ts packages/app/features/video/room-lifecycle.test.ts packages/app/features/video/stores/*.test.ts packages/app/lib/lynk/*.test.ts packages/app/lib/lynk/genesis-room-admission.fixture.ts packages/app/lib/subscription/*.test.ts apps/mobile/supabase/functions/video_create_room/subscription.test.cjs apps/mobile/supabase/functions/video_end_room/index.test.cjs apps/mobile/supabase/functions/_shared/lynk-moq-access.test.cjs apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs
-          node --test scripts/test-subscription-owner-rls.cjs
+          node --test scripts/test-subscription-owner-rls.cjs scripts/test-lynk-atomic-admission.cjs
           node --test apps/mobile/supabase/functions/lynk-livestream-token/index.test.cjs
           node scripts/test-lynk-room-browser.cjs --dom
           node scripts/verify-lynk.mjs
