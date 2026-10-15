@@ -42,6 +42,14 @@ async function fixture() {
       user_id text NOT NULL,
       expires_at timestamptz
     );
+    CREATE TABLE public.lynk_cohost_invites (
+      id serial PRIMARY KEY,
+      room_id integer NOT NULL,
+      inviter_id text NOT NULL,
+      invitee_id text NOT NULL,
+      status text NOT NULL DEFAULT 'pending',
+      responded_at timestamptz
+    );
     INSERT INTO public.video_rooms(id,max_participants) VALUES (7,2), (8,3);
     INSERT INTO public.video_rooms(id,room_kind) VALUES (9,'call');
     INSERT INTO public.video_rooms(id,ends_at) VALUES (10,now() - interval '1 hour');
@@ -151,4 +159,53 @@ test('RPC is not executable by the browser roles', async () => {
     await db.exec('RESET ROLE');
     await db.close();
   }
+});
+
+test('cohost acceptance reserves capacity, marks invitation once, and cannot resurrect kicked users', async () => {
+  const db = await fixture();
+  try {
+    await db.exec(`
+      INSERT INTO public.lynk_cohost_invites(room_id,inviter_id,invitee_id)
+        VALUES (7,'host','cohost'),(7,'host','late'),(8,'host','banned');
+      INSERT INTO public.video_room_members(room_id,user_id,role)
+        VALUES (7,'host','host');
+    `);
+    const accept = async (inviteId, identity) => (await db.query(
+      'SELECT public.lynk_accept_cohost_atomic($1,$2) AS result',
+      [inviteId, identity],
+    )).rows[0].result;
+    assert.equal((await accept(1,'stranger')).reason, 'invite_not_found');
+    const invited = await accept(1,'cohost');
+    assert.equal(invited.ok,true);
+    assert.equal(invited.role,'co-host');
+    assert.equal((await db.query(
+      "SELECT role FROM video_room_members WHERE user_id='cohost'",
+    )).rows[0].role,'co-host');
+    assert.equal((await db.query(
+      'SELECT status FROM lynk_cohost_invites WHERE id=1',
+    )).rows[0].status,'accepted');
+    assert.equal((await accept(1,'cohost')).reason,'invite_resolved');
+    assert.equal((await accept(2,'late')).reason,'room_full');
+    assert.equal((await db.query(
+      'SELECT status FROM lynk_cohost_invites WHERE id=2',
+    )).rows[0].status,'pending', 'a full room must not burn the invite');
+
+    await db.exec("INSERT INTO video_room_members(room_id,user_id,status) VALUES (8,'banned','kicked')");
+    assert.equal((await accept(3,'banned')).reason,'member_banned');
+  } finally { await db.close(); }
+});
+
+test('cohost role promotion retains an anonymous participant identity', async () => {
+  const db=await fixture();
+  try{
+    const joined=await admit(db,8,'private',true);
+    assert.equal(joined.anonLabel,'Anon 1');
+    await db.exec("INSERT INTO lynk_cohost_invites(room_id,inviter_id,invitee_id) VALUES(8,'host','private')");
+    const {rows}=await db.query("SELECT public.lynk_accept_cohost_atomic(1,'private') AS result");
+    assert.equal(rows[0].result.ok,true);
+    const {rows:members}=await db.query("SELECT is_anonymous,anon_label,role FROM video_room_members WHERE room_id=8 AND user_id='private'");
+    assert.equal(members[0].is_anonymous,true);
+    assert.equal(members[0].anon_label,'Anon 1');
+    assert.equal(members[0].role,'co-host');
+  } finally {await db.close();}
 });
