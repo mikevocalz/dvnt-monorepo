@@ -577,3 +577,7 @@ verify_jwt = false
 # User-scoped Stripe payout setup reminder: Better Auth token validated internally.
 [functions.payout-setup-reminder]
 verify_jwt = false
+
+# Distance bands only; Better Auth session is validated inside the function.
+[functions.member-proximity]
+verify_jwt = false
