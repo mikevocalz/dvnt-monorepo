@@ -18,6 +18,7 @@ async function fixture() {
     CREATE ROLE service_role BYPASSRLS;
     CREATE TABLE public.video_rooms (
       id serial PRIMARY KEY,
+      uuid uuid NOT NULL DEFAULT gen_random_uuid(),
       room_kind text NOT NULL DEFAULT 'lynk',
       status varchar DEFAULT 'open',
       max_participants integer DEFAULT 12,
