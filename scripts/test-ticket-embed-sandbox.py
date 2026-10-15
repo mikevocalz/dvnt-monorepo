@@ -23,10 +23,14 @@ def stripe(method,path,params=None):
     with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
 result={'commit':os.environ.get('GITHUB_SHA','local'),'real_stripe_sandbox':True,'passed':False}
 with sync_playwright() as p:
-    # A protected Vercel preview admits the automation token through this header; the token never lands in artifacts.
+    # A protected Vercel preview admits the automation token through this header. Only the preview hosts get it:
+    # a context-wide header would hand the secret to Stripe and the external host and trip their CORS preflights.
     bypass=os.environ.get('TICKET_EMBED_SANDBOX_BYPASS')
-    headers={'x-vercel-protection-bypass':bypass,'x-vercel-set-bypass-cookie':'true'} if bypass else {}
-    browser=p.chromium.launch(headless=True); page=browser.new_context(extra_http_headers=headers).new_page()
+    preview_hosts={urllib.parse.urlparse(host_url).hostname}
+    def bypass_headers(url):
+        return {'x-vercel-protection-bypass':bypass,'x-vercel-set-bypass-cookie':'true'} if bypass and urllib.parse.urlparse(url).hostname in preview_hosts else {}
+    browser=p.chromium.launch(headless=True); context=browser.new_context(); page=context.new_page()
+    context.route('**/*',lambda route:route.continue_(headers={**route.request.headers,**bypass_headers(route.request.url)}))
     page.set_default_timeout(60000)
     observed={'checkout':None,'fulfilled':None}
     def observe(response):
@@ -45,6 +49,7 @@ with sync_playwright() as p:
         descriptor=json.loads(frame.locator('#dvnt-data').text_content())
         assert descriptor.get('testMode') is True,'Refusing to reserve live inventory: descriptor must confirm test mode'
         assert urllib.parse.urlparse(descriptor['siteOrigin']).hostname not in production,'Staging must use a non-production ticket platform'
+        preview_hosts.add(urllib.parse.urlparse(descriptor['siteOrigin']).hostname)
         frame.locator('#buyer-name').fill('DVNT Sandbox Test')
         frame.locator('#buyer-email').fill(email)
         for field in frame.locator('#attendees input').all():field.fill('Sandbox Attendee')
@@ -86,7 +91,7 @@ with sync_playwright() as p:
         assert len(observed['fulfilled']['tickets'])==1 and observed['fulfilled']['emailStatus']=='sent','Verify QR issuance and staging email delivery before release'
         for ticket in observed['fulfilled']['tickets']:
             assert urllib.parse.urlparse(ticket['url']).hostname not in production
-            assert page.request.get(ticket['url']).ok,'Issued test ticket cannot be opened'
+            assert page.request.get(ticket['url'],headers=bypass_headers(ticket['url'])).ok,'Issued test ticket cannot be opened'
         refund=stripe('POST','/refunds',{'payment_intent':session['payment_intent']})
         assert refund['status']=='succeeded','Sandbox refund did not succeed'
         result.update(passed=True,payment=True,one_order=True,qr_ticket=True,email_delivery=True,refund=True)
