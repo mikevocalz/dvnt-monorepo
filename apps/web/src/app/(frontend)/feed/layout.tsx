@@ -4,6 +4,14 @@ import { WebAppShell } from '@dvnt/app/components/web-app-shell';
 import { useEffect } from 'react';
 import { registerWebPushIfGranted } from '@dvnt/app/lib/web-push';
 
+// Mounted once inside the authenticated shell so consent changes, account
+// switches and explicit revocations sync without opening the privacy page.
+const MemberProximitySync = dynamic(
+  () => import('@dvnt/app/components/member-proximity-sync.web')
+    .then((module) => module.MemberProximitySync),
+  { ssr: false },
+);
+
 const PwaInstallPrompt = dynamic(
   () =>
     import('@dvnt/app/components/pwa-install.web').then(
@@ -27,6 +35,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   return (
     <WebAppShell>
       {children}
+      <MemberProximitySync />
       <PwaInstallPrompt />
       <IncomingCallOverlay />
     </WebAppShell>
