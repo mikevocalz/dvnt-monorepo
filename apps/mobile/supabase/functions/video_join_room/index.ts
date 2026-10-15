@@ -404,103 +404,49 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Check participant count
-      const { data: participantCount } = await supabase.rpc(
-        "count_active_participants",
+      // Capacity, membership and anonymous identity are ONE database
+      // transaction. The old count → insert → recount flow permitted two
+      // concurrent joins to claim the last seat and reuse "Anon N".
+      // Already-admitted reconnects retain their role and anonymous identity.
+      const { data: admittedMember, error: admitError } = await supabase.rpc(
+        "lynk_admit_member_atomic",
         {
           p_room_id: internalRoomId,
+          p_user_id: userId,
+          p_anonymous: anonymous,
         },
       );
-
-      if (participantCount >= room.max_participants) {
-        // Include structured capacity data so the client can render a
-        // rich "room is full" surface with the real counts + host context
-        // rather than a bare message. Client treats this as the source
-        // of truth for the capacity flow.
-        return errorResponse("conflict", "Room is full", {
-          reason: "room_full",
-          current: participantCount,
-          max: room.max_participants,
-          // Was the user requesting this join the host? Lets the client
-          // show an upgrade CTA for hosts vs a wait-notify UX for viewers.
-          isHost: userId === room.host_id,
-        });
+      if (admitError) {
+        console.error("[video_join_room] Atomic admission failed:", admitError.message);
+        return errorResponse("internal_error", "Could not join this room. Try again.");
       }
-
-      // Compute anon label if joining anonymously
-      if (anonymous) {
-        const { count } = await supabase
-          .from("video_room_members")
-          .select("id", { count: "exact", head: true })
-          .eq("room_id", internalRoomId)
-          .eq("is_anonymous", true);
-        anonLabel = `Anon ${(count ?? 0) + 1}`;
-        anonLabel = normalizeAnonLabel(existingMember?.anon_label) || anonLabel;
-      }
-
-      if (existingMember) {
-        if (existingMember.status === "active") {
-          // Already in room, just refresh token
-          memberRole = existingMember.role;
-          anonLabel = normalizeAnonLabel(existingMember.anon_label) ||
-            anonLabel;
-        } else if (existingMember.status === "banned") {
-          return errorResponse("forbidden", "You are banned from this room");
-        } else {
-          // Rejoin (was kicked or left)
-          const { error: updateError } = await supabase
-            .from("video_room_members")
-            .update({
-              status: "active",
-              joined_at: new Date().toISOString(),
-              left_at: null,
-              hand_raised: false,
-              is_anonymous: anonymous,
-              anon_label: anonLabel,
-            })
-            .eq("room_id", internalRoomId)
-            .eq("user_id", userId);
-
-          if (updateError) {
-            console.error(
-              "[video_join_room] Rejoin error:",
-              updateError.message,
-            );
-            return errorResponse("internal_error", "Failed to rejoin room");
-          }
-          memberRole = existingMember.role;
-        }
-      } else {
-        // New member
-        const { error: insertError } = await supabase
-          .from("video_room_members")
-          .insert({
-            room_id: internalRoomId,
-            user_id: userId,
-            role: "participant",
-            status: "active",
-            hand_raised: false,
-            is_anonymous: anonymous,
-            anon_label: anonLabel,
-          });
-
-        if (insertError) {
-          console.error("[video_join_room] Insert error:", insertError.message);
-          return errorResponse("internal_error", "Failed to join room");
+      if (!admittedMember?.ok) {
+        switch (admittedMember?.reason) {
+          case "room_full":
+            return errorResponse("conflict", "Room is full", {
+              reason: "room_full",
+              current: admittedMember.current,
+              max: admittedMember.max,
+              isHost: userId === room.host_id,
+            });
+          case "room_ended":
+            return errorResponse("conflict", "This Lynk's session has ended", {
+              reason: "session_expired",
+              endsAt: room.ends_at,
+              isHost: userId === room.host_id,
+            });
+          case "room_not_found":
+            return errorResponse("not_found", "Room not found");
+          case "member_banned":
+            return errorResponse("forbidden", "You are banned from this room");
+          default:
+            return errorResponse("internal_error", "Could not join this room. Try again.");
         }
       }
 
-      // Update participant count
-      await supabase
-        .rpc("count_active_participants", { p_room_id: internalRoomId })
-        .then(async ({ data: count }) => {
-          if (count !== null) {
-            await supabase
-              .from("video_rooms")
-              .update({ participant_count: count })
-              .eq("id", internalRoomId);
-          }
-        });
+      memberRole = admittedMember.memberRole || "participant";
+      anonymous = admittedMember.isAnonymous === true;
+      anonLabel = anonymous ? normalizeAnonLabel(admittedMember.anonLabel) : null;
     }
 
     // Reuse existing Fishjam room if one exists; only create a new one if needed.
