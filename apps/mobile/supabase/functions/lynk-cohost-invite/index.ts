@@ -25,6 +25,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { parseMemberHandle } from "../_shared/room-member-handle.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
+import { resolveCreatorStanding, creatorStandingRefusal } from "../_shared/creator-standing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -316,6 +317,12 @@ Deno.serve(async (req) => {
         const refusal = admissionRefusal(admission);
         return errorResponse("forbidden", refusal.message);
       }
+      // An invite can grant a hosting role, so suspension/pausing must apply
+      // here just as it does to room creation and hosting reconnects.
+      const standing = await resolveCreatorStanding(supabase, callerId);
+      if (standing.state === "refused") {
+        return errorResponse("forbidden", creatorStandingRefusal(standing).message);
+      }
 
       // The room's parent row is locked by this RPC and the ordinary join
       // path, preventing invite acceptance from exceeding the final seat.
@@ -337,6 +344,8 @@ Deno.serve(async (req) => {
           return errorResponse("forbidden", "You cannot join this room");
         if (accepted?.reason === "invite_resolved")
           return errorResponse("conflict", "This invitation has already been answered");
+        if (accepted?.reason === "inviter_unavailable")
+          return errorResponse("conflict", "The original host is no longer able to invite co-hosts");
         return errorResponse("not_found", "Invite not found");
       }
 
