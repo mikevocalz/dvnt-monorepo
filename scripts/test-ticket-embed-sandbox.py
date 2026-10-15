@@ -23,7 +23,10 @@ def stripe(method,path,params=None):
     with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
 result={'commit':os.environ.get('GITHUB_SHA','local'),'real_stripe_sandbox':True,'passed':False}
 with sync_playwright() as p:
-    browser=p.chromium.launch(headless=True); page=browser.new_page()
+    # A protected Vercel preview admits the automation token through this header; the token never lands in artifacts.
+    bypass=os.environ.get('TICKET_EMBED_SANDBOX_BYPASS')
+    headers={'x-vercel-protection-bypass':bypass,'x-vercel-set-bypass-cookie':'true'} if bypass else {}
+    browser=p.chromium.launch(headless=True); page=browser.new_context(extra_http_headers=headers).new_page()
     page.set_default_timeout(60000)
     observed={'checkout':None,'fulfilled':None}
     def observe(response):
