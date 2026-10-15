@@ -99,12 +99,14 @@ with sync_playwright() as p:
         submitted=False
         for f in page.frames:
             if not (urllib.parse.urlparse(f.url).hostname or '').endswith('.stripe.com'):continue
+            if not f.locator('input[name="cardNumber"]').count():continue
             billing_name=f.locator('input[name="billingName"],input[autocomplete="cc-name"]')
             if billing_name.count() and billing_name.first.is_visible():billing_name.first.fill('DVNT Sandbox Test')
             postal=f.locator('input[name="billingPostalCode"],input[autocomplete="postal-code"]')
             if postal.count() and postal.first.is_visible():postal.first.fill('10001')
-            # Do not mistake Stripe's alternate 'Pay with Link' button for submit.
-            button=f.locator('button[type="submit"]').filter(has_text=re.compile(r'^Pay(?:\s+\$[0-9,.]+)?$'))
+            # Submit the populated card form. Its DOM text also includes a hidden
+            # 'Processing' label, so matching raw text would miss the real button.
+            button=f.locator('button[type="submit"]')
             if button.count()==1 and button.is_visible():button.click();submitted=True;break
         assert submitted,'Stripe submit button not found; do not bypass checkout by confirming an unrelated PaymentIntent'
         expect(widget.get_by_role('link',name='Open ticket 1')).to_be_visible(timeout=120000)
