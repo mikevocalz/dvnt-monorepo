@@ -195,6 +195,19 @@ BEGIN
   IF v_invite.status IS DISTINCT FROM 'pending' THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'invite_resolved');
   END IF;
+  -- An invitation ceases to grant authority when the inviter has left,
+  -- been removed or lost their host/co-host role. Old notifications must not
+  -- allow an unrelated person to mint a co-host seat later.
+  IF NOT EXISTS (
+    SELECT 1 FROM public.video_room_members m
+    WHERE m.room_id = v_room_id
+      AND m.user_id = v_invite.inviter_id
+      AND m.status = 'active'
+      AND m.role IN ('host', 'co-host')
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'inviter_unavailable');
+  END IF;
+
   IF EXISTS (
     SELECT 1 FROM public.video_room_members
     WHERE room_id=v_room_id AND user_id=p_user_id
