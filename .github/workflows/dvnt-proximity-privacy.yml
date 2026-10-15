@@ -4,6 +4,8 @@ on:
     paths:
       - 'apps/mobile/supabase/functions/member-proximity/**'
       - 'apps/mobile/supabase/migrations/*member_proximity_presence.sql'
+      - 'apps/mobile/supabase/migrations/*member_proximity_presence_purge.sql'
+      - 'apps/mobile/supabase/functions/_shared/db-rate-limit.ts'
       - 'packages/app/lib/api/member-proximity.ts'
       - 'packages/app/lib/hooks/use-member-proximity.ts'
       - 'packages/app/components/member-proximity-sync.web.tsx'

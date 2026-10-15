@@ -17,7 +17,24 @@ test('distance lookup requires target username, not caller spoofed location',()=
   assert.ok(m,'distance call missing');
   assert.doesNotMatch(m[0],/latitude|longitude/);
   assert.match(edge,/resolveVerifiedAdmission/);
-  assert.match(edge,/checkRateLimit/);
+  assert.match(edge,/consumeDbRateLimit\(db, authUserId, "member-proximity-distance"/);
+  assert.doesNotMatch(edge,/checkRateLimit|_shared\/rate-limit\.ts/,'in-memory limiter resets per isolate');
+});
+test('moving your own published point is rate-limited in the database, fail closed',()=>{
+  const publish=edge.slice(edge.indexOf('if (action === "publish")'),edge.indexOf('if (action !== "distance")'));
+  assert.match(publish,/member-proximity-move-hour/);
+  assert.match(publish,/member-proximity-move-day/);
+  assert.match(publish,/consumeDbRateLimit\(db, authUserId, action, max, windowSeconds\)/);
+  assert.match(publish,/limit\.error[\s\S]*?503/);
+  assert.match(publish,/!limit\.allowed[\s\S]*?429/);
+  assert.ok(publish.indexOf('consumeDbRateLimit')<publish.indexOf('.upsert('),'limit before the write');
+  assert.match(edge,/const PUBLISH_MOVES_PER_HOUR = [1-9]\d?;/);
+  assert.doesNotMatch(edge,/cannot be intersected/);
+});
+test('expired presence rows are purged on a schedule',()=>{
+  const purge=read('apps/mobile/supabase/migrations/20261015122000_member_proximity_presence_purge.sql');
+  assert.match(purge,/cron\.schedule\(\s*'member-proximity-presence-purge'/);
+  assert.match(purge,/delete from public\.member_proximity_presence where share_until < now\(\)/);
 });
 test('distance response stays coarse and never returns member GPS coordinates',()=>{
   assert.match(api,/MemberProximityBand/);

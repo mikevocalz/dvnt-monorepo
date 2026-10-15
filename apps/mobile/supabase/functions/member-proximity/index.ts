@@ -16,14 +16,23 @@
  * request body: a caller who can choose their own coordinates can move it,
  * and a reviewer recovered a target's stored coordinate exactly in 16 calls by
  * trilaterating the 0.1-mile figure this used to return. Both sides therefore
- * need a live grant, and the answer is a band rather than a measurement,
- * because bands cannot be intersected.
+ * need a live grant, and the answer is a band rather than a measurement.
+ *
+ * Bands can still be intersected. A caller who republishes their own point
+ * and watches the band flip at 1, 5, 15 or 50 miles learns where those circles
+ * cross, and enough crossings locate the target. What stands in the way is
+ * cost, not geometry: a position change is limited to PUBLISH_MOVES_PER_HOUR
+ * and PUBLISH_MOVES_PER_DAY in the database-backed limiter, distance reads to
+ * 120 per 10 minutes, the caller must be a verified adult with a live grant of
+ * their own, and stored points are quantized to ~110 m. That slows a
+ * trilateration to days and ties it to a verified identity. It does not make
+ * one impossible.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { resolveVerifiedAdmission } from "../_shared/verified-admission.ts";
-import { checkRateLimit } from "../_shared/rate-limit.ts";
+import { consumeDbRateLimit } from "../_shared/db-rate-limit.ts";
 import { checkAdultBirthDate } from "../_shared/age-policy.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -42,6 +51,10 @@ function json(body: unknown, status = 200) {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
+
+/** Own-position changes a member may make. Each move is one trilateration probe. */
+const PUBLISH_MOVES_PER_HOUR = 4;
+const PUBLISH_MOVES_PER_DAY = 12;
 
 function finiteCoord(value: unknown, min: number, max: number): number | null {
   // Only a number or a numeric string is a coordinate. `Number()` turns null,
@@ -175,6 +188,36 @@ Deno.serve(async (req: Request) => {
       return json({ ok: false, error: "Invalid or expired proximity grant" }, 400);
     }
 
+    // Only a moved point is a new probe. Renewing or shortening the grant at
+    // the same quantized position does not spend the limit.
+    const { data: current, error: currentError } = await db
+      .from("member_proximity_presence")
+      .select("latitude, longitude")
+      .eq("user_id", authUserId)
+      .maybeSingle();
+    if (currentError) {
+      console.error("[member-proximity] presence read failed:", currentError.code);
+      return json({ ok: false, error: "Could not update proximity sharing" }, 503);
+    }
+    const moved = !current ||
+      Number(current.latitude) !== quantize(latitude) ||
+      Number(current.longitude) !== quantize(longitude);
+    if (moved) {
+      for (const [action, max, windowSeconds] of [
+        ["member-proximity-move-hour", PUBLISH_MOVES_PER_HOUR, 60 * 60],
+        ["member-proximity-move-day", PUBLISH_MOVES_PER_DAY, 24 * 60 * 60],
+      ] as const) {
+        const limit = await consumeDbRateLimit(db, authUserId, action, max, windowSeconds);
+        if (limit.error) {
+          console.error("[member-proximity] publish rate limit check failed:", limit.error);
+          return json({ ok: false, error: "Could not update proximity sharing" }, 503);
+        }
+        if (!limit.allowed) {
+          return json({ ok: false, error: "Location updated too often. Try again later." }, 429);
+        }
+      }
+    }
+
     const cityId = Number(body?.cityId);
     const accuracyMeters = Number(body?.accuracyMeters);
     const { error } = await db.from("member_proximity_presence").upsert(
@@ -203,10 +246,11 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "Unknown action" }, 400);
   }
 
-  const rate = checkRateLimit(authUserId, "member-proximity-distance", {
-    maxRequests: 120,
-    windowMs: 10 * 60_000,
-  });
+  const rate = await consumeDbRateLimit(db, authUserId, "member-proximity-distance", 120, 10 * 60);
+  if (rate.error) {
+    console.error("[member-proximity] distance rate limit check failed:", rate.error);
+    return json({ ok: false, error: "Proximity is unavailable right now" }, 503);
+  }
   if (!rate.allowed) {
     return json({ ok: false, error: "Too many proximity lookups" }, 429);
   }
