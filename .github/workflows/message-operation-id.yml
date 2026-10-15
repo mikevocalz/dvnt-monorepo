@@ -1,0 +1,27 @@
+name: Message operation-id contract
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/_shared/conversation-delivery.ts'
+      - 'apps/mobile/supabase/functions/brand-outbox-worker/**'
+      - 'apps/mobile/supabase/functions/send-message/**'
+      - 'apps/mobile/supabase/migrations/*messages_operation_id.sql'
+      - 'scripts/test-message-operation-id.mjs'
+      - '.github/workflows/message-operation-id.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  message-idempotency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated PostgreSQL fixture
+        run: npm install --prefix "$RUNNER_TEMP/dvnt-message-fixtures" --no-package-lock --no-save @electric-sql/pglite@0.3.14
+      - name: Verify migration, retries and replay safety without contacting providers
+        env:
+          NODE_PATH: ${{ runner.temp }}/dvnt-message-fixtures/node_modules
+        run: node --test scripts/test-message-operation-id.mjs
