@@ -30,6 +30,8 @@ test('text-post surface shows user text without the unsolicited community taglin
 });
 test('web full flyer and detail video preserve portrait artwork without cover cropping', () => {
   assert.match(source('../../components/event/EventFlyer.web.tsx'), /aspect = EVENT_FLYER_ASPECT/);
-  assert.match(source('../../components/event/EventFlyer.web.tsx'), /objectFit: "contain"/);
+  const flyer = source('../../components/event/EventFlyer.web.tsx');
+  assert.match(flyer, /contentFit = "contain"/);
+  assert.equal((flyer.match(/objectFit: contentFit/g) || []).length, 2);
   assert.match(source('../../features/events/event-detail.web.tsx'), /aspectRatio: EVENT_FLYER_ASPECT/);
 });
