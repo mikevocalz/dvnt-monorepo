@@ -171,6 +171,11 @@ const cases = [
 ];
 const zeroInsets = {top:0,right:0,bottom:0,left:0};
 const tick = (page) => page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+const failures=[];
+function recordFailure(name,error) {
+  failures.push({name,message:String(error.message||error)});
+  console.error('FAIL '+name+'\n'+String(error.stack||error));
+}
 
 async function dimensions(locator) {
   return locator.evaluateAll(nodes=>nodes.map(el=>{const r=el.getBoundingClientRect();return {label:el.getAttribute('aria-label')||el.textContent.trim(),x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}}));
@@ -221,7 +226,19 @@ async function evidence(page,name,error) {
   if(!process.env.LYNK_LAYOUT_OUTPUT)return;
   const directory=path.resolve(process.env.LYNK_LAYOUT_OUTPUT);fs.mkdirSync(directory,{recursive:true});
   await page.screenshot({path:path.join(directory,name+'.png')}).catch(()=>{});
-  if(error)fs.writeFileSync(path.join(directory,name+'.txt'),String(error.stack||error));
+  if(error) {
+    fs.writeFileSync(path.join(directory,name+'.txt'),String(error.stack||error));
+    const geometry=await page.evaluate(()=>({
+      viewport:{width:innerWidth,height:innerHeight,visualHeight:visualViewport?.height,offsetTop:visualViewport?.offsetTop},
+      nodes:[...document.querySelectorAll('[data-room-viewport],[data-room-viewport]>*,#anticapture-wrapper,[data-secure-capture-boundary],main,[data-room-content],[data-room-content]>header,footer,[data-stage-scroll],[data-stage-card],[role="dialog"],[data-native-room]>*,[data-testid="lynk-native-stage"],[data-testid="lynk-native-focus"],[data-testid="lynk-native-participants"]')].map(el=>{
+        const r=el.getBoundingClientRect(),s=getComputedStyle(el);
+        return {tag:el.tagName,id:el.id,classes:el.getAttribute('class'),testId:el.getAttribute('data-testid'),card:el.getAttribute('data-stage-card'),
+          x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom,scrollTop:el.scrollTop,scrollHeight:el.scrollHeight,
+          style:{position:s.position,display:s.display,height:s.height,minHeight:s.minHeight,overflow:s.overflow,padding:s.padding,flex:s.flex}};
+      })
+    })).catch(()=>null);
+    fs.writeFileSync(path.join(directory,name+'.json'),JSON.stringify(geometry,null,2));
+  }
 }
 async function assertWebGeometry(page, c, visible={top:0,height:c.height},checkHeader=true) {
   const insets={...zeroInsets,...c.insets};
@@ -262,6 +279,7 @@ async function setInsets(page, insets) {
 async function createPage(browser,url,c,role,rail='web') {
   const context=await browser.newContext({viewport:{width:c.width,height:c.height},reducedMotion:'reduce'});
   const page=await context.newPage();
+  page.setDefaultTimeout(8000);
   const errors=[],unexpectedRequests=[];
   page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/*',route=>{
@@ -282,6 +300,13 @@ async function webCases(browser,url) {
   for(const c of cases)for(const role of ['host','participant']) {
     const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,role);
     try {
+      const privacyNotice=page.locator('[data-room-viewport] > [class*="alert-anticapture"]');
+      assert.match(await privacyNotice.textContent(),/Press enter to continue/,'the real privacy notice is part of initial layout');
+      await assertWebGeometry(page,c);
+      const mountedBeforeNoticeDismiss=await page.evaluate(()=>window.fixture.attachments.length);
+      await page.keyboard.press('Enter');await privacyNotice.waitFor({state:'hidden'});await tick(page);
+      await assertWebGeometry(page,c);
+      assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mountedBeforeNoticeDismiss,'privacy notice dismissal must not remount media');
       // Exercise the production stage's distinct solo/duo layouts before
       // switching to the crowd view. No copied HTML is used for any mode.
       for(const publishers of [1,2]) {
@@ -335,7 +360,7 @@ async function webCases(browser,url) {
       assert.deepEqual(unexpectedRequests,[],c.name+' must not access live endpoints');
       await evidence(page,'web-'+c.name+'-'+role);
       console.log('PASS rendered web '+c.name+' '+role+': 1/2/12-person layouts, dock, header, listeners, reactions, chat send/close');
-    } catch(error) {await evidence(page,'FAIL-web-'+c.name+'-'+role,error);throw error} finally {await context.close()}
+    } catch(error) {await evidence(page,'FAIL-web-'+c.name+'-'+role,error);recordFailure('web-'+c.name+'-'+role,error)} finally {await context.close()}
   }
 }
 
@@ -368,7 +393,7 @@ async function timeUpCases(browser,url) {
       assert.deepEqual(errors,[],c.name+' time-limit runtime errors');
       assert.deepEqual(unexpectedRequests,[],c.name+' time-limit must not access live endpoints');
       console.log('PASS time-limit dialog '+c.name+': scroll-safe upgrade and leave actions');
-    } catch(error) {await evidence(page,'FAIL-time-limit-'+c.name,error);throw error} finally {await context.close()}
+    } catch(error) {await evidence(page,'FAIL-time-limit-'+c.name,error);recordFailure('time-limit-'+c.name,error)} finally {await context.close()}
   }
 }
 
@@ -386,6 +411,21 @@ async function keyboardCase(browser,url) {
     });
     await page.reload();
     await page.locator('main[data-room-phase="connected"]').waitFor();
+    await tick(page);
+    const privacyNotice=page.locator('[data-room-viewport] > [class*="alert-anticapture"]');
+    const initialNoticeHeight=(await privacyNotice.boundingBox()).height;
+    const mediaMounts=await page.evaluate(()=>window.fixture.attachments.length);
+    await assertWebGeometry(page,c);
+    await page.keyboard.press('Enter');await privacyNotice.waitFor({state:'hidden'});
+    // Drive the installed privacy library's own warning state. Its wrapped
+    // message must take space away from content without pushing the dock out.
+    await page.keyboard.down('F12');await tick(page);await page.keyboard.up('F12');
+    await privacyNotice.waitFor({state:'visible'});
+    assert.match(await privacyNotice.textContent(),/prohibited from being copied or captured/);
+    assert.ok((await privacyNotice.boundingBox()).height>initialNoticeHeight,'capture warning must exercise a multiline notice');
+    await page.evaluate(()=>window.setFixtureViewport({height:310,offsetTop:70}));await tick(page);
+    await assertWebGeometry(page,c,{top:70,height:310});
+    assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mediaMounts,'multiline notice and keyboard resize preserve media mounts');
     await page.getByRole('button',{name:'Chat',exact:true}).click();
     const chat=page.getByRole('dialog',{name:'Chat',exact:true});
     await page.evaluate(()=>window.setFixtureViewport({height:310,offsetTop:70}));await tick(page);
@@ -401,10 +441,11 @@ async function keyboardCase(browser,url) {
     await assertWebGeometry(page,c,{top:110,height:310});
     await page.evaluate(()=>window.setFixtureViewport({height:844,offsetTop:0}));await tick(page);
     await assertWebGeometry(page,c);
+    assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mediaMounts,'notice, chat and keyboard resize/scroll never detach media');
     assert.deepEqual(errors,[]);
     await evidence(page,'web-keyboard-restored');
     console.log('PASS keyboard visualViewport resize, scroll offset, send, close and restore');
-  } catch(error) {await evidence(page,'FAIL-keyboard',error);throw error} finally {await context.close()}
+  } catch(error) {await evidence(page,'FAIL-keyboard',error);recordFailure('keyboard',error)} finally {await context.close()}
 }
 
 async function groupStageCase(browser,url) {
@@ -441,7 +482,7 @@ async function groupStageCase(browser,url) {
     assert.deepEqual(errors,[]);
     await evidence(page,'web-'+c.name);
     console.log('PASS 20-person rendered stage '+c.name+': full last tile visible, focus, stable canvas mounts, leave fallback, rejoin');
-  } catch(error) {await evidence(page,'FAIL-'+c.name,error);throw error} finally {await context.close()}
+  } catch(error) {await evidence(page,'FAIL-'+c.name,error);recordFailure(c.name,error)} finally {await context.close()}
   }
 }
 
@@ -489,7 +530,7 @@ async function nativeCases(browser,url) {
       assert.deepEqual(unexpectedRequests,[],c.name+' native must not access live endpoints');
       await evidence(page,'native-'+c.name);
       console.log('PASS actual native stage+dock via RNW '+c.name+': 1/2/12/20 participants, last tile, stable mounts, video/audio, safe areas, reactions, overlay restore');
-    } catch(error) {await evidence(page,'FAIL-native-'+c.name,error);throw error} finally {await context.close()}
+    } catch(error) {await evidence(page,'FAIL-native-'+c.name,error);recordFailure('native-'+c.name,error)} finally {await context.close()}
   }
 }
 
@@ -544,6 +585,7 @@ async function main() {
     browser=await load('@playwright/test').chromium.launch({headless:true});
     const url='http://127.0.0.1:'+server.address().port;
     await webCases(browser,url);await keyboardCase(browser,url);await groupStageCase(browser,url);await timeUpCases(browser,url);await nativeCases(browser,url);
+    assert.equal(failures.length,0,'Rendered regression failures:\n'+JSON.stringify(failures,null,2));
     console.log('PASS all rendered Lynk viewport, room and control layout regressions');
   } finally {await browser?.close();await new Promise(resolve=>server.close(resolve))}
 }

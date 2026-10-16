@@ -1390,7 +1390,7 @@ function RoomInner({
 
       {/* Only room content scrolls. The dock never competes with a tall header,
           listener row, enlarged text, or a short landscape viewport. */}
-      <div data-room-content className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+      <div data-room-content className="relative isolate z-0 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
       {/* Header */}
       <header
         className="relative z-10 grid shrink-0 grid-cols-[44px_minmax(0,1fr)] items-center gap-2 pb-2 lg:grid-cols-[44px_minmax(0,1fr)_auto]"

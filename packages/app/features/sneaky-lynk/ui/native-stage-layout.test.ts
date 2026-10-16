@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { URL } from "node:url";
 import { nativeRoomStageLayout } from "./native-stage-layout.ts";
 
 // Dimensions are the remaining stage rectangle, not the whole screen.
