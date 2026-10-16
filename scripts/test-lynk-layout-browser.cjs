@@ -423,6 +423,8 @@ async function rosterNoticeCases(browser,url) {
       const notice=page.getByTestId('lynk-roster-pending');
       await notice.waitFor();
       assert.match(await notice.textContent(),state==='error'?/Couldn't load participants/:/Connecting participants/);
+      assert.equal(await page.getByText('Just you here — invite someone to join.',{exact:true}).count(),0,'unknown roster must not claim the room is empty');
+      assert.equal(await page.locator('[data-stage-card="local"]').count(),1,'local preview stays mounted while roster is unknown');
       await assertWebGeometry(page,c);
       const dock=page.locator('[data-room-controls]');
       const mic=dock.getByRole('button',{name:'Unmute',exact:true});
@@ -450,6 +452,9 @@ async function rosterNoticeCases(browser,url) {
       assert.equal(await page.locator('[data-tile]').count(),tileCount,'last good roster must remain visible');
       assert.equal(await remote.count(),1,'later failure must preserve the remote roster display identity');
       assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mounts,'transient roster errors preserve media mounts');
+      await assertWebGeometry(page,c);
+      await page.evaluate(()=>window.fixture.configure({rosterState:'ready',publishers:1}));
+      await page.getByText('Just you here — invite someone to join.',{exact:true}).waitFor();
       await assertWebGeometry(page,c);
       await leave.click();
       await page.waitForFunction(()=>window.fixture.actions.includes('leaveRoom')&&window.fixture.routes.includes('/feed/messages'));

@@ -107,6 +107,7 @@ test("both room screens show initial roster failure without altering publication
   const nativeHook = readFileSync(new URL("../../video/hooks/useVideoRoom.ts", import.meta.url), "utf8");
   assert.match(web, /\{admitted && !rosterReady && \(/);
   assert.doesNotMatch(web, /if \(admitted && !rosterReady\)/);
+  assert.match(web, /\{rosterReady && stageTiles\.length === 1 \? \(/);
   assert.match(native, /rosterStatus=\{videoRoom.isAdmitted && !videoRoom.rosterReady/);
   assert.doesNotMatch(native, /if \(videoRoom.isAdmitted && !videoRoom.rosterReady\)/);
   assert.match(native, /<RoomStage/);

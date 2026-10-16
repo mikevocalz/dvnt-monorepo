@@ -1533,7 +1533,7 @@ function RoomInner({
              data-stage-participants={stageTiles.length}
              className={`relative flex flex-1 flex-col items-center justify-center gap-2 pl-[max(12px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] py-2 [@media(max-height:500px)_and_(min-width:600px)]:py-1 ${stageTiles.length > 2 ? "min-h-[calc(clamp(144px,26dvh,280px)+240px)] [@media(max-height:500px)_and_(min-width:600px)]:min-h-[min(360px,calc(var(--lynk-visible-height,100dvh)-120px))]" : "min-h-40"}`}
            >
-             {stageTiles.length === 1 ? (
+             {rosterReady && stageTiles.length === 1 ? (
                <div role="status" className="flex shrink-0 flex-wrap items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#111522]/85 px-3 py-2 text-xs text-white/70">
                  <span>Just you here — invite someone to join.</span>
                  <button
