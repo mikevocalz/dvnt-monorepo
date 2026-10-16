@@ -9,6 +9,7 @@ import { StageTile, type Tile } from "./room-stage";
 export function RoomStage({ tiles }: { tiles: Tile[] }) {
   const [pinnedKey, setPinnedKey] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const revealFocusRef = useRef(false);
   const group = tiles.length > 2;
   const focusedKey = tiles.some((tile) => tile.key === pinnedKey)
     ? pinnedKey
@@ -16,14 +17,30 @@ export function RoomStage({ tiles }: { tiles: Tile[] }) {
 
   useEffect(() => {
     if (pinnedKey && !tiles.some((tile) => tile.key === pinnedKey)) {
+      revealFocusRef.current = true;
       setPinnedKey(null);
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
     }
   }, [tiles, pinnedKey]);
 
+  useEffect(() => {
+    if (!revealFocusRef.current) return;
+    revealFocusRef.current = false;
+    // The room content may itself have scrolled on a short phone. Resetting
+    // only the participant rail can leave the newly focused face above it.
+    scrollRef.current?.querySelector<HTMLElement>('[data-focused="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [focusedKey, pinnedKey]);
+
   const focus = (key: string | null) => {
-    setPinnedKey(key);
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    if (key === pinnedKey) {
+      scrollRef.current?.querySelector<HTMLElement>('[data-focused="true"]')
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      return;
+    }
+    revealFocusRef.current = true;
+    setPinnedKey(key);
   };
 
   return (

@@ -149,7 +149,7 @@ export function SidePanel({
         aria-label={title}
       >
         <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/25 sm:hidden" aria-hidden="true" />
-        <header className="flex shrink-0 items-center justify-between border-b border-white/8 px-4 py-2">
+        <header className="flex shrink-0 items-center justify-between border-b border-white/8 px-4 pb-2 pt-2 sm:pt-[calc(var(--lynk-safe-top,env(safe-area-inset-top))+8px)]">
           <span className="flex items-center gap-2 text-base font-semibold text-white">
             {icon}
             {title}

@@ -54,7 +54,9 @@ const fixture = `
     muteAll:async()=>({ok:true}),unmuteAll:async()=>({ok:true}),mutePeer:async()=>({ok:true}),unmutePeer:async()=>({ok:true}),
     promotePeer:async()=>({ok:true}),demotePeer:async()=>({ok:true}),kickUser:async()=>({ok:true})
   };
-  export const sneakyLynkApi = { joinRoom:async()=>({ok:true,data:{peer:{role:useFixture.getState().role},user:localUser,room:{id:'fixture-room',title:'A very long Lynk title that must not push host controls outside the phone',hasVideo:true,endsAt:new Date(Date.now()+240000).toISOString()}}}),
+  // The production timer only renders during the final minute. Keep a real
+  // server deadline in that window so host header geometry includes the badge.
+  export const sneakyLynkApi = { joinRoom:async()=>({ok:true,data:{peer:{role:useFixture.getState().role},user:localUser,room:{id:'fixture-room',title:'A very long Lynk title that must not push host controls outside the phone',hasVideo:true,endsAt:new Date(Date.now()+55000).toISOString()}}}),
     endRoom:async()=>{f.actions.push('endRoom');return {ok:true}},leaveRoom:async()=>{f.actions.push('leaveRoom');return {ok:true}},toggleHand:async()=>({ok:true}) };
   const comments = Array.from({length:30},(_,i)=>({id:i+1,roomId:'fixture-room',authorId:'publisher-1',body:'Earlier message '+i+' with enough text to wrap on a narrow phone.',parentId:null,rootId:null,depth:0,mentions:[],createdAt:new Date(1700000000000+i).toISOString(),author:{displayName:'Participant 01',username:'Participant 01',avatar:''}}));
   export const subscribeToRoomComments=(_id,_new,options)=>{f.commentsSync=options.onSync;queueMicrotask(()=>f.commentsSync?.(comments));return()=>{f.commentsSync=null}};
@@ -422,7 +424,12 @@ async function keyboardCase(browser,url) {
     await page.keyboard.down('F12');await tick(page);await page.keyboard.up('F12');
     await privacyNotice.waitFor({state:'visible'});
     assert.match(await privacyNotice.textContent(),/prohibited from being copied or captured/);
+    // Exercise user-enlarged text independently of the notice's normal font.
+    // Preserve the real message, DOM and events; only increase its font size.
+    await privacyNotice.evaluate(el=>el.style.setProperty('font-size','20px','important'));await tick(page);
     assert.ok((await privacyNotice.boundingBox()).height>initialNoticeHeight,'capture warning must exercise a multiline notice');
+    const noticeLines=await privacyNotice.evaluate(el=>{const range=document.createRange();range.selectNodeContents(el.querySelector('p'));return range.getClientRects().length});
+    assert.ok(noticeLines>=2,'enlarged privacy warning must actually wrap across multiple lines');
     await page.evaluate(()=>window.setFixtureViewport({height:310,offsetTop:70}));await tick(page);
     await assertWebGeometry(page,c,{top:70,height:310});
     assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mediaMounts,'multiline notice and keyboard resize preserve media mounts');
@@ -455,17 +462,21 @@ async function groupStageCase(browser,url) {
   try {
     await page.evaluate(()=>window.fixture.configure({publishers:20,listeners:12}));await tick(page);
     assert.equal(await page.locator('[data-tile]').count(),20,'every publisher must have one tile');
+    await evidence(page,'web-'+c.name+'-initial');
     const count=await page.evaluate(()=>window.fixture.attachments.length);
     assert.ok(count>=19,'real remote canvas refs must be mounted before checking media stability');
     const lastCard=page.locator('[data-stage-card="publisher-19"]');
     const last=page.getByRole('button',{name:'Focus Participant 19',exact:true});
     await lastCard.scrollIntoViewIfNeeded();await tick(page);
     await assertFullyVisibleCard(lastCard,c.name+' last participant');
+    await evidence(page,'web-'+c.name+'-last-participant');
     await assertReachable(last,c.name+' last participant');await last.click();await tick(page);
     assert.equal(await page.evaluate(()=>window.fixture.attachments.length),count,'scrolling/focusing cannot detach or recreate video canvases');
     await assertWebGeometry(page,c,{top:0,height:c.height},false);
     const focused=page.locator('[data-stage-card="publisher-19"][data-focused="true"]');
     assert.equal(await focused.count(),1,'clicked participant becomes focused');
+    await assertFullyVisibleCard(focused,c.name+' newly focused participant');
+    await evidence(page,'web-'+c.name+'-focused-participant');
     // Pinning exposes Reset focus, which must not steal enough height to trap
     // another thumbnail underneath the sticky featured participant.
     const nextCard=page.locator('[data-stage-card="publisher-18"]');
@@ -476,8 +487,12 @@ async function groupStageCase(browser,url) {
     await page.evaluate(()=>window.fixture.configure({publishers:19}));await tick(page);
     assert.equal(await page.locator('[data-tile]').count(),19,'departed publisher is removed');
     assert.equal(await page.locator('[data-stage-card="local"][data-focused="true"]').count(),1,'departed focus falls back to the host');
+    await assertFullyVisibleCard(page.locator('[data-stage-card="local"][data-focused="true"]'),c.name+' fallback focus after departure');
     await page.evaluate(()=>window.fixture.configure({publishers:20}));await tick(page);
     assert.equal(await page.locator('[data-tile]').count(),20,'new participant joins without duplicates');
+    // A separate default-view capture avoids presenting the intentional
+    // roster-browsing scroll position as the room's initial composition.
+    await page.locator('[data-room-content]').evaluate(el=>{el.scrollTop=0});await tick(page);
     await assertWebGeometry(page,c,{top:0,height:c.height},false);
     assert.deepEqual(errors,[]);
     await evidence(page,'web-'+c.name);
@@ -551,6 +566,7 @@ async function main() {
         window.eval(assets.js);await new Promise(resolve=>setTimeout(resolve,350));
         assert.ok(window.fixture,rail+' fixture mounted');
         assert.ok(window.document.querySelector(rail==='web'?'main[data-room-phase="connected"]':'[data-native-room] [role="button"]'),rail+' actual component mounted: '+window.document.body.innerHTML.slice(0,1200));
+        if(rail==='web')assert.ok(window.document.querySelector('[role="timer"]'),'host fixture must exercise the real final-minute timer badge');
         for(const publishers of [1,2,12,20]) {
           window.fixture.configure({publishers});await new Promise(resolve=>setTimeout(resolve,30));
           assert.equal(window.document.querySelectorAll(rail==='web'?'[data-tile]':'[data-testid^="native-tile-"]').length,publishers,rail+' rendered participant count');

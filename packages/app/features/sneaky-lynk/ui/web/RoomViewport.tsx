@@ -36,7 +36,7 @@ export function RoomViewport({ children }: { children: ReactNode }) {
       data-room-viewport
       // AntiCapture also renders a notice sibling. Let it reserve space rather
       // than adding its height on top of a full-height room and clipping the dock.
-      className="fixed inset-x-0 top-[var(--lynk-visible-top,0px)] isolate flex h-[var(--lynk-visible-height,100dvh)] flex-col overflow-hidden bg-[#06070d] [&>#anticapture-wrapper]:min-h-0 [&>#anticapture-wrapper]:flex-1"
+      className="fixed inset-x-0 top-[var(--lynk-visible-top,0px)] isolate flex h-[var(--lynk-visible-height,100dvh)] flex-col overflow-hidden bg-[#06070d] [&>#anticapture-wrapper]:min-h-0 [&>#anticapture-wrapper]:flex-1 [&>[class*='alert-anticapture'][style*='display:_block']~#anticapture-wrapper]:[--lynk-safe-top:0px] [&>[class*='alert-anticapture']]:shrink-0 [&>[class*='alert-anticapture']]:bg-amber-950 [&>[class*='alert-anticapture']]:pb-1 [&>[class*='alert-anticapture']]:pt-[max(4px,env(safe-area-inset-top))] [&>[class*='alert-anticapture']]:pl-[max(8px,env(safe-area-inset-left))] [&>[class*='alert-anticapture']]:pr-[max(8px,env(safe-area-inset-right))] [&>[class*='alert-anticapture']]:text-xs [&>[class*='alert-anticapture']>p]:text-amber-100"
     >
       {children}
     </div>
