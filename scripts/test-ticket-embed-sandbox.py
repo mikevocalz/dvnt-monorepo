@@ -26,7 +26,7 @@ def stripe(method,path,params=None,idempotency_key=None):
         headers={'Authorization':'Bearer '+key,'Content-Type':'application/x-www-form-urlencoded','Stripe-Version':'2025-02-24.acacia',
                  **({'Idempotency-Key':idempotency_key} if idempotency_key else {})})
     with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
-result={'commit':os.environ.get('GITHUB_SHA','local'),'real_stripe_sandbox':True,'passed':False}
+result={'commit':os.environ.get('GITHUB_SHA','local'),'real_stripe_sandbox':True,'email_test_mode':'resend_delivery_sink','passed':False}
 with sync_playwright() as p:
     # A protected Vercel preview admits the automation token through this header. Only the preview hosts get it:
     # a context-wide header would hand the secret to Stripe and the external host and trip their CORS preflights.
@@ -127,6 +127,8 @@ with sync_playwright() as p:
         assert session['livemode'] is False and session['payment_status']=='paid'
         assert session['client_reference_id']==observed['fulfilled']['orderId']
         assert len(observed['fulfilled']['tickets'])==1,'Expected exactly one issued ticket'
+        # This checks the application email send path using Resend's delivery
+        # simulator, not delivery to a human inbox. No mailer is mocked.
         # Issuance is committed before the email provider responds. Keep polling
         # this same authenticated attempt until delivery is confirmed separately.
         status_url=descriptor['siteOrigin'].rstrip('/')+'/embed/api'
@@ -179,3 +181,4 @@ with sync_playwright() as p:
         browser.close()
         Path('ticket-embed-sandbox-result.json').write_text(json.dumps(result,indent=2))
 print('PASS: real sandbox payment, server-confirmed order, QR access, email delivery and refund. No live transaction.')
+

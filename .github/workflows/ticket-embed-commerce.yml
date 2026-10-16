@@ -6,7 +6,17 @@ on:
       - "apps/web/**"
       - "packages/app/**"
       - "scripts/*ticket-embed*"
-      - "scripts/ticket_embed_sandbox_helpers.py"
+      - "scripts/ticket_embed_sandbox*.py"
+      - "packages/ui/**"
+      - "packages/config/**"
+      - "supabase/**"
+      - "docs/ticketing/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - "vercel.json"
+      - ".npmrc"
       - ".github/workflows/ticket-embed-commerce.yml"
   workflow_dispatch:
 permissions:
@@ -15,6 +25,35 @@ concurrency:
   group: ticket-embed-commerce-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  purchase-scope:
+    name: Determine whether real sandbox purchase is needed
+    runs-on: ubuntu-latest
+    outputs:
+      required: ${{ steps.scope.outputs.required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Recipient safety and purchase scope regressions
+        run: |
+          python scripts/test-ticket-embed-sandbox-helpers.py
+          python scripts/test-ticket-embed-sandbox-scope.py
+      - id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          required=true
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            required=$(python scripts/ticket_embed_sandbox_scope.py "$BASE_SHA" "$HEAD_SHA")
+          fi
+          echo "required=$required" >> "$GITHUB_OUTPUT"
+          if [ "$required" = "false" ]; then
+            echo "No checkout or shared commerce dependency changed. Contract/browser tests still run; no sandbox purchase or email." >> "$GITHUB_STEP_SUMMARY"
+          fi
   contracts-and-inventory:
     runs-on: ubuntu-latest
     steps:
@@ -52,16 +91,18 @@ jobs:
   sandbox-release:
     name: Real sandbox purchase (required before release)
     runs-on: ubuntu-latest
-    needs: [contracts-and-inventory, browser-contract]
+    needs: [purchase-scope, contracts-and-inventory, browser-contract]
+    if: needs.purchase-scope.outputs.required == 'true'
     # All PRs use one disposable event; never run its purchase jobs concurrently.
     concurrency:
       group: ticket-embed-shared-sandbox
       cancel-in-progress: false
-    # Intentionally fails, never skips or pretends to pass, if sandbox access is absent.
+    # When purchase is required, missing sandbox access fails rather than passing.
     env:
       TICKET_EMBED_SANDBOX_HOST_URL: ${{ vars.TICKET_EMBED_SANDBOX_HOST_URL }}
       TICKET_EMBED_SANDBOX_ID: ${{ vars.TICKET_EMBED_SANDBOX_ID }}
-      TICKET_EMBED_SANDBOX_EMAIL: ${{ secrets.TICKET_EMBED_SANDBOX_EMAIL }}
+      # Provider delivery simulator only; never route CI tickets to a personal inbox.
+      TICKET_EMBED_SANDBOX_EMAIL: delivered@resend.dev
       TICKET_EMBED_SANDBOX_BYPASS: ${{ secrets.TICKET_EMBED_SANDBOX_BYPASS }}
       STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
     steps:
@@ -73,3 +114,4 @@ jobs:
       - run: python scripts/test-ticket-embed-sandbox-helpers.py
       - name: Actual Stripe test payment, QR ticket, delivery and refund
         run: python scripts/test-ticket-embed-sandbox.py
+
