@@ -6,6 +6,7 @@ on:
       - 'packages/app/features/routes/screens/(protected)/sneaky-lynk/room/**'
       - 'packages/app/lib/secure-capture/**'
       - 'packages/app/components/media/DVNTLiquidGlass.tsx'
+      - 'packages/ui/src/video/RoomTimer*'
       - 'scripts/test-lynk-layout-browser.cjs'
       - 'scripts/test-lynk-native-stage-lifecycle.cjs'
       - '.github/workflows/lynk-layout-regressions.yml'

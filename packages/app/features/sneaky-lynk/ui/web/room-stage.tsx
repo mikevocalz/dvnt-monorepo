@@ -16,8 +16,8 @@
  * rounded SQUARES.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Crown, Hand, Mic, MicOff, RotateCw, Zap } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Crown, Hand, Mic, MicOff, RotateCw, Smile, Zap } from "lucide-react";
 
 import { SquareAvatar } from "./room-panels";
 
@@ -126,7 +126,7 @@ export function ControlButton({
       // Circular by this screen's own convention ("control buttons circular"),
       // which the design system allows alongside status dots and the shutter.
       title={label}
-      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF] sm:h-14 sm:w-14 [@media(max-height:500px)]:h-11 [@media(max-height:500px)]:w-11 ${bg}`}
+      className={`flex h-11 w-11 min-[360px]:h-12 min-[360px]:w-12 shrink-0 items-center justify-center rounded-full text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF] sm:h-14 sm:w-14 [@media(max-height:500px)]:h-11 [@media(max-height:500px)]:w-11 ${bg}`}
     >
       {children}
     </button>
@@ -190,7 +190,7 @@ export function FloatingReactions({
 
 export function ReactionBar({ onSend }: { onSend: (emoji: string) => void }) {
   return (
-    <div className="flex max-w-full items-center gap-1 rounded-lg bg-white/8 px-1">
+    <div className="flex max-w-full flex-wrap items-center justify-center gap-1 rounded-lg bg-white/8 px-1">
       {REACTION_EMOJIS.map((emoji) => (
         <button
           key={emoji}
@@ -206,14 +206,18 @@ export function ReactionBar({ onSend }: { onSend: (emoji: string) => void }) {
   );
 }
 
-/** Short landscape screens keep reactions one tap away without taking a second
- * dock row from the participant list. The palette overlays content, not controls. */
-export function CompactReactions({ onSend }: { onSend: (emoji: string) => void }) {
+/** One reactions control at every size. The picker overlays the stage only
+ * while open, so portrait phones do not lose a permanent row of video space. */
+export function ReactionsPicker({ onSend, overlayOpen = false }: { onSend: (emoji: string) => void; overlayOpen?: boolean }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const paletteRef = useRef<HTMLDivElement>(null);
+  const paletteId = useId();
+  useEffect(() => { if (overlayOpen) setOpen(false); }, [overlayOpen]);
   useEffect(() => {
     if (!open) return;
+    paletteRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
     const dismiss = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -232,18 +236,22 @@ export function CompactReactions({ onSend }: { onSend: (emoji: string) => void }
     };
   }, [open]);
   return (
-    <div ref={rootRef} className="hidden [@media(max-height:500px)]:block">
+    <div ref={rootRef} className="shrink-0" onBlur={(event) => {
+      if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
+    }}>
       <button
         type="button"
         ref={buttonRef}
         aria-label="Reactions"
         aria-expanded={open}
+        aria-controls={open ? paletteId : undefined}
+        title="Reactions"
         onClick={() => setOpen((value) => !value)}
-        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
-      >☺</button>
+        className="flex h-11 w-11 min-[360px]:h-12 min-[360px]:w-12 sm:h-14 sm:w-14 [@media(max-height:500px)]:h-11 [@media(max-height:500px)]:w-11 items-center justify-center rounded-full bg-white/15 text-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
+      ><Smile size={24} /></button>
       {open ? (
-        <div className="absolute bottom-[calc(100%+12px)] left-1/2 -translate-x-1/2 rounded-xl border border-white/15 bg-[#090b15] p-1">
-          <ReactionBar onSend={(emoji) => { onSend(emoji); setOpen(false); }} />
+        <div ref={paletteRef} id={paletteId} role="group" aria-label="Choose a reaction" className="absolute bottom-[calc(100%+8px)] left-1/2 w-max max-w-[calc(100%-16px)] -translate-x-1/2 rounded-xl border border-white/15 bg-[#090b15] p-1">
+          <ReactionBar onSend={(emoji) => { onSend(emoji); setOpen(false); buttonRef.current?.focus({ preventScroll: true }); }} />
         </div>
       ) : null}
     </div>
