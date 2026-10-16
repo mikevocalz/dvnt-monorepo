@@ -1,4 +1,5 @@
 "use client";
+import { slugify } from "@dvnt/app/lib/slug";
 
 /**
  * Other-user Profile — WEB variant (port of
@@ -56,20 +57,6 @@ function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
-}
-
-// Mirror of event-create's slugifyTitle so /events/[slug] resolves the target.
-// link_only events are exempt: their title slug deliberately resolves to
-// nothing, so they link by their share token instead (see eventSharePath).
-function eventSlug(title: string): string {
-  return String(title || "")
-    .toLowerCase()
-    .replace(/['"]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .split("-")
-    .slice(0, 6)
-    .join("-");
 }
 
 export function UserProfileScreen() {
@@ -449,7 +436,7 @@ export function UserProfileScreen() {
                         `/events/${
                           ev.visibility === "link_only" && ev.shareSlug
                             ? ev.shareSlug
-                            : eventSlug(ev.title)
+                            : slugify(ev.title)
                         }`,
                       )
                     }
@@ -678,3 +665,4 @@ function ActionSheet({
     </div>
   );
 }
+

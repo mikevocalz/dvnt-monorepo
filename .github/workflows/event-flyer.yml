@@ -4,6 +4,11 @@ on:
     paths:
       - 'packages/app/lib/media/**'
       - 'packages/app/lib/events/flyer-layout*'
+      - 'packages/app/lib/events/event-detail-route*'
+      - 'packages/app/features/activity/activity.web.tsx'
+      - 'packages/app/features/profile/user-profile.web.tsx'
+      - 'packages/app/lib/slug.ts'
+      - 'packages/app/components/ui/card-link.web.tsx'
       - 'packages/app/components/event/EventFlyer.web.tsx'
       - 'packages/app/components/event/FeedEventCard.web.tsx'
       - 'packages/app/components/event/feed-event-card-shape*'
@@ -35,7 +40,7 @@ jobs:
       - name: Upload policy, quality budget, size and complete-output checks
         run: node --test packages/app/lib/events/flyer-layout.test.ts packages/app/lib/media/upload-policy.test.ts packages/app/lib/media/video-quality.test.ts packages/app/lib/media/video-pick-policy.test.ts packages/app/lib/media/event-video-preparation.test.ts
       - name: Feed portrait sizing and masonry regression checks
-        run: node --test packages/app/components/event/feed-event-card-shape.test.ts packages/app/components/feed/*.test.ts
+        run: node --test packages/app/lib/events/event-detail-route.test.ts packages/app/components/event/feed-event-card-shape.test.ts packages/app/components/feed/*.test.ts
       - name: Install isolated browser test tools and exact application encoder
         run: |
           CODEC_VERSION=$(node -p "require('./packages/app/package.json').dependencies.mediabunny")
@@ -58,3 +63,4 @@ jobs:
           path: ${{ runner.temp }}/dvnt-flyer-evidence/result.json
           if-no-files-found: ignore
           retention-days: 7
+

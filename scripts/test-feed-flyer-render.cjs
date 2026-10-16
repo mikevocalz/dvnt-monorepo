@@ -30,11 +30,11 @@ const adapters = {
   react: React,
   "react/jsx-runtime": jsxRuntime,
   "react-native": {
-    View({ style, children }) {
+    View({ style, children, pointerEvents }) {
       const domStyle = { ...flattenStyle(style) };
       for (const key of ["shadowColor", "shadowOffset", "shadowOpacity", "shadowRadius"])
         delete domStyle[key];
-      return React.createElement("div", { style: domStyle }, children);
+      return React.createElement("div", { style: domStyle, "data-pointer-events": pointerEvents }, children);
     },
   },
   "expo-linear-gradient": {
@@ -111,6 +111,8 @@ Object.assign(sourceModules, {
   "./feed-event-card-shape": "packages/app/components/event/feed-event-card-shape.ts",
   "@dvnt/app/components/event/feed-event-card-shape": "packages/app/components/event/feed-event-card-shape.ts",
   "@dvnt/app/components/event/EventFlyer.web": "packages/app/components/event/EventFlyer.web.tsx",
+  "@dvnt/app/components/ui/card-link.web": "packages/app/components/ui/card-link.web.tsx",
+  "@dvnt/app/lib/events/event-detail-route": "packages/app/lib/events/event-detail-route.ts",
 });
 const { FeedEventCard: WebCard } = loadSource("packages/app/components/event/FeedEventCard.web.tsx");
 const { FeedEventCard: NativeCard } = loadSource("packages/app/components/feed/feed-event-card.tsx");
@@ -121,41 +123,110 @@ for (const [kind, media] of [
   ["video", { videoFlyerUrl: "https://example.test/flyer.mp4" }],
   ["image", { staticFlyerUrl: "https://example.test/flyer.png" }],
 ]) {
-  test(`web ${kind} is contained in 4:6 media above details`, () => {
-    const doc = render(WebCard, { data: { id: "event-1", title, category: "Music", dateDay: "30", month: "OCT", media: { title, ...media } } });
+  test(`web ${kind} is contained in fixed 2:3 media above details`, () => {
+    const doc = render(WebCard, { data: { id: "42", title, category: "Music", dateDay: "30", month: "OCT", media: { title, ...media } } });
     const asset = doc.querySelector(kind === "video" ? "video" : "img");
     assert.ok(asset);
     assert.equal(asset.style.objectFit, "contain");
     assert.equal(asset.parentElement.style.aspectRatio, String(4 / 6));
     assert.equal(asset.parentElement.querySelector("h3"), null);
-    const card = doc.querySelector('[role="button"]');
+    const card = doc.querySelector('a[href^="/feed/events/"]');
     assert.equal(card.querySelector("h3").textContent, title);
+    assert.equal(card.getAttribute("href"), "/feed/events/42");
+    assert.equal(card.children[0].style.pointerEvents, "none", "media must not intercept navigation taps");
     assert.equal(card.children[1].style.height, "", "footer must size to its content");
     assert.equal(card.children[1].style.minHeight, "", "footer must not reserve blank space");
     assert.notEqual(card.children[1].style.justifyContent, "space-between");
     assert.equal(card.children[0].querySelector('[style*="linear-gradient"]'), null);
     if (kind === "video") for (const attr of ["muted", "autoplay", "loop", "playsinline"]) assert.ok(asset.hasAttribute(attr));
   });
-  test(`native ${kind} is contained in 4:6 media above details and retains navigation`, () => {
-    const doc = render(NativeCard, { event: { id: "event-1", title, image: media.staticFlyerUrl, flyerVideoUrl: media.videoFlyerUrl, category: "Music" } });
+  test(`native ${kind} is contained in fixed 2:3 media and retains navigation`, () => {
+    const doc = render(NativeCard, { event: { id: "42", title, image: media.staticFlyerUrl, flyerVideoUrl: media.videoFlyerUrl, category: "Music" } });
     const asset = doc.querySelector(kind === "video" ? "video" : "img");
     assert.equal(asset.style.objectFit, "contain");
     const canvas = [...doc.querySelectorAll("div")].find((node) => node.style.aspectRatio === String(4 / 6));
     assert.ok(canvas, "4:6 media canvas exists");
     assert.ok(canvas.contains(asset));
+    assert.equal(canvas.getAttribute("data-pointer-events"), "none", "native media must let the card receive taps");
     assert.ok(!canvas.textContent.includes(title));
     assert.equal(canvas.nextElementSibling.style.minHeight, "", "native footer must not reserve blank space");
     assert.ok(![...canvas.nextElementSibling.querySelectorAll("div")].some((node) => node.style.flex === "1"), "native footer must not stretch its content away from badges");
-    assert.equal(doc.querySelector("[data-href]").getAttribute("data-href"), "/(protected)/events/event-1");
+    assert.equal(doc.querySelector("[data-href]").getAttribute("data-href"), "/(protected)/events/42");
   });
 }
 test("native guest gating remains enabled", () => {
-  const doc = render(NativeCard, { event: { id: "event-1", title }, guestMode: true });
+  const doc = render(NativeCard, { event: { id: "42", title }, guestMode: true });
   assert.equal(doc.querySelector("[data-disabled]").getAttribute("data-disabled"), "true");
 });
 test("web missing media keeps generated fallback title", () => {
-  const doc = render(WebCard, { data: { id: "event-1", title, media: { title } } });
+  const doc = render(WebCard, { data: { id: "42", title, media: { title } } });
   assert.equal(doc.querySelector('[aria-label="Feed flyer title"]').textContent, title);
+});
+
+test("feed link reaches the Next id route and resolves that exact event", () => {
+  const doc = render(WebCard, { data: { id: "42", slug: "colliding-title", title, media: { title } } });
+  const href = doc.querySelector("a").getAttribute("href");
+  assert.equal(href, "/feed/events/42");
+  const route = source("apps/web/src/app/(frontend)/feed/events/[id]/page.tsx");
+  assert.match(route, /@dvnt\/app\/features\/events\/event-detail\.web/);
+  assert.match(route, /m\.EventDetailScreen/);
+  const detail = source("packages/app/features/events/event-detail.web.tsx");
+  const idParam = detail.match(/const idParam = [^;]+;/)?.[0];
+  const directId = detail.match(/const directId = [\s\S]*?;/)?.[0];
+  const resolvedId = detail.match(/const resolvedId =[\s\S]*?;/)?.[0];
+  assert.ok(idParam && directId && resolvedId, "production detail id resolution must exist");
+  const { resolve } = loadSource("scripts/feed-route-contract-fixture.ts", `
+    export function resolve(params: { id?: string; slug?: string }) {
+      const slug = params.slug ?? "";
+      const tokenEvent = { id: 901 };
+      const listEvent = { id: 902 };
+      const slugIndex = [];
+      const resolveEventByPathSegment = () => ({ id: 903 });
+      ${idParam}
+      ${directId}
+      ${resolvedId}
+      return resolvedId;
+    }
+  `);
+  assert.equal(resolve({ id: href.split("/").at(-1) }), 42, "stable id wins over slug/token collisions");
+  assert.match(detail, /useEvent\(resolvedId \? String\(resolvedId\) : ""\)/);
+});
+
+test("mounted production card clicks route images and videos to the exact event", async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: "https://example.test/feed" });
+  const previous = Object.getOwnPropertyDescriptors(globalThis);
+  const navigationAdapter = adapters["solito/navigation"].useRouter;
+  const navigations = [];
+  adapters["solito/navigation"].useRouter = () => ({ push: (href) => navigations.push(href) });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const { createRoot } = dependency("react-dom/client");
+  const rootNode = createRoot(document.querySelector("#root"));
+  try {
+    for (const kind of ["image", "video"]) {
+      await React.act(async () => rootNode.render(React.createElement(WebCard, { data: {
+        id: "42", slug: "conflicting-event", title,
+        media: { title, ...(kind === "video" ? { videoFlyerUrl: "https://example.test/flyer.mp4" } : { staticFlyerUrl: "https://example.test/flyer.png" }) },
+      } })));
+      const link = document.querySelector('a[href="/feed/events/42"]');
+      assert.ok(link);
+      for (const target of [link.querySelector("h3"), link.querySelector(kind === "video" ? "video" : "img")]) {
+        const click = new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+        await React.act(async () => target.dispatchEvent(click));
+        assert.ok(click.defaultPrevented, "plain click is intercepted for client navigation");
+      }
+    }
+    assert.deepEqual(navigations, Array(4).fill("/feed/events/42"));
+  } finally {
+    await React.act(async () => rootNode.unmount());
+    adapters["solito/navigation"].useRouter = navigationAdapter;
+    for (const key of ["window", "document", "IS_REACT_ACT_ENVIRONMENT"]) {
+      if (previous[key]) Object.defineProperty(globalThis, key, previous[key]);
+      else delete globalThis[key];
+    }
+    dom.window.close();
+  }
 });
 
 if (process.env.FEED_FLYER_BROWSER === "1") {
@@ -167,6 +238,7 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
           import React from "react";
           import { createRoot } from "react-dom/client";
           import { FeedEventCard } from "./packages/app/components/event/FeedEventCard.web.tsx";
+          window.navigations = [];
           const root = createRoot(document.querySelector("main"));
           const onHeightChange = (id,width,height) => window.measurements.push({id,width,height});
           window.renderCard = data => { window.measurements = []; root.render(React.createElement(FeedEventCard, {data,onHeightChange})); };
@@ -176,11 +248,11 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
         plugins: [{ name: "feed-test-adapters", setup(builder) {
           builder.onResolve({ filter: /^(solito\/navigation|lucide-react|@dvnt\/app\/lib\/color\/useEventDominantColor|@dvnt\/app\/lib\/theme)$/ }, args => ({ path: args.path, namespace: "test-stub" }));
           builder.onLoad({ filter: /.*/, namespace: "test-stub" }, args => ({ contents:
-            args.path === "solito/navigation" ? "export const useRouter = () => ({push(){}});" :
+            args.path === "solito/navigation" ? "export const useRouter = () => ({push(path){ window.navigations.push(path); }});" :
             args.path === "lucide-react" ? 'import React from "react"; const Icon=()=>React.createElement("i",{style:{display:"inline-block",width:10,height:10}}); export const MapPin=Icon,Clock=Icon,Users=Icon,Calendar=Icon,Zap=Icon;' :
             args.path.endsWith("useEventDominantColor") ? 'export const useEventDominantColor=()=>({color:"#111111"});' :
             'export const color={inkDeep:"#080a12",violet:"#8a40cf",text:"#ffffff"};', loader: "js", resolveDir: root }));
-          builder.onResolve({ filter: /^@dvnt\/app\// }, args => ({ path: path.join(root, "packages/app", args.path.replace("@dvnt/app/", "")) + (args.path.endsWith("EventFlyer.web") ? ".tsx" : ".ts") }));
+          builder.onResolve({ filter: /^@dvnt\/app\// }, args => ({ path: path.join(root, "packages/app", args.path.replace("@dvnt/app/", "")) + (args.path.endsWith(".web") ? ".tsx" : ".ts") }));
         } }],
       });
     const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, headless: true, args: ["--no-sandbox"] });
@@ -202,7 +274,7 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
         await page.waitForFunction(() => window.measurements.length > 0);
         const geometry = await page.evaluate(() => {
           const outer = document.querySelector("main").firstElementChild;
-          const card = document.querySelector('[role="button"]');
+          const card = document.querySelector('a[href^="/feed/events/"]');
           const media = card.children[0].getBoundingClientRect();
           const footer = card.children[1];
           const details = footer.getBoundingClientRect();
@@ -217,7 +289,7 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
         assert.equal(feedEventCardMeasurementKey("event", width), feedEventCardMeasurementKey("event", geometry.measured.width), `packer and DOM measurement keys differ: ${label}`);
         assert.ok(Math.abs(geometry.height - (geometry.mediaHeight + geometry.footerHeight + 24)) < 1, `unexpected blank outer area: ${label}`);
         assert.ok(Math.abs(geometry.mediaWidth / geometry.mediaHeight - 4 / 6) < 0.001);
-        assert.ok(geometry.mediaBottom <= geometry.detailsTop);
+        assert.ok(Math.abs(geometry.mediaBottom - geometry.detailsTop) < 0.5, "footer starts immediately after artwork");
         const gap = geometry.bottomTop - geometry.topBottom;
         assert.ok(gap >= -0.5 && gap <= 12.5, `footer gap ${gap}px must be compact: ${label}`);
         assert.ok(geometry.detailsBottom - geometry.bottomBottom <= 14.5, `excessive footer bottom padding: ${label}`);
@@ -244,6 +316,37 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
       const edited = await page.evaluate(() => ({ reported: window.measurements.at(-1).height, actual: document.querySelector("main").firstElementChild.getBoundingClientRect().height }));
       assert.ok(Math.abs(edited.reported - edited.actual) < 0.5, "observer reports new height after same-event metadata update");
       assert.ok(edited.actual > resized.actual, "long metadata expands naturally instead of clipping");
+      // Route by the exact event id, never by a title slug that may collide.
+      for (const kind of ["image", "video"]) {
+        if (kind === "video") await page.route("https://example.test/flyer.mp4", () => {});
+        await page.evaluate(({ svg, kind }) => window.renderCard({
+          id: "42", slug: "another-event-with-the-same-title", title: "Tap this event",
+          media: { title: "Tap this event", ...(kind === "video" ? { videoFlyerUrl: "https://example.test/flyer.mp4" } : { staticFlyerUrl: svg }) },
+        }), { svg, kind });
+        const link = page.locator('a[href="/feed/events/42"]');
+        await link.waitFor();
+        await link.locator(kind === "video" ? "video" : "img").waitFor();
+        assert.equal(await link.getAttribute("href"), "/feed/events/42");
+        await page.evaluate(() => { window.navigations = []; });
+        await link.locator("h3").click();
+        await link.focus();
+        await page.keyboard.press("Enter");
+        await link.locator(":scope > div").first().scrollIntoViewIfNeeded();
+        const media = await link.locator(":scope > div").first().boundingBox();
+        assert.ok(media);
+        await page.mouse.click(media.x + media.width / 2, media.y + media.height / 2);
+        assert.deepEqual(await page.evaluate(() => window.navigations), ["/feed/events/42", "/feed/events/42", "/feed/events/42"], `${kind}: title, Enter, and media tap open this exact event`);
+        await link.focus();
+        await page.keyboard.press("Space");
+        assert.equal(await page.evaluate(() => window.navigations.length), 3, "Space keeps native link semantics");
+        // A modifier click must be left to the real href rather than router.push.
+        await page.evaluate(() => {
+          const link = document.querySelector('a[href="/feed/events/42"]');
+          document.addEventListener("click", event => event.preventDefault(), { once: true });
+          link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ctrlKey: true }));
+        });
+        assert.equal(await page.evaluate(() => window.navigations.length), 3, "modified click does not hijack browser navigation");
+      }
     } finally { await browser.close(); }
   });
 }

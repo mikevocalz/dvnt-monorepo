@@ -1,4 +1,5 @@
 "use client";
+import { webEventDetailRoute } from "@dvnt/app/lib/events/event-detail-route";
 
 /**
  * Activity / Notifications screen — WEB variant (port of native
@@ -247,7 +248,7 @@ export function webRouteForActivity(activity: Activity): string {
 }
 
 function webRouteForLiked(item: LikedActivity): string {
-  if (item.entityType === "event") return `/events/${item.entityId}`;
+  if (item.entityType === "event") return webEventDetailRoute(item.entityId);
   return `/feed/${encodeURIComponent(item.actor.username)}/post/${encodeURIComponent(item.entityId)}`;
 }
 
@@ -1118,3 +1119,4 @@ export function ActivityScreen() {
 }
 
 export default ActivityScreen;
+

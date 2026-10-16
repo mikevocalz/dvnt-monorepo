@@ -1,3 +1,4 @@
+import { webEventDetailRoute } from "@dvnt/app/lib/events/event-detail-route";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 /**
  * Create Event — WEB (@dvnt/app/features/events/event-create).
@@ -695,7 +696,7 @@ export function CreateEventScreen() {
       } else {
         showToast("success", "Published", "Your event is live.");
       }
-      if (screenMounted.current) router.push(id ? `/events/${id}` : "/events");
+      if (screenMounted.current) router.push(id ? webEventDetailRoute(id) : "/events");
     } catch (e) {
       showToast(
         "error",
@@ -2268,3 +2269,4 @@ function GuestsField() {
     </div>
   );
 }
+

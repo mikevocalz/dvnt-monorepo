@@ -99,7 +99,7 @@ export const FeedEventCard = memo(function FeedEventCard({
             backgroundColor: heroBg,
           }}
         >
-          <View style={{ width: "100%", aspectRatio: CARD_ASPECT }}>
+          <View pointerEvents="none" style={{ width: "100%", aspectRatio: CARD_ASPECT }}>
             {/* Hero — video flyer takes priority, falls back to still image */}
             {event.flyerVideoUrl ? (
               <View
@@ -387,4 +387,5 @@ export const FeedEventCard = memo(function FeedEventCard({
     </View>
   );
 });
+
 

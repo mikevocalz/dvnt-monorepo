@@ -49,7 +49,10 @@ test("both platforms keep flyer media separate from metadata and preserve naviga
   assert.match(web, /maxWidth: CARD_MAX_WIDTH/);
   assert.match(web, /aspect=\{CARD_ASPECT\}/);
   assert.doesNotMatch(web, /linear-gradient/);
-  assert.match(web, /e.key === "Enter" \|\| e.key === " "/);
+  assert.match(web, /<CardLink/);
+  assert.match(web, /webEventDetailRoute\(data.id\)/);
+  assert.doesNotMatch(web, /data.slug \?\? data.id/);
+  assert.match(native, /pointerEvents="none" style=\{\{ width: "100%", aspectRatio: CARD_ASPECT \}\}/);
 });
 
 
@@ -72,3 +75,4 @@ test("masonry uses each event's measured extent instead of a fixed footer estima
   assert.equal(bounds[0].bottom - bounds[0].top, 530);
   assert.equal(bounds[1].bottom - bounds[1].top, 620);
 });
+

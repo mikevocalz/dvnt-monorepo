@@ -1,7 +1,8 @@
 "use client";
 
 import { useLayoutEffect, useRef } from "react";
-import { useRouter } from "solito/navigation";
+import { webEventDetailRoute } from "@dvnt/app/lib/events/event-detail-route";
+import { CardLink } from "@dvnt/app/components/ui/card-link.web";
 import { MapPin, Clock, Users, Calendar, Zap } from "lucide-react";
 import { EventFlyer, type EventFlyerMedia } from "@dvnt/app/components/event/EventFlyer.web";
 import { color } from "@dvnt/app/lib/theme";
@@ -46,22 +47,18 @@ export function FeedEventCard({ data, onHeightChange }: {
     observer.observe(element);
     return () => observer.disconnect();
   }, [data.id, onHeightChange]);
-  const router = useRouter();
-  const open = () => router.push(`/events/${data.slug ?? data.id}`);
+  // Feed data carries a stable id; /events/[slug] resolves titles, not ids.
+  const href = webEventDetailRoute(data.id);
 
   return (
     <div ref={cardRef} style={{ width: "100%", maxWidth: CARD_MAX_WIDTH, margin: "0 auto", boxSizing: "border-box", padding: `${CARD_VERTICAL_PADDING}px ${CARD_HORIZONTAL_PADDING}px` }}>
-      <div
-        onClick={open}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
-        }}
-        style={{ position: "relative", width: "100%", borderRadius: 16, overflow: "hidden", background: "#111", cursor: "pointer" }}
+      <CardLink
+        href={href}
+        ariaLabel={`View event: ${data.title}`}
+        style={{ display: "block", position: "relative", width: "100%", borderRadius: 16, overflow: "hidden", background: "#111", cursor: "pointer" }}
       >
         {/* hero — flyer precedence (video → image → generated fallback) */}
-        <div>
+        <div style={{ pointerEvents: "none" }}>
           <EventFlyer
             media={{ ...data.media, eventId: data.media.eventId ?? data.id }}
             autoplay
@@ -110,7 +107,7 @@ export function FeedEventCard({ data, onHeightChange }: {
             </div>
           </div>
         </div>
-      </div>
+      </CardLink>
     </div>
   );
 }
@@ -119,4 +116,5 @@ function pill(bg: string): React.CSSProperties {
   return { background: bg, padding: "4px 10px", borderRadius: 10, color: "#fff", fontSize: 10, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase" };
 }
 const meta: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 3, color: "rgba(255,255,255,0.7)", fontSize: 11, lineHeight: "14px" };
+
 
