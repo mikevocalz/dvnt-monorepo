@@ -142,10 +142,12 @@ export const FeedEventCard = memo(function FeedEventCard({
             <View
               style={{
                 marginHorizontal: 14,
-                marginBottom: 12,
+                marginBottom: 8,
                 flexDirection: "row",
                 justifyContent: "space-between",
-                alignItems: "flex-start",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 8,
               }}
             >
               {(event as any).status === "cancelled" ? (
@@ -164,6 +166,7 @@ export const FeedEventCard = memo(function FeedEventCard({
                     style={{
                       color: "#fff",
                       fontSize: 10,
+                      lineHeight: 14,
                       fontWeight: "800",
                       letterSpacing: 1,
                       textTransform: "uppercase",
@@ -185,6 +188,7 @@ export const FeedEventCard = memo(function FeedEventCard({
                     style={{
                       color: "#fff",
                       fontSize: 10,
+                      lineHeight: 14,
                       fontWeight: "800",
                       letterSpacing: 0.8,
                       textTransform: "uppercase",
@@ -200,18 +204,20 @@ export const FeedEventCard = memo(function FeedEventCard({
                 <View
                   style={{
                     backgroundColor: "rgba(0,0,0,0.6)",
-                    borderRadius: 12,
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
+                    borderRadius: 10,
+                    paddingHorizontal: 8,
+                    paddingVertical: 4,
+                    flexDirection: "row",
                     alignItems: "center",
-                    minWidth: 46,
+                    gap: 5,
                   }}
                 >
                   {event.date ? (
                     <Text
                       style={{
                         color: "#fff",
-                        fontSize: 18,
+                        fontSize: 12,
+                        lineHeight: 14,
                         fontWeight: "800",
                       }}
                     >
@@ -222,7 +228,8 @@ export const FeedEventCard = memo(function FeedEventCard({
                     <Text
                       style={{
                         color: "rgba(255,255,255,0.7)",
-                        fontSize: 9,
+                        fontSize: 10,
+                        lineHeight: 14,
                         fontWeight: "700",
                         textTransform: "uppercase",
                       }}

@@ -67,9 +67,9 @@ export function FeedEventCard({ data, onHeightChange }: {
           />
         </div>
 
-        <div style={{ boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 12, padding: "12px 14px 14px" }}>
+        <div style={{ boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px 14px" }}>
           {/* top row: category pill / cancelled · date badge */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", flexShrink: 0 }}>
             {data.cancelled ? (
               <span style={pill("rgba(239,68,68,0.85)")}>Cancelled</span>
             ) : data.promoted ? (
@@ -82,9 +82,9 @@ export function FeedEventCard({ data, onHeightChange }: {
               <span />
             )}
             {data.dateDay || data.month ? (
-              <span style={{ background: "rgba(0,0,0,0.6)", borderRadius: 12, padding: "6px 10px", minWidth: 46, textAlign: "center", display: "inline-block" }}>
-                {data.dateDay ? <span style={{ display: "block", color: "#fff", fontSize: 18, fontWeight: 800, fontFamily: "SpaceMono, ui-monospace, monospace" }}>{data.dateDay}</span> : null}
-                {data.month ? <span style={{ display: "block", color: "rgba(255,255,255,0.7)", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>{data.month}</span> : null}
+              <span style={{ background: "rgba(0,0,0,0.6)", borderRadius: 10, padding: "4px 8px", display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap", lineHeight: "14px" }}>
+                {data.dateDay ? <span style={{ color: "#fff", fontSize: 12, fontWeight: 800, fontFamily: "SpaceMono, ui-monospace, monospace" }}>{data.dateDay}</span> : null}
+                {data.month ? <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>{data.month}</span> : null}
               </span>
             ) : null}
           </div>
@@ -113,7 +113,7 @@ export function FeedEventCard({ data, onHeightChange }: {
 }
 
 function pill(bg: string): React.CSSProperties {
-  return { background: bg, padding: "4px 10px", borderRadius: 10, color: "#fff", fontSize: 10, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase" };
+  return { background: bg, padding: "4px 10px", borderRadius: 10, color: "#fff", fontSize: 10, lineHeight: "14px", fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase" };
 }
 const meta: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 3, color: "rgba(255,255,255,0.7)", fontSize: 11, lineHeight: "14px" };
 

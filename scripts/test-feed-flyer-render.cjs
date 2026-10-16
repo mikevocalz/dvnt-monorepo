@@ -137,11 +137,15 @@ for (const [kind, media] of [
     assert.equal(card.children[1].style.height, "", "footer must size to its content");
     assert.equal(card.children[1].style.minHeight, "", "footer must not reserve blank space");
     assert.notEqual(card.children[1].style.justifyContent, "space-between");
+    const header = card.children[1].children[0];
+    const date = header.lastElementChild;
+    assert.equal(date.style.display, "inline-flex", "date must be one compact inline row");
+    assert.ok(![...date.children].some((node) => node.style.display === "block"), "day/month must not stack into a tall badge");
     assert.equal(card.children[0].querySelector('[style*="linear-gradient"]'), null);
     if (kind === "video") for (const attr of ["muted", "autoplay", "loop", "playsinline"]) assert.ok(asset.hasAttribute(attr));
   });
   test(`native ${kind} is contained in fixed 2:3 media and retains navigation`, () => {
-    const doc = render(NativeCard, { event: { id: "42", title, image: media.staticFlyerUrl, flyerVideoUrl: media.videoFlyerUrl, category: "Music" } });
+    const doc = render(NativeCard, { event: { id: "42", title, image: media.staticFlyerUrl, flyerVideoUrl: media.videoFlyerUrl, category: "Music", date: "30", month: "OCT" } });
     const asset = doc.querySelector(kind === "video" ? "video" : "img");
     assert.equal(asset.style.objectFit, "contain");
     const canvas = [...doc.querySelectorAll("div")].find((node) => node.style.aspectRatio === String(4 / 6));
@@ -150,10 +154,26 @@ for (const [kind, media] of [
     assert.equal(canvas.getAttribute("data-pointer-events"), "none", "native media must let the card receive taps");
     assert.ok(!canvas.textContent.includes(title));
     assert.equal(canvas.nextElementSibling.style.minHeight, "", "native footer must not reserve blank space");
+    const nativeDate = canvas.nextElementSibling.firstElementChild.lastElementChild;
+    assert.equal(nativeDate.style.flexDirection, "row", "native day/month must share one row");
+    assert.ok(Number.parseFloat(nativeDate.firstElementChild.style.fontSize) <= 12, "native date should not dominate the header");
     assert.ok(![...canvas.nextElementSibling.querySelectorAll("div")].some((node) => node.style.flex === "1"), "native footer must not stretch its content away from badges");
     assert.equal(doc.querySelector("[data-href]").getAttribute("data-href"), "/(protected)/events/42");
   });
 }
+test("sparse metadata keeps a compact footer without invented date values", () => {
+  for (const metadata of [{}, { category: "Music" }, { dateDay: "30" }, { month: "OCT" }]) {
+    const doc = render(WebCard, { data: { id: "42", title, ...metadata, media: { title } } });
+    const footer = doc.querySelector('a[href="/feed/events/42"]').children[1];
+    assert.equal(footer.style.height, "");
+    assert.equal(footer.style.minHeight, "");
+    assert.equal(footer.style.gap, "8px");
+    assert.ok(!footer.textContent.includes("undefined"));
+    assert.ok(!footer.textContent.includes("null"));
+    assert.equal(footer.querySelector("h3").textContent, title);
+  }
+});
+
 test("native guest gating remains enabled", () => {
   const doc = render(NativeCard, { event: { id: "42", title }, guestMode: true });
   assert.equal(doc.querySelector("[data-disabled]").getAttribute("data-disabled"), "true");
@@ -279,8 +299,11 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
           const footer = card.children[1];
           const details = footer.getBoundingClientRect();
           const top = footer.children[0].getBoundingClientRect();
+          const headerItems = [...footer.children[0].children].filter((node) => node.textContent.trim()).map((node) => {
+            const box = node.getBoundingClientRect(); return { top: box.top, bottom: box.bottom, height: box.height };
+          });
           const bottom = footer.children[1].getBoundingClientRect();
-          return { measured: window.measurements.at(-1), width: outer.getBoundingClientRect().width, height: outer.getBoundingClientRect().height, mediaBottom: media.bottom, detailsTop: details.top, detailsBottom: details.bottom, footerHeight: details.height, topBottom: top.bottom, bottomTop: bottom.top, bottomBottom: bottom.bottom, mediaWidth: media.width, mediaHeight: media.height, footerScrollHeight: footer.scrollHeight, footerClientHeight: footer.clientHeight };
+          return { measured: window.measurements.at(-1), width: outer.getBoundingClientRect().width, height: outer.getBoundingClientRect().height, mediaBottom: media.bottom, detailsTop: details.top, detailsBottom: details.bottom, footerHeight: details.height, headerHeight: top.height, headerItems, topBottom: top.bottom, bottomTop: bottom.top, bottomBottom: bottom.bottom, mediaWidth: media.width, mediaHeight: media.height, footerScrollHeight: footer.scrollHeight, footerClientHeight: footer.clientHeight };
         });
         const label = `${fixture.name} at ${width}px`;
         assert.ok(Math.abs(geometry.measured.height - geometry.height) < 0.5, `height callback disagrees with rendered card: ${label}`);
@@ -291,11 +314,16 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
         assert.ok(Math.abs(geometry.mediaWidth / geometry.mediaHeight - 4 / 6) < 0.001);
         assert.ok(Math.abs(geometry.mediaBottom - geometry.detailsTop) < 0.5, "footer starts immediately after artwork");
         const gap = geometry.bottomTop - geometry.topBottom;
-        assert.ok(gap >= -0.5 && gap <= 12.5, `footer gap ${gap}px must be compact: ${label}`);
+        assert.ok(gap >= -0.5 && gap <= 8.5, `footer gap ${gap}px must be compact: ${label}`);
+        assert.ok(geometry.headerHeight <= 28, `category/date header is too tall: ${label}`);
+        for (const item of geometry.headerItems) {
+          assert.ok(item.height <= 28, `header badge is too tall: ${label}`);
+          assert.ok(geometry.bottomTop - item.bottom <= 12.5, `visible blank space below a header badge: ${label}`);
+        }
         assert.ok(geometry.detailsBottom - geometry.bottomBottom <= 14.5, `excessive footer bottom padding: ${label}`);
         assert.ok(geometry.bottomBottom <= geometry.detailsBottom, `footer content clipped: ${label}`);
         assert.ok(geometry.footerScrollHeight <= geometry.footerClientHeight + 1, `footer content overflows: ${label}`);
-        if (fixture.name === "short") assert.ok(geometry.footerHeight < 180, `short footer is unnecessarily tall: ${label}`);
+        if (fixture.name === "short") assert.ok(geometry.footerHeight <= 128, `short footer is unnecessarily tall: ${label}`);
         if (fixture.name === "minimal") assert.ok(geometry.footerHeight < 100, `minimal footer is unnecessarily tall: ${label}`);
       }
       // Resize the same mounted event: this must be caught by ResizeObserver,
