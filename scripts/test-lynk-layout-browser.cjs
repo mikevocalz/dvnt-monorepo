@@ -1,0 +1,550 @@
+#!/usr/bin/env node
+/**
+ * Rendered layout regression, using the production room, panels, stage, stores,
+ * native dock and glass layout. Only account/server/media/native-device boundaries
+ * are fixtures. No account, camera, microphone or live endpoint is accessed.
+ *
+ * Run: node scripts/test-lynk-layout-browser.cjs
+ * CI: install the Playwright-managed Chromium with `playwright install chromium`.
+ * NODE_PATH can point at a separate fixture dependency installation.
+ * --build-only validates the source graph and generated Tailwind, NOT geometry.
+ * --smoke additionally mounts React in happy-dom, NOT a browser geometry pass.
+ */
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const http = require('node:http');
+
+const ROOT = path.resolve(__dirname, '..');
+const source = (relative) => path.join(ROOT, relative);
+const dependencyPaths = [ROOT, source('apps/web'), ...(process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean)];
+const resolve = (name) => require.resolve(name, { paths: dependencyPaths });
+const load = (name) => require(resolve(name));
+const nodePaths = [...new Set(dependencyPaths.flatMap((p) => [p, path.join(p, 'node_modules')]))];
+const lynk = 'packages/app/features/sneaky-lynk/';
+
+const fixture = `
+  import { create } from 'zustand';
+  const params = new URLSearchParams(location.search);
+  export const noop = () => {};
+  export const localUser = { id:'fixture-host', authId:'fixture-auth', username:'Local Host', displayName:'Local Host', avatar:'', isVerified:true };
+  const defaults = { role:params.get('role') || 'host', publishers:2, listeners:0, hasVideo:true, overlayOpen:false,
+    insets:{top:0,right:0,bottom:0,left:0}, reactions:[], connection:'connected' };
+  export const useFixture = create(() => ({...defaults}));
+  export const f = window.fixture = { actions:[], routes:[], sent:[], attachments:[], nativeMounts:[], roster:[], membersSync:null, commentsSync:null };
+  const names = index => 'Participant ' + String(index).padStart(2,'0');
+  function roster() {
+    const c = useFixture.getState();
+    return [{userId:localUser.id,role:c.role,status:'active',handRaised:false,displayName:localUser.displayName},
+      ...Array.from({length:c.publishers-1},(_,i)=>({userId:'publisher-'+String(i+1).padStart(2,'0'),role:'participant',status:'active',handRaised:false,displayName:names(i+1)})),
+      ...Array.from({length:c.listeners},(_,i)=>({userId:'listener-'+i,role:'listener',status:'active',handRaised:i<3,displayName:'Listener '+i}))];
+  }
+  f.configure = patch => { useFixture.setState(patch); f.roster=roster(); f.membersSync?.(f.roster); };
+  f.configure({});
+  export const attachCanvas = (peer, element) => { f.attachments.push({peer, attached:!!element}); };
+  const mediaActions = { goLive:async()=>{}, end:noop, setMicEnabled:noop, setCameraEnabled:noop, attachCanvas };
+  export function useLynkBroadcast() {
+    const c=useFixture();
+    return { ...mediaActions, state:'live', isLive:true, error:null, micEnabled:false,cameraEnabled:false,
+      localStream:null,localAudioStream:null,coPublishers:f.roster.filter(m=>m.role!=='listener' && m.userId!==localUser.id).map(m=>({peerId:m.userId,path:'fixture/'+m.userId})) };
+  }
+  export const videoApi = {
+    subscribeToMembers:(_id,_change,options)=> {f.membersSync=options.onSync;queueMicrotask(()=>f.membersSync?.(f.roster));return()=>{f.membersSync=null}},
+    subscribeToRoomEvents:()=>noop,
+    muteAll:async()=>({ok:true}),unmuteAll:async()=>({ok:true}),mutePeer:async()=>({ok:true}),unmutePeer:async()=>({ok:true}),
+    promotePeer:async()=>({ok:true}),demotePeer:async()=>({ok:true}),kickUser:async()=>({ok:true})
+  };
+  export const sneakyLynkApi = { joinRoom:async()=>({ok:true,data:{peer:{role:useFixture.getState().role},user:localUser,room:{id:'fixture-room',title:'A very long Lynk title that must not push host controls outside the phone',hasVideo:true,endsAt:new Date(Date.now()+240000).toISOString()}}}),
+    endRoom:async()=>{f.actions.push('endRoom');return {ok:true}},leaveRoom:async()=>{f.actions.push('leaveRoom');return {ok:true}},toggleHand:async()=>({ok:true}) };
+  const comments = Array.from({length:30},(_,i)=>({id:i+1,roomId:'fixture-room',authorId:'publisher-1',body:'Earlier message '+i+' with enough text to wrap on a narrow phone.',parentId:null,rootId:null,depth:0,mentions:[],createdAt:new Date(1700000000000+i).toISOString(),author:{displayName:'Participant 01',username:'Participant 01',avatar:''}}));
+  export const subscribeToRoomComments=(_id,_new,options)=>{f.commentsSync=options.onSync;queueMicrotask(()=>f.commentsSync?.(comments));return()=>{f.commentsSync=null}};
+  export const postRoomComment=async(params)=>{f.sent.push(params.body);return {...params,id:1000+f.sent.length,createdAt:new Date().toISOString(),parentId:null,rootId:null,depth:0,mentions:[]}};
+`;
+
+const boundaries = new Map([
+  ['fixture', fixture],
+  ['solito/navigation', `import {f} from 'fixture';const router={push:path=>f.routes.push(path),back:()=>{}};export const useRouter=()=>router;export const useParams=()=>({id:'fixture-room'});export const useSearchParams=()=>new URLSearchParams();`],
+  ['@dvnt/app/lib/stores/auth-store', `import {create} from 'zustand';import {localUser} from 'fixture';export const useAuthStore=create(()=>({user:localUser}));`],
+  ['@dvnt/app/lib/stores/ui-store', `import {create} from 'zustand';import {noop} from 'fixture';export const useUIStore=create(()=>({showToast:noop}));`],
+  ['@dvnt/app/lib/lynk/useLynkBroadcast.web', `export {useLynkBroadcast} from 'fixture';`],
+  ['@dvnt/app/lib/lynk/useSpeakingDetection.web', `export const useSpeakingDetection=()=>false;`],
+  ['@dvnt/app/lib/lynk/useSpeakingPresence', `const empty={};export const useSpeakingPresence=()=>empty;`],
+  ['@dvnt/app/lib/subscription/use-entitlements', `export const useEntitlements=()=>({entitlements:{sessionMinutes:5},isLoading:false});`],
+  ['@dvnt/app/lib/hooks/use-verified-gate', `export const useVerifiedGate=()=>callback=>callback();`],
+  ['@dvnt/app/features/video/api', `export {videoApi} from 'fixture';`],
+  ['@dvnt/app/lib/api/events', `export const eventsApi={getEventByLynkRoom:async()=>({id:'fixture-event',title:'A long linked event title',slug:null})};`],
+  ['@dvnt/observability', `export const addSentryBreadcrumb=()=>{};`],
+  ['@dvnt/ui', `export {ConnectionBanner} from '${source('packages/ui/src/video/ConnectionBanner.web.tsx')}';export {RoomTimer} from '${source('packages/ui/src/video/RoomTimer.web.tsx')}';export {Dialog} from '${source('packages/ui/src/form/Dialog.web.tsx')}';`],
+  ['@dvnt/app/lib/secure-capture', `export {SecureCaptureBoundary} from '${source('packages/app/lib/secure-capture/SecureCaptureBoundary.tsx')}';`],
+  [source(lynk+'api/supabase'), `export {sneakyLynkApi} from 'fixture';`],
+  [source(lynk+'api/comments'), `export {subscribeToRoomComments,postRoomComment} from 'fixture';`],
+  [source('packages/app/features/video/api'), `export {videoApi} from 'fixture';`],
+  [source(lynk+'hooks/useRoomHeartbeat'), `export const useRoomHeartbeat=()=>{};`],
+  [source(lynk+'hooks/useEventLynkWaitingRoom'), `export const useEventLynkWaitingRoom=()=>{};`],
+  [source(lynk+'hooks/useSneakyLynkCaptureBroadcast'), `const value={notifyLocalCapture:()=>{}};export const useSneakyLynkCaptureBroadcast=()=>value;`],
+  [source('packages/app/features/video/useRoomLifecycle'), `const value={notifyEnded:()=>{}};export const useRoomLifecycle=()=>value;`],
+  [source(lynk+'session/useRoomSession'), `import {useFixture} from 'fixture';export const useRoomSession=()=>({state:useFixture(s=>s.connection)});export const bannerPhaseFor=s=>s.state;`],
+  [source(lynk+'stores/lynk-history-store'), `import {create} from 'zustand';export const useLynkHistoryStore=create(()=>({endRoom:()=>{}}));`],
+  [source(lynk+'hooks/useRoomReactions'), `import {useFixture,f} from 'fixture';export const useRoomReactions=()=>({reactions:useFixture(s=>s.reactions),sendReaction:emoji=>f.actions.push('reaction:'+emoji)});`],
+  [source('packages/app/lib/secure-capture/useSecureCaptureGuard'), `export const shouldEnableWebSecureCapture=()=>true;export const useSecureCaptureGuard=()=>({blackoutReason:null});`],
+  ['react-native-safe-area-context', `import {useFixture} from 'fixture';export const useSafeAreaInsets=()=>useFixture(s=>s.insets);`],
+  ['expo-haptics', `export const impactAsync=async()=>{};export const notificationAsync=async()=>{};export const ImpactFeedbackStyle={Light:'light',Medium:'medium'};export const NotificationFeedbackType={Warning:'warning'};`],
+  ['react-native-reanimated', `import {View} from 'react-native';const chain={springify:()=>chain,damping:()=>chain,stiffness:()=>chain,duration:()=>chain};export const FadeInRight=chain,FadeOutRight=chain;export default {View};`],
+  ['expo-blur', `import {View} from 'react-native';export function BlurView({children,style,pointerEvents}){return <View style={style} pointerEvents={pointerEvents}>{children}</View>}`],
+  ['@dvnt/app/lib/safe-native-modules', `export {View as SafeLiquidGlassView} from 'react-native';export const safeIsLiquidGlassSupported=false;`],
+  ['native-media-tile', `
+    import {useEffect} from 'react';import {View,Text} from 'react-native';import {f} from 'fixture';
+    export function VideoTile({participant,tileWidth,tileHeight}) {
+      useEffect(()=>{f.nativeMounts.push({id:participant.id,mounted:true});return()=>f.nativeMounts.push({id:participant.id,mounted:false})},[participant.id]);
+      return <View testID={'native-tile-'+participant.id} style={{width:tileWidth,height:tileHeight,backgroundColor:'#152131',alignItems:'center',justifyContent:'center'}}>
+        <Text style={{color:'white',fontSize:12}}>{participant.user.displayName}</Text>
+      </View>;
+    }
+  `],
+]);
+
+async function buildFixture() {
+  const esbuild = load('esbuild');
+  const bundle = await esbuild.build({
+    stdin: { resolveDir:ROOT, loader:'tsx', contents:`
+      import React from 'react';import {createRoot} from 'react-dom/client';
+      import {RoomInner} from './${lynk}screens/room.web';
+      import {ControlsBar} from './${lynk}ui/ControlsBar';
+      import {RoomStage as NativeRoomStage} from './${lynk}ui/RoomStage';
+      import {useSneakyLynkCaptureStore} from '@dvnt/app/lib/stores/sneaky-lynk-capture-store';
+      import {useRoomUIStore} from './${lynk}stores/room-ui-store';
+      import {useFixture,f,localUser} from 'fixture';
+      f.expireSession=()=>useRoomUIStore.getState().setShowTimeUp(true);
+      useSneakyLynkCaptureStore.getState().setWebPeerPresent(true);
+      function App(){const c=useFixture();const action=name=>()=>f.actions.push(name);
+        return location.search.includes('rail=native') ? <div data-native-room style={{position:'fixed',inset:0,background:'#06070d',display:'flex',flexDirection:'column'}}>
+          <div data-native-header style={{height:96+c.insets.top,paddingTop:c.insets.top,flexShrink:0,color:'white'}}>Native room header</div>
+          <NativeRoomStage participants={f.roster.map(member=>({id:member.userId,user:{id:member.userId,displayName:member.displayName},role:member.role,isLocal:member.userId===localUser.id,isCameraOn:c.hasVideo,isMicOn:false}))}
+            activeSpeakers={new Set()} isHost={c.role==='host'} hostUserId={localUser.id}/>
+          <ControlsBar isMuted hasVideo={c.hasVideo} isVideoEnabled={c.hasVideo} handRaised={false} localRole={c.role}
+            overlayOpen={c.overlayOpen} floatingReactions={c.reactions} onLeave={action('leave')} onToggleMute={action('mute')}
+            onToggleVideo={action('video')} onToggleHand={action('hand')} onOpenChat={()=>f.configure({overlayOpen:true})}
+            onShare={action('share')} onSwitchCamera={action('flip')} onSendReaction={emoji=>f.actions.push('reaction:'+emoji)} onReport={action('report')}/>
+          </div> : <RoomInner id="fixture-room" roomHasVideo={c.hasVideo} isCreator={c.role==='host'}/>;
+      }
+      createRoot(document.getElementById('root')).render(<App/>);
+    `},
+    bundle:true, write:false, platform:'browser', format:'iife', jsx:'automatic',
+    tsconfigRaw:{compilerOptions:{jsx:'react-jsx',jsxImportSource:'react'}},
+    nodePaths, resolveExtensions:['.web.tsx','.web.ts','.tsx','.ts','.jsx','.js','.json'],
+    define:{'process.env.NODE_ENV':'"test"','process.env.EXPO_PUBLIC_SNEAKY_LYNK_WEB_CAPTURE_PROTECTION':'"true"','__DEV__':'false'},
+    plugins:[{name:'room-service-boundaries',setup(build){
+      build.onResolve({filter:/.*/},args=>{
+        if(args.path==='./VideoGrid'&&args.importer===source(lynk+'ui/RoomStage.tsx'))return {path:'native-media-tile',namespace:'fixture'};
+        const absolute = args.path.startsWith('.') ? path.resolve(args.resolveDir,args.path) : args.path;
+        const key=boundaries.has(args.path)?args.path:boundaries.has(absolute)?absolute:null;
+        if(key)return {path:key,namespace:'fixture'};
+        if(args.path==='react-native')return {path:resolve('react-native-web')};
+        if(args.path==='lucide-react-native')return {path:resolve('lucide-react')};
+        if(args.path.startsWith('@dvnt/app/'))return build.resolve(source('packages/app/'+args.path.slice('@dvnt/app/'.length)),{resolveDir:ROOT,kind:args.kind});
+      });
+      build.onLoad({filter:/.*/,namespace:'fixture'},args=>({loader:'tsx',resolveDir:ROOT,contents:boundaries.get(args.path)}));
+      build.onLoad({filter:/screens\/room\.web\.tsx$/},args=>({loader:'tsx',resolveDir:path.dirname(args.path),contents:fs.readFileSync(args.path,'utf8')+'\nexport { RoomInner };\n'}));
+    }}],
+  });
+  // Match the production layered theme/preflight and important utilities.
+  // Explicit sources ensure the exact production class strings are compiled.
+  const twRoot = path.dirname(resolve('tailwindcss/package.json'));
+  const cssInput = `@import "${twRoot}/theme.css" layer(theme);\n@import "${twRoot}/preflight.css" layer(base);\n@import "${twRoot}/utilities.css" important;\n@source "${source('packages/app/features/sneaky-lynk')}";\n@source "${source('packages/app/lib/secure-capture')}";\n@source "${source('packages/ui/src/video')}";\n@source "${source('packages/ui/src/form')}";`;
+  const css = await load('postcss')([load('@tailwindcss/postcss')({base:ROOT})]).process(cssInput,{from:source('lynk-layout-fixture.css')});
+  assert.match(css.css,/\.flex\s*\{/,'Tailwind must generate actual room utilities');
+  assert.match(css.css,/safe-area-inset-bottom/,'safe-area CSS must be present');
+  assert.match(bundle.outputFiles[0].text,/data-room-phase/,'actual room screen must be bundled');
+  return {js:bundle.outputFiles[0].text,css:css.css};
+}
+
+const cases = [
+  {name:'narrow-short-phone',width:320,height:480},
+  {name:'small-phone',width:320,height:568},
+  {name:'phone-375',width:375,height:667},
+  {name:'notched-phone',width:390,height:844,insets:{top:47,bottom:34,left:0,right:0}},
+  {name:'landscape-667',width:667,height:375,insets:{top:0,bottom:21,left:44,right:44}},
+  {name:'landscape-844',width:844,height:390,insets:{top:0,bottom:21,left:47,right:47}},
+  {name:'tablet-portrait',width:768,height:1024,insets:{top:24,bottom:20,left:0,right:0}},
+  {name:'tablet-landscape',width:1024,height:768,insets:{top:24,bottom:20,left:0,right:0}},
+  {name:'desktop',width:1440,height:900},
+];
+const zeroInsets = {top:0,right:0,bottom:0,left:0};
+const tick = (page) => page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+
+async function dimensions(locator) {
+  return locator.evaluateAll(nodes=>nodes.map(el=>{const r=el.getBoundingClientRect();return {label:el.getAttribute('aria-label')||el.textContent.trim(),x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}}));
+}
+function assertContained(rects, bounds, context) {
+  assert.ok(rects.length,context+': expected rendered targets');
+  for(const r of rects) {
+    assert.ok(r.width>0&&r.height>0,`${context}: ${r.label} has no rendered area`);
+    assert.ok(r.x>=bounds.left-1&&r.right<=bounds.right+1&&r.y>=bounds.top-1&&r.bottom<=bounds.bottom+1,
+      `${context}: ${r.label} is outside ${JSON.stringify(bounds)}: ${JSON.stringify(r)}`);
+  }
+}
+function assertNoOverlap(rects, context) {
+  for(let i=0;i<rects.length;i++)for(let j=i+1;j<rects.length;j++) {
+    const a=rects[i],b=rects[j];
+    assert.ok(Math.min(a.right,b.right)-Math.max(a.x,b.x)<=1||Math.min(a.bottom,b.bottom)-Math.max(a.y,b.y)<=1,
+      `${context}: ${a.label} overlaps ${b.label}`);
+  }
+}
+async function assertReachable(locator, context) {
+  const covered=await locator.evaluateAll(nodes=>nodes.filter(el=>{
+    const r=el.getBoundingClientRect(), top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+    return !top || (top!==el&&!el.contains(top));
+  }).map(el=>el.getAttribute('aria-label')||el.textContent.trim()));
+  assert.deepEqual(covered,[],context+': controls must receive taps');
+}
+async function assertFullyVisibleCard(locator, context) {
+  const result=await locator.evaluate(card=>{
+    const r=card.getBoundingClientRect();
+    const clip={left:0,top:0,right:innerWidth,bottom:innerHeight};
+    for(let parent=card.parentElement;parent;parent=parent.parentElement) {
+      const style=getComputedStyle(parent),p=parent.getBoundingClientRect();
+      if(/auto|scroll|hidden|clip/.test(style.overflowX)){clip.left=Math.max(clip.left,p.left);clip.right=Math.min(clip.right,p.right)}
+      if(/auto|scroll|hidden|clip/.test(style.overflowY)){clip.top=Math.max(clip.top,p.top);clip.bottom=Math.min(clip.bottom,p.bottom)}
+    }
+    const visible=r.left>=clip.left-1&&r.right<=clip.right+1&&r.top>=clip.top-1&&r.bottom<=clip.bottom+1;
+    // Check the picture and the focus control: a sticky hero may cover a card
+    // even though both its DOM node and bounding box are present.
+    const covered=[0.15,0.5,0.85].flatMap(x=>[0.15,0.5,0.85].map(y=>{
+      const hit=document.elementFromPoint(r.left+r.width*x,r.top+r.height*y);
+      return !hit || (hit!==card&&!card.contains(hit));
+    })).some(Boolean);
+    return {visible,covered,clip,rect:{left:r.left,top:r.top,right:r.right,bottom:r.bottom}};
+  });
+  assert.ok(result.visible&&!result.covered,context+': full thumbnail must be visible and unobscured '+JSON.stringify(result));
+}
+async function evidence(page,name,error) {
+  if(!process.env.LYNK_LAYOUT_OUTPUT)return;
+  const directory=path.resolve(process.env.LYNK_LAYOUT_OUTPUT);fs.mkdirSync(directory,{recursive:true});
+  await page.screenshot({path:path.join(directory,name+'.png')}).catch(()=>{});
+  if(error)fs.writeFileSync(path.join(directory,name+'.txt'),String(error.stack||error));
+}
+async function assertWebGeometry(page, c, visible={top:0,height:c.height},checkHeader=true) {
+  const insets={...zeroInsets,...c.insets};
+  const bounds={left:insets.left,right:c.width-insets.right,top:visible.top+insets.top,bottom:visible.top+visible.height-insets.bottom};
+  const dock=page.locator('main[data-room-phase] > footer');
+  const buttons=dock.locator('button:visible');
+  const controls=await dimensions(buttons);
+  assertContained(controls,bounds,c.name+' web dock');
+  assertNoOverlap(controls,c.name+' web dock');
+  await assertReachable(buttons,c.name+' web dock');
+  if(checkHeader) {
+    const header=page.locator('[data-room-content] > header');
+    const headerTargets=await dimensions(header.locator('button,[role="timer"]'));
+    assertContained(headerTargets,bounds,c.name+' header');
+    assertNoOverlap(headerTargets,c.name+' header');
+    await assertReachable(header.locator('button'),c.name+' header');
+  }
+  const [footerRect]=await dimensions(dock);
+  for(const region of await dimensions(page.locator('[data-room-content]'))) {
+    assert.ok(region.bottom<=footerRect.y+1,c.name+': content must not overlap the dock');
+  }
+  const viewport=await page.locator('[data-room-viewport]').boundingBox();
+  assert.ok(viewport,c.name+': room owns a viewport wrapper');
+  assert.ok(Math.abs(viewport.y-visible.top)<=1&&Math.abs(viewport.height-visible.height)<=1,
+    c.name+': room must follow the visible viewport, including keyboard offsets');
+}
+
+async function setInsets(page, insets) {
+  const cdp=await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setSafeAreaInsetsOverride',{insets});
+  const actual=await page.evaluate(()=>{
+    const probe=document.createElement('div');probe.style.padding='env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+    document.body.append(probe);const style=getComputedStyle(probe);const result=['Top','Right','Bottom','Left'].map(side=>parseFloat(style['padding'+side]));probe.remove();return result;
+  });
+  assert.deepEqual(actual,[insets.top,insets.right,insets.bottom,insets.left],'Chromium must really emulate CSS safe areas');
+}
+
+async function createPage(browser,url,c,role,rail='web') {
+  const context=await browser.newContext({viewport:{width:c.width,height:c.height},reducedMotion:'reduce'});
+  const page=await context.newPage();
+  const errors=[],unexpectedRequests=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  await page.route('**/*',route=>{
+    const target=new URL(route.request().url());
+    if(target.origin===url)return route.continue();
+    unexpectedRequests.push(target.origin+target.pathname);return route.abort();
+  });
+  await page.goto(url+'/?rail='+rail+'&role='+role);
+  await page.waitForFunction(()=>window.fixture);
+  await setInsets(page,{...zeroInsets,...c.insets});
+  if(rail==='web')await page.locator('main[data-room-phase="connected"]').waitFor();
+  await page.evaluate(insets=>window.fixture.configure({insets}),{...zeroInsets,...c.insets});
+  await tick(page);
+  return {page,context,errors,unexpectedRequests};
+}
+
+async function webCases(browser,url) {
+  for(const c of cases)for(const role of ['host','participant']) {
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,role);
+    try {
+      // Exercise the production stage's distinct solo/duo layouts before
+      // switching to the crowd view. No copied HTML is used for any mode.
+      for(const publishers of [1,2]) {
+        await page.evaluate(publishers=>window.fixture.configure({publishers}),publishers);await tick(page);
+        assert.equal(await page.locator('[data-tile]').count(),publishers,c.name+' stage count');
+        assert.equal(await page.locator('[data-stage-mode]').getAttribute('data-stage-mode'),publishers===1?'solo':'duo');
+        const tiles=page.locator('[data-tile]');
+        const sizes=await dimensions(tiles);
+        if(publishers===2) {
+          assert.ok(Math.abs(sizes[0].width-sizes[1].width)<=1&&Math.abs(sizes[0].height-sizes[1].height)<=1,c.name+': duo tiles must be equal-sized');
+        }
+        for(let index=0;index<publishers;index++) {
+          await tiles.nth(index).scrollIntoViewIfNeeded();await tick(page);
+          await assertFullyVisibleCard(tiles.nth(index),c.name+' '+publishers+'-person tile '+index);
+        }
+        await page.locator('[data-room-content]').evaluate(el=>{el.scrollTop=0});await tick(page);
+        await assertWebGeometry(page,c);
+      }
+      await page.evaluate(()=>window.fixture.configure({publishers:12,listeners:18,reactions:Array.from({length:12},(_,i)=>({id:'r'+i,emoji:'🔥'}))}));
+      await tick(page);
+      await assertWebGeometry(page,c);
+      assert.equal(await page.locator('footer button:visible').count(),c.height<=500?6:11,'primary controls and responsive reactions');
+      if(c.height<=500) {
+        await page.getByRole('button',{name:'Reactions',exact:true}).click();
+        const reactionButtons=page.getByRole('button',{name:/^React /});
+        assert.equal(await reactionButtons.count(),6,'all reactions remain available in short landscape');
+        assertContained(await dimensions(reactionButtons),{left:c.insets?.left||0,right:c.width-(c.insets?.right||0),top:0,bottom:c.height-(c.insets?.bottom||0)},c.name+' compact reactions');
+        await assertReachable(reactionButtons,c.name+' compact reactions');
+        await page.getByRole('button',{name:'React 🔥',exact:true}).click();
+        await page.waitForFunction(()=>window.fixture.actions.includes('reaction:🔥'));
+      }
+      if(role==='host') {
+        await page.getByRole('timer').waitFor();
+        assert.equal(await page.getByRole('button',{name:'3 raised hands',exact:true}).count(),1,'host queue must be tested with nonempty hands');
+      }
+      await page.getByRole('button',{name:'Chat',exact:true}).click();
+      const chat=page.getByRole('dialog',{name:'Chat',exact:true});
+      await chat.waitFor();
+      const chatButtons=chat.getByRole('button',{name:/^(Close|Send message)$/});
+      const bounds={left:c.insets?.left||0,right:c.width-(c.insets?.right||0),top:c.insets?.top||0,bottom:c.height-(c.insets?.bottom||0)};
+      assertContained(await dimensions(chatButtons),bounds,c.name+' chat');
+      await assertReachable(chatButtons,c.name+' chat');
+      await chat.getByRole('textbox',{name:'Message',exact:true}).fill('Layout fixture message');
+      await chat.getByRole('button',{name:'Send message',exact:true}).click();
+      await page.waitForFunction(()=>window.fixture.sent.length===1);
+      assert.equal(await chat.getByRole('textbox',{name:'Message',exact:true}).inputValue(),'','successful send clears draft');
+      await chat.getByRole('button',{name:'Close',exact:true}).click();
+      await chat.waitFor({state:'detached'});
+      await assertWebGeometry(page,c);
+      assert.deepEqual(errors,[],c.name+' runtime errors');
+      assert.deepEqual(unexpectedRequests,[],c.name+' must not access live endpoints');
+      await evidence(page,'web-'+c.name+'-'+role);
+      console.log('PASS rendered web '+c.name+' '+role+': 1/2/12-person layouts, dock, header, listeners, reactions, chat send/close');
+    } catch(error) {await evidence(page,'FAIL-web-'+c.name+'-'+role,error);throw error} finally {await context.close()}
+  }
+}
+
+async function timeUpCases(browser,url) {
+  for(const c of cases) {
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'host');
+    try {
+      const insets={...zeroInsets,...c.insets};
+      const bounds={left:insets.left,right:c.width-insets.right,top:insets.top,bottom:c.height-insets.bottom};
+      // Enter through the real UI store; both buttons exercise production room
+      // handlers. Only billing navigation and server end calls are recorded.
+      await page.evaluate(()=>window.fixture.expireSession());
+      const dialog=page.getByRole('dialog',{name:'Session time limit',exact:true});
+      await dialog.waitFor();
+      const upgrade=dialog.getByRole('button',{name:'Upgrade plan',exact:true});
+      await upgrade.scrollIntoViewIfNeeded();await tick(page);
+      assertContained(await dimensions(upgrade),bounds,c.name+' time-limit upgrade');
+      await assertReachable(upgrade,c.name+' time-limit upgrade');
+      await upgrade.click();
+      await page.waitForFunction(()=>window.fixture.routes.includes('/feed/sneaky-lynk/billing'));
+      await dialog.waitFor({state:'detached'});
+      await page.evaluate(()=>window.fixture.expireSession());await dialog.waitFor();
+      const leave=dialog.getByRole('button',{name:'Leave Lynk',exact:true});
+      await leave.scrollIntoViewIfNeeded();await tick(page);
+      assertContained(await dimensions(leave),bounds,c.name+' time-limit leave');
+      await assertReachable(leave,c.name+' time-limit leave');
+      await evidence(page,'time-limit-'+c.name);
+      await leave.click();
+      await page.waitForFunction(()=>window.fixture.actions.includes('endRoom')&&window.fixture.routes.includes('/feed/messages'));
+      assert.deepEqual(errors,[],c.name+' time-limit runtime errors');
+      assert.deepEqual(unexpectedRequests,[],c.name+' time-limit must not access live endpoints');
+      console.log('PASS time-limit dialog '+c.name+': scroll-safe upgrade and leave actions');
+    } catch(error) {await evidence(page,'FAIL-time-limit-'+c.name,error);throw error} finally {await context.close()}
+  }
+}
+
+async function keyboardCase(browser,url) {
+  const c={name:'keyboard-pan',width:390,height:844,insets:{top:0,right:0,bottom:0,left:0}};
+  const {page,context,errors}=await createPage(browser,url,c,'host');
+  try {
+    // A software keyboard can shrink/pan visualViewport without changing CSS
+    // dvh or window.innerHeight. Use the real viewport event handlers.
+    // initScript supplies the mock before the production effect subscribes.
+    await page.addInitScript(()=>{
+      const vv=new EventTarget();Object.assign(vv,{height:window.innerHeight,width:window.innerWidth,offsetTop:0,offsetLeft:0,scale:1});
+      Object.defineProperty(window,'visualViewport',{configurable:true,value:vv});
+      window.setFixtureViewport=patch=>{Object.assign(vv,patch);vv.dispatchEvent(new Event('resize'));vv.dispatchEvent(new Event('scroll'))};
+    });
+    await page.reload();
+    await page.locator('main[data-room-phase="connected"]').waitFor();
+    await page.getByRole('button',{name:'Chat',exact:true}).click();
+    const chat=page.getByRole('dialog',{name:'Chat',exact:true});
+    await page.evaluate(()=>window.setFixtureViewport({height:310,offsetTop:70}));await tick(page);
+    const targets=page.getByRole('dialog',{name:'Chat',exact:true}).locator('button[aria-label="Close"],button[aria-label="Send message"],input');
+    assertContained(await dimensions(targets),{left:0,right:390,top:70,bottom:380},'keyboard chat');
+    await assertReachable(targets,'keyboard chat');
+    await chat.getByRole('textbox',{name:'Message',exact:true}).fill('Keyboard remains usable');
+    await chat.getByRole('button',{name:'Send message',exact:true}).click();
+    await page.waitForFunction(()=>window.fixture.sent.length===1);
+    await chat.getByRole('button',{name:'Close',exact:true}).click();
+    await assertWebGeometry(page,c,{top:70,height:310});
+    await page.evaluate(()=>window.setFixtureViewport({offsetTop:110}));await tick(page);
+    await assertWebGeometry(page,c,{top:110,height:310});
+    await page.evaluate(()=>window.setFixtureViewport({height:844,offsetTop:0}));await tick(page);
+    await assertWebGeometry(page,c);
+    assert.deepEqual(errors,[]);
+    await evidence(page,'web-keyboard-restored');
+    console.log('PASS keyboard visualViewport resize, scroll offset, send, close and restore');
+  } catch(error) {await evidence(page,'FAIL-keyboard',error);throw error} finally {await context.close()}
+}
+
+async function groupStageCase(browser,url) {
+  for(const viewport of cases) {
+  const c={...viewport,name:'large-room-'+viewport.name};
+  const {page,context,errors}=await createPage(browser,url,c,'host');
+  try {
+    await page.evaluate(()=>window.fixture.configure({publishers:20,listeners:12}));await tick(page);
+    assert.equal(await page.locator('[data-tile]').count(),20,'every publisher must have one tile');
+    const count=await page.evaluate(()=>window.fixture.attachments.length);
+    assert.ok(count>=19,'real remote canvas refs must be mounted before checking media stability');
+    const lastCard=page.locator('[data-stage-card="publisher-19"]');
+    const last=page.getByRole('button',{name:'Focus Participant 19',exact:true});
+    await lastCard.scrollIntoViewIfNeeded();await tick(page);
+    await assertFullyVisibleCard(lastCard,c.name+' last participant');
+    await assertReachable(last,c.name+' last participant');await last.click();await tick(page);
+    assert.equal(await page.evaluate(()=>window.fixture.attachments.length),count,'scrolling/focusing cannot detach or recreate video canvases');
+    await assertWebGeometry(page,c,{top:0,height:c.height},false);
+    const focused=page.locator('[data-stage-card="publisher-19"][data-focused="true"]');
+    assert.equal(await focused.count(),1,'clicked participant becomes focused');
+    // Pinning exposes Reset focus, which must not steal enough height to trap
+    // another thumbnail underneath the sticky featured participant.
+    const nextCard=page.locator('[data-stage-card="publisher-18"]');
+    await nextCard.scrollIntoViewIfNeeded();await tick(page);
+    await assertFullyVisibleCard(nextCard,c.name+' participant after pinning');
+    await assertReachable(page.getByRole('button',{name:'Focus Participant 18',exact:true}),c.name+' focus after pinning');
+    assert.equal(await page.evaluate(()=>window.fixture.attachments.length),count,'browsing after pinning must preserve media mounts');
+    await page.evaluate(()=>window.fixture.configure({publishers:19}));await tick(page);
+    assert.equal(await page.locator('[data-tile]').count(),19,'departed publisher is removed');
+    assert.equal(await page.locator('[data-stage-card="local"][data-focused="true"]').count(),1,'departed focus falls back to the host');
+    await page.evaluate(()=>window.fixture.configure({publishers:20}));await tick(page);
+    assert.equal(await page.locator('[data-tile]').count(),20,'new participant joins without duplicates');
+    await assertWebGeometry(page,c,{top:0,height:c.height},false);
+    assert.deepEqual(errors,[]);
+    await evidence(page,'web-'+c.name);
+    console.log('PASS 20-person rendered stage '+c.name+': full last tile visible, focus, stable canvas mounts, leave fallback, rejoin');
+  } catch(error) {await evidence(page,'FAIL-'+c.name,error);throw error} finally {await context.close()}
+  }
+}
+
+async function nativeCases(browser,url) {
+  for(const c of cases) {
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'participant','native');
+    try {
+      for(const publishers of [1,2,12,20]) {
+        await page.evaluate(publishers=>window.fixture.configure({publishers}),publishers);await tick(page);
+        assert.equal(await page.locator('[data-testid^="native-tile-"]').count(),publishers,c.name+' real native stage count');
+      }
+      const stage=page.getByTestId('lynk-native-stage');
+      const dock=page.locator('[data-native-room] > :last-child');
+      const [stageRect]=await dimensions(stage),[dockRect]=await dimensions(dock);
+      assert.ok(stageRect.height>0&&stageRect.bottom<=dockRect.y+1,c.name+': measured native stage stays above dock');
+      const nativeMounts=await page.evaluate(()=>window.fixture.nativeMounts.length);
+      assert.ok(nativeMounts>=20,'real native stage must mount every media boundary');
+      const last=page.getByTestId('native-tile-publisher-19');
+      await last.scrollIntoViewIfNeeded();await tick(page);
+      await assertFullyVisibleCard(last,c.name+' native last participant');
+      assert.equal(await page.evaluate(()=>window.fixture.nativeMounts.length),nativeMounts,'native crowd scrolling must not remount media tiles');
+      const buttons=page.locator('[data-native-room] [role="button"]');
+      const insets={...zeroInsets,...c.insets};
+      const bounds={left:insets.left,right:c.width-insets.right,top:insets.top,bottom:c.height-insets.bottom};
+      const rects=await dimensions(buttons);
+      assertContained(rects,bounds,c.name+' native dock');assertNoOverlap(rects,c.name+' native dock');await assertReachable(buttons,c.name+' native dock');
+      assert.ok(rects.length>=8,'full video dock and secondary actions are covered');
+      await page.getByRole('button',{name:'Open reactions',exact:true}).click();await tick(page);
+      const reactions=page.locator('[data-native-room]').getByText('😂',{exact:true});
+      assertContained(await dimensions(reactions),bounds,c.name+' reaction palette');await reactions.click();
+      await page.waitForFunction(()=>window.fixture.actions.includes('reaction:😂'));
+      await page.getByRole('button',{name:'Open chat',exact:true}).click();
+      // accessibilityElementsHidden is native-only. RNW still exposes the
+      // actual dock's interaction/animation styles for this geometry fixture.
+      await page.waitForFunction(()=>{
+        const dock=document.querySelector('[data-native-room] > :last-child');
+        return dock&&getComputedStyle(dock).pointerEvents==='none'&&Number(getComputedStyle(dock).opacity)===0;
+      });
+      await page.evaluate(()=>window.fixture.configure({overlayOpen:false,hasVideo:false}));
+      await page.waitForTimeout(250);await tick(page);
+      assertContained(await dimensions(buttons),bounds,c.name+' native audio dock');
+      assertNoOverlap(await dimensions(buttons),c.name+' native audio dock');
+      await assertReachable(buttons,c.name+' native audio dock');
+      assert.deepEqual(errors,[],c.name+' native runtime errors');
+      assert.deepEqual(unexpectedRequests,[],c.name+' native must not access live endpoints');
+      await evidence(page,'native-'+c.name);
+      console.log('PASS actual native stage+dock via RNW '+c.name+': 1/2/12/20 participants, last tile, stable mounts, video/audio, safe areas, reactions, overlay restore');
+    } catch(error) {await evidence(page,'FAIL-native-'+c.name,error);throw error} finally {await context.close()}
+  }
+}
+
+async function main() {
+  const assets=await buildFixture();
+  if(process.argv.includes('--build-only')) {
+    console.log('PASS fixture bundle and production Tailwind compilation; browser geometry was not run');return;
+  }
+  if(process.argv.includes('--smoke')) {
+    const {Window}=load('happy-dom');
+    for(const rail of ['web','native']) {
+      const window=new Window({url:'http://fixture.local/?rail='+rail});
+      try {
+        const errors=[];window.addEventListener('error',event=>errors.push(event.error?.stack||event.message));
+        // React 19's development timing hook is absent in this DOM emulator.
+        window.console.timeStamp=()=>{};
+        window.document.body.innerHTML='<div id="root"></div>';
+        window.eval(assets.js);await new Promise(resolve=>setTimeout(resolve,350));
+        assert.ok(window.fixture,rail+' fixture mounted');
+        assert.ok(window.document.querySelector(rail==='web'?'main[data-room-phase="connected"]':'[data-native-room] [role="button"]'),rail+' actual component mounted: '+window.document.body.innerHTML.slice(0,1200));
+        for(const publishers of [1,2,12,20]) {
+          window.fixture.configure({publishers});await new Promise(resolve=>setTimeout(resolve,30));
+          assert.equal(window.document.querySelectorAll(rail==='web'?'[data-tile]':'[data-testid^="native-tile-"]').length,publishers,rail+' rendered participant count');
+        }
+        if(rail==='web') {
+          window.fixture.expireSession();await new Promise(resolve=>setTimeout(resolve,30));
+          const dialog=window.document.querySelector('[aria-label="Session time limit"]');
+          assert.ok(dialog,'actual session time-limit dialog opens');
+          [...dialog.querySelectorAll('button')].find(button=>button.textContent.includes('Upgrade plan')).click();
+          await new Promise(resolve=>setTimeout(resolve,30));
+          assert.ok(window.fixture.routes.includes('/feed/sneaky-lynk/billing'),'real upgrade handler navigates to billing boundary');
+          window.fixture.expireSession();await new Promise(resolve=>setTimeout(resolve,30));
+          [...window.document.querySelector('[aria-label="Session time limit"]').querySelectorAll('button')].find(button=>button.textContent.includes('Leave Lynk')).click();
+          await new Promise(resolve=>setTimeout(resolve,30));
+          assert.ok(window.fixture.actions.includes('endRoom')&&window.fixture.routes.includes('/feed/messages'),'real leave handler calls server boundary and exits');
+        }
+        assert.deepEqual(errors,[],rail+' runtime errors');
+      } finally {await window.happyDOM.close()}
+    }
+    console.log('PASS actual React web/native stage+dock DOM smoke, 1/2/12/20 rosters and time-limit handlers; browser geometry was not run');return;
+  }
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/bundle.js'){res.setHeader('Content-Type','text/javascript');res.end(assets.js)}
+    else if(req.url==='/style.css'){res.setHeader('Content-Type','text/css');res.end(assets.css)}
+    else {res.setHeader('Content-Type','text/html');res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>')}
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  let browser;
+  try {
+    // Use the version-matched, Playwright-managed browser. Never fall back to a
+    // system executable or change sandbox settings to circumvent a denied run.
+    browser=await load('@playwright/test').chromium.launch({headless:true});
+    const url='http://127.0.0.1:'+server.address().port;
+    await webCases(browser,url);await keyboardCase(browser,url);await groupStageCase(browser,url);await timeUpCases(browser,url);await nativeCases(browser,url);
+    console.log('PASS all rendered Lynk viewport, room and control layout regressions');
+  } finally {await browser?.close();await new Promise(resolve=>server.close(resolve))}
+}
+main().catch(error=>{console.error(error);process.exitCode=1});

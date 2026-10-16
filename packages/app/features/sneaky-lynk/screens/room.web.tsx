@@ -114,10 +114,10 @@ import {
 } from "../ui/web/room-panels";
 import {
   ControlButton,
+  CompactReactions,
   FloatingReactions,
   REACTION_EMOJIS,
   ReactionBar,
-  StageTile,
   TimeUpDialog,
   VideoTile,
   type Tile,
@@ -142,7 +142,8 @@ import type { SneakyUser } from "@dvnt/app/features/sneaky-lynk/types";
 import { useRoomStore } from "../stores/room-store";
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { isPublisherRole } from "../publish-roles";
-import { stageGridClass, stageMode } from "../ui/stage-grid";
+import { RoomViewport } from "../ui/web/RoomViewport";
+import { RoomStage } from "../ui/web/RoomStage";
 import { useLynkHistoryStore } from "../stores/lynk-history-store";
 import { useSneakyLynkCaptureStore } from "@dvnt/app/lib/stores/sneaky-lynk-capture-store";
 import { SecureCaptureBoundary } from "@dvnt/app/lib/secure-capture";
@@ -1356,6 +1357,7 @@ function RoomInner({
       : undefined;
 
   return (
+    <RoomViewport>
     <SecureCaptureBoundary
       enabled={phase === "connected" || phase === "joining" || phase === "connecting"}
       roomId={id}
@@ -1379,33 +1381,36 @@ function RoomInner({
         data-can-publish={canPublish ? "true" : "false"}
         data-camera-on={isCameraOn ? "true" : "false"}
         data-has-local-stream={lynk.localStream ? "true" : "false"}
-        className="relative flex h-dvh w-full flex-col overflow-hidden bg-[#06070d] text-white"
+        className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#06070d] text-white"
       >
       {/* The session machine is the single source now — it is what knows a
           first join from a reconnect, and what is driving the retries. */}
       <ConnectionBanner phase={bannerPhaseFor(session)} />
       <CaptureNotificationBannerWeb />
 
+      {/* Only room content scrolls. The dock never competes with a tall header,
+          listener row, enlarged text, or a short landscape viewport. */}
+      <div data-room-content className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
       {/* Header */}
       <header
-        className="relative z-10 flex items-center justify-between gap-2 px-4 py-3"
-        style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
+        className="relative z-10 grid shrink-0 grid-cols-[44px_minmax(0,1fr)] items-center gap-2 pb-2 lg:grid-cols-[44px_minmax(0,1fr)_auto]"
+        style={{ paddingTop: "calc(var(--lynk-safe-top, env(safe-area-inset-top)) + 8px)", paddingLeft: "max(12px, env(safe-area-inset-left))", paddingRight: "max(12px, env(safe-area-inset-right))" }}
       >
         <button
           type="button"
           onClick={requestLeave}
           aria-label="Back"
-          className="w-9 h-9 shrink-0 rounded-xl bg-white/8 flex items-center justify-center active:scale-95"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/8 active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
         >
           <ArrowLeft size={20} color="#fff" />
         </button>
-        <div className="flex min-w-0 flex-col items-center">
-          <span className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-col items-start lg:items-center">
+          <span className="flex max-w-full min-w-0 items-center gap-2">
             <span
               className="h-2 w-2 rounded-full"
               style={{ backgroundColor: connecting ? "#facc15" : ACCENT }}
             />
-            <span className="text-[15px] font-semibold truncate max-w-[40vw]">{roomTitle}</span>
+            <span className="min-w-0 truncate text-[15px] font-semibold">{roomTitle}</span>
             {isHost ? (
               <span className="rounded-md bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-extrabold text-blue-200">
                 HOST
@@ -1429,7 +1434,7 @@ function RoomInner({
             ) : null}
           </span>
         </div>
-        <span className="flex shrink-0 items-center gap-1.5">
+        <span className="col-span-2 flex min-w-0 flex-wrap items-center justify-center gap-1.5 lg:col-span-1 lg:justify-end">
           {showTimer ? (
             <RoomTimer
               startedAt={timerStartedAt}
@@ -1448,7 +1453,7 @@ function RoomInner({
               type="button"
               onClick={openHandQueue}
               aria-label={`${raisedHandCount} raised hands`}
-              className="flex items-center gap-1 rounded-xl border border-[#FF5BFC]/40 bg-[#FF5BFC]/20 px-2.5 py-1.5 text-xs font-extrabold text-[#FF5BFC]"
+              className="flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-xl border border-[#FF5BFC]/40 bg-[#FF5BFC]/20 px-2.5 py-1.5 text-xs font-extrabold text-[#FF5BFC]"
             >
               <Hand size={13} /> {raisedHandCount}
             </button>
@@ -1458,7 +1463,7 @@ function RoomInner({
             onClick={shareRoom}
             aria-label="Share invite link"
             title="Share invite link"
-            className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 text-white/90 hover:bg-white/15"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/8 text-white/90 hover:bg-white/15"
           >
             <Share2 size={16} />
           </button>
@@ -1466,7 +1471,7 @@ function RoomInner({
             type="button"
             onClick={() => setParticipantsOpen(true)}
             aria-label="Participants"
-            className="flex items-center gap-1 rounded-xl bg-white/8 px-2.5 py-1.5 text-xs font-bold text-white/90 hover:bg-white/15"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-xl bg-white/8 px-2.5 py-1.5 text-xs font-bold text-white/90 hover:bg-white/15"
           >
             <Users size={14} /> {participantCount}
           </button>
@@ -1476,7 +1481,7 @@ function RoomInner({
                 type="button"
                 onClick={muteAll}
                 aria-label="Mute everyone"
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 hover:bg-white/15"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/8 hover:bg-white/15"
                 style={{ color: ROSE }}
               >
                 <VolumeX size={16} />
@@ -1489,7 +1494,7 @@ function RoomInner({
                 onClick={unmuteAll}
                 aria-label="Let everyone unmute"
                 title="Lift the mute — participants choose when to speak"
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 text-white/80 hover:bg-white/15"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/8 text-white/80 hover:bg-white/15"
               >
                 <Volume2 size={16} />
               </button>
@@ -1501,12 +1506,12 @@ function RoomInner({
       {/* Standing disclosure — own row so the copy is never truncated by
           the three-column header. Renders only while a web viewer is in
           the room. */}
-      <div className="relative z-10 px-4 pb-1 empty:hidden">
+      <div className="relative z-10 shrink-0 pl-[max(12px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] pb-1 empty:hidden">
         <WebViewerDisclosureChip />
       </div>
 
       {connecting ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4">
+        <div className="flex min-h-32 flex-1 flex-col items-center justify-center gap-4">
           <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
           <p className="text-white/60">Connecting…</p>
         </div>
@@ -1516,7 +1521,7 @@ function RoomInner({
                Keep the speaker ring and roles; remove the oversized host hero. */}
            <section
              data-stage-participants={stageTiles.length}
-             className="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-hidden px-3 py-3 sm:px-5 lg:px-8"
+             className={`relative flex flex-1 flex-col items-center justify-center gap-2 pl-[max(12px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] py-2 ${stageTiles.length > 2 ? "min-h-[calc(clamp(144px,26dvh,280px)+240px)] [@media(max-height:500px)_and_(min-width:600px)]:min-h-[min(360px,calc(var(--lynk-visible-height,100dvh)-120px))]" : "min-h-40"}`}
            >
              {stageTiles.length === 1 ? (
                <div role="status" className="flex shrink-0 flex-wrap items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#111522]/85 px-3 py-2 text-xs text-white/70">
@@ -1530,24 +1535,16 @@ function RoomInner({
                  </button>
                </div>
              ) : null}
-             <div
-               data-stage-mode={stageMode(stageTiles.length)}
-               data-stage-count={stageTiles.length}
-               className={`mx-auto grid min-h-0 w-full flex-1 auto-rows-fr gap-2 overflow-y-auto sm:gap-3 lg:gap-4 ${stageTiles.length === 1 ? "max-w-4xl" : "max-w-6xl"} ${stageGridClass(stageTiles.length)}`}
-             >
-               {stageTiles.map((tile) => (
-                 <StageTile key={tile.key} tile={tile} />
-               ))}
-             </div>
+             <RoomStage tiles={stageTiles} />
            </section>
 
           {/* Listener row — TanStack Virtual (horizontal) */}
           {listenerTiles.length > 0 ? (
-            <div className="px-4 pb-1">
+            <div className="shrink-0 pl-[max(16px,env(safe-area-inset-left))] pr-[max(16px,env(safe-area-inset-right))] pb-1" data-room-listeners>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/40">
-                In the room
+                In the room · {listenerTiles.length} · Swipe for more
               </p>
-              <div ref={listScrollRef} className="overflow-x-auto" style={{ height: 96 }}>
+              <div ref={listScrollRef} tabIndex={0} role="region" aria-label="Listeners. Scroll horizontally to see everyone." className="overflow-x-auto rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]" style={{ height: 96 }}>
                 <div
                   style={{ width: rowVirtualizer.getTotalSize(), height: "100%", position: "relative" }}
                 >
@@ -1578,15 +1575,17 @@ function RoomInner({
         </>
       )}
 
+      </div>
+
       {/* One renderer. The GPU overlay used to suppress this one whenever it
           reported available, so a canvas that failed to initialise made
           reactions silently invisible. */}
       <FloatingReactions reactions={reactions} />
 
       {/* Controls bar */}
-      <footer className="relative z-10 flex shrink-0 flex-col items-center gap-2 border-t border-white/8 bg-[#090b15]/95 px-2 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-2 sm:gap-3 sm:pb-5">
-        <ReactionBar onSend={sendReaction} />
-        <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
+      <footer data-room-controls className="relative z-10 flex shrink-0 flex-col items-center gap-1 border-t border-white/8 bg-[#090b15]/95 pt-1 sm:gap-2" style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 8px)", paddingLeft: "max(8px, env(safe-area-inset-left))", paddingRight: "max(8px, env(safe-area-inset-right))" }}>
+        <div className="[@media(max-height:500px)]:hidden"><ReactionBar onSend={sendReaction} /></div>
+        <div className="flex w-full items-center justify-center gap-2 sm:gap-4">
           <ControlButton
             onClick={toggleMic}
             active={isMicOn}
@@ -1618,7 +1617,7 @@ function RoomInner({
             </ControlButton>
           ) : null}
 
-          <ControlButton onClick={toggleHand} active={isHandRaised} label="Raise hand">
+          <ControlButton onClick={toggleHand} active={isHandRaised} label={isHandRaised ? "Lower hand" : "Raise hand"}>
             <Hand size={24} color={isHandRaised ? ACCENT : "#fff"} />
           </ControlButton>
 
@@ -1630,6 +1629,7 @@ function RoomInner({
             <MessageCircle size={24} />
           </ControlButton>
 
+          <CompactReactions onSend={sendReaction} />
           <ControlButton onClick={requestLeave} danger label="Leave Lynk">
             <PhoneOff size={24} />
           </ControlButton>
@@ -1730,6 +1730,7 @@ function RoomInner({
       ) : null}
       </main>
     </SecureCaptureBoundary>
+    </RoomViewport>
   );
 }
 

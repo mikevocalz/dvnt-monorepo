@@ -125,7 +125,8 @@ export function ControlButton({
       aria-pressed={danger ? undefined : !!active}
       // Circular by this screen's own convention ("control buttons circular"),
       // which the design system allows alongside status dots and the shutter.
-      className={`flex h-14 w-14 items-center justify-center rounded-full text-white transition-colors ${bg}`}
+      title={label}
+      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF] sm:h-14 sm:w-14 [@media(max-height:500px)]:h-11 [@media(max-height:500px)]:w-11 ${bg}`}
     >
       {children}
     </button>
@@ -189,18 +190,62 @@ export function FloatingReactions({
 
 export function ReactionBar({ onSend }: { onSend: (emoji: string) => void }) {
   return (
-    <div className="flex items-center gap-1 rounded-lg bg-white/8 px-2 py-1">
+    <div className="flex max-w-full items-center gap-1 rounded-lg bg-white/8 px-1">
       {REACTION_EMOJIS.map((emoji) => (
         <button
           key={emoji}
           type="button"
           onClick={() => onSend(emoji)}
           aria-label={`React ${emoji}`}
-          className="rounded-lg px-1.5 py-0.5 text-lg transition-transform hover:scale-125"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-lg transition-transform hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
         >
           {emoji}
         </button>
       ))}
+    </div>
+  );
+}
+
+/** Short landscape screens keep reactions one tap away without taking a second
+ * dock row from the participant list. The palette overlays content, not controls. */
+export function CompactReactions({ onSend }: { onSend: (emoji: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        buttonRef.current?.focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  return (
+    <div ref={rootRef} className="hidden [@media(max-height:500px)]:block">
+      <button
+        type="button"
+        ref={buttonRef}
+        aria-label="Reactions"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
+      >☺</button>
+      {open ? (
+        <div className="absolute bottom-[calc(100%+12px)] left-1/2 -translate-x-1/2 rounded-xl border border-white/15 bg-[#090b15] p-1">
+          <ReactionBar onSend={(emoji) => { onSend(emoji); setOpen(false); }} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -214,10 +259,33 @@ export function TimeUpDialog({
   onUpgrade: () => void;
   onLeave: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const panel = dialogRef.current;
+    panel?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+    const keepFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const buttons = panel?.querySelectorAll<HTMLButtonElement>("button");
+      const first = buttons?.[0];
+      const last = buttons?.[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first?.focus();
+      }
+    };
+    panel?.addEventListener("keydown", keepFocus);
+    return () => {
+      panel?.removeEventListener("keydown", keepFocus);
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, [open]);
   if (!open) return null;
   return (
-    <div className="absolute inset-0 z-[60] flex items-end justify-center bg-black/90 px-3 pb-[calc(env(safe-area-inset-bottom)+80px)] sm:items-center sm:px-0 sm:pb-0">
-      <div className="w-full max-w-md rounded-3xl bg-[#0b0d14] px-6 pb-8 pt-7">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Session time limit" className="absolute inset-0 z-[60] flex items-center justify-center bg-black/90 px-3" style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 12px)", paddingTop: "calc(var(--lynk-safe-top, env(safe-area-inset-top)) + 12px)" }}>
+      <div className="max-h-full w-full max-w-md overflow-y-auto overscroll-contain rounded-3xl bg-[#0b0d14] px-6 pb-8 pt-7">
         <span
           className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl"
           style={{ backgroundColor: `${PURPLE}20` }}

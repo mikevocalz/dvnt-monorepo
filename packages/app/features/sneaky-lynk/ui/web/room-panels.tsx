@@ -98,6 +98,39 @@ export function SidePanel({
   icon?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const panelRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    const focusable = () => Array.from(panel?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]',
+    ) ?? []);
+    focusable()[0]?.focus({ preventScroll: true });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+      } else if (event.key === "Tab") {
+        const items = focusable();
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (!first) { event.preventDefault(); return; }
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault(); last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault(); first.focus();
+        }
+      }
+    };
+    panel?.addEventListener("keydown", onKeyDown);
+    return () => {
+      panel?.removeEventListener("keydown", onKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+    };
+  }, [open]);
   if (!open) return null;
   return (
     <>
@@ -108,12 +141,15 @@ export function SidePanel({
         className="absolute inset-0 z-40 bg-black/50 sm:bg-black/30"
       />
       <aside
-        className="absolute inset-x-0 bottom-0 z-50 flex h-[75dvh] max-h-[75dvh] w-full flex-col overflow-hidden rounded-t-3xl border-t border-white/10 bg-[#0b0d14] shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:max-h-none sm:max-w-md sm:rounded-none sm:border-l sm:border-t-0"
+        ref={panelRef}
+        aria-modal="true"
+        style={{ paddingLeft: "env(safe-area-inset-left)", paddingRight: "env(safe-area-inset-right)" }}
+        className="absolute inset-x-0 bottom-0 z-50 flex h-[85%] max-h-full w-full flex-col overflow-hidden rounded-t-3xl border-t border-white/10 bg-[#0b0d14] shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:max-h-none sm:max-w-md sm:rounded-none sm:border-l sm:border-t-0"
         role="dialog"
         aria-label={title}
       >
         <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/25 sm:hidden" aria-hidden="true" />
-        <header className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+        <header className="flex shrink-0 items-center justify-between border-b border-white/8 px-4 py-2">
           <span className="flex items-center gap-2 text-base font-semibold text-white">
             {icon}
             {title}
@@ -122,7 +158,7 @@ export function SidePanel({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white hover:bg-white/15"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/8 text-white hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
           >
             <X size={16} />
           </button>
@@ -204,7 +240,7 @@ export function ChatPanel({
       title="Chat"
       icon={<MessageCircle size={18} color="#3FDCFF" />}
     >
-      <div ref={scrollRef} className="flex-1 space-y-1 overflow-y-auto px-4 py-3">
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-4 py-3">
         {comments.length === 0 ? (
           <p className="mt-8 text-center text-sm text-white/40">
             {loading ? "Loading chat…" : "No messages yet. Say hi 👋"}
@@ -261,7 +297,8 @@ export function ChatPanel({
       {error ? <p role="alert" className="px-4 py-2 text-sm text-red-300">{error}</p> : null}
       <form
         onSubmit={submit}
-        className="flex items-center gap-2 border-t border-white/8 px-3 py-3"
+        className="flex shrink-0 items-center gap-2 border-t border-white/8 px-3 pt-3"
+        style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 12px)" }}
       >
         <input
           ref={inputRef}
@@ -270,14 +307,14 @@ export function ChatPanel({
           aria-label="Message"
           disabled={disabled || sending}
           maxLength={500}
-          className="flex-1 rounded-lg bg-white/8 px-4 py-2.5 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-1 focus:ring-[#3FDCFF]"
+          className="min-w-0 flex-1 rounded-lg bg-white/8 px-4 py-2.5 text-base text-white placeholder:text-white/40 focus:outline-none focus:ring-1 focus:ring-[#3FDCFF]"
         />
         <button
           type="submit"
           aria-label="Send message"
           disabled={disabled || sending}
           // The hover colour matched the base, so the control gave no feedback.
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#3FDCFF] text-black transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#3FDCFF] text-black transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
         >
           <Send size={18} />
         </button>
