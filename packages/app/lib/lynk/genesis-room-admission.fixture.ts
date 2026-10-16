@@ -30,10 +30,10 @@ const boundaries: Record<string, string> = {
   "@dvnt/app/features/sneaky-lynk/api/supabase": `const f=window.fixture;export const sneakyLynkApi={heartbeat:f.heartbeat,leaveRoom:f.leave};`,
   "@dvnt/app/lib/api/event-lynk": `export const eventLynkApi={wait:room=>window.fixture.wait(room)};`,
   "lifecycle-source-fixture": `export const createRoomLifecycleSource=options=>window.fixture.lifecycle(options.roomId);`,
-  "@moq/signals": `export const Signal=window.fixture.Signal;`,
-  "@moq/lite": `export const Connection={Reload:window.fixture.Reload};export const Path={from:path=>path};`,
-  "@moq/watch": `export const Broadcast=window.fixture.Watch;export const MultiBackend=window.fixture.Backend;`,
-  "@moq/publish": `export const Broadcast=window.fixture.Publication;export const Source={Camera:window.fixture.Device,Microphone:window.fixture.Device};`,
+  "@moq/signals": `export const Signal=window.fixture.Signal;export const Computed=window.fixture.Computed;`,
+  "@moq/net": `export const Connection=window.fixture.Connection;export const Path={from:path=>path};export const Time={Milli:{zero:0}};`,
+  "@moq/watch": `export const Player=window.fixture.Player;`,
+  "@moq/publish": `export const Broadcast=window.fixture.Publication;export const Source={Camera:window.fixture.Device,Microphone:window.fixture.Device};export const Video={Capture:window.fixture.Capture,Encoder:window.fixture.Encoder};export const Audio=Video;`,
   "react-native-moq": `import React,{useMemo,useRef,useEffect,useState,useCallback,useSyncExternalStore} from 'react';const f=window.fixture;
     export function useSession(url){const session=useMemo(()=>{const signal=new f.Signal('idle');const next={id:Symbol(),signal,connect:()=>signal.set('connected'),disconnect:()=>signal.set('closed')};f.sessions.push(next);return next;},[url]);const state=useSyncExternalStore(cb=>session.signal.subscribe(cb),()=>session.signal.peek());return {...session,state};}
     export function usePublisher(session){const ref=useRef(null);const [state,setState]=useState('idle');const publish=useCallback(options=>{ref.current?.close();ref.current=new f.Publication({name:options.path});setState('publishing');},[session.id]);const stop=useCallback(()=>{ref.current?.close();ref.current=null;setState('idle');},[session.id]);return {state,publish,stop};}
@@ -72,8 +72,23 @@ class Signal {
   listeners = new Set<() => void>();
   constructor(value: any) { this.value = value; }
   peek() { return this.value; }
-  set(value: any) { this.value = value; for (const callback of this.listeners) callback(); }
+  set(value: any) { if (Object.is(value, this.value)) return; this.value = value; for (const callback of [...this.listeners]) callback(); }
   subscribe(callback: () => void) { this.listeners.add(callback); return () => this.listeners.delete(callback); }
+}
+class Computed extends Signal {
+  stops: (() => void)[] = [];
+  closed = false;
+  constructor(fn: (effect: any) => any) {
+    super(undefined);
+    const run = () => {
+      if (this.closed) return;
+      for (const stop of this.stops.splice(0)) stop();
+      this.set(fn({ get: (signal: Signal) => { this.stops.push(signal.subscribe(run)); return signal.peek(); } }));
+    };
+    // Released Computed starts undefined until its first microtask.
+    queueMicrotask(run);
+  }
+  close() { this.closed = true; for (const stop of this.stops.splice(0)) stop(); this.set(undefined); }
 }
 const deferred = () => {
   let resolve!: (value: any) => void;
@@ -90,8 +105,8 @@ async function until(predicate: () => unknown, label = "fixture settles") {
 const clients = new Set<any>();
 after(() => { for (const client of clients) client.close(); });
 function server() {
-  return { publishers: new Set<string>(), reloads: new Set<any>(), lifecycle: new Set<any>(), ended: new Set<string>(), announcements: new Signal(""),
-    announce() { for (const reload of this.reloads) reload.announced.set(new Set(this.publishers)); this.announcements.set([...this.publishers].sort().join("\n")); },
+  return { publishers: new Set<string>(), connections: new Set<any>(), lifecycle: new Set<any>(), ended: new Set<string>(), announcements: new Signal(""),
+    announce() { for (const connection of this.connections) connection.routes.set(new Map([...this.publishers].map((path) => [path, {}]))); this.announcements.set([...this.publishers].sort().join("\n")); },
     end(room: string, broadcast = true) {
       this.ended.add(room);
       if (broadcast) for (const sub of [...this.lifecycle]) if (sub.room === room) sub.callbacks.onSnapshot({ status: "ended" });
@@ -104,7 +119,7 @@ function client(s: ReturnType<typeof server>, owner = "alice", broadcast = false
   let authState = { user: { id: owner, authId: owner } };
   const f: any = {
     room: "room-one", owner, broadcast, strict, platform, exits: 0, joins: [], mints: [], heartbeats: [], leaves: [], waits: [], ends: [],
-    subscriptions: [], reloads: [], devices: [], publications: [], watches: [], backends: [], errors: [],
+    subscriptions: [], connections: [], devices: [], captures: [], encoders: [], computeds: [], publications: [], watches: [], webPlayers: [], errors: [],
     sessions: [], players: new Map(), announcements: s.announcements,
     player(path: string) { if (!f.players.has(path)) f.players.set(path, { playing: false, setVolume() {}, play() { this.playing = true; }, stop() { this.playing = false; } }); return f.players.get(path); },
     getState: () => authState,
@@ -139,18 +154,40 @@ function client(s: ReturnType<typeof server>, owner = "alice", broadcast = false
     },
     Signal,
   };
-  f.Reload = class {
-    announced = new Signal(new Set(s.publishers));
+  f.Computed = class extends Computed { constructor(fn: (effect: any) => any) { super(fn); f.computeds.push(this); } };
+  f.Connection = class {
+    routes = new Signal(new Map([...s.publishers].map((path) => [path, {}])));
+    origin = new Signal({ broadcasts: () => this.routes });
     status = new Signal("connected");
-    established = new Signal({});
+    probe = new Signal(undefined);
     closed = false;
-    constructor() { f.reloads.push(this); s.reloads.add(this); }
-    close() { this.closed = true; s.reloads.delete(this); }
+    constructor(options: any) {
+      assert.equal(options.share, false); assert.equal(options.linger, 0);
+      f.connections.push(this); s.connections.add(this);
+    }
+    close() { this.closed = true; s.connections.delete(this); }
   };
   f.Device = class {
-    enabled = new Signal(false); source = new Signal(undefined); closed = false;
-    constructor() { f.devices.push(this); }
+    enabled: Signal;
+    in: any;
+    out = { source: new Signal(undefined), error: new Signal(undefined) };
+    closed = false;
+    constructor(options?: any) {
+      this.enabled = options?.enabled ?? new Signal(false);
+      assert.ok(this.enabled instanceof Signal);
+      this.in = { enabled: this.enabled }; f.devices.push(this);
+    }
     close() { this.closed = true; this.enabled.set(false); }
+  };
+  f.Capture = class {
+    props: any; closed = false; out = { display: new Signal(undefined) };
+    constructor(options: any) { this.props = options; f.captures.push(this); }
+    close() { this.closed = true; }
+  };
+  f.Encoder = class {
+    name: string; props: any; closed = false;
+    constructor(name: string, options: any) { this.name = name; this.props = options; f.encoders.push(this); }
+    close() { this.closed = true; }
   };
   f.Publication = class {
     name: string; closed = false;
@@ -158,10 +195,13 @@ function client(s: ReturnType<typeof server>, owner = "alice", broadcast = false
     close() { this.closed = true; s.publishers.delete(this.name); s.announce(); }
   };
   f.Watch = class { closed = false; constructor() { f.watches.push(this); } close() { this.closed = true; } };
-  f.Backend = class {
-    element = new Signal(null); audio = { muted: new Signal(false), volume: new Signal(1) }; closed = false;
-    constructor(options: any) { this.element.set(options.element); f.backends.push(this); }
-    close() { this.closed = true; }
+  f.Player = class {
+    props: any; broadcast = new f.Watch(); closed = false;
+    constructor(options: any) {
+      assert.ok(options.canvas instanceof Signal); assert.ok(options.muted instanceof Signal); assert.ok(options.volume instanceof Signal);
+      this.props = options; f.webPlayers.push(this);
+    }
+    close() { this.closed = true; this.broadcast.close(); }
   };
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "https://app.invalid", runScripts: "outside-only", pretendToBeVisual: true });
   dom.window.fixture = f;
@@ -222,17 +262,20 @@ test("two real clients discover already-published peers; viewer mode never captu
   host.click("Go Live"); await until(() => s.publishers.has("lynk/room-one/alice"));
   const viewer = client(s, "bob");
   await until(() => viewer.joins.length === 1); viewer.admit();
-  await until(() => viewer.backends.some((backend: any) => !backend.closed));
+  await until(() => viewer.webPlayers.some((backend: any) => !backend.closed));
   assert.equal(viewer.dom.window.document.querySelectorAll("canvas").length, 1);
   assert.equal(viewer.devices.length, 0); assert.equal(viewer.mints.length, 1);
   assert.equal(viewer.mints[0].body.intent, "subscribe");
   assert.equal(host.heartbeats.length, 1); assert.equal(viewer.heartbeats.length, 1);
   s.end("room-one");
   await until(() => host.text().includes("This Lynk has ended") && viewer.text().includes("This Lynk has ended"));
-  await until(() => s.publishers.size === 0 && s.reloads.size === 0 && s.lifecycle.size === 0, "both clients release media and lifecycle observers");
-  assert.equal(s.publishers.size, 0); assert.equal(s.reloads.size, 0); assert.equal(s.lifecycle.size, 0);
+  await until(() => s.publishers.size === 0 && s.connections.size === 0 && s.lifecycle.size === 0, "both clients release media and lifecycle observers");
+  assert.equal(s.publishers.size, 0); assert.equal(s.connections.size, 0); assert.equal(s.lifecycle.size, 0);
   assert.ok(host.devices.every((device: any) => !device.enabled.peek()));
-  assert.ok(viewer.backends.every((backend: any) => backend.closed));
+  assert.equal(host.captures.length, 2); assert.equal(host.encoders.length, 2);
+  assert.ok(host.encoders.every((encoder: any) => encoder.closed));
+  assert.ok(host.captures.every((capture: any) => capture.closed));
+  assert.ok(viewer.webPlayers.every((backend: any) => backend.closed));
   assert.ok(viewer.watches.every((watch: any) => watch.closed));
   assert.ok([...host.subscriptions, ...viewer.subscriptions].every((sub: any) => !sub.active));
   assert.deepEqual(host.errors, []); assert.deepEqual(viewer.errors, []);
@@ -251,7 +294,11 @@ test("query mode cannot grant publish authority; roster role loss tears down cap
   roster.options.onSync([{ userId: "bob", role: "moderator" }]);
   await until(() => s.publishers.size === 0 && !f.text().includes("Go Live"));
   assert.ok(f.devices.every((device: any) => !device.enabled.peek()));
+  assert.equal(f.encoders.length, 2);
+  assert.ok(f.encoders.every((encoder: any) => encoder.closed), "role loss releases both encoders");
   f.close();
+  assert.ok(f.captures.every((capture: any) => capture.closed));
+  assert.ok(f.computeds.every((computed: any) => computed.closed));
 });
 
 test("a rejected publish token stops opted-in devices and permits a deliberate retry", async () => {
@@ -278,11 +325,13 @@ test("account and room switches reject late joins and remove old transport befor
   f.click("Try again"); await until(() => f.joins.length === 3); f.admit(2, "co-host");
   await until(() => f.text().includes("Go Live")); f.click("Go Live"); await until(() => s.publishers.size === 1);
   f.room = "room-two"; f.render(); await until(() => f.joins.length === 4 && s.publishers.size === 0);
+  assert.ok(f.encoders.every((encoder: any) => encoder.closed));
+  assert.ok(f.captures.every((capture: any) => capture.closed));
   const oldSubscriptions = f.subscriptions.slice();
   assert.ok(oldSubscriptions.every((sub: any) => !sub.active));
   f.admit(3, "co-host"); await until(() => f.text().includes("Go Live"));
   assert.equal(s.publishers.size, 0, "new room never inherits camera opt-in");
-  f.close(); assert.equal(s.reloads.size, 0); assert.equal(s.lifecycle.size, 0);
+  f.close(); assert.equal(s.connections.size, 0); assert.equal(s.lifecycle.size, 0);
 });
 
 test("batched A to B to A account changes invalidate the first A reply", async () => {
@@ -401,8 +450,8 @@ test("background stops media and resume readmission catches a missed host end; r
   next.end("room-one", false);
   for (const sub of next.lifecycle) sub.callbacks.onReconnect();
   await until(() => viewer.text().includes("This Lynk has ended"));
-  await until(() => next.reloads.size === 0 && next.lifecycle.size === 0, "reconnect cleanup");
-  assert.equal(next.reloads.size, 0); assert.equal(next.lifecycle.size, 0); viewer.close();
+  await until(() => next.connections.size === 0 && next.lifecycle.size === 0, "reconnect cleanup");
+  assert.equal(next.connections.size, 0); assert.equal(next.lifecycle.size, 0); viewer.close();
 });
 
 test("StrictMode replay ignores its abandoned join and unmount disposes the final admitted lifetime", async () => {
@@ -410,7 +459,12 @@ test("StrictMode replay ignores its abandoned join and unmount disposes the fina
   await until(() => f.joins.length === 2);
   f.admit(0); f.admit(1); await until(() => f.text().includes("Go Live"));
   assert.equal(f.devices.filter((device: any) => device.enabled.peek()).length, 0);
-  f.close(); assert.equal(s.reloads.size, 0); assert.equal(s.lifecycle.size, 0);
+  f.click("Go Live"); await until(() => s.publishers.size === 1);
+  f.close(); assert.equal(s.connections.size, 0); assert.equal(s.lifecycle.size, 0);
+  assert.ok(f.captures.length > 0); assert.ok(f.encoders.length > 0);
+  assert.ok(f.encoders.every((encoder: any) => encoder.closed));
+  assert.ok(f.captures.every((capture: any) => capture.closed));
+  assert.ok(f.computeds.every((computed: any) => computed.closed));
   assert.ok(f.subscriptions.every((sub: any) => !sub.active));
 });
 

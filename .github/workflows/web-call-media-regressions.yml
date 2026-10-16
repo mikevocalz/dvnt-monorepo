@@ -1,0 +1,51 @@
+name: Web call media SDK regressions
+on:
+  pull_request:
+    paths:
+      - 'apps/web/package.json'
+      - 'packages/app/features/call/**'
+      - 'packages/app/features/video/video-room.web.tsx'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'pnpm-patches/@fishjam-cloud__react-client@*'
+      - 'scripts/test-web-call-sdk.cjs'
+      - 'scripts/fixtures/web-call-*-client.tsx'
+      - '.github/workflows/web-call-media-regressions.yml'
+permissions:
+  contents: read
+jobs:
+  fishjam-media:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Camera selection, teardown and join lifecycle regressions
+        run: node --test packages/app/features/call/*.test.ts
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+          run_install: false
+      - name: Install isolated test tools and exact web SDK with 24-hour package-age gate
+        run: |
+          FISHJAM_VERSION=$(node -p "require('./apps/web/package.json').dependencies['@fishjam-cloud/react-client']")
+          mkdir -p "$RUNNER_TEMP/web-call-media"
+          printf '{"private":true}' > "$RUNNER_TEMP/web-call-media/package.json"
+          TEST_DIR="$RUNNER_TEMP/web-call-media" node - <<'JS'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const version = require('./apps/web/package.json').dependencies['@fishjam-cloud/react-client'];
+          const key = `@fishjam-cloud/react-client@${version}`;
+          const patch = require('./package.json').pnpm.patchedDependencies[key];
+          const config = { minimumReleaseAge: 1440, ...(patch ? { patchedDependencies: { [key]: path.resolve(patch) } } : {}) };
+          fs.writeFileSync(path.join(process.env.TEST_DIR, 'pnpm-workspace.yaml'), JSON.stringify(config));
+          JS
+          pnpm --dir "$RUNNER_TEMP/web-call-media" add --ignore-scripts --save-exact "@fishjam-cloud/react-client@$FISHJAM_VERSION" "@fishjam-cloud/ts-client@$FISHJAM_VERSION" "@fishjam-cloud/webrtc-client@$FISHJAM_VERSION" react@19.2.3 react-dom@19.2.3 esbuild@0.25.11 jsdom@26.1.0
+      - name: Exercise real Fishjam hooks with delayed devices and mocked transport
+        env:
+          NODE_PATH: ${{ runner.temp }}/web-call-media/node_modules
+        run: node scripts/test-web-call-sdk.cjs

@@ -4,8 +4,23 @@ on:
     paths:
       - 'scripts/probe-lynk-video-orientation.cjs'
       - 'scripts/test-lynk-orientation.cjs'
+      - 'scripts/test-lynk-moq-signals.ts'
+      - 'scripts/test-local-web-verification.cjs'
+      - 'scripts/local-web-verification.cjs'
+      - 'apps/web/sentry.*.config.ts'
+      - 'apps/web/src/instrumentation-client.ts'
+      - 'scripts/lynk-orientation-build.cjs'
+      - 'scripts/test-lynk-orientation-build.cjs'
+      - 'scripts/probe-lynk-remote-video.cjs'
+      - 'scripts/fixtures/lynk-remote-video-client.js'
+      - 'apps/web/next.config.ts'
+      - 'apps/web/package.json'
+      - 'packages/app/package.json'
+      - 'packages/app/lib/lynk/**'
+      - 'packages/cms/src/payload.config.ts'
+      - 'vercel.json'
       - 'packages/app/features/sneaky-lynk/ui/web/room-stage.tsx'
-      - 'pnpm-patches/@moq__publish@0.2.14.patch'
+      - 'pnpm-patches/@moq__publish@0.5.2.patch'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/lynk-orientation-probe.yml'
@@ -18,16 +33,50 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Install isolated probe tools
-        run: npm install --prefix "$RUNNER_TEMP/lynk-orientation" --no-save --no-package-lock playwright@1.56.1 esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 @moq/publish@0.2.14 @moq/hang@0.2.9 @moq/json@0.0.2 @moq/net@0.1.4 @moq/signals@0.1.8
-      - name: Log resolved diagnostic dependencies
-        run: npm ls --prefix "$RUNNER_TEMP/lynk-orientation" --all
-      - name: Apply production dependency patch and test ownership
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+          run_install: false
+      - name: Install exact media SDKs with production patches and 24-hour age gate
         run: |
-          patch --directory="$RUNNER_TEMP/lynk-orientation/node_modules/@moq/publish" --strip=1 < pnpm-patches/@moq__publish@0.2.14.patch
+          mkdir -p "$RUNNER_TEMP/lynk-orientation"
+          TEST_DIR="$RUNNER_TEMP/lynk-orientation" node - <<'JS'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const app = require('./packages/app/package.json');
+          const pins = { ...app.dependencies, ...app.devDependencies };
+          const dependencies = {
+            playwright: '1.56.1', esbuild: '0.25.11', webpack: '5.107.2',
+            react: '19.2.3', 'react-dom': '19.2.3',
+            '@moq/hang': '0.5.2', '@moq/json': '0.4.2',
+          };
+          for (const name of ['@moq/publish', '@moq/watch', '@moq/net', '@moq/signals', 'mediabunny', 'zod', '@zod/mini']) {
+            if (!/^\d+\.\d+\.\d+$/.test(pins[name])) throw new Error(`Expected an exact production pin for ${name}`);
+            dependencies[name] = pins[name];
+          }
+          const key = `@moq/publish@${dependencies['@moq/publish']}`;
+          const patch = require('./package.json').pnpm.patchedDependencies[key];
+          if (!patch) throw new Error('Production publisher patch is required');
+          fs.writeFileSync(path.join(process.env.TEST_DIR, 'package.json'), JSON.stringify({ private: true, dependencies }));
+          fs.writeFileSync(path.join(process.env.TEST_DIR, 'pnpm-workspace.yaml'), JSON.stringify({
+            minimumReleaseAge: 1440,
+            patchedDependencies: { [key]: path.resolve(patch) },
+            overrides: { mediabunny: dependencies.mediabunny, react: dependencies.react, 'react-dom': dependencies['react-dom'] },
+          }));
+          JS
+          pnpm --dir "$RUNNER_TEMP/lynk-orientation" install --ignore-scripts
+      - name: Log resolved diagnostic dependencies
+        run: pnpm --dir "$RUNNER_TEMP/lynk-orientation" list --depth Infinity
+      - name: Verify installed production patch and test frame ownership
+        env:
+          LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-orientation
+        run: |
+          node -e "require('./scripts/lynk-orientation-build.cjs').checkInstalledPublisher(process.cwd(), process.env.LYNK_PROBE_DEPS + '/package.json')"
           node --test scripts/test-lynk-orientation.cjs
       - name: Install Chromium
         run: "$RUNNER_TEMP/lynk-orientation/node_modules/.bin/playwright install --with-deps chromium"
@@ -36,3 +85,25 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/lynk-orientation/node_modules
           LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-orientation
         run: node scripts/probe-lynk-video-orientation.cjs
+      - name: Reject stale installed and cached browser SDKs
+        env:
+          LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-orientation
+        run: node --test scripts/test-lynk-orientation-build.cjs
+      - name: Exercise real MoQ transport between independent browser clients
+        env:
+          LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-orientation
+        run: node scripts/probe-lynk-remote-video.cjs
+      - name: Verify production hook lifecycle with released signals
+        env:
+          LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-orientation
+        run: node --test scripts/test-lynk-moq-signals.ts
+      - name: Verify local build cannot transmit telemetry
+        run: node --test scripts/test-local-web-verification.cjs
+      - name: Exercise legacy MoQ SETUP and catalog/media compatibility
+        env:
+          LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-orientation
+          LYNK_CAPTURE_MODES: fallback
+          LYNK_PROBE_HIDDEN_ORIENTATION: '0'
+        run: |
+          LYNK_WIRE_VERSION=1 LYNK_REMOTE_OUTPUT="$RUNNER_TEMP/lynk-legacy-01.json" node scripts/probe-lynk-remote-video.cjs
+          LYNK_WIRE_VERSION=2 LYNK_REMOTE_OUTPUT="$RUNNER_TEMP/lynk-legacy-02.json" node scripts/probe-lynk-remote-video.cjs

@@ -1,0 +1,85 @@
+diff --git a/dist/hooks/internal/devices/useDeviceManager.js b/dist/hooks/internal/devices/useDeviceManager.js
+--- a/dist/hooks/internal/devices/useDeviceManager.js
++++ b/dist/hooks/internal/devices/useDeviceManager.js
+@@ -1,5 +1,5 @@
+-import { useCallback, useMemo, useRef, useState } from "react";
+-import { parseUserMediaError } from "../../../utils/errors";
++import { useCallback, useEffect, useMemo, useRef, useState } from "react";
++import { parseUserMediaError, UNHANDLED_ERROR } from "../../../utils/errors";
+ import { getTrackFromStream, stopStream } from "../../../utils/track";
+ import { useTrackMiddleware } from "../useTrackMiddleware";
+ import { useHandleTrackEnd } from "./useHandleTrackEnd";
+@@ -16,6 +16,20 @@
+ export const useDeviceManager = ({ mediaStream, setMediaStream, getInitialStream, deviceType, constraints, allDevicesList, setSelectedDevice, deviceError, setDeviceError, selectedDevice, logger, }) => {
+     const mediaStreamRef = useRef(mediaStream);
+     mediaStreamRef.current = mediaStream;
++    // Browser permission prompts may settle after navigation or a newer device
++    // request. Invalidate the old request and release its eventual tracks.
++    const mountedRef = useRef(true);
++    const deviceRequestRef = useRef(0);
++    useEffect(() => {
++        mountedRef.current = true;
++        return () => {
++            mountedRef.current = false;
++            deviceRequestRef.current++;
++            if (mediaStreamRef.current)
++                stopStream(mediaStreamRef.current, deviceType);
++            mediaStreamRef.current = null;
++        };
++    }, [deviceType]);
+     const rawTrack = useMemo(() => mediaStream && getTrackFromStream(mediaStream, deviceType), [mediaStream, deviceType]);
+     const clearStream = useCallback(() => {
+         setMediaStream(null);
+@@ -41,7 +55,11 @@
+         setSelectedDevice(device);
+     }, [deviceList, setSelectedDevice]);
+     const startDevice = useCallback(async (deviceId = selectedDevice?.deviceId) => {
++        const request = ++deviceRequestRef.current;
++        const isCurrentRequest = () => mountedRef.current && request === deviceRequestRef.current;
+         const initialStream = await getInitialStream();
++        if (!isCurrentRequest())
++            return [null, UNHANDLED_ERROR];
+         const track = initialStream && getTrackFromStream(initialStream, deviceType);
+         const isUsingDesiredDevice = !deviceId || deviceId === track?.getSettings().deviceId;
+         if (track?.enabled && isUsingDesiredDevice) {
+@@ -49,12 +67,19 @@
+         }
+         try {
+             const stream = await getDeviceStream(deviceType, constraints, deviceId ?? null);
++            if (!isCurrentRequest()) {
++                stopStream(stream, deviceType);
++                return [null, UNHANDLED_ERROR];
++            }
+             const retrievedTrack = getTrackFromStream(stream, deviceType);
+             if (retrievedTrack)
+                 retrievedTrack.enabled = deviceEnabledRef.current;
+             if (mediaStreamRef.current) {
+                 stopStream(mediaStreamRef.current, deviceType);
+             }
++            // Make synchronous stop/unmount see the acquisition before React
++            // commits the state update.
++            mediaStreamRef.current = stream;
+             setMediaStream(stream);
+             const retrievedTrackDeviceId = retrievedTrack.getSettings().deviceId;
+             if (retrievedTrackDeviceId) {
+@@ -63,6 +88,8 @@
+             return [retrievedTrack, null];
+         }
+         catch (err) {
++            if (!isCurrentRequest())
++                return [null, UNHANDLED_ERROR];
+             const parsedError = parseUserMediaError(err, logger);
+             setDeviceError(parsedError);
+             return [null, parsedError];
+@@ -86,9 +113,11 @@
+         }
+     }, [currentTrack, setSelectedDeviceId, startDevice]);
+     const stopDevice = useCallback(() => {
++        deviceRequestRef.current++;
+         if (mediaStreamRef.current) {
+             stopStream(mediaStreamRef.current, deviceType);
+         }
++        mediaStreamRef.current = null;
+         setMediaStream(null);
+     }, [setMediaStream, deviceType]);
+     const enableDevice = useCallback(() => {

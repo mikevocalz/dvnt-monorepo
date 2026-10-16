@@ -3,7 +3,7 @@
 /**
  * VideoTile (WEB) — renders, in priority order:
  *   1. `canvasRef`  → a `<canvas>` for the MoQ WebCodecs decoder
- *      (`Watch.MultiBackend` paints here). This is the Lynk Live viewer/cohost tile.
+ *      (`Watch.Player` paints here). This is the Lynk Live viewer/cohost tile.
  *   2. `stream`     → a `<video>` bound to a MediaStream (Fishjam WebRTC call, or
  *      the broadcaster's local camera preview).
  *   3. avatar fallback (rounded SQUARE) when there's no live media.

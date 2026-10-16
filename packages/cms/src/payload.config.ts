@@ -67,6 +67,8 @@ const storageAdapters = s3Enabled
   : []
 
 export default buildConfig({
+  // Local artifact verification must not send CMS usage telemetry.
+  telemetry: process.env.NEXT_PUBLIC_DVNT_LOCAL_BUILD_ONLY !== '1',
   // The Payload admin login collection (separate from DVNT app members).
   admin: {
     user: AdminUsers.slug,

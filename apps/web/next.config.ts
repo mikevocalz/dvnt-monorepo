@@ -4,6 +4,8 @@ import type { NextConfig } from 'next';
 import type { Compiler, Compilation } from 'webpack';
 import { withPayload } from '@payloadcms/next/withPayload';
 import { withSentryConfig } from '@sentry/nextjs';
+import { localVerificationSentryOptions } from '../../scripts/local-web-verification.cjs';
+import { checkInstalledPublisher, withOrientationCache } from '../../scripts/lynk-orientation-build.cjs';
 
 class CopySkiaPlugin {
   apply(compiler: Compiler) {
@@ -304,6 +306,8 @@ const nextConfig: NextConfig = {
     ];
   },
   webpack: (config, { webpack }) => {
+    // Never reuse an unpatched SDK from a restored webpack node_modules cache.
+    withOrientationCache(config, checkInstalledPublisher());
     config.resolve.alias = {
       ...(config.resolve.alias || {}),
       'react-native$': path.resolve(__dirname, 'src/platform/react-native-web.ts'),
@@ -439,6 +443,9 @@ const nextConfig: NextConfig = {
 // (ad blockers eat direct beacons → wrong Web Vitals), source-map upload when
 // SENTRY_AUTH_TOKEN is present (silently skipped otherwise), release naming
 // dvnt@<version>+<sha> shared with mobile/edge.
+// Local verification must not upload code, release metadata, or telemetry.
+// This opt-in is rejected on Vercel so it cannot silently disable release monitoring.
+const localSentry = localVerificationSentryOptions(process.env);
 const gitSha = (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7);
 process.env.SENTRY_RELEASE = `dvnt@${process.env.npm_package_version || '0.1.0'}${gitSha ? `+${gitSha}` : ''}`;
 
@@ -448,13 +455,20 @@ export default withSentryConfig(
     org: '5th-galaxy-studios',
     project: 'dvnt-web',
     silent: !process.env.CI,
+    ...localSentry,
     tunnelRoute: '/monitoring',
     disableLogger: true,
     widenClientFileUpload: true,
     // Sentry deletes client maps after upload, which is right for a normal
     // build and defeats ANALYZE_SOURCEMAPS=1. Option name verified against
     // node_modules/@sentry/nextjs/build/types/config/types.d.ts:239.
-    sourcemaps: { deleteSourcemapsAfterUpload: process.env.ANALYZE_SOURCEMAPS !== '1' },
-    release: { name: process.env.SENTRY_RELEASE },
+    sourcemaps: { deleteSourcemapsAfterUpload: process.env.ANALYZE_SOURCEMAPS !== '1', ...localSentry.sourcemaps },
+    release: {
+      name: process.env.SENTRY_RELEASE,
+      ...localSentry.release,
+      // The installed bundler plugin accepts false, but Next's wrapper type omits it.
+      // @ts-expect-error Explicitly forbid remote commit association in local-only mode.
+      setCommits: localSentry.release?.setCommits,
+    },
   },
 );

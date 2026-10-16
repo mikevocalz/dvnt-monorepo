@@ -42,3 +42,21 @@ test("the live Fishjam selectCamera API receives the new device id", async () =>
   assert.equal(result, true);
   assert.deepEqual(selected, ["back-1"]);
 });
+
+test("Fishjam device errors reject instead of falsely reporting a camera flip", async () => {
+  for (const name of ["NotAllowedError", "NotFoundError", "OverconstrainedError"]) {
+    await assert.rejects(switchWebCallCamera({
+      cameraDevices: devices,
+      currentCamera: devices[0],
+      selectCamera: async () => ({ name }),
+    }), { name });
+  }
+});
+
+test("a rejected camera selection remains a failure", async () => {
+  await assert.rejects(switchWebCallCamera({
+    cameraDevices: devices,
+    currentCamera: devices[0],
+    selectCamera: async () => { throw new Error("transport failed"); },
+  }), /transport failed/);
+});

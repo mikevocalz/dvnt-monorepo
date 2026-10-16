@@ -240,7 +240,7 @@ assert.ok(hasWeb, "the web room does not drive the session machine");
 //   - supply `onReconnect` — the native leg does, because `useVideoRoom.join`
 //     re-mints the token and re-attaches;
 //   - or drive the session from a transport that reconnects ITSELF, which the
-//     web room does since it moved to MoQ: `Moq.Connection.Reload` owns
+//     web room does since it moved to MoQ: `Moq.Connection` owns
 //     recovery, so the leg observes `reconnecting → live` rather than driving
 //     it, and a hand-written rejoin would race the transport's own.
 const SELF_RECONNECTING = /useLynkBroadcast\s*\(/;
@@ -252,12 +252,17 @@ for (const leg of sessionLegs) {
   );
 }
 // ...and "the transport reconnects itself" is CHECKED, not taken on trust. If
-// `Connection.Reload` is ever swapped for a plain connection, the web room
-// silently loses recovery — it has no onReconnect to fall back on.
+// `Connection.connect` is one-shot; the Connection constructor owns the new
+// SDK reconnect loop, with an unlimited outage window for room recovery.
 assert.match(
   strip(read("packages/app/lib/lynk/useLynkBroadcast.web.ts")),
-  /Connection\.Reload/,
+  /new Moq\.Connection\(\{/,
   "useLynkBroadcast.web no longer builds a reconnecting connection, and the web room relies on that INSTEAD of onReconnect",
+);
+assert.match(
+  strip(read("packages/app/lib/lynk/useLynkBroadcast.web.ts")),
+  /delay:\s*\{\s*timeout:\s*Moq\.Time\.Milli\.zero\s*\}/,
+  "publisher must keep retrying recoverable relay outages until leave",
 );
 // The heartbeat is the same class of bug the session machine was: an API
 // written, exported, and never called. Without a caller every member reports

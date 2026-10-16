@@ -4,7 +4,7 @@
  *
  * Transport: `@moq` directly.
  *   - publish token (own peer path) ← `lynk-moq-token` (intent: "publish")
- *   - `new Moq.Connection.Reload({ url })` for auto-reconnect
+ *   - `new Moq.Connection({ url })` for auto-reconnect
  *   - `Publish.Source.Camera` / `Publish.Source.Microphone` → `Publish.Broadcast`
  *     under `lynk/${roomId}/${peerId}`; `enabled` toggles mute camera/mic
  *   - co-publishers are discovered by composing `useLynkViewer` (a SEPARATE,
@@ -23,9 +23,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as Moq from "@moq/lite";
+import * as Moq from "@moq/net";
 import * as Publish from "@moq/publish";
-import { Signal, type Getter } from "@moq/signals";
+import { Signal, Computed } from "@moq/signals";
 import { useMoqToken } from "./useMoqToken";
 import { useLynkViewer } from "./useLynkViewer.web";
 import { deriveLynkState } from "./lynkState";
@@ -58,10 +58,10 @@ export function useLynkBroadcast(
   const viewer = useLynkViewer(roomId);
 
   const urlSignal = useRef(new Signal<URL | undefined>(undefined));
-  const reloadRef = useRef<Moq.Connection.Reload | null>(null);
+  const reloadRef = useRef<Moq.Connection | null>(null);
   const cameraRef = useRef<Publish.Source.Camera | null>(null);
   const micRef = useRef<Publish.Source.Microphone | null>(null);
-  const broadcastRef = useRef<Publish.Broadcast | null>(null);
+  const broadcastRef = useRef<{ close(): void } | null>(null);
 
   const [isLive, setIsLive] = useState(false);
   const [cameraEnabled, setCameraEnabledState] = useState(true);
@@ -88,22 +88,29 @@ export function useLynkBroadcast(
    * followed by a rebuild and a re-render that picks the new ones up.
    */
   const [devices, setDevices] = useState<{
-    reload: Moq.Connection.Reload;
+    reload: Moq.Connection;
     camera: Publish.Source.Camera;
     mic: Publish.Source.Microphone;
+    cameraOn: Signal<boolean>;
+    micOn: Signal<boolean>;
   } | null>(null);
 
   useEffect(() => {
     if (!isBrowser || !roomId) return;
     urlSignal.current.set(undefined);
-    const reload = new Moq.Connection.Reload({
+    const reload = new Moq.Connection({
       url: urlSignal.current,
       enabled: true,
+      share: false,
+      linger: Moq.Time.Milli.zero,
+      delay: { timeout: Moq.Time.Milli.zero },
     });
     // Constructed DISABLED — the enable effects below open the devices once we
     // know this member may publish. See the header note.
-    const camera = new Publish.Source.Camera({ enabled: false });
-    const mic = new Publish.Source.Microphone({ enabled: false });
+    const cameraOn = new Signal(false);
+    const micOn = new Signal(false);
+    const camera = new Publish.Source.Camera({ enabled: cameraOn });
+    const mic = new Publish.Source.Microphone({ enabled: micOn });
     reloadRef.current = reload;
     cameraRef.current = camera;
     micRef.current = mic;
@@ -117,7 +124,7 @@ export function useLynkBroadcast(
     // publish, and no track was ever opened.
     setEnded(false);
     setIsLive(false);
-    setDevices({ reload, camera, mic });
+    setDevices({ reload, camera, mic, cameraOn, micOn });
     return () => {
       broadcastRef.current?.close();
       broadcastRef.current = null;
@@ -140,31 +147,42 @@ export function useLynkBroadcast(
   }, [token?.relayUrl, ended, reload]);
 
   const status = useSignalValue(
-    reload?.status ?? new Signal<Moq.Connection.ReloadStatus>("connecting"),
+    reload?.status ?? new Signal<Moq.Connection.Status>("connecting"),
   );
-  // `camera.source` is `Signal<Video.StreamTrack | undefined>` (StreamTrack
-  // extends MediaStreamTrack); widen to the base type for the local preview.
-  const cameraSource = (camera?.source ??
-    new Signal<MediaStreamTrack | undefined>(undefined)) as Getter<
-    MediaStreamTrack | undefined
-  >;
-  const cameraTrack = useSignalValue(cameraSource);
+  const connectionError = useSignalValue(
+    reload?.error ?? new Signal<Error | undefined>(undefined),
+  );
+  const cameraError = useSignalValue(
+    camera?.out.error ?? new Signal<Error | undefined>(undefined),
+  );
+  const microphoneError = useSignalValue(
+    mic?.out.error ?? new Signal<Error | undefined>(undefined),
+  );
+  // Rejected credentials and terminal capture failures do not keep retrying.
+  // Surface them instead of claiming a live publication with no media.
+  const error = tokenError ?? connectionError?.message
+    ?? (cameraEnabled ? cameraError?.message : undefined)
+    ?? (micEnabled ? microphoneError?.message : undefined) ?? null;
+  // Source outputs contain media tracks, while capture/encoders own frames.
+  const cameraMedia = useSignalValue(
+    camera?.out.source ?? new Signal<Publish.Source.Media | undefined>(undefined),
+  );
+  const videoSource = cameraMedia?.video;
+  const cameraTrack = videoSource && !("frames" in videoSource)
+    ? ("track" in videoSource ? videoSource.track : videoSource)
+    : undefined;
   const localStream = useMemo(
     () => (cameraTrack ? new MediaStream([cameraTrack]) : null),
     [cameraTrack],
   );
 
-  // `mic.source` is `Signal<Audio.Source | undefined>`, and Audio.Source is
-  // either the track itself or `{ track, kind }` — normalize to the track.
-  const micSource = (mic?.source ??
-    new Signal<Publish.Audio.Source | undefined>(undefined)) as Getter<
-    Publish.Audio.Source | undefined
-  >;
-  const micSourceValue = useSignalValue(micSource);
-  const micTrack =
-    micSourceValue && "track" in micSourceValue
-      ? micSourceValue.track
-      : micSourceValue;
+  const microphoneMedia = useSignalValue(
+    mic?.out.source ?? new Signal<Publish.Source.Media | undefined>(undefined),
+  );
+  const audioSource = microphoneMedia?.audio;
+  const micTrack = audioSource && !("samples" in audioSource)
+    ? ("track" in audioSource ? audioSource.track : audioSource)
+    : undefined;
   const localAudioStream = useMemo(
     () => (micTrack ? new MediaStream([micTrack]) : null),
     [micTrack],
@@ -173,12 +191,12 @@ export function useLynkBroadcast(
   // Capture follows the flags AND the role. Same rule as the native hook, where
   // it is `useCamera({ enabled: cameraEnabled && !ended && canPublish })`.
   useEffect(() => {
-    camera?.enabled.set(cameraEnabled && !ended && canPublish);
-  }, [camera, cameraEnabled, ended, canPublish]);
+    devices?.cameraOn.set(cameraEnabled && !ended && canPublish);
+  }, [devices, cameraEnabled, ended, canPublish]);
 
   useEffect(() => {
-    mic?.enabled.set(micEnabled && !ended && canPublish);
-  }, [mic, micEnabled, ended, canPublish]);
+    devices?.micOn.set(micEnabled && !ended && canPublish);
+  }, [devices, micEnabled, ended, canPublish]);
 
   const goLive = useCallback(async () => {
     if (!canPublish || ended) return;
@@ -191,19 +209,47 @@ export function useLynkBroadcast(
   // account's connection can be installed.
   useEffect(() => {
     if (!isLive || !canPublish || ended || !reload || !camera || !mic || !token?.path) return;
-    const broadcast = new Publish.Broadcast({
-      connection: reload.established,
-      name: Moq.Path.from(token.path),
-      enabled: true,
-      // Web defaults prefer VP9 on some hardware; native MoQ decoders share
-      // H.264 with browsers. Let the SDK probe supported AVC profiles.
-      video: { source: camera.source, hd: { enabled: true, config: { codec: "avc1" } } },
-      audio: { enabled: true, source: mic.source },
-    });
-    broadcastRef.current = broadcast;
+    // Broadcast no longer owns capture/encoders. Close every component together
+    // on token revocation, role loss, leave and effect replay.
+    const owned: { close(): void }[] = [];
+    const own = <T extends { close(): void }>(resource: T): T => {
+      owned.push(resource);
+      return resource;
+    };
+    let closed = false;
+    const publication = { close() {
+      if (closed) return;
+      closed = true;
+      for (const resource of owned.reverse()) resource.close();
+    } };
+    try {
+      const video = own(new Computed((effect) => effect.get(camera.out.source)?.video));
+      const audio = own(new Computed((effect) => effect.get(mic.out.source)?.audio));
+      const capture = own(new Publish.Video.Capture({ source: video }));
+      const audioCapture = own(new Publish.Audio.Capture({ source: audio }));
+      const broadcast = own(new Publish.Broadcast({
+        origin: reload.origin,
+        name: Moq.Path.from(token.path),
+        enabled: true,
+        display: capture.out.display,
+      }));
+      // Keep AVC for the existing native receiver. The SDK probes supported
+      // profiles; a software VP8 diagnostic is not evidence of AVC support.
+      own(new Publish.Video.Encoder("video/hd", {
+        broadcast, capture, enabled: true, bandwidth: reload.bandwidth,
+        config: { codec: "avc1" },
+      }));
+      own(new Publish.Audio.Encoder("audio", {
+        broadcast, capture: audioCapture, enabled: true, bandwidth: reload.bandwidth,
+      }));
+    } catch (error) {
+      publication.close();
+      throw error;
+    }
+    broadcastRef.current = publication;
     return () => {
-      broadcast.close();
-      if (broadcastRef.current === broadcast) broadcastRef.current = null;
+      publication.close();
+      if (broadcastRef.current === publication) broadcastRef.current = null;
     };
   }, [isLive, canPublish, ended, reload, camera, mic, token?.path]);
 
@@ -259,13 +305,13 @@ export function useLynkBroadcast(
         connection: reload ? status : undefined,
         hasMedia: isLive,
         ended,
-        error: !!tokenError,
+        error: !!error,
       })
     : viewer.state;
 
   return {
     state,
-    error: canPublish ? tokenError : viewer.error,
+    error: canPublish ? error : viewer.error,
     isLive,
     localStream,
     localAudioStream,

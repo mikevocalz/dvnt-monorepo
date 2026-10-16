@@ -72,3 +72,13 @@ test("the join effect still guards against double-joining", () => {
     );
   }
 });
+
+
+test("rejoin is cancelled by room teardown, not by its own connecting status", () => {
+  const source = readFileSync(join(ROOT, "features/call/call.web.tsx"), "utf8");
+  const rejoin = source.slice(source.indexOf("// ── Auto-rejoin:"), source.indexOf("// ── Sync local camera stream"));
+  assert.match(rejoin, /cancelRejoinRef\.current = \(\) =>/);
+  assert.doesNotMatch(rejoin, /return \(\) =>/, "peerStatus cleanup must not self-cancel a successful reconnect");
+  assert.ok((source.match(/cancelRejoinRef\.current\?\.\(\)/g) ?? []).length >= 3,
+    "room change, leave and unmount all cancel in-flight recovery");
+});

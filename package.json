@@ -66,8 +66,9 @@
   },
   "pnpm": {
     "patchedDependencies": {
-      "@moq/publish@0.2.14": "pnpm-patches/@moq__publish@0.2.14.patch",
-      "react-native-css@3.0.7": "pnpm-patches/react-native-css@3.0.7.patch"
+      "react-native-css@3.0.7": "pnpm-patches/react-native-css@3.0.7.patch",
+      "@moq/publish@0.5.2": "pnpm-patches/@moq__publish@0.5.2.patch",
+      "@fishjam-cloud/react-client@0.31.0": "pnpm-patches/@fishjam-cloud__react-client@0.31.0.patch"
     },
     "overrides": {
       "react": "19.2.3",

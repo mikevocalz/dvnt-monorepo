@@ -5,11 +5,11 @@
  *
  * Transport: `@moq` directly (browser WebTransport + WebCodecs → `<canvas>`).
  *   - subscribe token (namespace-scoped) ← `lynk-moq-token`
- *   - `new Moq.Connection.Reload({ url })` → auto-reconnect (`Connection.Reload`
- *     semantics) with a reactive `announced: Getter<Set<Path>>`
- *   - read `announced` to mount/unmount a `Watch.MultiBackend({ element: canvas,
- *     broadcast: new Watch.Broadcast({ name: path }) })` per publisher path
- *   - latency mode `"real-time"`; volume/muted on the audio backend
+ *   - `new Moq.Connection({ url })` → auto-reconnect (`Connection`
+ *     semantics) with the live origin broadcast map
+ *   - read the connection origin's broadcasts to mount one `Watch.Player`
+ *     per publisher. Player owns its broadcast, decoders, renderer and audio.
+ *   - zero target delay keeps audio enabled for real-time conversation.
  *
  * A viewer NEVER publishes — the token is subscribe-only and there is no publish
  * affordance here. Teardown on `leave()` (call from unmount/leave/background) is
@@ -17,9 +17,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as Moq from "@moq/lite";
+import * as Moq from "@moq/net";
 import * as Watch from "@moq/watch";
-import { Signal } from "@moq/signals";
+import { Signal, Computed } from "@moq/signals";
 import { useMoqToken } from "./useMoqToken";
 import { deriveLynkState } from "./lynkState";
 import { useSignalValue, useSignalSetKey } from "./moq-signals-react";
@@ -36,18 +36,21 @@ const EMPTY_PATHS = new Set<Moq.Path.Valid>();
 export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
   const { token, error: tokenError } = useMoqToken(roomId, "subscribe", !!roomId);
 
-  // One reactive URL signal feeds Connection.Reload; token refresh updates it.
+  // One reactive URL signal feeds Connection; token refresh updates it.
   const urlSignal = useRef(new Signal<URL | undefined>(undefined));
-  const reloadRef = useRef<Moq.Connection.Reload | null>(null);
+  const reloadRef = useRef<Moq.Connection | null>(null);
   const backends = useRef(new Map<string, {
-    backend: Watch.MultiBackend;
-    broadcast: Watch.Broadcast;
+    player: Watch.Player;
+    canvas: Signal<HTMLCanvasElement | undefined>;
   }>());
 
   const [muted, setMutedState] = useState(false);
   const [volume, setVolumeState] = useState(1);
   const [ended, setEnded] = useState(false);
-  const [reload, setReload] = useState<Moq.Connection.Reload | null>(null);
+  const mutedSignal = useRef(new Signal(false));
+  const volumeSignal = useRef(new Signal(1));
+  const [paths, setPaths] = useState<Computed<Set<Moq.Path.Valid>> | null>(null);
+  const [reload, setReload] = useState<Moq.Connection | null>(null);
 
   // Effects own construction AND cleanup. A render-created connection is
   // already closed after StrictMode/Fast Refresh replays effects; React need
@@ -56,21 +59,30 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
     setEnded(false);
     if (!roomId || typeof window === "undefined") return;
     urlSignal.current.set(undefined);
-    const connection = new Moq.Connection.Reload({
+    const connection = new Moq.Connection({
       url: urlSignal.current,
       enabled: true,
+      share: false,
+      linger: Moq.Time.Milli.zero,
+      delay: { timeout: Moq.Time.Milli.zero },
     });
+    const announced = new Computed((effect) => {
+      const origin = effect.get(connection.origin);
+      return origin ? new Set(effect.get(origin.broadcasts()).keys()) : EMPTY_PATHS;
+    });
+    setPaths(announced);
     reloadRef.current = connection;
     setReload(connection);
     return () => {
       for (const entry of backends.current.values()) {
-        entry.backend.close();
-        entry.broadcast.close();
+        entry.player.close();
       }
       backends.current.clear();
+      announced.close();
+      setPaths((current) => current === announced ? null : current);
       connection.close();
       if (reloadRef.current === connection) reloadRef.current = null;
-      setReload((current: Moq.Connection.Reload | null) => current === connection ? null : current);
+      setReload((current: Moq.Connection | null) => current === connection ? null : current);
     };
   }, [roomId]);
 
@@ -81,13 +93,16 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
 
   // Reactive connection status + announced publisher paths.
   const status = useSignalValue(
-    reload?.status ?? new Signal<Moq.Connection.ReloadStatus>("connecting"),
+    reload?.status ?? new Signal<Moq.Connection.Status>("connecting"),
   );
-  // A STRING of the announced paths, not the Set — the Set is mutated in place
-  // by the transport, so its reference never changes and React would never see
-  // a new publisher. See `useSignalSetKey`.
+  const connectionError = useSignalValue(
+    reload?.error ?? new Signal<Error | undefined>(undefined),
+  );
+  const error = tokenError ?? connectionError?.message ?? null;
+  // A stable STRING makes origin replacement and mutable-collection updates
+  // visible to React, including Computed's initial empty microtask.
   const announcedKey = useSignalSetKey(
-    reload?.announced ?? new Signal<Set<Moq.Path.Valid>>(EMPTY_PATHS),
+    paths ?? new Signal<Set<Moq.Path.Valid>>(EMPTY_PATHS),
   );
 
   // Map announced paths under our namespace → publishers (1..N).
@@ -107,8 +122,7 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
     const live = new Set(publishers.map((p) => p.path));
     for (const [path, entry] of backends.current) {
       if (!live.has(path)) {
-        entry.backend.close();
-        entry.broadcast.close();
+        entry.player.close();
         backends.current.delete(path);
       }
     }
@@ -119,51 +133,49 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
       const existing = backends.current.get(path);
       if (!canvas) {
         if (existing) {
-          existing.backend.close();
-          existing.broadcast.close();
+          existing.player.close();
           backends.current.delete(path);
         }
         return;
       }
       if (existing) {
-        existing.backend.element.set(canvas);
+        existing.canvas.set(canvas);
         return;
       }
       if (!reload || reloadRef.current !== reload || ended) return;
-      const broadcast = new Watch.Broadcast({
-        connection: reload.established,
+      const target = new Signal<HTMLCanvasElement | undefined>(canvas);
+      const player = new Watch.Player({
+        origin: reload.origin,
+        probe: reload.probe,
         name: Moq.Path.from(path),
         enabled: true,
-      });
-      const backend = new Watch.MultiBackend({
-        element: canvas,
-        broadcast,
-        latency: "real-time",
+        canvas: target,
+        // "instant" also disables audio; zero delay preserves conversation.
+        delay: Moq.Time.Milli.zero,
         paused: false,
+        muted: mutedSignal.current,
+        volume: volumeSignal.current,
       });
-      backend.audio.muted.set(muted);
-      backend.audio.volume.set(volume);
-      backends.current.set(path, { backend, broadcast });
+      backends.current.set(path, { player, canvas: target });
     },
-    [reload, muted, volume, ended],
+    [reload, ended],
   );
 
   const setMuted = useCallback((m: boolean) => {
     setMutedState(m);
-    for (const b of backends.current.values()) b.backend.audio.muted.set(m);
+    mutedSignal.current.set(m);
   }, []);
 
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
     setVolumeState(clamped);
-    for (const b of backends.current.values()) b.backend.audio.volume.set(clamped);
+    volumeSignal.current.set(clamped);
   }, []);
 
   const leave = useCallback(() => {
     setEnded(true);
     for (const b of backends.current.values()) {
-      b.backend.close();
-      b.broadcast.close();
+      b.player.close();
     }
     backends.current.clear();
     reloadRef.current?.close();
@@ -175,12 +187,12 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
     connection: reload ? status : undefined,
     hasMedia: publishers.length > 0,
     ended,
-    error: !!tokenError,
+    error: !!error,
   });
 
   return {
     state,
-    error: tokenError,
+    error,
     publishers,
     viewerCount: 0, // wired by the screen from existing room presence (useRoomEvents)
     muted,

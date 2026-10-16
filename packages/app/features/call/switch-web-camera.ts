@@ -53,6 +53,12 @@ export async function switchWebCallCamera(camera: {
   );
   const next = chooseNextCallCamera(devices, camera.currentCamera?.deviceId);
   if (!next) return false;
-  await camera.selectCamera(next.deviceId);
+  const error = await camera.selectCamera(next.deviceId);
+  // Fishjam resolves with DeviceError for denied/unavailable devices. Only
+  // transport failures reject; do not report a successful flip on either.
+  if (error) {
+    const name = typeof error === "object" && "name" in error ? String(error.name) : "CameraError";
+    throw Object.assign(new Error(`Camera switch failed: ${name}`), { name });
+  }
   return true;
 }
