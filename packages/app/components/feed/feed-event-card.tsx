@@ -1,16 +1,8 @@
-/**
- * FeedEventCard — Compact event card shown inline in the feed every N posts.
- *
- * Design: Full-bleed hero image with gradient overlay, category pill,
- * title, venue + time, date badge, and attendee count. Taps navigate
- * to event detail. No scroll-dependent parallax — fully self-contained.
- */
-import { View, Text, Pressable } from "react-native";
+/** Feed event flyer: portrait artwork, with details in a separate panel. */
+import { View, Text } from "react-native";
 import { Image } from "expo-image";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
-import { LinearGradient } from "expo-linear-gradient";
 import { MapPin, Clock, Users, Calendar } from "lucide-react-native";
-import { useRouter } from "expo-router";
 import { useCallback, memo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -23,13 +15,12 @@ import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
 import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 
-// Shape is shared with the web card and the masonry packer so the three cannot
-// drift. The old fixed `200` ignored the width it was given: this card spans the
-// FULL feed width, so on a 1024pt tablet it was a 5:1 sliver — a wide band of
-// empty space above the title, which is how it was reported from the iPad.
 import {
   CARD_ASPECT,
   CARD_MAX_WIDTH,
+  CARD_DETAILS_HEIGHT,
+  CARD_HORIZONTAL_PADDING,
+  CARD_VERTICAL_PADDING,
 } from "@dvnt/app/components/event/feed-event-card-shape";
 
 export const FeedEventCard = memo(function FeedEventCard({
@@ -41,7 +32,6 @@ export const FeedEventCard = memo(function FeedEventCard({
   guestMode?: boolean;
   onRequireAuth?: (reason: PublicGateReason) => void;
 }) {
-  const router = useRouter();
   const queryClient = useQueryClient();
   const { i18n } = useTranslation();
   const targetLang = i18n.language;
@@ -52,16 +42,13 @@ export const FeedEventCard = memo(function FeedEventCard({
     isTranslated: isTitleTranslated,
     translate: translateTitleFn,
     showOriginal: showOriginalTitle,
-    isCapable: isTranslationCapable,
   } = useContentTranslation(
     `feed-event-${event.id}-title`,
     event.title || "",
     targetLang,
   );
 
-  const showTranslateButton =
-    
-    shouldShowTranslateButton(event.title || "", targetLang);
+  const showTranslateButton = shouldShowTranslateButton(event.title || "", targetLang);
 
   const handleTranslate = useCallback(async () => {
     await translateTitleFn();
@@ -90,9 +77,9 @@ export const FeedEventCard = memo(function FeedEventCard({
   return (
     <View
       style={{
-        paddingHorizontal: 4,
-        paddingVertical: 12,
-        // max-w-3xl, centred: the card keeps one shape at every screen size
+        paddingHorizontal: CARD_HORIZONTAL_PADDING,
+        paddingVertical: CARD_VERTICAL_PADDING,
+        // Centred: the card keeps one shape at every screen size
         // instead of stretching to the full width of a tablet.
         width: "100%",
         maxWidth: CARD_MAX_WIDTH,
@@ -108,313 +95,294 @@ export const FeedEventCard = memo(function FeedEventCard({
         <View
           style={{
             width: "100%",
-            // Ratio drives the height at every width, the same rule the web
-            // card follows.
-            aspectRatio: CARD_ASPECT,
             borderRadius: 16,
             overflow: "hidden",
             backgroundColor: heroBg,
           }}
         >
-          {/* Hero — video flyer takes priority, falls back to still image */}
-          {event.flyerVideoUrl ? (
-            <View
-              style={{
-                width: "100%",
-                height: "100%",
-                position: "absolute",
-                overflow: "hidden",
-              }}
-            >
-              <DVNTAnimatedVideoView
-                uri={event.flyerVideoUrl}
-                width="100%"
-                height="100%"
-                contentFit="cover"
-                isPlaying
-                muted
-              />
-            </View>
-          ) : event.image ? (
-            <View
-              style={{
-                width: "100%",
-                height: "100%",
-                position: "absolute",
-                overflow: "hidden",
-              }}
-            >
-              <Image
-                source={{ uri: event.image }}
-                style={{ width: "100%", height: "100%", position: "absolute" }}
-                contentFit="cover"
-              />
-            </View>
-          ) : null}
-
-          {/* Gradient overlay */}
-          <LinearGradient
-            colors={[
-              "rgba(0,0,0,0.1)",
-              "rgba(0,0,0,0.3)",
-              "rgba(0,0,0,0.85)",
-            ]}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-            }}
-          />
-
-          {/* Top row: Category + Date badge */}
-          <View
-            style={{
-              position: "absolute",
-              top: 12,
-              left: 14,
-              right: 14,
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-            }}
-          >
-            {(event as any).status === "cancelled" ? (
-              // CANCELLED — replaces the category pill. The cancel-event
-              // edge function already notified ticket holders + refunded
-              // them; this is the visual cue for the rest of the feed.
+          <View style={{ width: "100%", aspectRatio: CARD_ASPECT }}>
+            {/* Hero — video flyer takes priority, falls back to still image */}
+            {event.flyerVideoUrl ? (
               <View
                 style={{
-                  backgroundColor: "rgba(239,68,68,0.85)",
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                  borderRadius: 10,
+                  width: "100%",
+                  height: "100%",
+                  position: "absolute",
+                  overflow: "hidden",
                 }}
               >
+                <DVNTAnimatedVideoView
+                  uri={event.flyerVideoUrl}
+                  width="100%"
+                  height="100%"
+                  contentFit="contain"
+                  isPlaying
+                  muted
+                />
+              </View>
+            ) : event.image ? (
+              <View
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  position: "absolute",
+                  overflow: "hidden",
+                }}
+              >
+                <Image
+                  source={{ uri: event.image }}
+                  style={{ width: "100%", height: "100%", position: "absolute" }}
+                  contentFit="contain"
+                />
+              </View>
+            ) : null}
+
+          </View>
+          <View style={{ minHeight: CARD_DETAILS_HEIGHT, backgroundColor: "#111", paddingTop: 12 }}>
+            {/* Top row: Category + Date badge */}
+            <View
+              style={{
+                marginHorizontal: 14,
+                marginBottom: 12,
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+              }}
+            >
+              {(event as any).status === "cancelled" ? (
+                // CANCELLED — replaces the category pill. The cancel-event
+                // edge function already notified ticket holders + refunded
+                // them; this is the visual cue for the rest of the feed.
+                <View
+                  style={{
+                    backgroundColor: "rgba(239,68,68,0.85)",
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                    borderRadius: 10,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#fff",
+                      fontSize: 10,
+                      fontWeight: "800",
+                      letterSpacing: 1,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Cancelled
+                  </Text>
+                </View>
+              ) : event.category ? (
+                <View
+                  style={{
+                    backgroundColor: "rgba(138,64,207,0.7)",
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                    borderRadius: 10,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#fff",
+                      fontSize: 10,
+                      fontWeight: "800",
+                      letterSpacing: 0.8,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {event.category}
+                  </Text>
+                </View>
+              ) : (
+                <View />
+              )}
+              {(event.date || event.month) ? (
+                <View
+                  style={{
+                    backgroundColor: "rgba(0,0,0,0.6)",
+                    borderRadius: 12,
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    alignItems: "center",
+                    minWidth: 46,
+                  }}
+                >
+                  {event.date ? (
+                    <Text
+                      style={{
+                        color: "#fff",
+                        fontSize: 18,
+                        fontWeight: "800",
+                      }}
+                    >
+                      {event.date}
+                    </Text>
+                  ) : null}
+                  {event.month ? (
+                    <Text
+                      style={{
+                        color: "rgba(255,255,255,0.7)",
+                        fontSize: 9,
+                        fontWeight: "700",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {event.month}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+
+            {/* Bottom content */}
+            <View
+              style={{
+                flex: 1,
+                justifyContent: "flex-end",
+                paddingHorizontal: 14,
+                paddingBottom: 14,
+              }}
+            >
+              {/* Event label */}
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginBottom: 4,
+                  gap: 4,
+                }}
+              >
+                <Calendar size={10} color="rgba(63,220,255,0.9)" />
                 <Text
                   style={{
-                    color: "#fff",
+                    color: "rgba(63,220,255,0.9)",
                     fontSize: 10,
-                    fontWeight: "800",
+                    fontWeight: "700",
                     letterSpacing: 1,
                     textTransform: "uppercase",
                   }}
                 >
-                  Cancelled
+                  Event
                 </Text>
               </View>
-            ) : event.category ? (
+
+              {/* Title + translate button row */}
               <View
                 style={{
-                  backgroundColor: "rgba(138,64,207,0.7)",
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                  borderRadius: 10,
+                  flexDirection: "row",
+                  alignItems: "flex-start",
+                  marginBottom: 6,
+                  gap: 8,
                 }}
               >
                 <Text
+                  numberOfLines={2}
                   style={{
                     color: "#fff",
-                    fontSize: 10,
+                    fontSize: 18,
                     fontWeight: "800",
-                    letterSpacing: 0.8,
-                    textTransform: "uppercase",
+                    lineHeight: 22,
+                    flex: 1,
                   }}
                 >
-                  {event.category}
+                  {translatedTitle || event.title}
                 </Text>
+                {showTranslateButton && (
+                  <View style={{ marginTop: 3 }}>
+                    <TranslateButton
+                      onTranslate={handleTranslate}
+                      isTranslated={isTitleTranslated}
+                      onToggleOriginal={showOriginalTitle}
+                      size="sm"
+                    />
+                  </View>
+                )}
               </View>
-            ) : (
-              <View />
-            )}
-            {(event.date || event.month) ? (
+
+              {/* Meta row: venue, time, attendees */}
               <View
                 style={{
-                  backgroundColor: "rgba(0,0,0,0.6)",
-                  borderRadius: 12,
-                  paddingHorizontal: 10,
-                  paddingVertical: 6,
+                  flexDirection: "row",
                   alignItems: "center",
-                  minWidth: 46,
+                  gap: 10,
+                  flexWrap: "wrap",
                 }}
               >
-                {event.date ? (
-                  <Text
+                {event.location ? (
+                  <View
                     style={{
-                      color: "#fff",
-                      fontSize: 18,
-                      fontWeight: "800",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 3,
                     }}
                   >
-                    {event.date}
-                  </Text>
+                    <MapPin size={10} color="rgba(255,255,255,0.5)" />
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        color: "rgba(255,255,255,0.7)",
+                        fontSize: 11,
+                        maxWidth: 140,
+                      }}
+                    >
+                      {event.location}
+                    </Text>
+                  </View>
                 ) : null}
-                {event.month ? (
-                  <Text
+                {event.time ? (
+                  <View
                     style={{
-                      color: "rgba(255,255,255,0.7)",
-                      fontSize: 9,
-                      fontWeight: "700",
-                      textTransform: "uppercase",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 3,
                     }}
                   >
-                    {event.month}
-                  </Text>
+                    <Clock size={10} color="rgba(255,255,255,0.5)" />
+                    <Text
+                      style={{ color: "rgba(255,255,255,0.7)", fontSize: 11 }}
+                    >
+                      {event.time}
+                    </Text>
+                  </View>
+                ) : null}
+                {attendeeCount > 0 ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 3,
+                    }}
+                  >
+                    <Users size={10} color="rgba(255,255,255,0.5)" />
+                    <Text
+                      style={{ color: "rgba(255,255,255,0.7)", fontSize: 11 }}
+                    >
+                      {attendeeCount}
+                    </Text>
+                  </View>
+                ) : null}
+                {event.price != null && event.price > 0 ? (
+                  <View
+                    style={{
+                      backgroundColor: "rgba(138,64,207,0.4)",
+                      paddingHorizontal: 8,
+                      paddingVertical: 2,
+                      borderRadius: 8,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "#fff",
+                        fontSize: 11,
+                        fontWeight: "700",
+                      }}
+                    >
+                      ${event.price}
+                    </Text>
+                  </View>
                 ) : null}
               </View>
-            ) : null}
-          </View>
-
-          {/* Bottom content */}
-          <View
-            style={{
-              position: "absolute",
-              bottom: 0,
-              left: 0,
-              right: 0,
-              paddingHorizontal: 14,
-              paddingBottom: 14,
-            }}
-          >
-            {/* Event label */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                marginBottom: 4,
-                gap: 4,
-              }}
-            >
-              <Calendar size={10} color="rgba(63,220,255,0.9)" />
-              <Text
-                style={{
-                  color: "rgba(63,220,255,0.9)",
-                  fontSize: 10,
-                  fontWeight: "700",
-                  letterSpacing: 1,
-                  textTransform: "uppercase",
-                }}
-              >
-                Event
-              </Text>
-            </View>
-
-            {/* Title + translate button row */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "flex-start",
-                marginBottom: 6,
-                gap: 8,
-              }}
-            >
-              <Text
-                numberOfLines={2}
-                style={{
-                  color: "#fff",
-                  fontSize: 18,
-                  fontWeight: "800",
-                  lineHeight: 22,
-                  flex: 1,
-                }}
-              >
-                {translatedTitle || event.title}
-              </Text>
-              {showTranslateButton && (
-                <View style={{ marginTop: 3 }}>
-                  <TranslateButton
-                    onTranslate={handleTranslate}
-                    isTranslated={isTitleTranslated}
-                    onToggleOriginal={showOriginalTitle}
-                    size="sm"
-                  />
-                </View>
-              )}
-            </View>
-
-            {/* Meta row: venue, time, attendees */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 10,
-                flexWrap: "wrap",
-              }}
-            >
-              {event.location ? (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 3,
-                  }}
-                >
-                  <MapPin size={10} color="rgba(255,255,255,0.5)" />
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      color: "rgba(255,255,255,0.7)",
-                      fontSize: 11,
-                      maxWidth: 140,
-                    }}
-                  >
-                    {event.location}
-                  </Text>
-                </View>
-              ) : null}
-              {event.time ? (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 3,
-                  }}
-                >
-                  <Clock size={10} color="rgba(255,255,255,0.5)" />
-                  <Text
-                    style={{ color: "rgba(255,255,255,0.7)", fontSize: 11 }}
-                  >
-                    {event.time}
-                  </Text>
-                </View>
-              ) : null}
-              {attendeeCount > 0 ? (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 3,
-                  }}
-                >
-                  <Users size={10} color="rgba(255,255,255,0.5)" />
-                  <Text
-                    style={{ color: "rgba(255,255,255,0.7)", fontSize: 11 }}
-                  >
-                    {attendeeCount}
-                  </Text>
-                </View>
-              ) : null}
-              {event.price != null && event.price > 0 ? (
-                <View
-                  style={{
-                    backgroundColor: "rgba(138,64,207,0.4)",
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    borderRadius: 8,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "#fff",
-                      fontSize: 11,
-                      fontWeight: "700",
-                    }}
-                  >
-                    ${event.price}
-                  </Text>
-                </View>
-              ) : null}
             </View>
           </View>
         </View>
