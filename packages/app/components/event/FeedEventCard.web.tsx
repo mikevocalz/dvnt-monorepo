@@ -8,7 +8,7 @@ import { EventFlyer, type EventFlyerMedia } from "@dvnt/app/components/event/Eve
 import { color } from "@dvnt/app/lib/theme";
 import { CARD_ASPECT, CARD_MAX_WIDTH, CARD_HORIZONTAL_PADDING, CARD_VERTICAL_PADDING } from "./feed-event-card-shape";
 
-/** Portrait feed flyer with event details below the unobscured artwork. */
+/** Square feed flyer with event details below the artwork. */
 export interface FeedEventCardData {
   id: string;
   slug?: string;
@@ -63,6 +63,7 @@ export function FeedEventCard({ data, onHeightChange }: {
             media={{ ...data.media, eventId: data.media.eventId ?? data.id }}
             autoplay
             aspect={CARD_ASPECT}
+            contentFit="cover"
             rounded={0}
           />
         </div>

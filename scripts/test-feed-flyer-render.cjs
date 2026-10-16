@@ -123,12 +123,12 @@ for (const [kind, media] of [
   ["video", { videoFlyerUrl: "https://example.test/flyer.mp4" }],
   ["image", { staticFlyerUrl: "https://example.test/flyer.png" }],
 ]) {
-  test(`web ${kind} is contained in fixed 2:3 media above details`, () => {
+  test(`web ${kind} fills fixed square media above details`, () => {
     const doc = render(WebCard, { data: { id: "42", title, category: "Music", dateDay: "30", month: "OCT", media: { title, ...media } } });
     const asset = doc.querySelector(kind === "video" ? "video" : "img");
     assert.ok(asset);
-    assert.equal(asset.style.objectFit, "contain");
-    assert.equal(asset.parentElement.style.aspectRatio, String(4 / 6));
+    assert.equal(asset.style.objectFit, "cover");
+    assert.equal(asset.parentElement.style.aspectRatio, String(1));
     assert.equal(asset.parentElement.querySelector("h3"), null);
     const card = doc.querySelector('a[href^="/feed/events/"]');
     assert.equal(card.querySelector("h3").textContent, title);
@@ -144,12 +144,12 @@ for (const [kind, media] of [
     assert.equal(card.children[0].querySelector('[style*="linear-gradient"]'), null);
     if (kind === "video") for (const attr of ["muted", "autoplay", "loop", "playsinline"]) assert.ok(asset.hasAttribute(attr));
   });
-  test(`native ${kind} is contained in fixed 2:3 media and retains navigation`, () => {
+  test(`native ${kind} fills fixed square media and retains navigation`, () => {
     const doc = render(NativeCard, { event: { id: "42", title, image: media.staticFlyerUrl, flyerVideoUrl: media.videoFlyerUrl, category: "Music", date: "30", month: "OCT" } });
     const asset = doc.querySelector(kind === "video" ? "video" : "img");
-    assert.equal(asset.style.objectFit, "contain");
-    const canvas = [...doc.querySelectorAll("div")].find((node) => node.style.aspectRatio === String(4 / 6));
-    assert.ok(canvas, "4:6 media canvas exists");
+    assert.equal(asset.style.objectFit, "cover");
+    const canvas = [...doc.querySelectorAll("div")].find((node) => node.style.aspectRatio === String(1));
+    assert.ok(canvas, "square media canvas exists");
     assert.ok(canvas.contains(asset));
     assert.equal(canvas.getAttribute("data-pointer-events"), "none", "native media must let the card receive taps");
     assert.ok(!canvas.textContent.includes(title));
@@ -161,6 +161,16 @@ for (const [kind, media] of [
     assert.equal(doc.querySelector("[data-href]").getAttribute("data-href"), "/(protected)/events/42");
   });
 }
+test("shared EventFlyer defaults stay portrait contain outside Feed", () => {
+  const { EventFlyer } = loadSource("packages/app/components/event/EventFlyer.web.tsx");
+  for (const media of [{ staticFlyerUrl: "https://example.test/image.png" }, { videoFlyerUrl: "https://example.test/video.mp4" }]) {
+    const doc = render(EventFlyer, { media: { title, ...media } });
+    const asset = doc.querySelector("img, video");
+    assert.equal(asset.style.objectFit, "contain");
+    assert.equal(asset.parentElement.style.aspectRatio, String(9 / 16));
+  }
+});
+
 test("sparse metadata keeps a compact footer without invented date values", () => {
   for (const metadata of [{}, { category: "Music" }, { dateDay: "30" }, { month: "OCT" }]) {
     const doc = render(WebCard, { data: { id: "42", title, ...metadata, media: { title } } });
@@ -250,7 +260,7 @@ test("mounted production card clicks route images and videos to the exact event"
 });
 
 if (process.env.FEED_FLYER_BROWSER === "1") {
-  test("Chromium: compact responsive footer preserves artwork and long text", async () => {
+  test("Chromium: compact responsive footer fills square artwork bounds and preserves compact long text", async () => {
     const { chromium } = dependency("playwright");
       const { build } = dependency("esbuild");
       const bundled = await build({
@@ -280,7 +290,8 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
       const page = await browser.newPage();
       await page.setContent('<style>*{box-sizing:border-box}body{margin:0;font-family:Arial;line-height:1.5}</style><main></main>');
       await page.addScriptTag({ content: bundled.outputFiles[0].text });
-      const svg = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1600"><rect width="900" height="1600" fill="purple"/></svg>');
+      const artwork = (width, height) => "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="purple"/></svg>`);
+      const svg = artwork(900, 1600);
       const fixtures = [
         { name: "short", title: "DALLAS Freaky Friday", category: "Other", dateDay: "30", month: "OCT", location: "Station 4", time: "10:00 PM EDT", attendeeCount: 40 },
         { name: "long", title: "A deliberately long event title that takes up two lines of detail text", category: "Music", dateDay: "30", month: "OCT", location: "A long venue name in the city", time: "10:00 PM EDT", attendeeCount: 400 },
@@ -290,7 +301,7 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
         await page.evaluate(({ width, data }) => {
           document.querySelector("main").style.width = `${width}px`;
           window.renderCard(data);
-        }, { width, data: { id: `event-${width}-${fixture.name}`, ...fixture, media: { title: fixture.title, staticFlyerUrl: svg } } });
+        }, { width, data: { id: `event-${width}-${fixture.name}`, ...fixture, media: { title: fixture.title, staticFlyerUrl: fixture.name === "long" ? artwork(1600, 900) : fixture.name === "minimal" ? artwork(900, 900) : svg } } });
         await page.waitForFunction(() => window.measurements.length > 0);
         const geometry = await page.evaluate(() => {
           const outer = document.querySelector("main").firstElementChild;
@@ -305,13 +316,31 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
           const bottom = footer.children[1].getBoundingClientRect();
           return { measured: window.measurements.at(-1), width: outer.getBoundingClientRect().width, height: outer.getBoundingClientRect().height, mediaBottom: media.bottom, detailsTop: details.top, detailsBottom: details.bottom, footerHeight: details.height, headerHeight: top.height, headerItems, topBottom: top.bottom, bottomTop: bottom.top, bottomBottom: bottom.bottom, mediaWidth: media.width, mediaHeight: media.height, footerScrollHeight: footer.scrollHeight, footerClientHeight: footer.clientHeight };
         });
+        // Sample rendered pixels, not just CSS dimensions: portrait, landscape,
+        // and square source images must paint all four mid-edge bounds.
+        if (width === 320) {
+          await page.waitForFunction(() => { const image = document.querySelector("main img"); return image?.complete && image.naturalWidth > 0; });
+          const png = await page.locator('a[href^="/feed/events/"] > div').first().screenshot();
+          const samples = await page.evaluate(async (base64) => {
+            const image = new Image();
+            image.src = "data:image/png;base64," + base64;
+            await image.decode();
+            const canvas = document.createElement("canvas");
+            canvas.width = image.width; canvas.height = image.height;
+            const context = canvas.getContext("2d");
+            context.drawImage(image, 0, 0);
+            return [[image.width / 2, 2], [image.width / 2, image.height - 3], [2, image.height / 2], [image.width - 3, image.height / 2]]
+              .map(([x, y]) => [...context.getImageData(Math.floor(x), Math.floor(y), 1, 1).data]);
+          }, png.toString("base64"));
+          for (const pixel of samples) assert.deepEqual(pixel, [128, 0, 128, 255], `${fixture.name}: source artwork must fill square edges without letterbox bands`);
+        }
         const label = `${fixture.name} at ${width}px`;
         assert.ok(Math.abs(geometry.measured.height - geometry.height) < 0.5, `height callback disagrees with rendered card: ${label}`);
         assert.ok(Math.abs(geometry.measured.width - geometry.width) < 0.5, `width callback disagrees with rendered card: ${label}`);
         const { feedEventCardMeasurementKey } = loadSource("packages/app/components/event/feed-event-card-shape.ts");
         assert.equal(feedEventCardMeasurementKey("event", width), feedEventCardMeasurementKey("event", geometry.measured.width), `packer and DOM measurement keys differ: ${label}`);
         assert.ok(Math.abs(geometry.height - (geometry.mediaHeight + geometry.footerHeight + 24)) < 1, `unexpected blank outer area: ${label}`);
-        assert.ok(Math.abs(geometry.mediaWidth / geometry.mediaHeight - 4 / 6) < 0.001);
+        assert.ok(Math.abs(geometry.mediaWidth / geometry.mediaHeight - 1) < 0.001);
         assert.ok(Math.abs(geometry.mediaBottom - geometry.detailsTop) < 0.5, "footer starts immediately after artwork");
         const gap = geometry.bottomTop - geometry.topBottom;
         assert.ok(gap >= -0.5 && gap <= 8.5, `footer gap ${gap}px must be compact: ${label}`);
@@ -355,6 +384,14 @@ if (process.env.FEED_FLYER_BROWSER === "1") {
         await link.waitFor();
         await link.locator(kind === "video" ? "video" : "img").waitFor();
         assert.equal(await link.getAttribute("href"), "/feed/events/42");
+        const mediaFit = await link.locator(kind === "video" ? "video" : "img").evaluate((asset) => {
+          const bounds = asset.getBoundingClientRect();
+          const canvas = asset.parentElement.getBoundingClientRect();
+          return { fit: getComputedStyle(asset).objectFit, width: bounds.width, height: bounds.height, canvasWidth: canvas.width, canvasHeight: canvas.height };
+        });
+        assert.equal(mediaFit.fit, "cover", `${kind} fills the square`);
+        assert.ok(Math.abs(mediaFit.width - mediaFit.canvasWidth) < 0.5 && Math.abs(mediaFit.height - mediaFit.canvasHeight) < 0.5, `${kind} spans the full canvas`);
+
         await page.evaluate(() => { window.navigations = []; });
         await link.locator("h3").click();
         await link.focus();

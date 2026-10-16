@@ -23,6 +23,8 @@ export interface EventFlyerProps {
   staticOnly?: boolean;
   /** Aspect ratio (w/h). Default 9:16 portrait flyer. */
   aspect?: number;
+  /** Contain full artwork by default; feed opts into edge-to-edge cropping. */
+  contentFit?: "contain" | "cover";
   className?: string;
   rounded?: number;
 }
@@ -40,6 +42,7 @@ export function EventFlyer({
   autoplay = false,
   staticOnly = false,
   aspect = EVENT_FLYER_ASPECT,
+  contentFit = "contain",
   className,
   rounded = 16,
 }: EventFlyerProps) {
@@ -110,7 +113,7 @@ export function EventFlyer({
           playsInline
           autoPlay={autoplay}
           onError={() => setVideoFailed(true)}
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: contentFit }}
         />
       ) : hasStatic ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -118,7 +121,7 @@ export function EventFlyer({
           src={staticSrc!}
           alt={media.title}
           onError={() => setImgFailed(true)}
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: contentFit }}
         />
       ) : (
         fallback
