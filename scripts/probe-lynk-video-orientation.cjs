@@ -1,12 +1,28 @@
 /** Diagnostic only. Generated pixels, no cameras, permissions, relay or tokens. */
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { chromium } = require('playwright');
-const { buildSync } = require('esbuild');
+const dependencyPaths = [process.env.LYNK_PROBE_DEPS || process.cwd()];
+const dependency = name => require(require.resolve(name, {paths: dependencyPaths}));
+const { chromium } = dependency('playwright');
+const { build } = dependency('esbuild');
 const path = require('node:path');
-const helperPath = path.join(path.dirname(require.resolve('@moq/publish')), 'video/normalize-orientation.js');
-const sdk = buildSync({ stdin: { contents: `import * as Publish from "@moq/publish"; import {createOrientationNormalizer} from ${JSON.stringify(helperPath)}; window.Publish = Publish; window.createOrientationNormalizer = createOrientationNormalizer;`, resolveDir: process.env.LYNK_PROBE_DEPS || process.cwd() }, bundle: true, write: false, format: 'iife', platform: 'browser' }).outputFiles[0].text;
+const helperPath = path.join(path.dirname(require.resolve('@moq/publish', {paths: dependencyPaths})), 'video/normalize-orientation.js');
+const stagePath = path.join(__dirname, '../packages/app/features/sneaky-lynk/ui/web/room-stage.tsx');
 (async () => {
+const sdk = (await build({ plugins: [{ name: 'stage-presentation-adapters', setup(builder) {
+  builder.onResolve({ filter: /^(react|react-dom)(\/.*)?$/ }, args => ({path: require.resolve(args.path, {paths: dependencyPaths})}));
+  builder.onResolve({ filter: /^(lucide-react|\.\/room-panels)$/ }, args => ({ path: args.path, namespace: 'stage-stub' }));
+  builder.onLoad({ filter: /.*/, namespace: 'stage-stub' }, args => ({ contents: args.path === 'lucide-react'
+    ? 'export const Crown=()=>null,Hand=()=>null,Mic=()=>null,MicOff=()=>null,RotateCw=()=>null,Zap=()=>null;'
+    : 'export const SquareAvatar=()=>null;', loader: 'js' }));
+} }], nodePaths: [path.join(process.env.LYNK_PROBE_DEPS || process.cwd(), 'node_modules')], jsx: 'automatic', stdin: { contents: `import * as Publish from "@moq/publish"; import {createOrientationNormalizer} from ${JSON.stringify(helperPath)}; window.Publish = Publish; window.createOrientationNormalizer = createOrientationNormalizer;
+import React from "react"; import {createRoot} from "react-dom/client";
+import {StageTile} from ${JSON.stringify(stagePath)};
+window.mountStage = (container, tiles) => {
+ const root = createRoot(container);
+ const render = (next) => root.render(React.createElement(React.Fragment, null, ...next.map(tile => React.createElement(StageTile, {key:tile.key,tile}))));
+ render(tiles); return {render,unmount:()=>root.unmount()};
+};`, resolveDir: process.env.LYNK_PROBE_DEPS || process.cwd() }, bundle: true, write: false, format: 'iife', platform: 'browser' })).outputFiles[0].text;
   const server = http.createServer((_q, r) => r.end('<html></html>')).listen(0, '127.0.0.1');
   await new Promise(resolve => server.on('listening', resolve));
   let browser;
@@ -39,14 +55,14 @@ const sdk = buildSync({ stdin: { contents: `import * as Publish from "@moq/publi
           let frame;
           const decoder = new VideoDecoder({ output: f => { frame = f; }, error: e => { throw e; } });
           decoder.configure(config); decoder.decode(chunk); await decoder.flush();
-          const rendered = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
+          const rendered = document.createElement("canvas"); rendered.width = frame.displayWidth; rendered.height = frame.displayHeight;
           const pixels = rendered.getContext('2d'); pixels.drawImage(frame, 0, 0);
           const corners = [[.25,.25],[.75,.25],[.25,.75],[.75,.75]].map(([x,y]) => {
             const rgba = pixels.getImageData(Math.floor(x * rendered.width), Math.floor(y * rendered.height), 1, 1).data;
             if (rgba[0] > 128 && rgba[1] > 128) return 'Y';
             return rgba[0] > rgba[1] && rgba[0] > rgba[2] ? 'R' : rgba[1] > rgba[2] ? 'G' : 'B';
           }).join('');
-          const result = { rotation: frame.rotation ?? 0, width: frame.displayWidth, height: frame.displayHeight, corners };
+          const result = { rotation: frame.rotation ?? 0, width: frame.displayWidth, height: frame.displayHeight, corners, dataUrl: rendered.toDataURL() };
           frame.close(); decoder.close(); return result;
         };
         return { metadata: metadata.decoderConfig, preserved: await decode(metadata.decoderConfig), catalog: await decode(catalog) };
@@ -104,7 +120,7 @@ const sdk = buildSync({ stdin: { contents: `import * as Publish from "@moq/publi
       fallback.close(); video.pause(); video.srcObject = null; stream.getTracks().forEach(t => t.stop());
       return { userAgent: navigator.userAgent, avcSupported: !!avcSupport.supported, exercisedCodec: codec, rows, pipeline, fallback: fallbackResult };
     });
-    console.log(JSON.stringify(results, null, 2));
+    console.log(JSON.stringify(results, (key, value) => key === "dataUrl" ? "[generated frame pixels]" : value, 2));
     for (const row of results.rows) {
       let expectedCorners = { 0: 'RGBY', 90: 'BRYG', 180: 'YBGR', 270: 'GYRB' }[row.rotation];
       if (row.flip) expectedCorners = expectedCorners[1] + expectedCorners[0] + expectedCorners[3] + expectedCorners[2];
@@ -117,6 +133,53 @@ const sdk = buildSync({ stdin: { contents: `import * as Publish from "@moq/publi
       assert.equal(row.normalized.width, row.input.width);
       assert.equal(row.normalized.height, row.input.height);
     }
+    // Mount the real remote browser tile. Only transport attachment and icons
+    // are adapted; frames are the real encoded/decoded outputs from above.
+    await page.addStyleTag({ content: `body{margin:0} #stage{display:flex;gap:12px} [data-tile]{position:relative;overflow:hidden;flex:none;border:0;border-radius:0} [data-tile] canvas{position:absolute} [data-tile] button{position:absolute;right:0;top:0;width:24px;height:24px;z-index:10}` });
+    await page.evaluate(() => {
+      const host = document.createElement('div'); host.id = 'stage'; document.body.appendChild(host);
+      window.attachments = [];
+      window.attachFrame = (path, canvas) => {
+        window.attachments.push({path, attached:!!canvas});
+        if (canvas) window.remoteCanvas = canvas;
+      };
+      window.remoteTile = {key:'guest',name:'Guest',isLocal:false,isHost:false,isCoHost:false,isCameraOn:true,isMicOn:true,isSpeaking:false,videoStream:null,canvasPath:'generated/guest',attachCanvas:window.attachFrame};
+      window.stageRoot = window.mountStage(host, [window.remoteTile, {...window.remoteTile,key:'other',name:'Other',canvasPath:'generated/other',attachCanvas:()=>{}}]);
+    });
+    await page.waitForSelector('[data-tile="guest"] canvas');
+    for (const row of results.rows) {
+      await page.evaluate(async (frame) => {
+        const tile = document.querySelector('[data-tile="guest"]');
+        tile.style.width = `${frame.width * 4}px`; tile.style.height = `${frame.height * 4}px`;
+        const other = document.querySelector('[data-tile="other"]'); other.style.width='128px'; other.style.height='128px';
+        const image = new Image(); image.src = frame.dataUrl; await image.decode();
+        const canvas = tile.querySelector('canvas'); canvas.width=frame.width; canvas.height=frame.height;
+        canvas.getContext('2d').drawImage(image,0,0);
+      }, row.normalized);
+      const png = await page.locator('[data-tile="guest"]').screenshot();
+      const corners = await page.evaluate(async (base64) => {
+        const image = new Image(); image.src='data:image/png;base64,'+base64; await image.decode();
+        const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+        const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);
+        return [[.25,.25],[.75,.25],[.25,.75],[.75,.75]].map(([x,y])=>{
+          const p=ctx.getImageData(Math.floor(x*canvas.width),Math.floor(y*canvas.height),1,1).data;
+          return p[0]>128&&p[1]>128?'Y':p[0]>p[1]&&p[0]>p[2]?'R':p[1]>p[2]?'G':'B';
+        }).join('');
+      }, png.toString('base64'));
+      assert.equal(corners,row.normalized.corners,'production remote tile preserves decoded orientation without additional rotation');
+    }
+    const before = await page.evaluate(()=>window.attachments.length);
+    await page.getByRole('button',{name:"Rotate Guest's video clockwise"}).click();
+    assert.equal(await page.locator('[data-tile="guest"]').getAttribute('data-video-rotation'),'90');
+    assert.equal(await page.locator('[data-tile="other"]').getAttribute('data-video-rotation'),'0');
+    await page.evaluate(()=>{document.querySelector('[data-tile="guest"]').style.width='200px';});
+    await page.waitForTimeout(50);
+    assert.equal(await page.locator('[data-tile="guest"]').getAttribute('data-video-rotation'),'90','resize must not rotate participant');
+    assert.equal(await page.evaluate(()=>window.attachments.length),before,'manual rotation/resize must not reconnect media');
+    await page.evaluate(()=>window.stageRoot.render([{...window.remoteTile,canvasPath:'generated/new-guest'}]));
+    await page.waitForFunction(()=>document.querySelector('[data-tile="guest"]')?.dataset.videoRotation==='0');
+    await page.evaluate(()=>window.stageRoot.unmount());
+    console.log('Production remote StageTile: all eight decoded frame pixel cases, per-participant rotation, resize stability, path reset, and attachment stability passed. No relay or live account used.');
     for (const frame of results.pipeline) {
       assert.equal(frame.rotation, 0); assert.equal(frame.flip, false);
       assert.equal(frame.rawClosed, true); assert.equal(frame.previousClosed, true);

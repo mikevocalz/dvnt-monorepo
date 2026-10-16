@@ -1,3 +1,5 @@
+diff --git a/source-DrwkEDdu.js b/source-DrwkEDdu.js
+index d21f0442..5d8e850b 100644
 --- a/source-DrwkEDdu.js
 +++ b/source-DrwkEDdu.js
 @@ -1,3 +1,4 @@
@@ -5,7 +7,7 @@
  import * as e from "@moq/net";
  import { Time as t } from "@moq/net";
  import { Effect as n, Signal as r } from "@moq/signals";
-@@ -397,11 +398,12 @@
+@@ -397,11 +398,12 @@ var w = /* @__PURE__ */ l({
  //#endregion
  //#region src/video/polyfill.ts
  function D(e) {
@@ -19,7 +21,7 @@
  		} });
  		return new self.MediaStreamTrackProcessor({ track: e }).readable.pipeThrough(r);
  	}
-@@ -422,7 +424,7 @@
+@@ -422,7 +424,7 @@ function D(e) {
  					await new Promise((e) => requestAnimationFrame(e));
  					continue;
  				}
@@ -28,6 +30,9 @@
  			}
  		}
  	});
+diff --git a/video/normalize-orientation.js b/video/normalize-orientation.js
+new file mode 100644
+index 00000000..8b0dded5
 --- /dev/null
 +++ b/video/normalize-orientation.js
 @@ -0,0 +1,32 @@

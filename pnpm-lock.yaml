@@ -18,7 +18,7 @@ overrides:
 
 patchedDependencies:
   '@moq/publish@0.2.14':
-    hash: 27179849eab96702fc7bd499e3b9e077eb3b73b253b6e5b615fc5cdddb91340c
+    hash: bc85b64659a6d166aefcbb1ea9ba239244ae2254cb23eed334b92aad6e4109ea
     path: pnpm-patches/@moq__publish@0.2.14.patch
   react-native-css@3.0.7:
     hash: d558c6d64381048d5477f3044b2dbcbf4063e8eefb4f837d2360308c0ffb4dcc
@@ -1021,7 +1021,7 @@ importers:
         version: 0.3.0(@types/react@19.2.14)(react@19.2.3)(zod@4.4.3)
       '@moq/publish':
         specifier: ^0.2.14
-        version: 0.2.14(patch_hash=27179849eab96702fc7bd499e3b9e077eb3b73b253b6e5b615fc5cdddb91340c)(@svta/cml-utils@1.5.0)(@types/react@19.2.14)(react@19.2.3)(zod@4.4.3)
+        version: 0.2.14(patch_hash=bc85b64659a6d166aefcbb1ea9ba239244ae2254cb23eed334b92aad6e4109ea)(@svta/cml-utils@1.5.0)(@types/react@19.2.14)(react@19.2.3)(zod@4.4.3)
       '@moq/signals':
         specifier: ^0.1.8
         version: 0.1.8(@types/react@19.2.14)(react@19.2.3)
@@ -18039,7 +18039,7 @@ snapshots:
       - react
       - solid-js
 
-  '@moq/publish@0.2.14(patch_hash=27179849eab96702fc7bd499e3b9e077eb3b73b253b6e5b615fc5cdddb91340c)(@svta/cml-utils@1.5.0)(@types/react@19.2.14)(react@19.2.3)(zod@4.4.3)':
+  '@moq/publish@0.2.14(patch_hash=bc85b64659a6d166aefcbb1ea9ba239244ae2254cb23eed334b92aad6e4109ea)(@svta/cml-utils@1.5.0)(@types/react@19.2.14)(react@19.2.3)(zod@4.4.3)':
     dependencies:
       '@moq/hang': 0.2.9(@svta/cml-utils@1.5.0)(@types/react@19.2.14)(react@19.2.3)
       '@moq/json': 0.0.2(@types/react@19.2.14)(react@19.2.3)(zod@4.4.3)

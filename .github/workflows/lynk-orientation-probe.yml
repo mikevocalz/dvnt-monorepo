@@ -4,6 +4,7 @@ on:
     paths:
       - 'scripts/probe-lynk-video-orientation.cjs'
       - 'scripts/test-lynk-orientation.cjs'
+      - 'packages/app/features/sneaky-lynk/ui/web/room-stage.tsx'
       - 'pnpm-patches/@moq__publish@0.2.14.patch'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -21,7 +22,7 @@ jobs:
         with:
           node-version: 24
       - name: Install isolated probe tools
-        run: npm install --prefix "$RUNNER_TEMP/lynk-orientation" --no-save --no-package-lock playwright@1.56.1 esbuild@0.25.11 @moq/publish@0.2.14 @moq/hang@0.2.9 @moq/json@0.0.2 @moq/net@0.1.4 @moq/signals@0.1.8
+        run: npm install --prefix "$RUNNER_TEMP/lynk-orientation" --no-save --no-package-lock playwright@1.56.1 esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 @moq/publish@0.2.14 @moq/hang@0.2.9 @moq/json@0.0.2 @moq/net@0.1.4 @moq/signals@0.1.8
       - name: Log resolved diagnostic dependencies
         run: npm ls --prefix "$RUNNER_TEMP/lynk-orientation" --all
       - name: Apply production dependency patch and test ownership

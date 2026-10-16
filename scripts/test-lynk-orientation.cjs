@@ -47,3 +47,26 @@ test('patch normalizes both owned capture boundaries without changing track/audi
   assert.doesNotMatch(additions, /getUserMedia|\.stop\(|Audio|screen\.orientation|facingMode\s*===/);
   assert.match(additions, /if \(!frame\.rotation && !frame\.flip\) return frame/);
 });
+
+test('patch has pnpm-compatible Git file boundaries and exact hunk lengths', () => {
+  const files = patch.split(/^diff --git /m).slice(1);
+  assert.equal(files.length, 2, 'pnpm requires explicit boundaries between patched files');
+  assert.match(files[1], /\nnew file mode 100644\n/);
+  for (const file of files) {
+    const lines = file.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const header = /^@@ -(\d+),(\d+) \+(\d+),(\d+) @@/.exec(lines[i]);
+      if (!header) continue;
+      let oldCount = 0, newCount = 0;
+      for (let j = i + 1; j < lines.length && !lines[j].startsWith('@@'); j++) {
+        const line = lines[j];
+        if (!line || line.startsWith('\\ No newline')) continue;
+        assert.ok(/^[ +\-]/.test(line), 'unexpected line inside patch hunk');
+        if (/^[ -]/.test(line)) oldCount++;
+        if (/^[ +]/.test(line)) newCount++;
+      }
+      assert.equal(oldCount, Number(header[2]));
+      assert.equal(newCount, Number(header[4]));
+    }
+  }
+});
