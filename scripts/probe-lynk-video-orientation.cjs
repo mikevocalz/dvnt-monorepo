@@ -27,7 +27,7 @@ window.mountStage = (container, tiles) => {
   await new Promise(resolve => server.on('listening', resolve));
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, ...(process.env.LYNK_CHROMIUM_PATH ? { executablePath: process.env.LYNK_CHROMIUM_PATH } : {}) });
     const page = await browser.newPage();
     page.on('console', message => console.log('browser:', message.text()));
     page.on('pageerror', error => console.error('browser error:', error));
@@ -111,11 +111,17 @@ window.mountStage = (container, tiles) => {
       // Force the actual SDK fallback with a generated canvas track. Simulate
       // metadata-before-frame and one transient constructor race, then recover.
       const source = document.createElement('canvas'); source.width = 32; source.height = 64;
-      source.getContext('2d').fillRect(0, 0, 32, 64);
+      const paintSource = () => {
+        const pixels = source.getContext('2d'); const w = source.width / 2, h = source.height / 2;
+        for (const [color,x,y] of [['blue',0,0],['red',w,0],['yellow',0,h],['lime',w,h]]) {
+          pixels.fillStyle = color; pixels.fillRect(x,y,w,h);
+        }
+      };
+      paintSource();
       const stream = source.captureStream(30);
       const NativeFrame = window.VideoFrame;
       const createElement = document.createElement.bind(document);
-      let fallbackVideo, waiting = true, attempts = 0, fallbackRoot;
+      let fallbackVideo, waiting = true, attempts = 0, rawVideoExtractions = 0, fallbackRoot;
       let fallbackResult;
       window.MediaStreamTrackProcessor = undefined;
       document.createElement = function(name, ...args) {
@@ -129,8 +135,12 @@ window.mountStage = (container, tiles) => {
       };
       window.VideoFrame = class extends NativeFrame {
         constructor(input, init) {
-          if (input === fallbackVideo && ++attempts === 1) throw new DOMException('Video element has no video frame', 'InvalidStateError');
-          super(input, init);
+          // Model the unexposed camera orientation contract: extracting the raw
+          // video frame yields landscape sensor pixels with no public rotation.
+          // This is fault injection, not an iPhone/WebKit runtime reproduction.
+          if (++attempts === 1) throw new DOMException('Video element has no video frame', 'InvalidStateError');
+          if (input === fallbackVideo) { rawVideoExtractions++; super(canvas, init); }
+          else super(input, init);
         }
       };
       try {
@@ -141,11 +151,30 @@ window.mountStage = (container, tiles) => {
         for (let n = 0; !fallbackRoot.frame.peek() && n < 200; n++) await new Promise(r => setTimeout(r, 10));
         const frame = fallbackRoot.frame.peek();
         if (!frame || attempts < 2) throw new Error('Fallback did not recover transient no-video-frame error');
-        fallbackResult = { rotation: frame.rotation ?? 0, width: frame.displayWidth, height: frame.displayHeight };
+        const encodeFallback = async (input) => {
+          // Root owns/replaces input while the asynchronous codec flush runs.
+          const captured = new NativeFrame(input);
+          try { return await encode(captured,
+            { codec: 'vp8', width: captured.codedWidth, height: captured.codedHeight, bitrate: 1000000, framerate: 30 },
+            { codec: 'vp8', codedWidth: captured.codedWidth, codedHeight: captured.codedHeight });
+          } finally { captured.close(); }
+        };
+        const first = { rotation: frame.rotation ?? 0, width: frame.displayWidth, height: frame.displayHeight };
+        first.corners = (await encodeFallback(frame)).catalog.corners;
+        // Change the displayed source dimensions mid-stream. The capture canvas
+        // must follow them rather than freezing the track's startup dimensions.
+        source.width = 64; source.height = 32; paintSource();
+        for (let n = 0; fallbackRoot.frame.peek()?.displayWidth !== 64 && n < 200; n++) await new Promise(r => setTimeout(r, 10));
+        const resized = fallbackRoot.frame.peek();
+        if (!resized || resized.displayWidth !== 64) throw new Error('Fallback did not follow live video dimensions');
+        const second = { width: resized.displayWidth, height: resized.displayHeight };
+        second.corners = (await encodeFallback(resized)).catalog.corners;
+        fallbackResult = { first, resized: second, rawVideoExtractions };
+        const lastFrame = fallbackRoot.frame.peek();
         fallbackRoot.close(); fallbackRoot = null;
         const count = attempts;
         await new Promise(r => setTimeout(r, 100));
-        if (fallbackVideo.srcObject !== null || attempts !== count || frame.displayWidth !== 0) throw new Error('Fallback teardown left capture running');
+        if (fallbackVideo.srcObject !== null || attempts !== count || !lastFrame || lastFrame.displayWidth !== 0) throw new Error('Fallback teardown left capture running');
         if (stream.getVideoTracks()[0].readyState !== 'live') throw new Error('Fallback stopped caller-owned track');
       } finally {
         fallbackRoot?.close(); window.MediaStreamTrackProcessor = NativeProcessor;
@@ -218,8 +247,11 @@ window.mountStage = (container, tiles) => {
       assert.equal(frame.rotation, 0); assert.equal(frame.flip, false);
       assert.equal(frame.rawClosed, true); assert.equal(frame.previousClosed, true);
     }
-    assert.deepEqual(results.fallback, { rotation: 0, width: 32, height: 64 });
-    console.log('Actual SDK fallback passed delayed readiness, transient InvalidStateError recovery, and teardown with generated browser video.');
-    console.log('Confirmed catalog metadata gap and installed normalization patch preserves all angle/flip pixels; generated video-element fallback remains upright. AVC/iPhone attribution remains unproven.');
+    assert.deepEqual(results.fallback, {
+      first: { rotation: 0, width: 32, height: 64, corners: 'BRYG' },
+      resized: { width: 64, height: 32, corners: 'BRYG' }, rawVideoExtractions: 0,
+    });
+    console.log('Actual SDK fallback passed rendered pixel capture/VP8 roundtrip, live dimension changes, delayed readiness, transient InvalidStateError recovery, and teardown with generated browser video.');
+    console.log('Confirmed catalog metadata gap and installed patch preserves all angle/flip pixels. Fallback avoids the fault-injected opaque sensor-frame extraction path. Physical iPhone/WebKit camera and AVC attribution remain unproven.');
   } finally { await browser?.close(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

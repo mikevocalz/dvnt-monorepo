@@ -3,11 +3,11 @@ index d21f0442..e88cb621 100644
 --- a/source-DrwkEDdu.js
 +++ b/source-DrwkEDdu.js
 @@ -1,3 +1,4 @@
-+import { createOrientationNormalizer } from "./video/normalize-orientation.js";
++import { createOrientationNormalizer, createVideoElementCapture } from "./video/normalize-orientation.js";
  import * as e from "@moq/net";
  import { Time as t } from "@moq/net";
  import { Effect as n, Signal as r } from "@moq/signals";
-@@ -397,35 +398,65 @@ var w = /* @__PURE__ */ l({
+@@ -397,35 +398,66 @@ var w = /* @__PURE__ */ l({
  //#endregion
  //#region src/video/polyfill.ts
  function D(e) {
@@ -26,6 +26,7 @@ index d21f0442..e88cb621 100644
  	if (!n) throw Error("track has no settings");
 -	let r, i, a = n.frameRate ?? 30;
 +	let r, i = 0, cancelled = false, timer, wake;
++	const captureVideo = createVideoElementCapture();
 +	const interval = 1e3 / (n.frameRate > 0 ? n.frameRate : 30);
 +	const wait = () => new Promise((resolve) => {
 +		wake = resolve;
@@ -68,7 +69,7 @@ index d21f0442..e88cb621 100644
 +						await wait(); continue;
 +					}
 +					let frame;
-+					try { frame = new VideoFrame(r, { timestamp: t.Micro.fromMilli(now) }); }
++					try { frame = captureVideo(r, t.Micro.fromMilli(now)); }
 +					catch (error) {
 +						if (error?.name !== "InvalidStateError") throw error;
 +						await wait(); continue;
@@ -88,12 +89,12 @@ index d21f0442..e88cb621 100644
  }
  //#endregion
  //#region src/video/index.ts
-diff --git a/tmp/lynk-patch-edited/video/normalize-orientation.js b/video/normalize-orientation.js
+diff --git a/video/normalize-orientation.js b/video/normalize-orientation.js
 new file mode 100644
 index 00000000..8b0dded5
 --- /dev/null
 +++ b/video/normalize-orientation.js
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,56 @@
 +// DVNT: @moq/publish 0.2.14 discards encoder orientation metadata.
 +// Bake only explicit frame transforms into pixels before encoding. Never infer
 +// orientation from device angle, aspect ratio, or camera facing mode.
@@ -124,5 +125,29 @@ index 00000000..8b0dded5
 +      // The returned frame remains owned by the SDK's existing frame lifecycle.
 +      frame.close();
 +    }
++  };
++}
++
++// VideoFrame(video) can retain a camera's internal sensor rotation on WebKit
++// without exposing rotation/flip to JavaScript. Paint the video presentation
++// first so the encoder receives exactly those pixels, with no metadata needed.
++// Read the live displayed dimensions on every frame (including camera switches),
++// never the track's startup settings or the viewer's device orientation.
++export function createVideoElementCapture() {
++  let canvas;
++  return function capture(video, timestamp) {
++    const width = video.videoWidth;
++    const height = video.videoHeight;
++    if (video.readyState < 2 || !width || !height) {
++      throw new DOMException("Video element has no current frame", "InvalidStateError");
++    }
++    if (!canvas) canvas = document.createElement("canvas");
++    if (canvas.width !== width) canvas.width = width;
++    if (canvas.height !== height) canvas.height = height;
++    const context = canvas.getContext("2d");
++    if (!context) throw new Error("Video capture needs a 2D canvas");
++    context.clearRect(0, 0, width, height);
++    context.drawImage(video, 0, 0, width, height);
++    return new VideoFrame(canvas, { timestamp });
 +  };
 +}
