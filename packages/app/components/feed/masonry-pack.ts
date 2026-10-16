@@ -28,7 +28,7 @@ export interface PackInput<Post, Event> {
   /** Rendered height of a post tile, gap excluded. */
   postHeight: (post: Post) => number;
   /** Rendered height of an event card at the given pixel width, gap excluded. */
-  eventHeight: (width: number) => number;
+  eventHeight: (width: number, event: Event) => number;
   columnWidth: number;
   gap: number;
 }
@@ -107,7 +107,7 @@ export function packMasonry<Post, Event>(
         }
       }
 
-      const h = eventHeight(spanWidth) + gap;
+      const h = eventHeight(spanWidth, tile.event) + gap;
       cols[pair].items.push({
         kind: "event",
         key: tile.key,
@@ -131,7 +131,7 @@ export function packMasonry<Post, Event>(
 
     if (tile.kind === "event" && tile.event !== undefined) {
       cols[min].items.push({ kind: "event", key: tile.key, event: tile.event });
-      cols[min].h += eventHeight(columnWidth) + gap;
+      cols[min].h += eventHeight(columnWidth, tile.event) + gap;
     } else if (tile.post !== undefined) {
       cols[min].items.push({ kind: "post", key: tile.key, post: tile.post });
       cols[min].h += postHeight(tile.post) + gap;
@@ -158,7 +158,7 @@ export function packMasonry<Post, Event>(
  */
 export function tileBounds<Post, Event>(
   result: PackResult<Post, Event>,
-  opts: { postHeight: (post: Post) => number; eventHeight: (width: number) => number; columnWidth: number; gap: number },
+  opts: { postHeight: (post: Post) => number; eventHeight: (width: number, event: Event) => number; columnWidth: number; gap: number },
 ): { column: number; span: number; key: string; top: number; bottom: number }[] {
   const out: { column: number; span: number; key: string; top: number; bottom: number }[] = [];
   const spanWidth = opts.columnWidth * 2 + opts.gap;
@@ -169,7 +169,7 @@ export function tileBounds<Post, Event>(
         item.kind === "spacer"
           ? item.height
           : item.kind === "event"
-            ? opts.eventHeight(item.span === 2 ? spanWidth : opts.columnWidth) + opts.gap
+            ? opts.eventHeight(item.span === 2 ? spanWidth : opts.columnWidth, item.event) + opts.gap
             : opts.postHeight(item.post) + opts.gap;
       if (item.kind !== "spacer") {
         out.push({
@@ -185,3 +185,4 @@ export function tileBounds<Post, Event>(
   });
   return out;
 }
+

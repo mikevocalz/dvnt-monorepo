@@ -1,10 +1,11 @@
 "use client";
 
+import { useLayoutEffect, useRef } from "react";
 import { useRouter } from "solito/navigation";
 import { MapPin, Clock, Users, Calendar, Zap } from "lucide-react";
 import { EventFlyer, type EventFlyerMedia } from "@dvnt/app/components/event/EventFlyer.web";
 import { color } from "@dvnt/app/lib/theme";
-import { CARD_ASPECT, CARD_MAX_WIDTH, CARD_DETAILS_HEIGHT, CARD_HORIZONTAL_PADDING, CARD_VERTICAL_PADDING } from "./feed-event-card-shape";
+import { CARD_ASPECT, CARD_MAX_WIDTH, CARD_HORIZONTAL_PADDING, CARD_VERTICAL_PADDING } from "./feed-event-card-shape";
 
 /** Portrait feed flyer with event details below the unobscured artwork. */
 export interface FeedEventCardData {
@@ -27,12 +28,29 @@ export interface FeedEventCardData {
 // Keep the existing export available to other feed consumers.
 export { CARD_ASPECT } from "./feed-event-card-shape";
 
-export function FeedEventCard({ data }: { data: FeedEventCardData }) {
+export function FeedEventCard({ data, onHeightChange }: {
+  data: FeedEventCardData;
+  onHeightChange?: (id: string, width: number, height: number) => void;
+}) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = cardRef.current;
+    if (!element || !onHeightChange) return;
+    const measure = () => {
+      const { width, height } = element.getBoundingClientRect();
+      if (width > 0 && height > 0) onHeightChange(data.id, width, height);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [data.id, onHeightChange]);
   const router = useRouter();
   const open = () => router.push(`/events/${data.slug ?? data.id}`);
 
   return (
-    <div style={{ width: "100%", maxWidth: CARD_MAX_WIDTH, margin: "0 auto", boxSizing: "border-box", padding: `${CARD_VERTICAL_PADDING}px ${CARD_HORIZONTAL_PADDING}px` }}>
+    <div ref={cardRef} style={{ width: "100%", maxWidth: CARD_MAX_WIDTH, margin: "0 auto", boxSizing: "border-box", padding: `${CARD_VERTICAL_PADDING}px ${CARD_HORIZONTAL_PADDING}px` }}>
       <div
         onClick={open}
         role="button"
@@ -52,7 +70,7 @@ export function FeedEventCard({ data }: { data: FeedEventCardData }) {
           />
         </div>
 
-        <div style={{ height: CARD_DETAILS_HEIGHT, boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 12, padding: "12px 14px 14px" }}>
+        <div style={{ boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 12, padding: "12px 14px 14px" }}>
           {/* top row: category pill / cancelled · date badge */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
             {data.cancelled ? (
@@ -101,3 +119,4 @@ function pill(bg: string): React.CSSProperties {
   return { background: bg, padding: "4px 10px", borderRadius: 10, color: "#fff", fontSize: 10, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase" };
 }
 const meta: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 3, color: "rgba(255,255,255,0.7)", fontSize: 11, lineHeight: "14px" };
+
