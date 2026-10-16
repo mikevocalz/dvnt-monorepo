@@ -66,18 +66,15 @@ import {
   Video,
   VideoOff,
   Hand,
-  Users,
   EyeOff,
   Camera as CameraIcon,
   CircleDot,
   PhoneOff,
   MessageCircle,
-  Volume2,
-  VolumeX,
   Smartphone,
   ShieldAlert,
-  Share2,
 } from "lucide-react";
+import { RoomHeader } from "../ui/web/room-header";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ConnectionBanner, Dialog, RoomTimer } from "@dvnt/ui";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.web";
@@ -114,10 +111,8 @@ import {
 } from "../ui/web/room-panels";
 import {
   ControlButton,
-  CompactReactions,
+  ReactionsPicker,
   FloatingReactions,
-  REACTION_EMOJIS,
-  ReactionBar,
   TimeUpDialog,
   VideoTile,
   type Tile,
@@ -1391,117 +1386,32 @@ function RoomInner({
       {/* Only room content scrolls. The dock never competes with a tall header,
           listener row, enlarged text, or a short landscape viewport. */}
       <div data-room-content className="relative isolate z-0 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-      {/* Header */}
-      <header
-        className="relative z-10 grid shrink-0 grid-cols-[44px_minmax(0,1fr)] items-center gap-2 pb-2 lg:grid-cols-[44px_minmax(0,1fr)_auto] [@media(max-height:500px)_and_(min-width:600px)]:grid-cols-[44px_minmax(0,1fr)_auto] [@media(max-height:500px)_and_(min-width:600px)]:pb-1 [@media(max-height:500px)_and_(min-width:600px)]:pt-[calc(var(--lynk-safe-top,env(safe-area-inset-top))+4px)]"
-        style={{ paddingTop: "calc(var(--lynk-safe-top, env(safe-area-inset-top)) + 8px)", paddingLeft: "max(12px, env(safe-area-inset-left))", paddingRight: "max(12px, env(safe-area-inset-right))" }}
-      >
-        <button
-          type="button"
-          onClick={requestLeave}
-          aria-label="Back"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/8 active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
-        >
-          <ArrowLeft size={20} color="#fff" />
-        </button>
-        <div className="flex min-w-0 flex-col items-start lg:items-center">
-          <span className="flex max-w-full min-w-0 items-center gap-2">
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ backgroundColor: connecting ? "#facc15" : ACCENT }}
-            />
-            <span className="min-w-0 truncate text-[15px] font-semibold">{roomTitle}</span>
-            {isHost ? (
-              <span className="rounded-md bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-extrabold text-blue-200">
-                HOST
-              </span>
-            ) : null}
-          </span>
-          <span className="flex max-w-full min-w-0 items-center gap-2 text-xs text-white/50">
-            <span className="flex shrink-0 items-center gap-1">
-              <Users size={12} /> {participantCount}
-            </span>
-            {lynkEvent ? (
-              <button
-                type="button"
-                data-lynk-event={lynkEvent.id}
-                onClick={() => router.push(`/feed/events/${lynkEvent.id}`)}
-                className="min-w-0 max-w-[32vw] truncate rounded-md bg-[#8A40CF]/25 px-1.5 py-0.5 text-[10px] font-semibold text-[#D9B8FF] hover:bg-[#8A40CF]/40"
-                title={`Go to ${lynkEvent.title}`}
-              >
-                {lynkEvent.title}
-              </button>
-            ) : null}
-          </span>
-        </div>
-        <span className="col-span-2 flex min-w-0 flex-wrap items-center justify-center gap-1.5 lg:col-span-1 lg:justify-end [@media(max-height:500px)_and_(min-width:600px)]:col-span-1 [@media(max-height:500px)_and_(min-width:600px)]:justify-end">
-          {showTimer ? (
-            <RoomTimer
-              startedAt={timerStartedAt}
-              durationMs={timerDurationMs}
-              onTimeUp={() => {
-                setShowTimeUp(true);
-                // Free session is over — stop broadcasting so no camera/mic keeps
-                // running behind the upgrade sheet.
-                lynkRef.current.setCameraEnabled(false);
-                lynkRef.current.setMicEnabled(false);
-              }}
-            />
-          ) : null}
-          {isHost && raisedHandCount > 0 ? (
-            <button
-              type="button"
-              onClick={openHandQueue}
-              aria-label={`${raisedHandCount} raised hands`}
-              className="flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-xl border border-[#FF5BFC]/40 bg-[#FF5BFC]/20 px-2.5 py-1.5 text-xs font-extrabold text-[#FF5BFC]"
-            >
-              <Hand size={13} /> {raisedHandCount}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={shareRoom}
-            aria-label="Share invite link"
-            title="Share invite link"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/8 text-white/90 hover:bg-white/15"
-          >
-            <Share2 size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setParticipantsOpen(true)}
-            aria-label="Participants"
-            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-xl bg-white/8 px-2.5 py-1.5 text-xs font-bold text-white/90 hover:bg-white/15"
-          >
-            <Users size={14} /> {participantCount}
-          </button>
-          {isHost ? (
-            <>
-              <button
-                type="button"
-                onClick={muteAll}
-                aria-label="Mute everyone"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/8 hover:bg-white/15"
-                style={{ color: ROSE }}
-              >
-                <VolumeX size={16} />
-              </button>
-              {/* Mute-all locks everyone out of their own microphone, so the
-                  release has to be reachable from the same place. Without it a
-                  host could mute the room and have no way to give it back. */}
-              <button
-                type="button"
-                onClick={unmuteAll}
-                aria-label="Let everyone unmute"
-                title="Lift the mute — participants choose when to speak"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/8 text-white/80 hover:bg-white/15"
-              >
-                <Volume2 size={16} />
-              </button>
-            </>
-          ) : null}
-        </span>
-      </header>
+      <RoomHeader
+        title={roomTitle}
+        connecting={connecting}
+        isHost={isHost}
+        participantCount={participantCount}
+        raisedHandCount={raisedHandCount}
+        event={lynkEvent}
+        onBack={requestLeave}
+        onShare={shareRoom}
+        onParticipants={() => setParticipantsOpen(true)}
+        onHandQueue={openHandQueue}
+        onMuteAll={muteAll}
+        onUnmuteAll={unmuteAll}
+        onEvent={() => lynkEvent && router.push(`/feed/events/${lynkEvent.id}`)}
+        timer={showTimer ? <RoomTimer
+          startedAt={timerStartedAt}
+          durationMs={timerDurationMs}
+          compact
+          onTimeUp={() => {
+            setShowTimeUp(true);
+            // The final-minute badge stays visible; expiry still stops media.
+            lynkRef.current.setCameraEnabled(false);
+            lynkRef.current.setMicEnabled(false);
+          }}
+        /> : null}
+      />
       {admitted && !rosterReady && (
         <div className="mx-4 mb-3 rounded-xl bg-amber-400/10 px-4 py-3 text-sm text-amber-100" role="status" aria-live="polite" data-testid="lynk-roster-pending">
           <p className="font-semibold">{rosterError ? "Couldn't load participants" : "Connecting participants…"}</p>
@@ -1593,9 +1503,8 @@ function RoomInner({
       <FloatingReactions reactions={reactions} />
 
       {/* Controls bar */}
-      <footer data-room-controls className="relative z-10 flex shrink-0 flex-col items-center gap-1 border-t border-white/8 bg-[#090b15]/95 pt-1 sm:gap-2" style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 8px)", paddingLeft: "max(8px, env(safe-area-inset-left))", paddingRight: "max(8px, env(safe-area-inset-right))" }}>
-        <div className="[@media(max-height:500px)]:hidden"><ReactionBar onSend={sendReaction} /></div>
-        <div className="flex w-full items-center justify-center gap-2 sm:gap-4">
+      <footer data-room-controls className="relative z-30 flex shrink-0 flex-col items-center gap-1 border-t border-white/8 bg-[#090b15]/95 pt-1 sm:gap-2" style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 8px)", paddingLeft: "max(8px, env(safe-area-inset-left))", paddingRight: "max(8px, env(safe-area-inset-right))" }}>
+        <div className="flex w-full items-center justify-center gap-1 min-[360px]:gap-2 sm:gap-4">
           <ControlButton
             onClick={toggleMic}
             active={isMicOn}
@@ -1639,7 +1548,7 @@ function RoomInner({
             <MessageCircle size={24} />
           </ControlButton>
 
-          <CompactReactions onSend={sendReaction} />
+          <ReactionsPicker onSend={sendReaction} overlayOpen={isChatOpen || isHandQueueOpen || isParticipantsOpen || showEndConfirm || showTimeUp} />
           <ControlButton onClick={requestLeave} danger label="Leave Lynk">
             <PhoneOff size={24} />
           </ControlButton>

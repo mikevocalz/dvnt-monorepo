@@ -10,4 +10,6 @@ export interface RoomTimerProps {
   /** Fired once, when the countdown reaches zero. */
   onTimeUp?: () => void;
   className?: string;
+  /** Dense room-header metadata; same countdown/announcements, less chrome. */
+  compact?: boolean;
 }

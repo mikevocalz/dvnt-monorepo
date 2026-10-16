@@ -56,7 +56,7 @@ const fixture = `
   export const videoApi = {
     subscribeToMembers:(_id,_change,options)=> {f.membersSync=options.onSync;f.membersError=options.onError;queueMicrotask(()=>f.deliverRoster());return()=>{f.membersSync=null;f.membersError=null}},
     subscribeToRoomEvents:()=>noop,
-    muteAll:async()=>({ok:true}),unmuteAll:async()=>({ok:true}),mutePeer:async()=>({ok:true}),unmutePeer:async()=>({ok:true}),
+    muteAll:async()=>{f.actions.push('muteAll');return {ok:true}},unmuteAll:async()=>{f.actions.push('unmuteAll');return {ok:true}},mutePeer:async()=>({ok:true}),unmutePeer:async()=>({ok:true}),
     promotePeer:async()=>({ok:true}),demotePeer:async()=>({ok:true}),kickUser:async()=>({ok:true})
   };
   // The production timer only renders during the final minute. Keep a real
@@ -165,10 +165,11 @@ async function buildFixture() {
   return {js:bundle.outputFiles[0].text,css:css.css};
 }
 
-const cases = [
+const allCases = [
   {name:'narrow-short-phone',width:320,height:480},
   {name:'small-phone',width:320,height:568},
   {name:'phone-375',width:375,height:667},
+  {name:'chrome-phone-393',width:393,height:640},
   {name:'notched-phone',width:390,height:844,insets:{top:47,bottom:34,left:0,right:0}},
   {name:'landscape-667',width:667,height:375,insets:{top:0,bottom:21,left:44,right:44}},
   {name:'landscape-844',width:844,height:390,insets:{top:0,bottom:21,left:47,right:47}},
@@ -176,6 +177,7 @@ const cases = [
   {name:'tablet-landscape',width:1024,height:768,insets:{top:24,bottom:20,left:0,right:0}},
   {name:'desktop',width:1440,height:900},
 ];
+const cases = process.env.LYNK_LAYOUT_CASES ? allCases.filter(c=>process.env.LYNK_LAYOUT_CASES.split(',').includes(c.name)) : allCases;
 const zeroInsets = {top:0,right:0,bottom:0,left:0};
 const tick = (page) => page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 const failures=[];
@@ -258,11 +260,19 @@ async function assertWebGeometry(page, c, visible={top:0,height:c.height},checkH
   await assertReachable(buttons,c.name+' web dock');
   if(checkHeader) {
     const header=page.locator('[data-room-content] > header');
-    const headerTargets=await dimensions(header.locator('button,[role="timer"]'));
+    const headerTargets=await dimensions(header.locator('button:visible,[role="timer"]:visible'));
     assertContained(headerTargets,bounds,c.name+' header');
     assertNoOverlap(headerTargets,c.name+' header');
     assertNoOverlap(await dimensions(header.locator(':scope > button,:scope > div,:scope > span')),c.name+' header title and control regions');
-    await assertReachable(header.locator('button'),c.name+' header');
+    await assertReachable(header.locator('button:visible'),c.name+' header');
+    const [back]=await dimensions(header.getByRole('button',{name:'Back',exact:true}));
+    const [identity]=await dimensions(header.locator('[data-room-header-title]'));
+    const [actions]=await dimensions(header.locator('[data-room-header-actions]'));
+    assert.ok(Math.abs(back.y+back.height/2-(identity.y+identity.height/2))<=1,c.name+': title stays in the same header row as Back');
+    assert.ok(Math.abs(back.y-actions.y)<=1&&Math.abs(back.height-actions.height)<=1,c.name+': Share/actions stay on the same single 44px header row');
+    assert.ok(identity.height<=44,c.name+': identity/timer do not create another header row');
+    assert.ok(actions.x>=identity.right-1,c.name+': actions stay to the right of the title');
+    assert.equal(await header.locator('[data-room-header-title]').evaluate(el=>el.scrollWidth>el.clientWidth+1),false,c.name+': title, timer and event must fit their grid column');
   }
   const [footerRect]=await dimensions(dock);
   for(const region of await dimensions(page.locator('[data-room-content]'))) {
@@ -345,25 +355,69 @@ async function webCases(browser,url) {
       await page.evaluate(()=>window.fixture.configure({publishers:12,listeners:18,reactions:Array.from({length:12},(_,i)=>({id:'r'+i,emoji:'🔥'}))}));
       await tick(page);
       await assertWebGeometry(page,c);
-      assert.equal(await page.locator('footer button:visible').count(),c.height<=500?6:11,'primary controls and responsive reactions');
-      if(c.height<=500) {
-        await page.getByRole('button',{name:'Reactions',exact:true}).click();
-        const reactionButtons=page.getByRole('button',{name:/^React /});
-        assert.equal(await reactionButtons.count(),6,'all reactions remain available in short landscape');
-        assertContained(await dimensions(reactionButtons),{left:c.insets?.left||0,right:c.width-(c.insets?.right||0),top:0,bottom:c.height-(c.insets?.bottom||0)},c.name+' compact reactions');
-        await assertReachable(reactionButtons,c.name+' compact reactions');
-        await page.getByRole('button',{name:'React 🔥',exact:true}).click();
-        await page.waitForFunction(()=>window.fixture.actions.includes('reaction:🔥'));
-      }
+      assert.equal(await page.locator('footer button:visible').count(),6,'exactly six dock controls at every video viewport size');
+      const reactionsToggle=page.getByRole('button',{name:'Reactions',exact:true});
+      assert.equal(await reactionsToggle.count(),1,'one reaction toggle in the dock');
+      assert.equal(await page.getByRole('button',{name:/^React /}).count(),0,'no permanent emoji row');
+      const mountsBeforePicker=await page.evaluate(()=>window.fixture.attachments.length);
+      const dockBefore=await page.locator('[data-room-controls]').boundingBox();
+      await reactionsToggle.click();
+      const reactionButtons=page.getByRole('button',{name:/^React /});
+      assert.equal(await reactionButtons.count(),6,'all six reactions expand from the dock');
+      assert.equal(await reactionsToggle.getAttribute('aria-expanded'),'true');
+      const bounds={left:c.insets?.left||0,right:c.width-(c.insets?.right||0),top:c.insets?.top||0,bottom:c.height-(c.insets?.bottom||0)};
+      assertContained(await dimensions(reactionButtons),bounds,c.name+' reactions');
+      await assertReachable(reactionButtons,c.name+' reactions');
+      assert.equal((await page.locator('[data-room-controls]').boundingBox()).height,dockBefore.height,'opening picker must not take stage/dock layout height');
+      await evidence(page,'web-'+c.name+'-'+role+'-picker');
+      await page.getByRole('button',{name:'React 🔥',exact:true}).click();
+      await page.waitForFunction(()=>window.fixture.actions.includes('reaction:🔥'));
+      assert.equal(await reactionButtons.count(),0,'selection closes picker');
+      assert.equal(await reactionsToggle.getAttribute('aria-expanded'),'false');
+      assert.equal(await reactionsToggle.evaluate(el=>el===document.activeElement),true,'selection returns focus to toggle');
+      await reactionsToggle.click();await page.keyboard.press('Escape');
+      assert.equal(await reactionButtons.count(),0,'Escape closes picker');
+      assert.equal(await reactionsToggle.evaluate(el=>el===document.activeElement),true,'Escape returns focus to toggle');
+      await reactionsToggle.click();await reactionsToggle.click();
+      assert.equal(await reactionButtons.count(),0,'toggle closes repeatedly');
+      await reactionsToggle.click();
+      await page.locator('[data-room-header-title]').click();
+      assert.equal(await reactionButtons.count(),0,'outside tap dismisses picker');
+      assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mountsBeforePicker,'picker never remounts media');
       if(role==='host') {
         await page.getByRole('timer').waitFor();
-        assert.equal(await page.getByRole('button',{name:'3 raised hands',exact:true}).count(),1,'host queue must be tested with nonempty hands');
+        const more=page.getByRole('button',{name:'Room actions, 3 raised hands',exact:true});
+        if(c.width<640) {
+          await more.click();
+          const menu=page.getByRole('group',{name:'Room actions',exact:true});
+          assertContained(await dimensions(menu.locator('button')),bounds,c.name+' room actions');
+          await assertReachable(menu.locator('button'),c.name+' room actions');
+          await evidence(page,'web-'+c.name+'-host-actions');
+          await menu.getByRole('button',{name:'Mute everyone',exact:true}).click();
+          assert.equal(await menu.count(),0,'moderation selection closes overflow');
+          await more.click();await menu.getByRole('button',{name:'Let everyone unmute',exact:true}).click();
+          await page.waitForFunction(()=>window.fixture.actions.includes('muteAll')&&window.fixture.actions.includes('unmuteAll'));
+          await more.click();await page.keyboard.press('Escape');
+          assert.equal(await menu.count(),0,'Escape closes room actions');
+          assert.equal(await more.evaluate(el=>el===document.activeElement),true,'Escape returns focus to More');
+          await more.click();await reactionsToggle.click();
+          assert.equal(await menu.count(),0,'outside tap dismisses room actions');
+          await reactionsToggle.click();
+          await more.click();
+        }
+        await page.locator('button[aria-label="3 raised hands"]:visible').click();
+        const queue=page.getByRole('dialog',{name:/Raised hands/});
+        await queue.waitFor();
+        assert.equal(await page.getByRole('group',{name:'Room actions',exact:true}).count(),0,'queue opens after closing overflow');
+        await queue.getByRole('button',{name:'Close',exact:true}).click();
+        assert.equal(await page.getByRole('group',{name:'Room actions',exact:true}).count(),0,'closing queue does not resurrect overflow');
       }
+      await reactionsToggle.click();
       await page.getByRole('button',{name:'Chat',exact:true}).click();
       const chat=page.getByRole('dialog',{name:'Chat',exact:true});
       await chat.waitFor();
       const chatButtons=chat.getByRole('button',{name:/^(Close|Send message)$/});
-      const bounds={left:c.insets?.left||0,right:c.width-(c.insets?.right||0),top:c.insets?.top||0,bottom:c.height-(c.insets?.bottom||0)};
+      assert.equal(await reactionButtons.count(),0,'opening chat dismisses picker');
       assertContained(await dimensions(chatButtons),bounds,c.name+' chat');
       await assertReachable(chatButtons,c.name+' chat');
       await chat.getByRole('textbox',{name:'Message',exact:true}).fill('Layout fixture message');
@@ -372,6 +426,7 @@ async function webCases(browser,url) {
       assert.equal(await chat.getByRole('textbox',{name:'Message',exact:true}).inputValue(),'','successful send clears draft');
       await chat.getByRole('button',{name:'Close',exact:true}).click();
       await chat.waitFor({state:'detached'});
+      assert.equal(await reactionButtons.count(),0,'closing chat does not resurrect picker');
       await assertWebGeometry(page,c);
       assert.deepEqual(errors,[],c.name+' runtime errors');
       assert.deepEqual(unexpectedRequests,[],c.name+' must not access live endpoints');
@@ -520,6 +575,51 @@ async function keyboardCase(browser,url) {
     await evidence(page,'web-keyboard-restored');
     console.log('PASS keyboard visualViewport resize, scroll offset, send, close and restore');
   } catch(error) {await evidence(page,'FAIL-keyboard',error);recordFailure('keyboard',error)} finally {await context.close()}
+}
+
+async function browserChromeCase(browser,url) {
+  // The supplied iPhone Chrome screenshot has much less visible content height
+  // than the layout viewport. Exercise the production visualViewport listener,
+  // with browser chrome opening/closing independently of window.innerHeight.
+  const c={name:'chrome-toolbar',width:393,height:852};
+  const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'host');
+  try {
+    await page.addInitScript(()=>{
+      const vv=new EventTarget();Object.assign(vv,{height:640,width:393,offsetTop:0,offsetLeft:0,scale:1});
+      Object.defineProperty(window,'visualViewport',{configurable:true,value:vv});
+      window.setFixtureViewport=patch=>{Object.assign(vv,patch);vv.dispatchEvent(new Event('resize'));vv.dispatchEvent(new Event('scroll'))};
+      Object.defineProperty(navigator,'share',{configurable:true,value:async()=>window.fixture.actions.push('share')});
+    });
+    await page.reload();await page.locator('main[data-room-phase="connected"]').waitFor();await tick(page);
+    const mediaMounts=await page.evaluate(()=>window.fixture.attachments.length);
+    for(const height of [640,730,560,640]) {
+      await page.evaluate(height=>window.setFixtureViewport({height}),height);await tick(page);
+      await assertWebGeometry(page,c,{top:0,height});
+      const bounds={left:0,right:c.width,top:0,bottom:height};
+      await page.getByRole('button',{name:'Reactions',exact:true}).click();
+      const reactions=page.getByRole('button',{name:/^React /});
+      assertContained(await dimensions(reactions),bounds,'Chrome toolbar reactions');await assertReachable(reactions,'Chrome toolbar reactions');
+      await evidence(page,'web-chrome-toolbar-'+height+'-picker');
+      await page.getByRole('button',{name:'React ❤️',exact:true}).click();
+      await page.getByRole('button',{name:'Room actions',exact:true}).click();
+      const menu=page.getByRole('group',{name:'Room actions',exact:true});
+      assertContained(await dimensions(menu.locator('button')),bounds,'Chrome toolbar host actions');await assertReachable(menu.locator('button'),'Chrome toolbar host actions');
+      await page.keyboard.press('Escape');
+    }
+    await page.getByRole('button',{name:'Share invite link',exact:true}).click();
+    await page.waitForFunction(()=>window.fixture.actions.includes('share'));
+    assert.ok(!await page.evaluate(()=>window.fixture.actions.includes('endRoom')),'sharing must not leave/end the room');
+    await page.getByRole('button',{name:'Reactions',exact:true}).click();
+    await page.getByRole('button',{name:'Participants',exact:true}).click();
+    const participants=page.getByRole('dialog',{name:/In the room/});await participants.waitFor();
+    assert.equal(await page.getByRole('group',{name:'Choose a reaction',exact:true}).count(),0,'participants panel closes picker');
+    await participants.getByRole('button',{name:'Close',exact:true}).click();
+    assert.equal(await page.getByRole('group',{name:'Choose a reaction',exact:true}).count(),0,'closing participants leaves picker closed');
+    assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mediaMounts,'browser chrome, menus and panels preserve canvas ownership');
+    assert.deepEqual(errors,[]);assert.deepEqual(unexpectedRequests,[]);
+    await evidence(page,'web-chrome-toolbar-restored');
+    console.log('PASS screenshot-like Chrome visualViewport: 393×852 layout / 560–730px visible, single header row, picker, Share, participants and stable media');
+  } catch(error) {await evidence(page,'FAIL-browser-chrome',error);recordFailure('browser-chrome',error)} finally {await context.close()}
 }
 
 async function groupStageCase(browser,url) {
@@ -685,7 +785,8 @@ async function main() {
     // system executable or change sandbox settings to circumvent a denied run.
     browser=await load('@playwright/test').chromium.launch({headless:true});
     const url='http://127.0.0.1:'+server.address().port;
-    await webCases(browser,url);await rosterNoticeCases(browser,url);await keyboardCase(browser,url);await groupStageCase(browser,url);await timeUpCases(browser,url);await nativeCases(browser,url);
+    const suites={web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
+    for(const name of (process.env.LYNK_LAYOUT_SUITES||Object.keys(suites).join(',')).split(','))await suites[name](browser,url);
     assert.equal(failures.length,0,'Rendered regression failures:\n'+JSON.stringify(failures,null,2));
     console.log('PASS all rendered Lynk viewport, room and control layout regressions');
   } finally {await browser?.close();await new Promise(resolve=>server.close(resolve))}

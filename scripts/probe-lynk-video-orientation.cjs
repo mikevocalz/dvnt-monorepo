@@ -13,7 +13,7 @@ const sdk = (await build({ plugins: [{ name: 'stage-presentation-adapters', setu
   builder.onResolve({ filter: /^(react|react-dom)(\/.*)?$/ }, args => ({path: require.resolve(args.path, {paths: dependencyPaths})}));
   builder.onResolve({ filter: /^(lucide-react|\.\/room-panels)$/ }, args => ({ path: args.path, namespace: 'stage-stub' }));
   builder.onLoad({ filter: /.*/, namespace: 'stage-stub' }, args => ({ contents: args.path === 'lucide-react'
-    ? 'export const Crown=()=>null,Hand=()=>null,Mic=()=>null,MicOff=()=>null,RotateCw=()=>null,Zap=()=>null;'
+    ? 'export const Crown=()=>null,Hand=()=>null,Mic=()=>null,MicOff=()=>null,RotateCw=()=>null,Smile=()=>null,Zap=()=>null;'
     : 'export const SquareAvatar=()=>null;', loader: 'js' }));
 } }], nodePaths: [path.join(process.env.LYNK_PROBE_DEPS || process.cwd(), 'node_modules')], jsx: 'automatic', stdin: { contents: `import * as Publish from "@moq/publish"; import {createOrientationNormalizer} from ${JSON.stringify(helperPath)}; window.Publish = Publish; window.createOrientationNormalizer = createOrientationNormalizer;
 import React from "react"; import {createRoot} from "react-dom/client";
