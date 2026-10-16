@@ -1,4 +1,4 @@
-/** Feed event flyer: portrait artwork, with details in a separate panel. */
+/** Feed event flyer: square artwork, with details in a separate panel. */
 import { View, Text } from "react-native";
 import { Image } from "expo-image";
 import { DVNTAnimatedVideoView } from "@dvnt/app/components/media/DVNTAnimatedVideoView";
@@ -114,7 +114,7 @@ export const FeedEventCard = memo(function FeedEventCard({
                   uri={event.flyerVideoUrl}
                   width="100%"
                   height="100%"
-                  contentFit="contain"
+                  contentFit="cover"
                   isPlaying
                   muted
                 />
@@ -131,7 +131,7 @@ export const FeedEventCard = memo(function FeedEventCard({
                 <Image
                   source={{ uri: event.image }}
                   style={{ width: "100%", height: "100%", position: "absolute" }}
-                  contentFit="contain"
+                  contentFit="cover"
                 />
               </View>
             ) : null}

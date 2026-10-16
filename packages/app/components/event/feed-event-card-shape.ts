@@ -1,6 +1,6 @@
-/** Feed-only 4:6 portrait canvas; contain keeps the complete artwork visible. */
-export const CARD_ASPECT = 4 / 6;
-/** Keep portrait flyers readable without becoming tablet-sized posters. */
+/** Feed-only 4:4 square canvas; cover fills it edge-to-edge. */
+export const CARD_ASPECT = 1;
+/** Keep feed flyers readable without becoming tablet-sized posters. */
 export const CARD_MAX_WIDTH = 384;
 /** First-render estimate only; mounted cards report their actual content height. */
 export const ESTIMATED_CARD_DETAILS_HEIGHT = 128;
