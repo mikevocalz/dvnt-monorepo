@@ -34,7 +34,9 @@ export function RoomViewport({ children }: { children: ReactNode }) {
     <div
       ref={ref}
       data-room-viewport
-      className="fixed inset-x-0 top-[var(--lynk-visible-top,0px)] isolate h-[var(--lynk-visible-height,100dvh)] overflow-hidden bg-[#06070d] [&>#anticapture-wrapper]:h-full [&>#anticapture-wrapper]:min-h-0"
+      // AntiCapture also renders a notice sibling. Let it reserve space rather
+      // than adding its height on top of a full-height room and clipping the dock.
+      className="fixed inset-x-0 top-[var(--lynk-visible-top,0px)] isolate flex h-[var(--lynk-visible-height,100dvh)] flex-col overflow-hidden bg-[#06070d] [&>#anticapture-wrapper]:min-h-0 [&>#anticapture-wrapper]:flex-1"
     >
       {children}
     </div>
