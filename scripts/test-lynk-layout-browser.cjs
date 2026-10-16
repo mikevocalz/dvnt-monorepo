@@ -305,9 +305,18 @@ async function webCases(browser,url) {
       const privacyNotice=page.locator('[data-room-viewport] > [class*="alert-anticapture"]');
       assert.match(await privacyNotice.textContent(),/Press enter to continue/,'the real privacy notice is part of initial layout');
       await assertWebGeometry(page,c);
+      if(c.insets?.top) {
+        const [noticeRect]=await dimensions(privacyNotice);
+        const [backRect]=await dimensions(page.getByRole('button',{name:'Back',exact:true}));
+        assert.ok(Math.abs(backRect.y-noticeRect.bottom-8)<=1,c.name+': the visible notice consumes top safe area once, without a second header inset');
+      }
       const mountedBeforeNoticeDismiss=await page.evaluate(()=>window.fixture.attachments.length);
       await page.keyboard.press('Enter');await privacyNotice.waitFor({state:'hidden'});await tick(page);
       await assertWebGeometry(page,c);
+      if(c.insets?.top) {
+        const [backRect]=await dimensions(page.getByRole('button',{name:'Back',exact:true}));
+        assert.ok(Math.abs(backRect.y-c.insets.top-8)<=1,c.name+': dismissed notice restores the header top safe area');
+      }
       assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mountedBeforeNoticeDismiss,'privacy notice dismissal must not remount media');
       // Exercise the production stage's distinct solo/duo layouts before
       // switching to the crowd view. No copied HTML is used for any mode.
@@ -484,6 +493,12 @@ async function groupStageCase(browser,url) {
     await assertFullyVisibleCard(nextCard,c.name+' participant after pinning');
     await assertReachable(page.getByRole('button',{name:'Focus Participant 18',exact:true}),c.name+' focus after pinning');
     assert.equal(await page.evaluate(()=>window.fixture.attachments.length),count,'browsing after pinning must preserve media mounts');
+    // Re-clicking the already pinned participant does not change its React
+    // state key. It must still reveal the full picture after outer scrolling.
+    await last.click();await tick(page);
+    await assertFullyVisibleCard(focused,c.name+' refocused same participant');
+    assert.equal(await page.evaluate(()=>window.fixture.attachments.length),count,'refocusing the same publisher preserves media mounts');
+    await nextCard.scrollIntoViewIfNeeded();await tick(page);
     await page.evaluate(()=>window.fixture.configure({publishers:19}));await tick(page);
     assert.equal(await page.locator('[data-tile]').count(),19,'departed publisher is removed');
     assert.equal(await page.locator('[data-stage-card="local"][data-focused="true"]').count(),1,'departed focus falls back to the host');
