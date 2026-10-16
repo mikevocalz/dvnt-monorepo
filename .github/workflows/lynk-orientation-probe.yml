@@ -1,0 +1,29 @@
+name: Lynk synthetic orientation probe
+on:
+  pull_request:
+    paths:
+      - 'scripts/probe-lynk-video-orientation.cjs'
+      - '.github/workflows/lynk-orientation-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated probe tools
+        run: npm install --prefix "$RUNNER_TEMP/lynk-orientation" --no-save --no-package-lock playwright@1.56.1 esbuild@0.25.11 @moq/publish@0.2.14 @moq/hang@0.2.9 @moq/json@0.0.2 @moq/net@0.1.4 @moq/signals@0.1.8
+      - name: Log resolved diagnostic dependencies
+        run: npm ls --prefix "$RUNNER_TEMP/lynk-orientation" --all
+      - name: Install Chromium
+        run: "$RUNNER_TEMP/lynk-orientation/node_modules/.bin/playwright install --with-deps chromium"
+      - name: Probe generated video only
+        env:
+          NODE_PATH: ${{ runner.temp }}/lynk-orientation/node_modules
+          LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-orientation
+        run: node scripts/probe-lynk-video-orientation.cjs
