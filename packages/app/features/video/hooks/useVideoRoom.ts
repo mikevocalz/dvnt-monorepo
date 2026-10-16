@@ -116,6 +116,7 @@ export function useVideoRoom({
 
   // The roster carries identity for remote tiles (MoQ paths carry none).
   const [members, setMembers] = useState<RoomMember[]>([]);
+  const [rosterState, setRosterState] = useState({ key: "", ready: false, error: false });
 
   // ── Internal refs (timers, subscriptions) ───────────────────────────
   const tokenExpiresAtRef = useRef<Date | null>(null);
@@ -372,6 +373,7 @@ export function useVideoRoom({
     }
 
     getStore().setConnectionStatus("connecting");
+    setRosterState({ key, ready: false, error: false });
 
     try {
       const result = await videoApi.joinRoom(roomId, anonymousRef.current);
@@ -449,10 +451,16 @@ export function useVideoRoom({
       unsubscribeMembersRef.current?.();
       unsubscribeMembersRef.current = videoApi.subscribeToMembers(roomId, () => {}, {
         onSync: (snapshot) => {
-          if (epoch === joinEpoch.current && key === admissionKeyRef.current) setMembers(snapshot);
+          if (epoch === joinEpoch.current && key === admissionKeyRef.current) {
+            setMembers(snapshot);
+            setRosterState({ key, ready: true, error: false });
+          }
         },
         onError: () => {
-          if (epoch === joinEpoch.current && key === admissionKeyRef.current) onErrorRef.current?.("Participants couldn't refresh. Reconnecting…");
+          if (epoch === joinEpoch.current && key === admissionKeyRef.current) {
+            // Keep the last good roster and media on later refresh failures.
+            setRosterState((previous) => ({ key, ready: previous.key === key && previous.ready, error: true }));
+          }
         },
       });
 
@@ -654,6 +662,8 @@ export function useVideoRoom({
   return {
     room: store.room,
     isAdmitted: admitted,
+    rosterReady: admitted && rosterState.key === admissionKey && rosterState.ready,
+    rosterError: admitted && rosterState.key === admissionKey && rosterState.error,
     notifyRoomEnded: notifyEnded,
     localUser: store.localUser,
     participants: store.participants,
