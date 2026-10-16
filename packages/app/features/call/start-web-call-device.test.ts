@@ -4,13 +4,13 @@ import { startWebCallDevice, changeWebCallDevice } from "./start-web-call-device
 
 test("already running media is not toggled off during joining", async () => {
   let toggled = false;
-  assert.equal(await startWebCallDevice(() => true, async () => { toggled = true; }, () => false), true);
+  assert.equal(await startWebCallDevice(() => true, async () => { toggled = true; return undefined; }, () => false), true);
   assert.equal(toggled, false);
 });
 
 test("cancel before acquiring does not request permission", async () => {
   let toggled = false;
-  assert.equal(await startWebCallDevice(() => false, async () => { toggled = true; }, () => true), false);
+  assert.equal(await startWebCallDevice(() => false, async () => { toggled = true; return undefined; }, () => true), false);
   assert.equal(toggled, false);
 });
 

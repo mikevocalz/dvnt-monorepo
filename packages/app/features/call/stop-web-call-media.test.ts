@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { stopWebCallMedia } from "./stop-web-call-media.ts";
 
 test("disconnect, both SDK devices and every capture track are released", () => {
@@ -27,7 +28,7 @@ test("repeated teardown is safe when devices were never acquired", () => {
 
 for (const path of ["./call.web.tsx", "../video/video-room.web.tsx"]) {
   test(`${path}: navigation/unmount releases media as well as the explicit leave button`, () => {
-    const source = readFileSync(new URL(path, import.meta.url), "utf8");
+    const source = readFileSync(resolve(import.meta.dirname, path), "utf8");
     assert.equal(source.match(/stopWebCallMedia\(leaveRoomRef\.current, cameraRef\.current, micRef\.current\)/g)?.length, 2);
     assert.match(source.slice(source.indexOf("// Leave Fishjam on unmount")), /return \(\) => \{[\s\S]*?stopWebCallMedia/);
   });
