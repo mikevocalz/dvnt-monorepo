@@ -121,26 +121,31 @@ for (const [kind, media] of [
   ["video", { videoFlyerUrl: "https://example.test/flyer.mp4" }],
   ["image", { staticFlyerUrl: "https://example.test/flyer.png" }],
 ]) {
-  test(`web ${kind} is contained in portrait media above details`, () => {
+  test(`web ${kind} is contained in 4:6 media above details`, () => {
     const doc = render(WebCard, { data: { id: "event-1", title, category: "Music", dateDay: "30", month: "OCT", media: { title, ...media } } });
     const asset = doc.querySelector(kind === "video" ? "video" : "img");
     assert.ok(asset);
     assert.equal(asset.style.objectFit, "contain");
-    assert.equal(asset.parentElement.style.aspectRatio, "0.5625");
+    assert.equal(asset.parentElement.style.aspectRatio, String(4 / 6));
     assert.equal(asset.parentElement.querySelector("h3"), null);
     const card = doc.querySelector('[role="button"]');
     assert.equal(card.querySelector("h3").textContent, title);
-    assert.equal(card.children[1].style.height, "200px");
+    assert.equal(card.children[1].style.height, "", "footer must size to its content");
+    assert.equal(card.children[1].style.minHeight, "", "footer must not reserve blank space");
+    assert.notEqual(card.children[1].style.justifyContent, "space-between");
     assert.equal(card.children[0].querySelector('[style*="linear-gradient"]'), null);
     if (kind === "video") for (const attr of ["muted", "autoplay", "loop", "playsinline"]) assert.ok(asset.hasAttribute(attr));
   });
-  test(`native ${kind} is contained above details and retains navigation`, () => {
+  test(`native ${kind} is contained in 4:6 media above details and retains navigation`, () => {
     const doc = render(NativeCard, { event: { id: "event-1", title, image: media.staticFlyerUrl, flyerVideoUrl: media.videoFlyerUrl, category: "Music" } });
     const asset = doc.querySelector(kind === "video" ? "video" : "img");
     assert.equal(asset.style.objectFit, "contain");
-    const canvas = [...doc.querySelectorAll("div")].find((node) => node.style.aspectRatio === "0.5625");
+    const canvas = [...doc.querySelectorAll("div")].find((node) => node.style.aspectRatio === String(4 / 6));
+    assert.ok(canvas, "4:6 media canvas exists");
     assert.ok(canvas.contains(asset));
     assert.ok(!canvas.textContent.includes(title));
+    assert.equal(canvas.nextElementSibling.style.minHeight, "", "native footer must not reserve blank space");
+    assert.ok(![...canvas.nextElementSibling.querySelectorAll("div")].some((node) => node.style.flex === "1"), "native footer must not stretch its content away from badges");
     assert.equal(doc.querySelector("[data-href]").getAttribute("data-href"), "/(protected)/events/event-1");
   });
 }
@@ -154,33 +159,91 @@ test("web missing media keeps generated fallback title", () => {
 });
 
 if (process.env.FEED_FLYER_BROWSER === "1") {
-  test("Chromium: responsive card matches reserved masonry height with unobscured artwork", async () => {
+  test("Chromium: compact responsive footer preserves artwork and long text", async () => {
     const { chromium } = dependency("playwright");
-    const { feedEventCardHeight } = loadSource("packages/app/components/event/feed-event-card-shape.ts");
+      const { build } = dependency("esbuild");
+      const bundled = await build({
+        stdin: { contents: `
+          import React from "react";
+          import { createRoot } from "react-dom/client";
+          import { FeedEventCard } from "./packages/app/components/event/FeedEventCard.web.tsx";
+          const root = createRoot(document.querySelector("main"));
+          const onHeightChange = (id,width,height) => window.measurements.push({id,width,height});
+          window.renderCard = data => { window.measurements = []; root.render(React.createElement(FeedEventCard, {data,onHeightChange})); };
+        `, resolveDir: root, loader: "tsx" },
+        bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
+        nodePaths: [path.dirname(require.resolve("react/package.json", { paths: dependencyRoots })) + "/.."],
+        plugins: [{ name: "feed-test-adapters", setup(builder) {
+          builder.onResolve({ filter: /^(solito\/navigation|lucide-react|@dvnt\/app\/lib\/color\/useEventDominantColor|@dvnt\/app\/lib\/theme)$/ }, args => ({ path: args.path, namespace: "test-stub" }));
+          builder.onLoad({ filter: /.*/, namespace: "test-stub" }, args => ({ contents:
+            args.path === "solito/navigation" ? "export const useRouter = () => ({push(){}});" :
+            args.path === "lucide-react" ? 'import React from "react"; const Icon=()=>React.createElement("i",{style:{display:"inline-block",width:10,height:10}}); export const MapPin=Icon,Clock=Icon,Users=Icon,Calendar=Icon,Zap=Icon;' :
+            args.path.endsWith("useEventDominantColor") ? 'export const useEventDominantColor=()=>({color:"#111111"});' :
+            'export const color={inkDeep:"#080a12",violet:"#8a40cf",text:"#ffffff"};', loader: "js", resolveDir: root }));
+          builder.onResolve({ filter: /^@dvnt\/app\// }, args => ({ path: path.join(root, "packages/app", args.path.replace("@dvnt/app/", "")) + (args.path.endsWith("EventFlyer.web") ? ".tsx" : ".ts") }));
+        } }],
+      });
     const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, headless: true, args: ["--no-sandbox"] });
     try {
       const page = await browser.newPage();
+      await page.setContent('<style>*{box-sizing:border-box}body{margin:0;font-family:Arial;line-height:1.5}</style><main></main>');
+      await page.addScriptTag({ content: bundled.outputFiles[0].text });
       const svg = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1600"><rect width="900" height="1600" fill="purple"/></svg>');
-      for (const width of [280, 320, 390, 768, 1024]) {
-        const html = renderToStaticMarkup(React.createElement(WebCard, { data: {
-          id: "event-1", title: "A deliberately long event title that takes up two lines of detail text", category: "Music", dateDay: "30", month: "OCT",
-          location: "A long venue name in the city", time: "10:00 PM EDT", attendeeCount: 400, media: { title, staticFlyerUrl: svg },
-        } }));
-        await page.setContent(`<style>*{box-sizing:border-box}body{margin:0;font-family:Arial;line-height:1.5}</style><main style="width:${width}px">${html}</main>`);
+      const fixtures = [
+        { name: "short", title: "DALLAS Freaky Friday", category: "Other", dateDay: "30", month: "OCT", location: "Station 4", time: "10:00 PM EDT", attendeeCount: 40 },
+        { name: "long", title: "A deliberately long event title that takes up two lines of detail text", category: "Music", dateDay: "30", month: "OCT", location: "A long venue name in the city", time: "10:00 PM EDT", attendeeCount: 400 },
+        { name: "minimal", title: "Event title" },
+      ];
+      for (const width of [280, 320, 333.339, 390, 768, 1024]) for (const fixture of fixtures) {
+        await page.evaluate(({ width, data }) => {
+          document.querySelector("main").style.width = `${width}px`;
+          window.renderCard(data);
+        }, { width, data: { id: `event-${width}-${fixture.name}`, ...fixture, media: { title: fixture.title, staticFlyerUrl: svg } } });
+        await page.waitForFunction(() => window.measurements.length > 0);
         const geometry = await page.evaluate(() => {
           const outer = document.querySelector("main").firstElementChild;
           const card = document.querySelector('[role="button"]');
           const media = card.children[0].getBoundingClientRect();
-          const details = card.children[1].getBoundingClientRect();
-          const top = card.children[1].children[0].getBoundingClientRect();
-          const bottom = card.children[1].children[1].getBoundingClientRect();
-          return { height: outer.getBoundingClientRect().height, mediaBottom: media.bottom, detailsTop: details.top, topBottom: top.bottom, bottomTop: bottom.top, mediaWidth: media.width, mediaHeight: media.height };
+          const footer = card.children[1];
+          const details = footer.getBoundingClientRect();
+          const top = footer.children[0].getBoundingClientRect();
+          const bottom = footer.children[1].getBoundingClientRect();
+          return { measured: window.measurements.at(-1), width: outer.getBoundingClientRect().width, height: outer.getBoundingClientRect().height, mediaBottom: media.bottom, detailsTop: details.top, detailsBottom: details.bottom, footerHeight: details.height, topBottom: top.bottom, bottomTop: bottom.top, bottomBottom: bottom.bottom, mediaWidth: media.width, mediaHeight: media.height, footerScrollHeight: footer.scrollHeight, footerClientHeight: footer.clientHeight };
         });
-        assert.ok(Math.abs(geometry.height - feedEventCardHeight(width)) < 1, `width ${width}: measured ${geometry.height}, reserved ${feedEventCardHeight(width)}`);
-        assert.ok(Math.abs(geometry.mediaWidth / geometry.mediaHeight - 9 / 16) < 0.001);
+        const label = `${fixture.name} at ${width}px`;
+        assert.ok(Math.abs(geometry.measured.height - geometry.height) < 0.5, `height callback disagrees with rendered card: ${label}`);
+        assert.ok(Math.abs(geometry.measured.width - geometry.width) < 0.5, `width callback disagrees with rendered card: ${label}`);
+        const { feedEventCardMeasurementKey } = loadSource("packages/app/components/event/feed-event-card-shape.ts");
+        assert.equal(feedEventCardMeasurementKey("event", width), feedEventCardMeasurementKey("event", geometry.measured.width), `packer and DOM measurement keys differ: ${label}`);
+        assert.ok(Math.abs(geometry.height - (geometry.mediaHeight + geometry.footerHeight + 24)) < 1, `unexpected blank outer area: ${label}`);
+        assert.ok(Math.abs(geometry.mediaWidth / geometry.mediaHeight - 4 / 6) < 0.001);
         assert.ok(geometry.mediaBottom <= geometry.detailsTop);
-        assert.ok(geometry.topBottom <= geometry.bottomTop, `footer content overlaps at ${width}px`);
+        const gap = geometry.bottomTop - geometry.topBottom;
+        assert.ok(gap >= -0.5 && gap <= 12.5, `footer gap ${gap}px must be compact: ${label}`);
+        assert.ok(geometry.detailsBottom - geometry.bottomBottom <= 14.5, `excessive footer bottom padding: ${label}`);
+        assert.ok(geometry.bottomBottom <= geometry.detailsBottom, `footer content clipped: ${label}`);
+        assert.ok(geometry.footerScrollHeight <= geometry.footerClientHeight + 1, `footer content overflows: ${label}`);
+        if (fixture.name === "short") assert.ok(geometry.footerHeight < 180, `short footer is unnecessarily tall: ${label}`);
+        if (fixture.name === "minimal") assert.ok(geometry.footerHeight < 100, `minimal footer is unnecessarily tall: ${label}`);
       }
+      // Resize the same mounted event: this must be caught by ResizeObserver,
+      // rather than only by the layout effect when an event id changes.
+      await page.evaluate(() => {
+        window.measurements = [];
+        document.querySelector("main").style.width = "280px";
+      });
+      await page.waitForFunction(() => window.measurements.some((item) => Math.abs(item.width - 280) < 0.5));
+      const resized = await page.evaluate(() => ({ reported: window.measurements.at(-1).height, actual: document.querySelector("main").firstElementChild.getBoundingClientRect().height }));
+      assert.ok(Math.abs(resized.reported - resized.actual) < 0.5, "observer reports new height after same-event resize");
+      await page.evaluate(({ svg }) => window.renderCard({
+        id: "event-1024-minimal", title: "A much longer title that must occupy two lines after the same mounted event is edited",
+        category: "Music", dateDay: "30", month: "OCT", location: "A longer venue name", time: "10:00 PM EDT", attendeeCount: 40,
+        media: { title: "Edited event", staticFlyerUrl: svg },
+      }), { svg });
+      await page.waitForFunction(() => window.measurements.length > 0);
+      const edited = await page.evaluate(() => ({ reported: window.measurements.at(-1).height, actual: document.querySelector("main").firstElementChild.getBoundingClientRect().height }));
+      assert.ok(Math.abs(edited.reported - edited.actual) < 0.5, "observer reports new height after same-event metadata update");
+      assert.ok(edited.actual > resized.actual, "long metadata expands naturally instead of clipping");
     } finally { await browser.close(); }
   });
 }

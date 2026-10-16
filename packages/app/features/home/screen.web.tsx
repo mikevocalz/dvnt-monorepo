@@ -46,7 +46,7 @@ import {
   FeedEventCard,
   type FeedEventCardData,
 } from "@dvnt/app/components/event/FeedEventCard.web";
-import { feedEventCardHeight } from "@dvnt/app/components/event/feed-event-card-shape";
+import { feedEventCardHeight, feedEventCardMeasurementKey } from "@dvnt/app/components/event/feed-event-card-shape";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
 import { useFeedRealtime } from "@dvnt/app/lib/hooks/use-feed-realtime";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
@@ -80,18 +80,6 @@ import { TextPostSurface } from "@dvnt/app/features/post/ui/TextPostSurface";
 import type { Post } from "@dvnt/app/lib/types";
 
 const GAP = 10;
-/**
- * Reserved height of a feed event card at a given width — the packer's number
- * AND the rendered number, because it is the same function at both sites.
- *
- * The card was the one tile in the masonry whose height was ESTIMATED here and
- * then left intrinsic in the DOM; every post tile pins `fallbackHeight`. A card
- * that rendered a few pixels short of its estimate moved its own column up
- * relative to the neighbour holding its spacer, and the shortfall accumulated
- * down the feed until a spanning card was painted over a post ~270px below
- * where its spacer sat. Pinning it makes the packer's arithmetic true again.
- */
-const eventCardHeight = feedEventCardHeight;
 const MAX_W = 1320;
 const VARIATION = 0.3;
 
@@ -248,15 +236,21 @@ export function HomeScreen() {
   const cellHeight = (post: Post) =>
     Math.round(estimateRatio(post) * columnWidth);
 
-  // Deterministic masonry: greedily place each post into the SHORTEST column
-  // using its estimated height. Packing happens in plain JS up-front, so the
-  // layout is identical on every mount — there's no async image-measurement
-  // race. (The previous TanStack `lanes` + measureElement masonry mis-stacked /
-  // overlapped columns when the feed was left and reopened, because lane packing
-  // recomputed from a mix of estimated and freshly-measured heights.) Each
-  // column is a normal vertical flex stack; each tile renders at exactly the
-  // height the packer reserved for it, which is what lets a two-column card be
-  // positioned from the packer's arithmetic at all.
+  // Metadata is natural-height. Reserve the measured extent in BOTH columns,
+  // and invalidate by width when text wraps after a responsive resize.
+  const [eventHeights, setEventHeights] = useState<Record<string, number>>({});
+  const handleEventHeight = useCallback((id: string, width: number, height: number) => {
+    const key = feedEventCardMeasurementKey(id, width);
+    setEventHeights((previous) => Math.abs((previous[key] ?? 0) - height) < 0.5
+      ? previous : { ...previous, [key]: height });
+  }, []);
+  const eventCardHeight = useCallback((width: number, event: Event) =>
+    eventHeights[feedEventCardMeasurementKey(String(event.id), width)] ?? feedEventCardHeight(width),
+  [eventHeights]);
+
+
+  // Post sizes remain deterministic. Event media has a fixed aspect; only its
+  // natural metadata height is measured, then shared by both spanning columns.
   // ONE masonry over the whole feed, with event cards packed in as tiles.
   //
   // The first attempt chunked posts into a separate masonry per run with the
@@ -301,7 +295,7 @@ export function HomeScreen() {
       postHeight: cellHeight,
       eventHeight: eventCardHeight,
     }).columns;
-  }, [posts, feedEvents, numColumns, columnWidth]);
+  }, [posts, feedEvents, numColumns, columnWidth, eventCardHeight]);
 
   // Infinite scroll — observe a sentinel near the end of the list inside the
   // scroller (replaces the virtualizer's last-item heuristic).
@@ -415,11 +409,8 @@ export function HomeScreen() {
                             overflow lands on reserved space rather than on a
                             post. */}
                         <div
-                          // Pinned to the RESERVED height, not the card's
-                          // intrinsic one — the same contract MasonryCell keeps
-                          // for posts. `overflow: hidden` makes a card that
-                          // wants to be taller clip instead of drifting its
-                          // column out of step with the spacer opposite it.
+                          // The initial estimate is replaced by the card's intrinsic
+                          // measurement before paint; never constrain its footer.
                           style={{
                             width:
                               tile.span === 2
@@ -429,11 +420,11 @@ export function HomeScreen() {
                               tile.span === 2
                                 ? columnWidth * 2 + GAP
                                 : columnWidth,
+                              tile.event,
                             ),
-                            overflow: "hidden",
                           }}
                         >
-                          <FeedEventCard data={toFeedEventCardData(tile.event)} />
+                          <FeedEventCard data={toFeedEventCardData(tile.event)} onHeightChange={handleEventHeight} />
                         </div>
                       </EventCardBoundary>
                     ) : tile.kind === "post" ? (
@@ -825,3 +816,4 @@ function FeedSkeleton({
     </div>
   );
 }
+

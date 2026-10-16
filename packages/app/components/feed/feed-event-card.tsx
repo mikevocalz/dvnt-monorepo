@@ -18,7 +18,6 @@ import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
 import {
   CARD_ASPECT,
   CARD_MAX_WIDTH,
-  CARD_DETAILS_HEIGHT,
   CARD_HORIZONTAL_PADDING,
   CARD_VERTICAL_PADDING,
 } from "@dvnt/app/components/event/feed-event-card-shape";
@@ -138,7 +137,7 @@ export const FeedEventCard = memo(function FeedEventCard({
             ) : null}
 
           </View>
-          <View style={{ minHeight: CARD_DETAILS_HEIGHT, backgroundColor: "#111", paddingTop: 12 }}>
+          <View style={{ backgroundColor: "#111", paddingTop: 12 }}>
             {/* Top row: Category + Date badge */}
             <View
               style={{
@@ -238,8 +237,6 @@ export const FeedEventCard = memo(function FeedEventCard({
             {/* Bottom content */}
             <View
               style={{
-                flex: 1,
-                justifyContent: "flex-end",
                 paddingHorizontal: 14,
                 paddingBottom: 14,
               }}
@@ -390,3 +387,4 @@ export const FeedEventCard = memo(function FeedEventCard({
     </View>
   );
 });
+

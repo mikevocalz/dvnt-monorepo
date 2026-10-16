@@ -1,18 +1,16 @@
-import { EVENT_FLYER_ASPECT } from "../../lib/events/flyer-layout.ts";
-
-/** Feed flyers use the same uncropped portrait canvas as the event page. */
-export const CARD_ASPECT = EVENT_FLYER_ASPECT;
+/** Feed-only 4:6 portrait canvas; contain keeps the complete artwork visible. */
+export const CARD_ASPECT = 4 / 6;
 /** Keep portrait flyers readable without becoming tablet-sized posters. */
 export const CARD_MAX_WIDTH = 384;
-/** Separate details from the artwork; also reserved by the web masonry packer. */
-export const CARD_DETAILS_HEIGHT = 200;
+/** First-render estimate only; mounted cards report their actual content height. */
+export const ESTIMATED_CARD_DETAILS_HEIGHT = 128;
 export const CARD_HORIZONTAL_PADDING = 4;
 export const CARD_VERTICAL_PADDING = 12;
 
-/** Exact rendered extent, including the outer padding and the details panel. */
+/** Initial reservation until the content-driven card has been measured. */
 export function feedEventCardHeight(width: number): number {
   const mediaWidth = Math.max(0, Math.min(width, CARD_MAX_WIDTH) - CARD_HORIZONTAL_PADDING * 2);
-  return mediaWidth / CARD_ASPECT + CARD_DETAILS_HEIGHT + CARD_VERTICAL_PADDING * 2;
+  return mediaWidth / CARD_ASPECT + ESTIMATED_CARD_DETAILS_HEIGHT + CARD_VERTICAL_PADDING * 2;
 }
 
 /**
@@ -27,3 +25,9 @@ export function feedEventCardHeight(width: number): number {
  * than the screen showing it. 6:5 keeps the card in view at any width.
  */
 export const EVENT_CARD_ASPECT = 6 / 4;
+
+
+/** Width belongs in the key: text wraps differently after a responsive resize. */
+export function feedEventCardMeasurementKey(id: string, width: number): string {
+  return `${id}:${Math.round(Math.min(width, CARD_MAX_WIDTH))}`;
+}
