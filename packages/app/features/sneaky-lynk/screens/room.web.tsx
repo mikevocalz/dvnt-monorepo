@@ -1393,7 +1393,7 @@ function RoomInner({
       <div data-room-content className="relative isolate z-0 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
       {/* Header */}
       <header
-        className="relative z-10 grid shrink-0 grid-cols-[44px_minmax(0,1fr)] items-center gap-2 pb-2 lg:grid-cols-[44px_minmax(0,1fr)_auto]"
+        className="relative z-10 grid shrink-0 grid-cols-[44px_minmax(0,1fr)] items-center gap-2 pb-2 lg:grid-cols-[44px_minmax(0,1fr)_auto] [@media(max-height:500px)_and_(min-width:600px)]:grid-cols-[44px_minmax(0,1fr)_auto] [@media(max-height:500px)_and_(min-width:600px)]:pb-1 [@media(max-height:500px)_and_(min-width:600px)]:pt-[calc(var(--lynk-safe-top,env(safe-area-inset-top))+4px)]"
         style={{ paddingTop: "calc(var(--lynk-safe-top, env(safe-area-inset-top)) + 8px)", paddingLeft: "max(12px, env(safe-area-inset-left))", paddingRight: "max(12px, env(safe-area-inset-right))" }}
       >
         <button
@@ -1417,8 +1417,8 @@ function RoomInner({
               </span>
             ) : null}
           </span>
-          <span className="flex items-center gap-2 text-xs text-white/50">
-            <span className="flex items-center gap-1">
+          <span className="flex max-w-full min-w-0 items-center gap-2 text-xs text-white/50">
+            <span className="flex shrink-0 items-center gap-1">
               <Users size={12} /> {participantCount}
             </span>
             {lynkEvent ? (
@@ -1426,7 +1426,7 @@ function RoomInner({
                 type="button"
                 data-lynk-event={lynkEvent.id}
                 onClick={() => router.push(`/feed/events/${lynkEvent.id}`)}
-                className="max-w-[32vw] truncate rounded-md bg-[#8A40CF]/25 px-1.5 py-0.5 text-[10px] font-semibold text-[#D9B8FF] hover:bg-[#8A40CF]/40"
+                className="min-w-0 max-w-[32vw] truncate rounded-md bg-[#8A40CF]/25 px-1.5 py-0.5 text-[10px] font-semibold text-[#D9B8FF] hover:bg-[#8A40CF]/40"
                 title={`Go to ${lynkEvent.title}`}
               >
                 {lynkEvent.title}
@@ -1434,7 +1434,7 @@ function RoomInner({
             ) : null}
           </span>
         </div>
-        <span className="col-span-2 flex min-w-0 flex-wrap items-center justify-center gap-1.5 lg:col-span-1 lg:justify-end">
+        <span className="col-span-2 flex min-w-0 flex-wrap items-center justify-center gap-1.5 lg:col-span-1 lg:justify-end [@media(max-height:500px)_and_(min-width:600px)]:col-span-1 [@media(max-height:500px)_and_(min-width:600px)]:justify-end">
           {showTimer ? (
             <RoomTimer
               startedAt={timerStartedAt}
@@ -1506,7 +1506,7 @@ function RoomInner({
       {/* Standing disclosure — own row so the copy is never truncated by
           the three-column header. Renders only while a web viewer is in
           the room. */}
-      <div className="relative z-10 shrink-0 pl-[max(12px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] pb-1 empty:hidden">
+      <div className="relative z-10 shrink-0 pl-[max(12px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] pb-1 empty:hidden [@media(max-height:500px)_and_(min-width:600px)]:pb-0">
         <WebViewerDisclosureChip />
       </div>
 
@@ -1521,7 +1521,7 @@ function RoomInner({
                Keep the speaker ring and roles; remove the oversized host hero. */}
            <section
              data-stage-participants={stageTiles.length}
-             className={`relative flex flex-1 flex-col items-center justify-center gap-2 pl-[max(12px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] py-2 ${stageTiles.length > 2 ? "min-h-[calc(clamp(144px,26dvh,280px)+240px)] [@media(max-height:500px)_and_(min-width:600px)]:min-h-[min(360px,calc(var(--lynk-visible-height,100dvh)-120px))]" : "min-h-40"}`}
+             className={`relative flex flex-1 flex-col items-center justify-center gap-2 pl-[max(12px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] py-2 [@media(max-height:500px)_and_(min-width:600px)]:py-1 ${stageTiles.length > 2 ? "min-h-[calc(clamp(144px,26dvh,280px)+240px)] [@media(max-height:500px)_and_(min-width:600px)]:min-h-[min(360px,calc(var(--lynk-visible-height,100dvh)-120px))]" : "min-h-40"}`}
            >
              {stageTiles.length === 1 ? (
                <div role="status" className="flex shrink-0 flex-wrap items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#111522]/85 px-3 py-2 text-xs text-white/70">
@@ -1542,7 +1542,7 @@ function RoomInner({
           {listenerTiles.length > 0 ? (
             <div className="shrink-0 pl-[max(16px,env(safe-area-inset-left))] pr-[max(16px,env(safe-area-inset-right))] pb-1" data-room-listeners>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/40">
-                In the room · {listenerTiles.length} · Swipe for more
+                Listeners · {listenerTiles.length} · Swipe for more
               </p>
               <div ref={listScrollRef} tabIndex={0} role="region" aria-label="Listeners. Scroll horizontally to see everyone." className="overflow-x-auto rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]" style={{ height: 96 }}>
                 <div

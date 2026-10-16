@@ -75,7 +75,7 @@ export function RoomStage({ tiles }: { tiles: Tile[] }) {
                 key={tile.key}
                 data-stage-card={tile.key}
                 data-focused={focused ? "true" : "false"}
-                className={`flex min-h-0 flex-col overflow-hidden rounded-2xl bg-[#0b0d14] ${group ? focused ? "sticky top-0 z-20 col-span-full h-[clamp(144px,26dvh,280px)] [@media(max-height:500px)_and_(min-width:600px)]:col-span-1 [@media(max-height:500px)_and_(min-width:600px)]:col-start-1 [@media(max-height:500px)_and_(min-width:600px)]:row-start-1 [@media(max-height:500px)_and_(min-width:600px)]:row-span-[var(--lynk-crowd-rows)] [@media(max-height:500px)_and_(min-width:600px)]:h-40" : "h-32 sm:h-40" : ""}`}
+                className={`flex min-h-0 flex-col overflow-hidden rounded-2xl bg-[#0b0d14] ${group ? focused ? "sticky top-0 z-20 col-span-full h-[clamp(144px,26dvh,280px)] [@media(max-height:500px)_and_(min-width:600px)]:col-span-1 [@media(max-height:500px)_and_(min-width:600px)]:col-start-1 [@media(max-height:500px)_and_(min-width:600px)]:row-start-1 [@media(max-height:500px)_and_(min-width:600px)]:row-span-[var(--lynk-crowd-rows)] [@media(max-height:500px)_and_(min-width:600px)]:h-32" : "h-32 sm:h-40 [@media(max-height:500px)_and_(min-width:600px)]:h-32" : ""}`}
                 style={focused ? { order: -1 } : undefined}
               >
                 <div className="min-h-0 flex-1"><StageTile tile={tile} /></div>

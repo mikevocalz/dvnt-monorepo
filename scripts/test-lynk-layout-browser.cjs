@@ -256,6 +256,7 @@ async function assertWebGeometry(page, c, visible={top:0,height:c.height},checkH
     const headerTargets=await dimensions(header.locator('button,[role="timer"]'));
     assertContained(headerTargets,bounds,c.name+' header');
     assertNoOverlap(headerTargets,c.name+' header');
+    assertNoOverlap(await dimensions(header.locator(':scope > button,:scope > div,:scope > span')),c.name+' header title and control regions');
     await assertReachable(header.locator('button'),c.name+' header');
   }
   const [footerRect]=await dimensions(dock);
@@ -471,6 +472,18 @@ async function groupStageCase(browser,url) {
   try {
     await page.evaluate(()=>window.fixture.configure({publishers:20,listeners:12}));await tick(page);
     assert.equal(await page.locator('[data-tile]').count(),20,'every publisher must have one tile');
+    await assertWebGeometry(page,c);
+    assert.match(await page.locator('[data-room-listeners] > p').textContent(),/^Listeners · 12/,'audience row must be labelled as listeners');
+    if(c.width>=600&&c.height<=500) {
+      const initialFocus=page.locator('[data-stage-card][data-focused="true"]');
+      await assertFullyVisibleCard(initialFocus,c.name+' initial landscape focus without scrolling');
+      const [picture]=await dimensions(initialFocus.locator('[data-tile]'));
+      const focusButton=initialFocus.getByRole('button',{name:/^Focus /});
+      const [focusControl]=await dimensions(focusButton);
+      assert.ok(picture.height>=80,c.name+': initial focused picture must remain at least 80px high');
+      assert.ok(focusControl.height>=44,c.name+': initial focus target must remain at least 44px high');
+      await assertReachable(focusButton,c.name+' initial landscape focus');
+    }
     await evidence(page,'web-'+c.name+'-initial');
     const count=await page.evaluate(()=>window.fixture.attachments.length);
     assert.ok(count>=19,'real remote canvas refs must be mounted before checking media stability');
