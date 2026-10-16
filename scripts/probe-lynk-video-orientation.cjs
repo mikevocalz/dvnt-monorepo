@@ -108,16 +108,50 @@ window.mountStage = (container, tiles) => {
         for (let n = 0; !cancelled && n < 100; n++) await new Promise(r => setTimeout(r, 10));
         if (!cancelled || last.displayWidth !== 0) throw new Error('SDK teardown did not cancel capture and close last frame');
       } finally { root?.close(); window.MediaStreamTrackProcessor = NativeProcessor; }
-      // SDK's WebKit fallback constructs VideoFrame(video), not the raw track's
-      // VideoFrame. Exercise that boundary with a generated canvas stream.
+      // Force the actual SDK fallback with a generated canvas track. Simulate
+      // metadata-before-frame and one transient constructor race, then recover.
       const source = document.createElement('canvas'); source.width = 32; source.height = 64;
       source.getContext('2d').fillRect(0, 0, 32, 64);
-      const stream = source.captureStream(1); const video = document.createElement('video');
-      video.muted = true; video.playsInline = true; video.srcObject = stream;
-      await video.play();
-      const fallback = new VideoFrame(video, { timestamp: 0 });
-      const fallbackResult = { rotation: fallback.rotation ?? 0, width: fallback.displayWidth, height: fallback.displayHeight };
-      fallback.close(); video.pause(); video.srcObject = null; stream.getTracks().forEach(t => t.stop());
+      const stream = source.captureStream(30);
+      const NativeFrame = window.VideoFrame;
+      const createElement = document.createElement.bind(document);
+      let fallbackVideo, waiting = true, attempts = 0, fallbackRoot;
+      let fallbackResult;
+      window.MediaStreamTrackProcessor = undefined;
+      document.createElement = function(name, ...args) {
+        const element = createElement(name, ...args);
+        if (name === 'video') {
+          fallbackVideo = element;
+          const state = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'readyState').get;
+          Object.defineProperty(element, 'readyState', { get: () => waiting ? 1 : state.call(element) });
+        }
+        return element;
+      };
+      window.VideoFrame = class extends NativeFrame {
+        constructor(input, init) {
+          if (input === fallbackVideo && ++attempts === 1) throw new DOMException('Video element has no video frame', 'InvalidStateError');
+          super(input, init);
+        }
+      };
+      try {
+        fallbackRoot = new Video.Root({ source: stream.getVideoTracks()[0] });
+        await new Promise(r => setTimeout(r, 150));
+        if (!fallbackVideo || attempts || fallbackRoot.frame.peek()) throw new Error('Fallback captured before current frame readiness');
+        waiting = false;
+        for (let n = 0; !fallbackRoot.frame.peek() && n < 200; n++) await new Promise(r => setTimeout(r, 10));
+        const frame = fallbackRoot.frame.peek();
+        if (!frame || attempts < 2) throw new Error('Fallback did not recover transient no-video-frame error');
+        fallbackResult = { rotation: frame.rotation ?? 0, width: frame.displayWidth, height: frame.displayHeight };
+        fallbackRoot.close(); fallbackRoot = null;
+        const count = attempts;
+        await new Promise(r => setTimeout(r, 100));
+        if (fallbackVideo.srcObject !== null || attempts !== count || frame.displayWidth !== 0) throw new Error('Fallback teardown left capture running');
+        if (stream.getVideoTracks()[0].readyState !== 'live') throw new Error('Fallback stopped caller-owned track');
+      } finally {
+        fallbackRoot?.close(); window.MediaStreamTrackProcessor = NativeProcessor;
+        window.VideoFrame = NativeFrame; document.createElement = createElement;
+        stream.getTracks().forEach(t => t.stop());
+      }
       return { userAgent: navigator.userAgent, avcSupported: !!avcSupport.supported, exercisedCodec: codec, rows, pipeline, fallback: fallbackResult };
     });
     console.log(JSON.stringify(results, (key, value) => key === "dataUrl" ? "[generated frame pixels]" : value, 2));
@@ -185,6 +219,7 @@ window.mountStage = (container, tiles) => {
       assert.equal(frame.rawClosed, true); assert.equal(frame.previousClosed, true);
     }
     assert.deepEqual(results.fallback, { rotation: 0, width: 32, height: 64 });
+    console.log('Actual SDK fallback passed delayed readiness, transient InvalidStateError recovery, and teardown with generated browser video.');
     console.log('Confirmed catalog metadata gap and installed normalization patch preserves all angle/flip pixels; generated video-element fallback remains upright. AVC/iPhone attribution remains unproven.');
   } finally { await browser?.close(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

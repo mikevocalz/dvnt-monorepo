@@ -1,5 +1,5 @@
 diff --git a/source-DrwkEDdu.js b/source-DrwkEDdu.js
-index d21f0442..5d8e850b 100644
+index d21f0442..e88cb621 100644
 --- a/source-DrwkEDdu.js
 +++ b/source-DrwkEDdu.js
 @@ -1,3 +1,4 @@
@@ -7,7 +7,7 @@ index d21f0442..5d8e850b 100644
  import * as e from "@moq/net";
  import { Time as t } from "@moq/net";
  import { Effect as n, Signal as r } from "@moq/signals";
-@@ -397,11 +398,12 @@ var w = /* @__PURE__ */ l({
+@@ -397,35 +398,65 @@ var w = /* @__PURE__ */ l({
  //#endregion
  //#region src/video/polyfill.ts
  function D(e) {
@@ -21,16 +21,74 @@ index d21f0442..5d8e850b 100644
  		} });
  		return new self.MediaStreamTrackProcessor({ track: e }).readable.pipeThrough(r);
  	}
-@@ -422,7 +424,7 @@ function D(e) {
- 					await new Promise((e) => requestAnimationFrame(e));
- 					continue;
+ 	console.warn("Using MediaStreamTrackProcessor polyfill; performance might suffer.");
+ 	let n = e.getSettings();
+ 	if (!n) throw Error("track has no settings");
+-	let r, i, a = n.frameRate ?? 30;
++	let r, i = 0, cancelled = false, timer, wake;
++	const interval = 1e3 / (n.frameRate > 0 ? n.frameRate : 30);
++	const wait = () => new Promise((resolve) => {
++		wake = resolve;
++		timer = setTimeout(() => { timer = void 0; wake = void 0; resolve(); }, interval);
++	});
++	const cleanup = () => {
++		cancelled = true;
++		clearTimeout(timer);
++		wake?.();
++		wake = void 0;
++		if (r) { r.pause(); r.srcObject = null; }
++	};
+ 	return new ReadableStream({
+ 		async start() {
+-			r = document.createElement("video"), r.srcObject = new MediaStream([e]), await Promise.all([r.play(), new Promise((e) => {
+-				r.onloadedmetadata = e;
+-			})]), i = t.Milli.now();
++			r = document.createElement("video");
++			r.muted = true;
++			r.playsInline = true;
++			r.srcObject = new MediaStream([e]);
++			try { await r.play(); } catch (error) {
++				if (!cancelled) { cleanup(); throw error; }
++			}
+ 		},
+-		async pull(e) {
+-			for (;;) {
+-				let n = t.Milli.now();
+-				if (t.Milli.sub(n, i) < 1e3 / a) {
+-					await new Promise((e) => requestAnimationFrame(e));
+-					continue;
++		async pull(controller) {
++			try {
++				while (!cancelled) {
++					if (e.readyState === "ended") { cleanup(); controller.close(); return; }
++					const now = t.Milli.now();
++					// Metadata can precede a decoded frame, and mobile video can briefly
++					// lose its current frame during camera/orientation transitions.
++					if (r.readyState < 2 || !r.videoWidth || !r.videoHeight || t.Milli.sub(now, i) < interval) {
++						await wait(); continue;
++					}
++					let frame;
++					try { frame = new VideoFrame(r, { timestamp: t.Micro.fromMilli(now) }); }
++					catch (error) {
++						if (error?.name !== "InvalidStateError") throw error;
++						await wait(); continue;
++					}
++					i = now;
++					controller.enqueue(normalizeOrientation(frame));
++					return;
  				}
 -				i = n, e.enqueue(new VideoFrame(r, { timestamp: t.Micro.fromMilli(i) }));
-+				i = n, e.enqueue(normalizeOrientation(new VideoFrame(r, { timestamp: t.Micro.fromMilli(i) })));
- 			}
- 		}
- 	});
-diff --git a/video/normalize-orientation.js b/video/normalize-orientation.js
+-			}
+-		}
+-	});
++			} catch (error) { cleanup(); throw error; }
++		},
++		cancel() { cleanup(); }
++	}, { highWaterMark: 0 });
+ }
+ //#endregion
+ //#region src/video/index.ts
+diff --git a/tmp/lynk-patch-edited/video/normalize-orientation.js b/video/normalize-orientation.js
 new file mode 100644
 index 00000000..8b0dded5
 --- /dev/null

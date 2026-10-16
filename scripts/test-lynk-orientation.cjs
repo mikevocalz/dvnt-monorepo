@@ -42,7 +42,7 @@ test('context/constructor failures close owned input and propagate', async () =>
 });
 test('patch normalizes both owned capture boundaries without changing track/audio authority', () => {
   assert.match(patch, /r\.enqueue\(normalizeOrientation\(i\)\)/);
-  assert.match(patch, /normalizeOrientation\(new VideoFrame\(r,/);
+  assert.match(patch, /controller\.enqueue\(normalizeOrientation\(frame\)\)/);
   const additions = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
   assert.doesNotMatch(additions, /getUserMedia|\.stop\(|Audio|screen\.orientation|facingMode\s*===/);
   assert.match(additions, /if \(!frame\.rotation && !frame\.flip\) return frame/);
@@ -69,4 +69,103 @@ test('patch has pnpm-compatible Git file boundaries and exact hunk lengths', () 
       assert.equal(newCount, Number(header[4]));
     }
   }
+});
+
+// Execute the exact patched fallback body, with only browser media objects faked.
+function fallbackHarness({ readyState = 2, width = 64, failures = [], playError, normalizeError, playPromise } = {}) {
+  const postimage = patch.split('diff --git a/video/')[0].split('\n')
+    .filter(line => (line.startsWith('+') && !line.startsWith('+++')) || line.startsWith(' '))
+    .map(line => line.slice(1)).join('\n');
+  const start = postimage.indexOf('\tlet r, i = 0, cancelled');
+  const end = postimage.indexOf('\n}', start);
+  assert.ok(start > 0 && end > start);
+  const body = postimage.slice(start, end);
+  const video = { readyState, videoWidth: width, videoHeight: 32, pauses: 0,
+    play() { return playPromise ?? (playError ? Promise.reject(playError) : Promise.resolve()); },
+    pause() { this.pauses++; } };
+  const track = { readyState: 'live' };
+  const frames = []; let attempts = 0;
+  const Frame = class { constructor(_video, init) {
+    attempts++;
+    const failure = failures.shift(); if (failure) throw failure;
+    Object.assign(this, init); frames.push(this);
+  } };
+  const make = new Function('e', 'n', 't', 'normalizeOrientation', 'document', 'MediaStream', 'VideoFrame', body);
+  const stream = make(track, { frameRate: 1000 }, { Milli: { now: () => performance.now(), sub: (a,b) => a-b }, Micro: { fromMilli: n => n*1000 } }, f => { if (normalizeError) throw normalizeError; return f; },
+    { createElement: () => video }, class {}, Frame);
+  return { stream, video, track, frames, attempts: () => attempts };
+}
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const bounded = promise => Promise.race([promise, new Promise((_, reject) => {
+  const timer = setTimeout(() => reject(new Error('capture did not settle')), 1000); timer.unref();
+})]);
+test('fallback waits for current frame and dimensions, then recovers constructor InvalidStateError', async () => {
+  const h = fallbackHarness({ readyState: 1, width: 0, failures: [new DOMException('no frame', 'InvalidStateError')] });
+  const reader = h.stream.getReader();
+  try {
+    const pending = reader.read();
+    await delay(10); assert.equal(h.attempts(), 0);
+    h.video.readyState = 2;
+    await delay(10); assert.equal(h.attempts(), 0);
+    h.video.videoWidth = 64;
+    const first = await bounded(pending);
+    assert.equal(first.done, false); assert.ok(h.attempts() >= 2);
+    assert.equal(h.video.muted, true); assert.equal(h.video.playsInline, true);
+    h.video.readyState = 1;
+    const previousAttempts = h.attempts();
+    let settled = false;
+    const next = reader.read().then(value => { settled = true; return value; });
+    await delay(10);
+    assert.equal(settled, false); assert.equal(h.attempts(), previousAttempts);
+    h.video.readyState = 2;
+    assert.equal((await bounded(next)).done, false);
+  } finally { await reader.cancel(); }
+  const count = h.attempts(); await delay(10);
+  assert.equal(h.attempts(), count); assert.equal(h.video.srcObject, null);
+  assert.equal(h.track.readyState, 'live', 'capture cleanup must not stop the caller-owned track');
+});
+test('fallback cancellation and track end settle pending reads without capturing or busy looping', async () => {
+  for (const endTrack of [false, true]) {
+    const h = fallbackHarness({ readyState: 1 }); const reader = h.stream.getReader();
+    const pending = reader.read(); await delay(5);
+    if (endTrack) h.track.readyState = 'ended'; else await bounded(reader.cancel());
+    assert.equal((await bounded(pending)).done, true);
+    assert.equal(h.attempts(), 0); assert.equal(h.video.srcObject, null);
+  }
+});
+test('fallback propagates non-transient capture and play errors with cleanup', async () => {
+  for (const config of [{ failures: [new TypeError('bad input')] }, { playError: new Error('play refused') }]) {
+    const h = fallbackHarness(config); const reader = h.stream.getReader();
+    await assert.rejects(bounded(reader.read()), /bad input|play refused/);
+    assert.equal(h.video.srcObject, null); assert.equal(h.video.pauses, 1);
+  }
+});
+test('fallback repeated transient errors remain cancellable and buffering respects backpressure', async () => {
+  const h = fallbackHarness({ failures: Array.from({ length: 100 }, () => new DOMException('no frame', 'InvalidStateError')) });
+  const reader = h.stream.getReader(); const pending = reader.read();
+  await delay(10); assert.ok(h.attempts() > 0 && h.attempts() < 50);
+  await bounded(reader.cancel()); assert.equal((await bounded(pending)).done, true);
+  const attempts = h.attempts(); await delay(10); assert.equal(h.attempts(), attempts);
+  const buffered = fallbackHarness();
+  await delay(20); assert.equal(buffered.attempts(), 0, 'unconsumed stream must not allocate an unowned frame');
+  await buffered.stream.cancel();
+});
+
+test('fallback does not swallow a normalizer InvalidStateError as transient capture failure', async () => {
+  const error = new DOMException('normalizer failed', 'InvalidStateError');
+  const h = fallbackHarness({ normalizeError: error });
+  await assert.rejects(bounded(h.stream.getReader().read()), actual => actual === error);
+  assert.equal(h.attempts(), 1); assert.equal(h.video.srcObject, null);
+});
+
+test('fallback cancellation detaches video while play startup is pending', async () => {
+  let rejectPlay;
+  const playPromise = new Promise((_, reject) => { rejectPlay = reject; });
+  const h = fallbackHarness({ playPromise });
+  const reader = h.stream.getReader(); const pending = reader.read();
+  await bounded(reader.cancel());
+  assert.equal((await bounded(pending)).done, true);
+  assert.equal(h.video.srcObject, null); assert.equal(h.attempts(), 0);
+  rejectPlay(new DOMException('play interrupted', 'AbortError'));
+  await delay(5);
 });
