@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { View, Text, Pressable, Animated, Easing } from "react-native";
+import { View, Text, Pressable, Animated, Easing, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Flag,
@@ -27,6 +27,7 @@ import {
   DVNTLiquidGlassIconButton,
 } from "@dvnt/app/components/media/DVNTLiquidGlass";
 import Reanimated, { FadeInRight, FadeOutRight } from "react-native-reanimated";
+import { controlsLayout } from "./controls-layout";
 import type { RoomReaction } from "../hooks/useRoomReactions";
 
 /**
@@ -168,6 +169,7 @@ function ControlButton({
   danger = false,
   compact = false,
   showLabel = true,
+  diameter,
 }: {
   icon: ReactNode;
   label: string;
@@ -176,6 +178,7 @@ function ControlButton({
   danger?: boolean;
   compact?: boolean;
   showLabel?: boolean;
+  diameter?: number;
 }) {
   const scale = useRef(new Animated.Value(1)).current;
 
@@ -197,7 +200,7 @@ function ControlButton({
     }).start();
   }, [scale]);
 
-  const size = compact ? 42 : 52;
+  const size = diameter ?? (compact ? 44 : 52);
   const labelColor = danger
     ? "#FCA5A5"
     : active
@@ -209,7 +212,7 @@ function ControlButton({
       style={{
         alignItems: "center",
         gap: showLabel ? 5 : 0,
-        minWidth: compact ? 42 : 52,
+        minWidth: size,
       }}
     >
       <Animated.View style={{ transform: [{ scale }] }}>
@@ -321,6 +324,8 @@ export function ControlsBar({
   onReport,
 }: ControlsBarProps) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const dock = controlsLayout(width, insets.left, insets.right, hasVideo ? 5 : 4);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const dockVisibility = useRef(
     new Animated.Value(overlayOpen ? 0 : 1),
@@ -367,6 +372,9 @@ export function ControlsBar({
               active: handRaised,
             }
           : null,
+        onReport
+          ? { key: "report", label: "Report", onPress: onReport, icon: <Flag size={18} color="rgba(255,255,255,0.72)" /> }
+          : null,
         onShare
           ? {
               key: "share",
@@ -390,6 +398,7 @@ export function ControlsBar({
       onToggleHand,
       handRaised,
       onShare,
+      onReport,
     ],
   );
 
@@ -399,12 +408,11 @@ export function ControlsBar({
       accessibilityElementsHidden={overlayOpen}
       importantForAccessibility={overlayOpen ? "no-hide-descendants" : "yes"}
       style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        bottom: 0,
+        flexShrink: 0,
+        paddingTop: 8,
         paddingBottom: insets.bottom + 10,
-        paddingHorizontal: 14,
+        paddingLeft: insets.left + dock.sidePadding,
+        paddingRight: insets.right + dock.sidePadding,
         zIndex: overlayOpen ? 0 : 60,
         elevation: overlayOpen ? 0 : 60,
         opacity: dockVisibility,
@@ -425,9 +433,12 @@ export function ControlsBar({
           entering={FadeInRight.springify().damping(18).stiffness(220)}
           exiting={FadeOutRight.duration(180)}
           style={{
-            alignSelf: "flex-end",
-            marginBottom: 12,
-            marginRight: 2,
+            position: "absolute",
+            bottom: "100%",
+            left: insets.left + 8,
+            right: insets.right + 8,
+            alignItems: "center",
+            marginBottom: 8,
           }}
         >
           <DVNTLiquidGlass
@@ -441,10 +452,12 @@ export function ControlsBar({
               backgroundColor: "rgba(3, 7, 18, 0.18)",
             }}
           >
-            <View style={{ flexDirection: "column", gap: 8 }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 4 }}>
               {REACTION_EMOJIS.map((emoji) => (
                 <Pressable
                   key={emoji}
+                  accessibilityRole="button"
+                  accessibilityLabel={`React ${emoji}`}
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     onSendReaction?.(emoji);
@@ -452,8 +465,8 @@ export function ControlsBar({
                   }}
                   hitSlop={8}
                   style={{
-                    width: 38,
-                    height: 38,
+                    width: 44,
+                    height: 44,
                     borderRadius: 12,
                     alignItems: "center",
                     justifyContent: "center",
@@ -497,8 +510,8 @@ export function ControlsBar({
       <DVNTLiquidGlass
         interactive={false}
         radius={22}
-        paddingH={10}
-        paddingV={10}
+        paddingH={dock.glassPadding}
+        paddingV={8}
         style={{
           alignSelf: "center",
           borderWidth: 1,
@@ -515,10 +528,11 @@ export function ControlsBar({
             flexDirection: "row",
             alignItems: "center",
             justifyContent: "center",
-            gap: 10,
+            gap: dock.gap,
           }}
         >
           <ControlButton
+            diameter={dock.size}
             label={
               hostMuteLocked
                 ? "Muted by host — you can't unmute yet"
@@ -544,6 +558,7 @@ export function ControlsBar({
 
           {hasVideo && (
             <ControlButton
+              diameter={dock.size}
               label={isVideoEnabled ? "Turn camera off" : "Turn camera on"}
               active={isVideoEnabled}
               onPress={onToggleVideo}
@@ -559,6 +574,7 @@ export function ControlsBar({
           )}
 
           <ControlButton
+            diameter={dock.size}
             label="Open reactions"
             active={showEmojiPicker}
             onPress={() => {
@@ -570,25 +586,15 @@ export function ControlsBar({
           />
 
           <ControlButton
+            diameter={dock.size}
             label="Open chat"
             onPress={onOpenChat}
             icon={<MessageCircle size={21} color="#F8FAFC" />}
             showLabel={false}
           />
 
-          {onReport && (
-            <ControlButton
-              label="Report"
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                onReport();
-              }}
-              icon={<Flag size={21} color="rgba(255,255,255,0.72)" />}
-              showLabel={false}
-            />
-          )}
-
           <ControlButton
+            diameter={dock.size}
             label="Leave room"
             danger
             onPress={() => {

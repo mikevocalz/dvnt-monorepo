@@ -1,0 +1,47 @@
+name: Sneaky Lynk responsive layout
+on:
+  pull_request:
+    paths:
+      - 'packages/app/features/sneaky-lynk/**'
+      - 'packages/app/features/routes/screens/(protected)/sneaky-lynk/room/**'
+      - 'packages/app/lib/secure-capture/**'
+      - 'packages/app/components/media/DVNTLiquidGlass.tsx'
+      - 'scripts/test-lynk-layout-browser.cjs'
+      - 'scripts/test-lynk-native-stage-lifecycle.cjs'
+      - '.github/workflows/lynk-layout-regressions.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  viewport-and-crowd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated rendering tools
+        run: npm install --prefix "$RUNNER_TEMP/lynk-layout" --no-save --no-package-lock esbuild@0.25.11 @playwright/test@1.56.1 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 lucide-react@1.17.0 @tanstack/react-virtual@3.14.2 react-native-web@0.21.2 postcss@8.5.26 tailwindcss@4.3.0 @tailwindcss/postcss@4.3.0 react-anticapture@0.1.5 happy-dom@20.10.3
+      - name: Install Chromium
+        run: "$RUNNER_TEMP/lynk-layout/node_modules/.bin/playwright install --with-deps chromium"
+      - name: Native dock and crowd geometry
+        run: node --test packages/app/features/sneaky-lynk/ui/controls-layout.test.ts packages/app/features/sneaky-lynk/ui/native-stage-layout.test.ts
+      - name: Preserve native media tiles across roster and viewport changes
+        env:
+          LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-layout
+        run: node scripts/test-lynk-native-stage-lifecycle.cjs
+      - name: Render real room, media tiles, panels and native controls
+        env:
+          NODE_PATH: ${{ runner.temp }}/lynk-layout/node_modules
+          LYNK_LAYOUT_OUTPUT: ${{ runner.temp }}/lynk-layout-evidence
+        run: node scripts/test-lynk-layout-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lynk-responsive-layout-evidence
+          path: ${{ runner.temp }}/lynk-layout-evidence
+          if-no-files-found: ignore
+          retention-days: 7

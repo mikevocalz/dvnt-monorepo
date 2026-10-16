@@ -83,18 +83,44 @@ test("room/account switches and re-enabling wait for their own fresh snapshot", 
   assert.equal(render(() => useRoomMembers("other", "guest", true)).ready, false);
 });
 
+for (const [description, nextRoom, nextUser] of [
+  ["room only", "other", "host"],
+  ["account only", "room", "guest"],
+]) {
+  test(`${description} changes discard stale members, errors and callbacks`, () => {
+    reset(); render(() => useRoomMembers("room", "host", true));
+    const old = callbacks;
+    old.onSync([{ userId: "host" }]); render();
+    old.onError(new Error("old failure")); render();
+    assert.deepEqual(render(() => useRoomMembers(nextRoom, nextUser, true)), { members: [], ready: false, error: false });
+    old.onSync([{ userId: "stale" }]); old.onError(new Error("late failure"));
+    assert.deepEqual(render(), { members: [], ready: false, error: false });
+    const members = [{ userId: nextUser }];
+    callbacks.onSync(members);
+    assert.deepEqual(render(), { members, ready: true, error: false });
+  });
+}
+
 test("both room screens show initial roster failure without altering publication authority", () => {
   const web = readFileSync(new URL("../screens/room.web.tsx", import.meta.url), "utf8");
   const native = readFileSync(new URL("../../routes/screens/(protected)/sneaky-lynk/room/[id].tsx", import.meta.url), "utf8");
   const nativeHook = readFileSync(new URL("../../video/hooks/useVideoRoom.ts", import.meta.url), "utf8");
   assert.match(web, /\{admitted && !rosterReady && \(/);
   assert.doesNotMatch(web, /if \(admitted && !rosterReady\)/);
+  assert.match(web, /\{rosterReady && stageTiles\.length === 1 \? \(/);
   assert.match(native, /rosterStatus=\{videoRoom.isAdmitted && !videoRoom.rosterReady/);
   assert.doesNotMatch(native, /if \(videoRoom.isAdmitted && !videoRoom.rosterReady\)/);
   assert.match(native, /<RoomStage/);
-  assert.ok(native.indexOf("{rosterStatus ? (") < native.indexOf("style={{ paddingBottom: controlsClearance }}"), "banner must not consume measured stage height");
+  // The responsive layout measures the remaining stage above its in-flow dock.
+  // Require the notice conditional to close before that wrapper begins; ordering
+  // alone could pass even if the notice were accidentally nested in the stage.
+  assert.match(native, /\{rosterStatus \? \([\s\S]*?\) : null\}\s*<View\s+className="flex-1"\s+style=\{\{ minHeight: 0 \}\}\s+onLayout=\{\(e\) => \{[\s\S]*?setStageContentHeight[\s\S]*?<RoomStage[\s\S]*?stageHeight=\{stageContentHeight\}/);
+  assert.match(native, /<RoomStage[\s\S]*?\/>\s*<\/View>\s*<RemoteAudioLayer[^>]*\/>\s*<ControlsBar/);
   assert.match(native, /onToggleMic=\{handleToggleMic\}/);
-  assert.match(web, /<StageTile/);
+  assert.match(web, /import \{ RoomStage \} from "\.\.\/ui\/web\/RoomStage"/);
+  assert.match(web, /<RoomStage tiles=\{stageTiles\} \/>/);
+  const webStage = readFileSync(new URL("../ui/web/RoomStage.tsx", import.meta.url), "utf8");
+  assert.match(webStage, /tiles\.map\(\(tile\) => \{[\s\S]*?key=\{tile.key\}[\s\S]*?<StageTile tile=\{tile\} \/>/);
   for (const source of [web, native]) assert.match(source, /Your camera and microphone controls remain active below/);
   for (const source of [web, native]) assert.match(source, /Couldn't load participants/);
   for (const source of [web, nativeHook]) assert.match(source, /const canPublish = admitted && isPublisherRole\(localRole\)/);

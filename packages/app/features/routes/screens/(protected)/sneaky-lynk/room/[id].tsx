@@ -2610,17 +2610,8 @@ function RoomLayout({
     roomId: admitted ? roomId : "",
     currentUser: admitted ? localUser : { ...localUser, id: "" },
   });
-  // Bottom padding below the speaker grid so the controls bar never
-  // clips participant name labels rendered on the last row of tiles.
-  // ControlsBar has: reactions row (~46) + mic/video/hand/share row
-  // (~64) + vertical padding (~24) + safe-area inset. Keeping a
-  // comfortable 200px floor (plus insets.bottom) so the name label
-  // + verified badge + role pill all sit above the dock cleanly.
-  const controlsClearance = insets.bottom + 200;
-
-  // Measured usable height for the stage area (container height minus
-  // controlsClearance padding). Passed to RoomStage so crowd tiles
-  // can be sized accurately without relying on inner onLayout timing.
+  // The dock participates in flex layout, so the stage receives exactly the
+  // remaining height on phones, landscape and devices with home indicators.
   const [stageContentHeight, setStageContentHeight] = useState(0);
 
   return (
@@ -2659,7 +2650,7 @@ function RoomLayout({
 
       <View className="flex-1" style={{ paddingTop: insets.top }}>
         <View
-          style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10 }}
+          style={{ paddingLeft: insets.left + 12, paddingRight: insets.right + 12, paddingTop: 8, paddingBottom: 10 }}
         >
           <View
             style={{
@@ -2900,17 +2891,13 @@ function RoomLayout({
 
         <View
           className="flex-1"
-          style={{ paddingBottom: controlsClearance }}
+          style={{ minHeight: 0 }}
           onLayout={(e) => {
-            const h =
-              Math.round(e.nativeEvent.layout.height) - controlsClearance;
+            const h = Math.max(0, Math.round(e.nativeEvent.layout.height));
             setStageContentHeight((prev) => (prev === h ? prev : h));
           }}
         >
-          {/* RoomStage = Zoom-parity host-hero + paged attendee carousel.
-              Replaces the old adaptive VideoGrid. Layering with the
-              controls dock is preserved via the existing controlsClearance
-              padding above (dock stays absolute, zIndex 60). */}
+          {/* A measured stage above the in-flow dock. */}
           <RoomStage
             participants={allParticipants}
             activeSpeakers={activeSpeakers}
