@@ -21,6 +21,8 @@ function isLoggedOutLandingSession(): boolean {
 
 // Browser init — runs once per pageload (Next instrumentation-client convention).
 Sentry.init({
+  // Opt-in local artifact verification only; rejected by next.config on Vercel.
+  enabled: process.env.NEXT_PUBLIC_DVNT_LOCAL_BUILD_ONLY !== "1",
   // DSN is a publishable client key (same committed-fallback pattern as the
   // Supabase anon key) so a missing Vercel env var can't silently disable telemetry.
   dsn:

@@ -1,0 +1,291 @@
+diff --git a/video/normalize-orientation.js b/video/normalize-orientation.js
+new file mode 100644
+index 0000000..3b76f7e
+--- /dev/null
++++ b/video/normalize-orientation.js
+@@ -0,0 +1,134 @@
++// DVNT: @moq/publish 0.5.2 catalogs do not carry frame orientation metadata.
++// Bake the displayed frame into pixels before encoding when its orientation
++// is transformed or unknown. Never infer rotation from device angle or aspect ratio.
++export function createOrientationNormalizer() {
++  let canvas;
++  return function normalize(frame) {
++    // Only explicit upright metadata proves the zero-copy path is safe.
++    // Rasterize unexpected metadata-unknown frames defensively. This alone cannot
++    // correct engines with raw sensor dimensions/pixels: TrackProcessor routes
++    // engines lacking either prototype getter through video-element capture.
++    // https://github.com/WebKit/WebKit/blob/main/Source/WebCore/Modules/webcodecs/WebCodecsVideoFrame.idl
++    if (frame.rotation === 0 && frame.flip === false) return frame;
++    try {
++      const width = frame.displayWidth;
++      const height = frame.displayHeight;
++      if (!canvas) canvas = new OffscreenCanvas(width, height);
++      if (canvas.width !== width) canvas.width = width;
++      if (canvas.height !== height) canvas.height = height;
++      const context = canvas.getContext("2d");
++      if (!context) throw new Error("Video orientation normalization needs a 2D canvas");
++      // In orientation-capable engines, drawImage applies the frame transform
++      // once in display coordinates. Canvas frames need no orientation metadata.
++      context.clearRect(0, 0, width, height);
++      context.drawImage(frame, 0, 0, width, height);
++      return new VideoFrame(canvas, {
++        timestamp: frame.timestamp,
++        ...(frame.duration == null ? {} : { duration: frame.duration }),
++      });
++    } finally {
++      // Consume ownership only when replacing the frame, including failures.
++      // The returned frame remains owned by the SDK's existing frame lifecycle.
++      frame.close();
++    }
++  };
++}
++
++// VideoFrame(video) can retain a camera's internal sensor rotation on WebKit
++// without exposing rotation/flip to JavaScript. Paint the video presentation
++// first so the encoder receives exactly those pixels, with no metadata needed.
++// Read the live displayed dimensions on every frame (including camera switches),
++// never the track's startup settings or the viewer's device orientation.
++export function createVideoElementCapture() {
++  let canvas;
++  return function capture(video, timestamp) {
++    const width = video.videoWidth;
++    const height = video.videoHeight;
++    if (video.readyState < 2 || !width || !height) {
++      throw new DOMException("Video element has no current frame", "InvalidStateError");
++    }
++    if (!canvas) canvas = document.createElement("canvas");
++    if (canvas.width !== width) canvas.width = width;
++    if (canvas.height !== height) canvas.height = height;
++    const context = canvas.getContext("2d");
++    if (!context) throw new Error("Video capture needs a 2D canvas");
++    context.clearRect(0, 0, width, height);
++    context.drawImage(video, 0, 0, width, height);
++    return new VideoFrame(canvas, { timestamp });
++  };
++}
++
++// Capture the video presentation only when a consumer asks for a frame. The
++// timer also handles browsers without requestVideoFrameCallback and lets ended
++// tracks/readiness transitions progress when no video callback is forthcoming.
++export function createVideoElementProcessor(track) {
++  const captureVideo = createVideoElementCapture();
++  const frameRate = track.getSettings()?.frameRate;
++  const interval = 1000 / (Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 30);
++  let video, stopped = false, timer, callback, wake, onEnded, lastTimestamp = -Infinity;
++  const clearWait = () => {
++    clearTimeout(timer);
++    timer = undefined;
++    if (callback !== undefined) video.cancelVideoFrameCallback(callback);
++    callback = undefined;
++  };
++  const wait = () => new Promise((resolve) => {
++    let settled = false;
++    const finish = (at) => {
++      if (settled) return;
++      settled = true;
++      clearWait(); wake = undefined; resolve(at);
++    };
++    wake = finish;
++    timer = setTimeout(() => finish(performance.now()), interval);
++    if (video.requestVideoFrameCallback) {
++      callback = video.requestVideoFrameCallback((now, metadata) => finish(metadata.captureTime ?? now));
++    }
++  });
++  const cleanup = () => {
++    if (stopped) return;
++    stopped = true;
++    clearWait();
++    wake?.();
++    track.removeEventListener?.("ended", onEnded);
++    if (video) { video.pause(); video.srcObject = null; }
++  };
++  return new ReadableStream({
++    async start(controller) {
++      video = document.createElement("video");
++      video.muted = true;
++      video.playsInline = true;
++      video.srcObject = new MediaStream([track]);
++      onEnded = () => { cleanup(); controller.close(); };
++      track.addEventListener?.("ended", onEnded, { once: true });
++      if (track.readyState === "ended") { onEnded(); return; }
++      try { await video.play(); }
++      catch (error) { if (!stopped) { cleanup(); throw error; } }
++    },
++    async pull(controller) {
++      try {
++        while (!stopped) {
++          if (track.readyState === "ended") { onEnded(); return; }
++          const at = await wait();
++          if (stopped) return;
++          if (track.readyState === "ended") { onEnded(); return; }
++          // Metadata can precede decoded pixels, including during camera switches.
++          if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) continue;
++          let frame;
++          // A delayed video callback can describe pixels captured before the
++          // watchdog's previous timestamp. Never send time backwards downstream.
++          const timestamp = Math.max(at * 1000, lastTimestamp + 1);
++          try { frame = captureVideo(video, timestamp); }
++          catch (error) {
++            if (error?.name !== "InvalidStateError") throw error;
++            continue;
++          }
++          try { controller.enqueue(frame); lastTimestamp = timestamp; }
++          catch (error) { frame.close(); throw error; }
++          return;
++        }
++      } catch (error) { cleanup(); throw error; }
++    },
++    cancel() { cleanup(); },
++  }, { highWaterMark: 0 });
++}
+diff --git a/video-B0t1PcDc.js b/video-B0t1PcDc.js
+index ebf3798..0f9baf4 100644
+--- a/video-B0t1PcDc.js
++++ b/video-B0t1PcDc.js
+@@ -1,4 +1,4 @@
+-import { Time as e } from "@moq/net";
++import { createOrientationNormalizer, createVideoElementProcessor } from "./video/normalize-orientation.js";
+ import * as t from "@moq/hang/util";
+ //#region src/video/capture-worker.ts?worker&inline
+ var n = "(function(){let e=self,t,n;e.addEventListener(`message`,e=>{r(e.data)}),e.postMessage({type:`ready`,supported:`MediaStreamTrackProcessor`in globalThis});async function r(t){try{switch(t.type){case`start`:i(t.track);return;case`pull`:await a();return}}catch(t){o(),e.postMessage({type:`error`,message:`${t}`})}}function i(e){n=e,t=new MediaStreamTrackProcessor({track:e}).readable.getReader()}async function a(){if(!t)throw Error(`not started`);let{value:n}=await t.read(),r=performance.timeOrigin+performance.now();if(!n){o(),e.postMessage({type:`done`});return}e.postMessage({type:`frame`,frame:n,at:r},[n])}function o(){t?.cancel(),t=void 0,n?.stop(),n=void 0}})();\n//# sourceMappingURL=capture-worker-BrEQqi2v.js.map", r = typeof self < "u" && self.Blob && new Blob(["(self.URL || self.webkitURL).revokeObjectURL(self.location.href);", n], { type: "text/javascript;charset=utf-8" });
+@@ -17,6 +17,9 @@ function i(e) {
+ //#endregion
+ //#region src/video/processor.ts
+ function a(e) {
++	// Without public orientation metadata, WebKit can expose raw sensor dimensions
++	// and pixels. Capture the video presentation instead of guessing transforms.
++	if (!("rotation" in VideoFrame.prototype) || !("flip" in VideoFrame.prototype)) return p(e);
+-	return "MediaStreamTrackProcessor" in self ? new MediaStreamTrackProcessor({ track: e }).readable.pipeThrough(l()) : m(async () => await u(e) ?? p(e));
++	return "MediaStreamTrackProcessor" in self ? new MediaStreamTrackProcessor({ track: e }).readable.pipeThrough(l()) : m(async () => await u(e) ?? p(e));
+ }
+ var o;
+@@ -27,11 +30,13 @@ var c = class {
+ 	#e;
+ 	#t = 0;
+ 	#n;
++	#normalize = createOrientationNormalizer();
+ 	stamp(e, t) {
+ 		let n = t * 1e3;
+ 		this.#e === void 0 ? (this.#e = e.timestamp, this.#t = n) : this.#n === void 0 && (this.#n = e.timestamp === this.#e);
+-		let r = this.#n ? n : e.timestamp - this.#e + this.#t, i = new VideoFrame(e, { timestamp: r });
+-		return e.close(), i;
++		let r = this.#n ? n : e.timestamp - this.#e + this.#t, i;
++		try { i = new VideoFrame(e, { timestamp: r }); } finally { e.close(); }
++		return this.#normalize(i);
+ 	}
+ };
+ function l() {
+@@ -53,25 +58,29 @@ async function u(e) {
+ 		console.warn("moq-publish: MediaStreamTrack is not transferable", e), n.stop(), t.close();
+ 		return;
+ 	}
+-	let r = new c();
++	let r = new c(), cancelled = false;
+ 	return new ReadableStream({
+ 		async pull(e) {
+-			t.post({ type: "pull" });
+-			let n = await t.next();
+-			switch (n.type) {
+-				case "frame":
+-					e.enqueue(r.stamp(n.frame, n.at - performance.timeOrigin));
+-					return;
+-				case "done":
+-					t.close(), e.close();
+-					return;
+-				default: throw t.close(), Error(n.type === "error" ? n.message : `unexpected message: ${n.type}`);
+-			}
++			try {
++				t.post({ type: "pull" });
++				let n = await t.next();
++				if (cancelled) { if (n.type === "frame") n.frame.close(); return; }
++				switch (n.type) {
++					case "frame":
++						e.enqueue(r.stamp(n.frame, n.at - performance.timeOrigin));
++						return;
++					case "done":
++						t.close(), e.close();
++						return;
++					default: throw Error(n.type === "error" ? n.message : `unexpected message: ${n.type}`);
++				}
++			} catch (error) { t.close(); if (!cancelled) throw error; }
+ 		},
+ 		cancel() {
++			cancelled = true;
+ 			t.close();
+ 		}
+-	});
++	}, { highWaterMark: 0 });
+ }
+ async function d() {
+ 	let e;
+@@ -89,7 +98,8 @@ async function d() {
+ 	return e;
+ }
+ function f(e) {
+-	let t = [], n, r = (e) => {
++	let t = [], n, closed = false, r = (e) => {
++		if (closed) { if (e.type === "frame") e.frame.close(); return; }
+ 		let r = n;
+ 		n = void 0, r ? r(e) : t.push(e);
+ 	};
+@@ -110,34 +120,19 @@ function f(e) {
+ 			});
+ 		},
+ 		close: () => {
+-			r({
+-				type: "error",
+-				message: "worker terminated"
+-			}), e.terminate();
++			if (closed) return;
++			closed = true;
++			for (const message of t) if (message.type === "frame") message.frame.close();
++			t = [];
++			n?.({ type: "error", message: "worker terminated" });
++			n = void 0;
++			e.terminate();
+ 		}
+ 	};
+ }
+ function p(t) {
+ 	console.warn("Using MediaStreamTrackProcessor polyfill; performance might suffer.");
+-	let n, r;
+-	return new ReadableStream({
+-		async start() {
+-			n = document.createElement("video"), n.srcObject = new MediaStream([t]), await Promise.all([n.play(), new Promise((e) => {
+-				n.onloadedmetadata = e;
+-			})]);
+-		},
+-		async pull(t) {
+-			await new Promise((i) => {
+-				r = n.requestVideoFrameCallback((r, a) => {
+-					let o = a.captureTime ?? r;
+-					t.enqueue(new VideoFrame(n, { timestamp: e.Micro.fromMilli(o) })), i();
+-				});
+-			});
+-		},
+-		cancel() {
+-			r !== void 0 && n.cancelVideoFrameCallback(r), n && (n.srcObject = null);
+-		}
+-	});
++	return createVideoElementProcessor(t);
+ }
+ function m(e) {
+ 	let t, n = !1;
+@@ -155,13 +150,14 @@ function m(e) {
+ 				e.close();
+ 				return;
+ 			}
+-			let { value: n } = await t.read();
+-			n ? e.enqueue(n) : e.close();
++			let { value: value } = await t.read();
++			if (n) { value?.close(); return; }
++			value ? e.enqueue(value) : e.close();
+ 		},
+ 		async cancel(e) {
+ 			n = !0, await t?.cancel(e);
+ 		}
+-	});
++	}, { highWaterMark: 0 });
+ }
+ //#endregion
+ //#region src/support/video.ts

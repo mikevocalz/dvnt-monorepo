@@ -68,33 +68,62 @@ class Hooks {
 const changed = (a: any[] = [], b: any[] = []) => a.length !== b.length || a.some((v, i) => !Object.is(v, b[i]));
 class Signal {
   value: any;
+  listeners = new Set<(value: any) => void>();
   constructor(value: any) { this.value = value; }
-  set(value: any) { this.value = value; }
+  set(value: any) { if (Object.is(value, this.value)) return; this.value = value; for (const callback of [...this.listeners]) callback(value); }
   peek() { return this.value; }
-  subscribe() { return () => {}; }
+  subscribe(callback: (value: any) => void) { this.listeners.add(callback); return () => this.listeners.delete(callback); }
 }
-const resources = { reloads: [] as any[], backends: [] as any[], watches: [] as any[], publications: [] as any[], nativePublications: [] as any[], initialPaths: [] as string[] };
-class Reload {
+// Deterministic signal graph at the SDK boundary. Production still receives
+// Getter-only outputs: mutations have to use the explicitly wired input Signals.
+class Computed extends Signal {
+  stops: (() => void)[] = [];
+  closed = false;
+  constructor(fn: (effect: any) => any) {
+    super(undefined);
+    const run = () => {
+      if (this.closed) return;
+      for (const stop of this.stops.splice(0)) stop();
+      this.set(fn({ get: (signal: Signal) => { this.stops.push(signal.subscribe(run)); return signal.peek(); } }));
+    };
+    run(); resources.computeds.push(this);
+  }
+  close() { this.closed = true; for (const stop of this.stops.splice(0)) stop(); this.set(undefined); }
+}
+const resources = {
+  connections: [] as any[], players: [] as any[], watches: [] as any[], devices: [] as any[],
+  captures: [] as any[], encoders: [] as any[], computeds: [] as any[], publications: [] as any[],
+  nativePublications: [] as any[], initialPaths: [] as string[],
+};
+class Connection {
   props: any;
   closed = false;
   status = new Signal("connected");
-  announced = new Signal(new Set(resources.initialPaths));
-  established = new Signal({});
-  constructor(props: any) { this.props = props; resources.reloads.push(this); }
+  error = new Signal(undefined);
+  bandwidth = new Signal({ allocator: "fixture" });
+  routes = new Signal(new Map(resources.initialPaths.map((path) => [path, {}])));
+  origin = new Signal({ broadcasts: () => this.routes });
+  probe = new Signal(undefined);
+  constructor(props: any) { this.props = props; resources.connections.push(this); }
   close() { this.closed = true; }
 }
 class WatchBroadcast {
-  props: any;
   closed = false;
-  constructor(props: any) { this.props = props; resources.watches.push(this); }
+  constructor() { resources.watches.push(this); }
   close() { this.closed = true; }
 }
-class MultiBackend {
-  element: Signal;
+class Player {
+  props: any;
   closed = false;
-  audio = { muted: new Signal(false), volume: new Signal(1) };
-  constructor(props: any) { this.element = new Signal(props.element); resources.backends.push(this); }
-  close() { this.closed = true; }
+  broadcast = new WatchBroadcast();
+  constructor(props: any) {
+    assert.ok(props.origin instanceof Signal);
+    assert.ok(props.canvas instanceof Signal);
+    assert.ok(props.muted instanceof Signal);
+    assert.ok(props.volume instanceof Signal);
+    this.props = props; resources.players.push(this);
+  }
+  close() { this.closed = true; this.broadcast.close(); }
 }
 class Publication {
   props: any;
@@ -103,26 +132,41 @@ class Publication {
   close() { this.closed = true; }
 }
 class Device {
-  enabled = new Signal(false);
-  source = new Signal(undefined);
-  close() { this.enabled.set(false); }
+  in: any;
+  out = { source: new Signal(undefined), error: new Signal(undefined) };
+  closed = false;
+  constructor(props: any) { assert.ok(props.enabled instanceof Signal); this.in = props; resources.devices.push(this); }
+  close() { this.closed = true; }
 }
+class Capture {
+  props: any;
+  out = { display: new Signal(undefined) };
+  closed = false;
+  constructor(props: any) { this.props = props; resources.captures.push(this); }
+  close() { this.closed = true; }
+}
+class Encoder {
+  name: string; props: any; closed = false;
+  constructor(name: string, props: any) { this.name = name; this.props = props; resources.encoders.push(this); }
+  close() { this.closed = true; }
+}
+const tokenState = { publish: true };
 let nativeConnects = 0;
 const nativeSession = { state: "connected", connect() { nativeConnects++; }, disconnect() {} };
 const nativePublisher = { state: "publishing", publish: (opts: any) => resources.nativePublications.push(opts), stop() {} };
 const nativeCamera = { position: "front", state: "active" };
 const nativeMicrophone = { state: "active" };
-(globalThis as any).__lynkMocks = { Signal, Reload, WatchBroadcast, MultiBackend, Publication, Device, nativeSession, nativePublisher, nativeCamera, nativeMicrophone };
+(globalThis as any).__lynkMocks = { Signal, Computed, Connection, Player, Publication, Device, Capture, Encoder, tokenState, nativeSession, nativePublisher, nativeCamera, nativeMicrophone };
 (globalThis as any).window = {};
 const moduleUrl = (source: string) => `data:text/javascript,${encodeURIComponent(source)}`;
 const stubs: Record<string, string> = {
   react: moduleUrl(["useState", "useRef", "useMemo", "useCallback", "useEffect", "useSyncExternalStore"].map((name) => `export const ${name} = (...args) => globalThis.__lynkHooks.${name}(...args);`).join("\n")),
-  "@moq/signals": moduleUrl("export const Signal = globalThis.__lynkMocks.Signal;"),
-  "@moq/lite": moduleUrl("export const Connection = { Reload: globalThis.__lynkMocks.Reload }; export const Path = { from: p => p };"),
-  "@moq/watch": moduleUrl("export const Broadcast = globalThis.__lynkMocks.WatchBroadcast; export const MultiBackend = globalThis.__lynkMocks.MultiBackend;"),
-  "@moq/publish": moduleUrl("export const Broadcast = globalThis.__lynkMocks.Publication; export const Source = { Camera: globalThis.__lynkMocks.Device, Microphone: globalThis.__lynkMocks.Device };"),
+  "@moq/signals": moduleUrl("export const Signal = globalThis.__lynkMocks.Signal; export const Computed = globalThis.__lynkMocks.Computed;"),
+  "@moq/net": moduleUrl("export const Connection = globalThis.__lynkMocks.Connection; export const Path = { from: p => p }; export const Time = { Milli: { zero: 0 } };"),
+  "@moq/watch": moduleUrl("export const Player = globalThis.__lynkMocks.Player;"),
+  "@moq/publish": moduleUrl("export const Broadcast = globalThis.__lynkMocks.Publication; export const Source = { Camera: globalThis.__lynkMocks.Device, Microphone: globalThis.__lynkMocks.Device }; export const Video = { Capture: globalThis.__lynkMocks.Capture, Encoder: globalThis.__lynkMocks.Encoder }; export const Audio = Video;"),
   "react-native-moq": moduleUrl("export const useSession = () => globalThis.__lynkMocks.nativeSession; export const usePublisher = () => globalThis.__lynkMocks.nativePublisher; export const useCamera = () => globalThis.__lynkMocks.nativeCamera; export const useMicrophone = () => globalThis.__lynkMocks.nativeMicrophone; export const useBroadcasts = () => [];"),
-  "./useMoqToken": moduleUrl("export const useMoqToken = (room, intent, enabled = true) => ({ token: room && enabled ? { relayUrl: 'https://example.invalid/' + room + '/' + intent, namespace: 'lynk/' + room, path: 'lynk/' + room + '/self', peerId: 'self' } : null, error: null });"),
+  "./useMoqToken": moduleUrl("export const useMoqToken = (room, intent, enabled = true) => ({ token: room && enabled && (intent !== 'publish' || globalThis.__lynkMocks.tokenState.publish) ? { relayUrl: 'https://example.invalid/' + room + '/' + intent, namespace: 'lynk/' + room, path: 'lynk/' + room + '/self', peerId: 'self' } : null, error: null });"),
 };
 const hooks = registerHooks({ resolve(specifier: string, context: { parentURL?: string }, next: (...args: any[]) => any) {
   if (stubs[specifier]) return { url: stubs[specifier], shortCircuit: true };
@@ -136,20 +180,22 @@ const { useLynkBroadcast } = await import("./useLynkBroadcast.web.ts");
 const { useLynkBroadcast: useNativeBroadcast } = await import("./useLynkBroadcast.native.ts");
 const { useNativeMoqSession } = await import("./useNativeMoqSession.ts");
 after(() => { hooks.deregister(); delete (globalThis as any).window; });
-function reset() { for (const value of Object.values(resources)) value.length = 0; }
+function reset() { for (const value of Object.values(resources)) value.length = 0; tokenState.publish = true; }
 
 test("web viewer reconstructs its connection during effect replay", () => {
   reset();
   const h = new Hooks();
   h.render(() => useLynkViewer("room"));
-  const first = resources.reloads.at(-1);
+  const first = resources.connections.at(-1);
   h.replay();
   assert.equal(first.closed, true);
-  assert.equal(resources.reloads.length, 2);
-  assert.equal(resources.reloads.at(-1).closed, false);
-  assert.equal(resources.reloads.at(-1).props.url.peek().pathname, "/room/subscribe");
+  assert.equal(resources.connections.length, 2);
+  assert.equal(resources.connections.at(-1).closed, false);
+  assert.equal(resources.connections.at(-1).props.share, false);
+  assert.equal(resources.connections.at(-1).props.linger, 0);
+  assert.equal(resources.connections.at(-1).props.url.peek().pathname, "/room/subscribe");
   h.unmount();
-  assert.equal(resources.reloads.at(-1).closed, true);
+  assert.equal(resources.connections.at(-1).closed, true);
 });
 
 test("late joining viewer discovers already-published paths and closes both decoder and subscription", () => {
@@ -159,10 +205,10 @@ test("late joining viewer discovers already-published paths and closes both deco
   const view = h.render(() => useLynkViewer("room"));
   assert.deepEqual(view.publishers, [{ path: "lynk/room/alice", peerId: "alice" }]);
   view.attachCanvas("lynk/room/alice", {});
-  assert.equal(resources.backends.length, 1);
+  assert.equal(resources.players.length, 1);
   assert.equal(resources.watches.length, 1);
   view.attachCanvas("lynk/room/alice", null);
-  assert.equal(resources.backends[0].closed, true);
+  assert.equal(resources.players[0].closed, true);
   assert.equal(resources.watches[0].closed, true);
   h.unmount();
 });
@@ -171,10 +217,10 @@ test("room switch closes old discovery and establishes the new room", () => {
   reset();
   const h = new Hooks();
   h.render(() => useLynkViewer("first"));
-  const old = resources.reloads.at(-1);
+  const old = resources.connections.at(-1);
   h.render(() => useLynkViewer("second"));
   assert.equal(old.closed, true);
-  assert.equal(resources.reloads.at(-1).props.url.peek().pathname, "/second/subscribe");
+  assert.equal(resources.connections.at(-1).props.url.peek().pathname, "/second/subscribe");
   h.unmount();
 });
 
@@ -186,11 +232,67 @@ test("web publication uses AVC and role loss closes its prior publication", asyn
   await view.goLive();
   h.flush();
   assert.equal(resources.publications.length, 1);
-  assert.equal(resources.publications[0].props.video.hd.config.codec, "avc1");
+  assert.equal(resources.encoders.find((encoder) => encoder.name === "video/hd").props.config.codec, "avc1");
+  assert.equal(resources.encoders.length, 2);
+  assert.ok(resources.encoders.every((encoder) => encoder.props.bandwidth === resources.connections.at(-1).bandwidth));
+  assert.equal(resources.captures.length, 2);
+  assert.ok(resources.encoders.every((encoder) => encoder.props.broadcast === resources.publications[0]));
   permitted = false;
   h.render();
   assert.equal(resources.publications[0].closed, true);
+  assert.ok(resources.encoders.every((encoder) => encoder.closed), "role loss closes all encoders");
+  assert.ok(resources.captures.every((capture) => capture.closed), "role loss closes capture fanouts");
   h.unmount();
+  assert.ok(resources.captures.every((capture) => capture.closed), "unmount closes capture fanouts");
+  assert.ok(resources.devices.every((device) => device.closed));
+  assert.ok(resources.computeds.every((computed) => computed.closed));
+});
+
+test("publish-token revocation closes encoders, capture fanouts and derived media signals", async () => {
+  reset();
+  const h = new Hooks();
+  const view = h.render(() => useLynkBroadcast("room", true));
+  await view.goLive(); h.flush();
+  assert.equal(resources.publications.length, 1);
+  tokenState.publish = false; h.render();
+  assert.equal(resources.publications[0].closed, true);
+  assert.ok(resources.encoders.every((encoder) => encoder.closed));
+  assert.ok(resources.captures.every((capture) => capture.closed));
+  h.unmount();
+  assert.ok(resources.computeds.every((computed) => computed.closed));
+});
+
+test("web publication survives effect replay with fresh devices and closes the final pipeline on end", async () => {
+  reset();
+  const h = new Hooks();
+  h.render(() => useLynkBroadcast("room", true));
+  const firstDevices = [...resources.devices];
+  h.replay();
+  assert.ok(firstDevices.every((device) => device.closed));
+  assert.ok(resources.devices.slice(firstDevices.length).every((device) => !device.closed));
+  await h.value.goLive(); h.flush();
+  assert.equal(resources.publications.length, 1);
+  h.value.end(); h.flush();
+  assert.ok(resources.publications.every((publication) => publication.closed));
+  assert.ok(resources.encoders.every((encoder) => encoder.closed));
+  assert.ok(resources.captures.every((capture) => capture.closed));
+  assert.ok(resources.devices.every((device) => device.closed));
+  assert.ok(resources.connections.every((connection) => connection.closed));
+  h.unmount();
+});
+
+test("origin withdrawals close an attached player and its owned subscription", () => {
+  reset(); resources.initialPaths.push("lynk/room/alice");
+  const h = new Hooks();
+  const view = h.render(() => useLynkViewer("room"));
+  view.attachCanvas("lynk/room/alice", {});
+  resources.connections[0].routes.set(new Map());
+  h.render();
+  assert.deepEqual(h.value.publishers, []);
+  assert.equal(resources.players[0].closed, true);
+  assert.equal(resources.watches[0].closed, true);
+  h.unmount();
+  assert.ok(resources.computeds.every((computed) => computed.closed));
 });
 
 test("native effect replay does not leave a newly admitted publisher permanently ended", async () => {
@@ -240,4 +342,47 @@ test("native relay drops reconnect with backoff and leaving cancels the retry", 
     globalThis.setTimeout = originalSet;
     globalThis.clearTimeout = originalClear;
   }
+});
+
+
+test("terminal relay errors surface and recover when fresh credentials clear them", () => {
+  reset();
+  const h = new Hooks();
+  h.render(() => useLynkViewer("room"));
+  const connection = resources.connections[0];
+  connection.status.set("disconnected");
+  connection.error.set(new Error("Credentials rejected"));
+  h.render();
+  assert.equal(h.value.state, "error");
+  assert.equal(h.value.error, "Credentials rejected");
+  connection.error.set(undefined);
+  connection.status.set("connected");
+  h.render();
+  assert.equal(h.value.error, null);
+  assert.notEqual(h.value.state, "error");
+  h.unmount();
+});
+
+test("publisher exposes terminal source and transport errors rather than false live state", async () => {
+  reset();
+  const h = new Hooks();
+  const view = h.render(() => useLynkBroadcast("room", true));
+  await view.goLive(); h.flush();
+  const camera = resources.devices[0];
+  const microphone = resources.devices[1];
+  camera.out.error.set(new Error("Camera permission denied")); h.render();
+  assert.equal(h.value.state, "error");
+  assert.equal(h.value.error, "Camera permission denied");
+  h.value.setCameraEnabled(false); h.flush();
+  assert.equal(h.value.error, null, "disabled camera's old failure is not fatal");
+  microphone.out.error.set(new Error("Microphone unavailable")); h.render();
+  assert.equal(h.value.error, "Microphone unavailable");
+  microphone.out.error.set(undefined); h.render();
+  assert.equal(h.value.state, "live");
+  const connection = resources.connections.at(-1);
+  connection.status.set("disconnected");
+  connection.error.set(new Error("Publisher authorization rejected")); h.render();
+  assert.equal(h.value.state, "error");
+  assert.equal(h.value.error, "Publisher authorization rejected");
+  h.unmount();
 });

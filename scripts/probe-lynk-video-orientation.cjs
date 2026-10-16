@@ -35,6 +35,29 @@ window.mountStage = (container, tiles) => {
     await page.addScriptTag({ content: sdk });
     const results = await page.evaluate(async () => {
       const { Video, Signals } = window.Publish;
+      // Capture now fans out reader-owned frames instead of exposing Root.frame.
+      const observeCapture = (source) => {
+        const capture = new Video.Capture({ source });
+        const effect = new Signals.Effect();
+        let latest, closed = false;
+        effect.run(e => {
+          const fanout = e.get(capture.out.frames);
+          if (!fanout) return;
+          const reader = fanout.subscribe(e, 1).getReader();
+          e.cleanup(() => reader.cancel().catch(() => {}));
+          e.spawn(async () => {
+            for (;;) {
+              const { value } = await reader.read();
+              if (!value) return;
+              if (closed) { value.close(); return; }
+              latest?.close(); latest = value;
+            }
+          });
+        });
+        return { capture, frame: { peek: () => latest }, close() {
+          closed = true; effect.close(); capture.close(); latest?.close(); latest = undefined;
+        } };
+      };
       const canvas = new OffscreenCanvas(64, 32);
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = 'red'; ctx.fillRect(0, 0, 32, 16);
@@ -71,20 +94,24 @@ window.mountStage = (container, tiles) => {
         const frame = new VideoFrame(canvas, { timestamp: 0, rotation, flip });
         if (frame.rotation !== rotation) throw new Error('Browser does not implement VideoFrame rotation');
         // Resolve exactly the locked SDK's encoder/catalog configuration; no transport.
-        const sdkEncoder = new Video.Encoder(new Signals.Signal(frame), new Signals.Signal({ getSettings: () => ({ frameRate: 30 }) }), new Signals.Signal(undefined), { enabled: true, config: { codec } });
-        for (let n = 0; (!sdkEncoder.resolved.peek() || !sdkEncoder.catalog.peek()) && n < 100; n++) await new Promise(r => setTimeout(r, 20));
-        const config = sdkEncoder.resolved.peek(); const catalog = sdkEncoder.catalog.peek();
+        const sdkCapture = new Video.Capture({ source: { frameRate: 30,
+          frames: new ReadableStream({ start(controller) { controller.enqueue(frame.clone()); controller.close(); } }),
+        } });
+        const sdkEncoder = new Video.Encoder('video/orientation-probe', { capture: sdkCapture, enabled: true, config: { codec } });
+        for (let n = 0; (!sdkEncoder.out.resolved.peek() || !sdkEncoder.out.catalog.peek()) && n < 100; n++) await new Promise(r => setTimeout(r, 20));
+        const config = sdkEncoder.out.resolved.peek(); const catalog = sdkEncoder.out.catalog.peek();
         if (!config || !catalog) throw new Error('SDK failed to resolve selected codec config');
         const wire = await encode(frame, config, catalog);
         // Exercise the actual installed package patch, including the no-op path.
         const normalized = normalize(new VideoFrame(frame));
         const normalizedWire = await encode(normalized, { ...config, width: normalized.codedWidth, height: normalized.codedHeight }, { ...catalog, codedWidth: normalized.codedWidth, codedHeight: normalized.codedHeight });
         rows.push({ rotation, flip, input: { width: frame.displayWidth, height: frame.displayHeight }, sdkCatalog: catalog, wire, normalized: normalizedWire.catalog });
-        normalized.close(); frame.close(); sdkEncoder.close();
+        normalized.close(); frame.close(); sdkEncoder.close(); sdkCapture.close();
       }
       // Exercise the patched SDK's real TrackProcessor boundary and source
       // teardown, replacing only capture with a generated-frame stream.
       const NativeProcessor = window.MediaStreamTrackProcessor;
+      const NativeWorker = window.Worker;
       let capture, cancelled = false;
       window.MediaStreamTrackProcessor = class {
         constructor() { this.readable = new ReadableStream({ start(controller) { capture = controller; }, cancel() { cancelled = true; } }); }
@@ -92,7 +119,7 @@ window.mountStage = (container, tiles) => {
       let root;
       const pipeline = [];
       try {
-        root = new Video.Root({ source: { getSettings: () => ({ frameRate: 30 }) } });
+        root = observeCapture({ getSettings: () => ({ frameRate: 30 }) });
         for (let n = 0; !capture && n < 100; n++) await new Promise(r => setTimeout(r, 10));
         if (!capture) throw new Error('SDK capture boundary did not start');
         for (const rotation of [90, 0, 270, 180]) {
@@ -108,8 +135,60 @@ window.mountStage = (container, tiles) => {
         for (let n = 0; !cancelled && n < 100; n++) await new Promise(r => setTimeout(r, 10));
         if (!cancelled || last.displayWidth !== 0) throw new Error('SDK teardown did not cancel capture and close last frame');
       } finally { root?.close(); window.MediaStreamTrackProcessor = NativeProcessor; }
-      // Force the actual SDK fallback with a generated canvas track. Simulate
-      // metadata-before-frame and one transient constructor race, then recover.
+      // Exercise the released SDK worker-message branch with real browser
+      // VideoFrames and deterministic worker delivery. The worker transport is
+      // simulated here; normalization/ownership/fanout and codecs are real.
+      const workerPipeline = [];
+      const orientationGetters = Object.fromEntries(['rotation', 'flip'].map(key =>
+        [key, Object.getOwnPropertyDescriptor(VideoFrame.prototype, key)]));
+      let captureWorker;
+      delete window.MediaStreamTrackProcessor;
+      window.Worker = class {
+        constructor() {
+          captureWorker = this;
+          queueMicrotask(() => this.onmessage({ data: { type: 'ready', supported: true } }));
+        }
+        postMessage(message) { if (message.type === 'pull') this.pending = true; }
+        deliver(frame) {
+          if (!this.pending) throw new Error('Worker frame delivered without demand');
+          this.pending = false;
+          this.onmessage({ data: { type: 'frame', frame, at: performance.timeOrigin + performance.now() } });
+        }
+        terminate() { this.terminated = true; }
+      };
+      try {
+        root = observeCapture({ getSettings: () => ({ frameRate: 30 }), clone: () => ({ stop() {} }) });
+        for (const hiddenGetters of [false, true]) {
+          // Exercise unexpected unknown metadata in an orientation-capable engine.
+          // Chromium's native slots/rendering remain intact; this is not WebKit.
+          for (const key of ['rotation', 'flip']) Object.defineProperty(VideoFrame.prototype, key,
+            hiddenGetters ? { configurable: true, get: () => undefined } : orientationGetters[key]);
+          for (const rotation of [0, 90, 180, 270]) for (const flip of [false, true]) {
+          for (let n = 0; !captureWorker?.pending && n < 100; n++) await new Promise(r => setTimeout(r, 10));
+          if (!captureWorker?.pending) throw new Error('SDK worker capture did not request a frame');
+          const previous = root.frame.peek();
+          const raw = new VideoFrame(canvas, { timestamp: 1000 * workerPipeline.length, rotation, flip });
+          captureWorker.deliver(raw);
+          for (let n = 0; root.frame.peek() === previous && n < 100; n++) await new Promise(r => setTimeout(r, 10));
+          const displayed = root.frame.peek();
+          if (!displayed || displayed === previous) throw new Error('SDK worker capture did not deliver normalized frame');
+          const wire = await encode(displayed,
+            { codec: 'vp8', width: displayed.codedWidth, height: displayed.codedHeight, bitrate: 1000000, framerate: 30 },
+            { codec: 'vp8', codedWidth: displayed.codedWidth, codedHeight: displayed.codedHeight });
+          workerPipeline.push({ hiddenGetters, inputRotation: rotation, inputFlip: flip, rotation: displayed.rotation ?? 0, flip: displayed.flip ?? false,
+            corners: wire.catalog.corners, rawClosed: raw.displayWidth === 0, previousClosed: !previous || previous.displayWidth === 0 });
+          }
+        }
+        const last = root.frame.peek(); root.close(); root = null;
+        for (let n = 0; !captureWorker.terminated && n < 100; n++) await new Promise(r => setTimeout(r, 10));
+        if (!captureWorker.terminated || last.displayWidth !== 0) throw new Error('SDK worker teardown did not terminate capture and release consumer frame');
+      } finally {
+        root?.close(); window.MediaStreamTrackProcessor = NativeProcessor; window.Worker = NativeWorker;
+        for (const key of ['rotation', 'flip']) Object.defineProperty(VideoFrame.prototype, key, orientationGetters[key]);
+      }
+      // Remove prototype capabilities so the SDK must select video-element capture
+      // even when native/worker processors exist. Use a generated canvas track,
+      // delayed readiness and one transient constructor race, then recover.
       const source = document.createElement('canvas'); source.width = 32; source.height = 64;
       const paintSource = () => {
         const pixels = source.getContext('2d'); const w = source.width / 2, h = source.height / 2;
@@ -122,8 +201,10 @@ window.mountStage = (container, tiles) => {
       const NativeFrame = window.VideoFrame;
       const createElement = document.createElement.bind(document);
       let fallbackVideo, waiting = true, attempts = 0, rawVideoExtractions = 0, fallbackRoot;
-      let fallbackResult;
-      window.MediaStreamTrackProcessor = undefined;
+      let fallbackResult, nativeAttempts = 0, workerAttempts = 0;
+      for (const key of ['rotation', 'flip']) delete NativeFrame.prototype[key];
+      window.MediaStreamTrackProcessor = class { constructor() { nativeAttempts++; throw new Error('Unsafe native processor selected'); } };
+      window.Worker = class { constructor() { workerAttempts++; throw new Error('Unsafe worker processor attempted'); } };
       document.createElement = function(name, ...args) {
         const element = createElement(name, ...args);
         if (name === 'video') {
@@ -144,7 +225,7 @@ window.mountStage = (container, tiles) => {
         }
       };
       try {
-        fallbackRoot = new Video.Root({ source: stream.getVideoTracks()[0] });
+        fallbackRoot = observeCapture(stream.getVideoTracks()[0]);
         await new Promise(r => setTimeout(r, 150));
         if (!fallbackVideo || attempts || fallbackRoot.frame.peek()) throw new Error('Fallback captured before current frame readiness');
         waiting = false;
@@ -152,7 +233,7 @@ window.mountStage = (container, tiles) => {
         const frame = fallbackRoot.frame.peek();
         if (!frame || attempts < 2) throw new Error('Fallback did not recover transient no-video-frame error');
         const encodeFallback = async (input) => {
-          // Root owns/replaces input while the asynchronous codec flush runs.
+          // The observer owns/replaces its copy while asynchronous codec flush runs.
           const captured = new NativeFrame(input);
           try { return await encode(captured,
             { codec: 'vp8', width: captured.codedWidth, height: captured.codedHeight, bitrate: 1000000, framerate: 30 },
@@ -169,7 +250,7 @@ window.mountStage = (container, tiles) => {
         if (!resized || resized.displayWidth !== 64) throw new Error('Fallback did not follow live video dimensions');
         const second = { width: resized.displayWidth, height: resized.displayHeight };
         second.corners = (await encodeFallback(resized)).catalog.corners;
-        fallbackResult = { first, resized: second, rawVideoExtractions };
+        fallbackResult = { first, resized: second, rawVideoExtractions, nativeAttempts, workerAttempts };
         const lastFrame = fallbackRoot.frame.peek();
         fallbackRoot.close(); fallbackRoot = null;
         const count = attempts;
@@ -178,10 +259,11 @@ window.mountStage = (container, tiles) => {
         if (stream.getVideoTracks()[0].readyState !== 'live') throw new Error('Fallback stopped caller-owned track');
       } finally {
         fallbackRoot?.close(); window.MediaStreamTrackProcessor = NativeProcessor;
-        window.VideoFrame = NativeFrame; document.createElement = createElement;
+        window.VideoFrame = NativeFrame; window.Worker = NativeWorker; document.createElement = createElement;
+        for (const key of ['rotation', 'flip']) Object.defineProperty(NativeFrame.prototype, key, orientationGetters[key]);
         stream.getTracks().forEach(t => t.stop());
       }
-      return { userAgent: navigator.userAgent, avcSupported: !!avcSupport.supported, exercisedCodec: codec, rows, pipeline, fallback: fallbackResult };
+      return { userAgent: navigator.userAgent, avcSupported: !!avcSupport.supported, exercisedCodec: codec, rows, pipeline, workerPipeline, fallback: fallbackResult };
     });
     console.log(JSON.stringify(results, (key, value) => key === "dataUrl" ? "[generated frame pixels]" : value, 2));
     for (const row of results.rows) {
@@ -247,11 +329,18 @@ window.mountStage = (container, tiles) => {
       assert.equal(frame.rotation, 0); assert.equal(frame.flip, false);
       assert.equal(frame.rawClosed, true); assert.equal(frame.previousClosed, true);
     }
+    for (const frame of results.workerPipeline) {
+      let expected = { 0: 'RGBY', 90: 'BRYG', 180: 'YBGR', 270: 'GYRB' }[frame.inputRotation];
+      if (frame.inputFlip) expected = expected[1] + expected[0] + expected[3] + expected[2];
+      assert.equal(frame.corners, expected); assert.equal(frame.rotation, 0); assert.equal(frame.flip, false);
+      assert.equal(frame.rawClosed, true); assert.equal(frame.previousClosed, true);
+    }
+    console.log('Actual SDK worker-message branch passed all eight angle/flip pixel roundtrips with explicit and hidden getters, plus ownership/teardown checks using simulated worker delivery.');
     assert.deepEqual(results.fallback, {
       first: { rotation: 0, width: 32, height: 64, corners: 'BRYG' },
-      resized: { width: 64, height: 32, corners: 'BRYG' }, rawVideoExtractions: 0,
+      resized: { width: 64, height: 32, corners: 'BRYG' }, rawVideoExtractions: 0, nativeAttempts: 0, workerAttempts: 0,
     });
-    console.log('Actual SDK fallback passed rendered pixel capture/VP8 roundtrip, live dimension changes, delayed readiness, transient InvalidStateError recovery, and teardown with generated browser video.');
+    console.log('Actual SDK capability fallback bypassed native/worker processors and passed rendered pixels/VP8 roundtrip, live dimension changes, delayed readiness, transient InvalidStateError recovery, and teardown with generated browser video.');
     console.log('Confirmed catalog metadata gap and installed patch preserves all angle/flip pixels. Fallback avoids the fault-injected opaque sensor-frame extraction path. Physical iPhone/WebKit camera and AVC attribution remain unproven.');
   } finally { await browser?.close(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

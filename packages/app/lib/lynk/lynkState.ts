@@ -7,7 +7,7 @@
  *   idle → requesting-token → connecting → live → reconnecting → ended
  *                                  └──────────────────────────→ error
  *
- * Maps onto the underlying `@moq` `Connection.Reload.status`
+ * Maps onto the underlying `@moq` `Connection.status`
  * ("connecting" | "connected" | "disconnected") plus our token + teardown
  * lifecycle — see `lynkStateFromConnection`.
  */
@@ -21,7 +21,7 @@ export type LynkState =
   | "ended"
   | "error";
 
-/** A MoQ relay connection status as surfaced by `Connection.Reload.status`. */
+/** A MoQ relay connection status as surfaced by `Connection.status`. */
 export type MoqConnectionStatus = "connecting" | "connected" | "disconnected";
 
 export interface LynkStateInputs {

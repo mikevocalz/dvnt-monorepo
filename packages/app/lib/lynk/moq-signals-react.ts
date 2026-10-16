@@ -5,7 +5,7 @@
  * status, the `announced` Set, broadcast status) is a `Getter<T>` exposing
  * `peek()` + `subscribe()` — exactly the `useSyncExternalStore` contract. We
  * bridge here instead of pulling in `@moq/signals/react` to avoid coupling to
- * its strict `react@^19` peer range.
+ * its optional React 19.3 peer while the app remains on React 19.2.
  */
 
 import { useSyncExternalStore } from "react";
@@ -22,22 +22,15 @@ export function useSignalValue<T>(signal: Getter<T>): T {
 /**
  * Snapshot a `Signal<Set<T>>` as a STABLE STRING of its contents.
  *
- * `useSignalValue` cannot be used for these. `Connection.Reload.announced`
- * mutates its Set IN PLACE — `#announced.mutate((active) => active.add(path))`
- * in @moq/net/connection/reload.js — so `peek()` returns the same object
- * reference forever. `useSyncExternalStore` compares snapshots with `Object.is`,
- * sees no change, and never re-renders; a `useMemo` keyed on the Set never
- * recomputes either. The symptom is brutal to read backwards: a second
- * broadcaster announces on the wire, the console shows it arriving, and the
- * remote tile simply never appears.
- *
- * Serializing the contents gives React a value that actually changes. Sets here
- * hold one entry per publisher in one room, so the cost is nothing.
+ * Snapshot the contents rather than relying on Set identity. Some source
+ * signals mutate their collection in place; the current origin bridge creates
+ * a new Set per route update. Both should produce the same stable React key.
+ * A Computed is undefined until its first microtask and after it closes.
  */
-export function useSignalSetKey<T>(signal: Getter<Set<T>>): string {
+export function useSignalSetKey<T>(signal: Getter<Set<T> | undefined>): string {
   return useSyncExternalStore(
     (onChange) => signal.subscribe(() => onChange()),
-    () => Array.from(signal.peek(), String).sort().join("\n"),
+    () => Array.from(signal.peek() ?? [], String).sort().join("\n"),
     () => "",
   );
 }

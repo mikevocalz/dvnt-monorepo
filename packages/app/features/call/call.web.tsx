@@ -28,6 +28,8 @@
 
 import { memo, useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { switchWebCallCamera } from "@dvnt/app/features/call/switch-web-camera";
+import { stopWebCallMedia } from "@dvnt/app/features/call/stop-web-call-media";
+import { startWebCallDevice, changeWebCallDevice } from "@dvnt/app/features/call/start-web-call-device";
 import { useParams, useRouter, useSearchParams } from "solito/navigation";
 import {
   FishjamProvider,
@@ -258,6 +260,12 @@ function CallRoom({
   joinRoomRef.current = joinRoom;
   const leaveRoomRef = useRef(leaveRoom);
   leaveRoomRef.current = leaveRoom;
+  const mediaActiveRef = useRef(true);
+  useEffect(() => {
+    mediaActiveRef.current = true;
+    return () => { mediaActiveRef.current = false; };
+  }, []);
+  const cancelRejoinRef = useRef<(() => void) | null>(null);
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
   const micRef = useRef(microphone);
@@ -308,7 +316,7 @@ function CallRoom({
           hasVideo: callType === "video",
           chatId: chatId || undefined,
         });
-        if (cancelled) return;
+        if (cancelled || !mediaActiveRef.current) return;
         if (!created.ok || !created.data?.room?.id) {
           s.setError(
             created.error?.message || "Couldn't start the call",
@@ -347,7 +355,7 @@ function CallRoom({
 
       const joinStartedMs = Date.now();
       const joinResult = await callRoomsApi.joinCall(joinTargetId);
-      if (cancelled) return;
+      if (cancelled || !mediaActiveRef.current) return;
 
       if (!joinResult.ok || !joinResult.data) {
         const msg = joinResult.error?.message || "Failed to join room";
@@ -377,40 +385,44 @@ function CallRoom({
           },
         });
       } catch (peerErr: any) {
-        if (cancelled) return;
+        if (cancelled || !mediaActiveRef.current) return;
         s.setError(
           peerErr?.message || "WebRTC connection failed",
           "peer_join_failed",
         );
         return;
       }
-      if (cancelled) return;
+      if (cancelled || !mediaActiveRef.current) return;
 
       // 3) Start media: mic + camera (toggle*, which BOTH starts AND publishes
       //    the track once the peer is connected, which matches native).
       s.setCallPhase("starting_media");
       try {
-        if (!micRef.current.isMicrophoneOn) {
-          await micRef.current.toggleMicrophone();
-        }
+        if (!await startWebCallDevice(() => micRef.current.isMicrophoneOn,
+          () => micRef.current.toggleMicrophone(), () => cancelled || !mediaActiveRef.current)) return;
         s.setMicOn(true);
       } catch {
+        if (cancelled || !mediaActiveRef.current) return;
+        s.setMicOn(false);
         s.setError("Microphone failed to start", "mic_start_failed");
+        return;
       }
       try {
-        if (!cameraRef.current.isCameraOn) {
-          await cameraRef.current.toggleCamera();
-        }
+        if (!await startWebCallDevice(() => cameraRef.current.isCameraOn,
+          () => cameraRef.current.toggleCamera(), () => cancelled || !mediaActiveRef.current)) return;
         s.setCameraOn(true);
       } catch {
+        if (cancelled || !mediaActiveRef.current) return;
+        s.setCameraOn(false);
         // Camera failure is non-fatal, call can continue audio-only.
       }
-      if (cancelled) return;
+      if (cancelled || !mediaActiveRef.current) return;
       s.setCallPhase("connected");
     })();
 
     return () => {
       cancelled = true;
+      cancelRejoinRef.current?.();
     };
   // ONLY roomId. This effect writes `initStarted`, so listing that flag (or
   // anything else that changes as a result of joining) made React tear the
@@ -453,6 +465,10 @@ function CallRoom({
     rejoinAttemptRef.current = 1;
 
     let cancelled = false;
+    cancelRejoinRef.current = () => {
+      cancelled = true;
+      rejoinAttemptRef.current = 0;
+    };
     void (async () => {
       for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
         await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
@@ -469,6 +485,7 @@ function CallRoom({
         st.setConnectionStatus("connecting");
         try {
           const joinResult = await callRoomsApi.joinCall(targetRoomId);
+          if (cancelled || intentionalLeaveRef.current) return;
           const token = joinResult.ok ? joinResult.data?.token : null;
           const joinedUser = joinResult.data?.user;
           if (!token || !joinedUser) {
@@ -482,18 +499,25 @@ function CallRoom({
               avatar: joinedUser.avatar,
             },
           });
-          // Re-publish what was on. Guarded the same way the first join is:
-          // toggle* is a true toggle, so only start what is actually off.
-          if (!micRef.current.isMicrophoneOn) {
-            await micRef.current.toggleMicrophone();
-          }
-          if (!cameraRef.current.isCameraOn) {
-            await cameraRef.current.toggleCamera();
+          if (cancelled || intentionalLeaveRef.current) return;
+          // toggle* is a true toggle. Preserve already-running devices, and
+          // check cancellation again after every asynchronous acquisition.
+          const isCancelled = () => cancelled || intentionalLeaveRef.current;
+          if (!await startWebCallDevice(() => micRef.current.isMicrophoneOn,
+            () => micRef.current.toggleMicrophone(), isCancelled)) return;
+          try {
+            if (!await startWebCallDevice(() => cameraRef.current.isCameraOn,
+              () => cameraRef.current.toggleCamera(), isCancelled)) return;
+          } catch {
+            if (isCancelled()) return;
+            // Match initial join: a denied camera may continue audio-only.
+            st.setCameraOn(false);
           }
           st.setConnectionStatus("connected");
           rejoinAttemptRef.current = 0;
           return;
         } catch (rejoinErr) {
+          if (cancelled || intentionalLeaveRef.current) return;
           console.warn(
             `[call.web] auto-rejoin attempt ${attempt + 1} failed:`,
             rejoinErr,
@@ -508,10 +532,9 @@ function CallRoom({
       }
     })();
 
-    return () => {
-      cancelled = true;
-      rejoinAttemptRef.current = 0;
-    };
+    // Joining itself changes peerStatus to connecting/connected. Observer
+    // cleanup must not cancel that recovery. The room/leave lifetimes above
+    // and below invoke cancelRejoinRef instead.
   }, [peerStatus, getStore]);
 
   // ── Sync local camera stream → store ──────────────────────────────────────
@@ -550,16 +573,18 @@ function CallRoom({
   // ── Controls ──────────────────────────────────────────────────────────────
   const toggleMic = useCallback(() => {
     void (async () => {
-      await micRef.current.toggleMicrophone();
+      if (!await changeWebCallDevice(() => micRef.current.toggleMicrophone(),
+        () => !mediaActiveRef.current)) return;
       getStore().setMicOn(micRef.current.isMicrophoneOn);
-    })();
+    })().catch((error) => console.warn("[DVNT call] Microphone toggle failed", error));
   }, [getStore]);
 
   const toggleCamera = useCallback(() => {
     void (async () => {
-      await cameraRef.current.toggleCamera();
+      if (!await changeWebCallDevice(() => cameraRef.current.toggleCamera(),
+        () => !mediaActiveRef.current)) return;
       getStore().setCameraOn(cameraRef.current.isCameraOn);
-    })();
+    })().catch((error) => console.warn("[DVNT call] Camera toggle failed", error));
   }, [getStore]);
 
   // Refresh the browser camera list after permission, then switch the live
@@ -587,21 +612,13 @@ function CallRoom({
   const rejoinAttemptRef = useRef(0);
 
   const leave = useCallback(() => {
+    mediaActiveRef.current = false;
     intentionalLeaveRef.current = true;
+    cancelRejoinRef.current?.();
     const s = getStore();
     const duration = s.callDuration;
     const roomIdToLeave = s.roomId;
-    try {
-      leaveRoomRef.current();
-    } catch {
-      // ignore, leaving a dead room is non-fatal
-    }
-    try {
-      cameraRef.current.stopCamera();
-      micRef.current.stopMicrophone();
-    } catch {
-      // ignore
-    }
+    stopWebCallMedia(leaveRoomRef.current, cameraRef.current, micRef.current);
     if (roomIdToLeave) {
       // Free my seat, without this the room accumulates 'active' ghosts and
       // hits call_full. Non-fatal: a stuck seat is bad, a stuck leave is
@@ -770,11 +787,8 @@ function CallRoom({
   useEffect(() => {
     return () => {
       if (aloneTimerRef.current) clearInterval(aloneTimerRef.current);
-      try {
-        leaveRoomRef.current();
-      } catch {
-        // ignore
-      }
+      cancelRejoinRef.current?.();
+      stopWebCallMedia(leaveRoomRef.current, cameraRef.current, micRef.current);
       getStore().reset();
       useCallUIStore.getState().setInitStarted(false);
     };

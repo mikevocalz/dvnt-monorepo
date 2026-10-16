@@ -27,6 +27,8 @@
  */
 
 import { switchWebCallCamera } from "@dvnt/app/features/call/switch-web-camera";
+import { stopWebCallMedia } from "@dvnt/app/features/call/stop-web-call-media";
+import { startWebCallDevice, changeWebCallDevice } from "@dvnt/app/features/call/start-web-call-device";
 import { useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { create } from "zustand";
@@ -220,6 +222,11 @@ function Room({ roomId }: { roomId: string }) {
   joinRoomRef.current = joinRoom;
   const leaveRoomRef = useRef(leaveRoom);
   leaveRoomRef.current = leaveRoom;
+  const mediaActiveRef = useRef(true);
+  useEffect(() => {
+    mediaActiveRef.current = true;
+    return () => { mediaActiveRef.current = false; };
+  }, []);
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
   const micRef = useRef(microphone);
@@ -242,7 +249,7 @@ function Room({ roomId }: { roomId: string }) {
       //    fn `video_join_room`). Identical token path to the native room.
       s.setCallPhase("joining_room");
       const joinResult = await videoApi.joinRoom(roomId);
-      if (cancelled) return;
+      if (cancelled || !mediaActiveRef.current) return;
 
       if (!joinResult.ok || !joinResult.data) {
         const msg = joinResult.error?.message || "Failed to join room";
@@ -268,34 +275,37 @@ function Room({ roomId }: { roomId: string }) {
           },
         });
       } catch (peerErr: any) {
-        if (cancelled) return;
+        if (cancelled || !mediaActiveRef.current) return;
         s.setError(
           peerErr?.message || "WebRTC connection failed",
           "peer_join_failed",
         );
         return;
       }
-      if (cancelled) return;
+      if (cancelled || !mediaActiveRef.current) return;
 
       // 3) Start media: mic + camera.
       s.setCallPhase("starting_media");
       try {
-        if (!micRef.current.isMicrophoneOn) {
-          await micRef.current.toggleMicrophone();
-        }
+        if (!await startWebCallDevice(() => micRef.current.isMicrophoneOn,
+          () => micRef.current.toggleMicrophone(), () => cancelled || !mediaActiveRef.current)) return;
         s.setMicOn(true);
       } catch {
+        if (cancelled || !mediaActiveRef.current) return;
+        s.setMicOn(false);
         s.setError("Microphone failed to start", "mic_start_failed");
+        return;
       }
       try {
-        if (!cameraRef.current.isCameraOn) {
-          await cameraRef.current.toggleCamera();
-        }
+        if (!await startWebCallDevice(() => cameraRef.current.isCameraOn,
+          () => cameraRef.current.toggleCamera(), () => cancelled || !mediaActiveRef.current)) return;
         s.setCameraOn(true);
       } catch {
+        if (cancelled || !mediaActiveRef.current) return;
+        s.setCameraOn(false);
         // Camera failure is non-fatal — room can continue audio-only.
       }
-      if (cancelled) return;
+      if (cancelled || !mediaActiveRef.current) return;
       s.setCallPhase("connected");
     })();
 
@@ -359,16 +369,18 @@ function Room({ roomId }: { roomId: string }) {
   // ── Controls ──────────────────────────────────────────────────────────────
   const toggleMic = useCallback(() => {
     void (async () => {
-      await micRef.current.toggleMicrophone();
+      if (!await changeWebCallDevice(() => micRef.current.toggleMicrophone(),
+        () => !mediaActiveRef.current)) return;
       getStore().setMicOn(micRef.current.isMicrophoneOn);
-    })();
+    })().catch((error) => console.warn("[DVNT call] Microphone toggle failed", error));
   }, [getStore]);
 
   const toggleCamera = useCallback(() => {
     void (async () => {
-      await cameraRef.current.toggleCamera();
+      if (!await changeWebCallDevice(() => cameraRef.current.toggleCamera(),
+        () => !mediaActiveRef.current)) return;
       getStore().setCameraOn(cameraRef.current.isCameraOn);
-    })();
+    })().catch((error) => console.warn("[DVNT call] Camera toggle failed", error));
   }, [getStore]);
 
   // Refresh the browser camera list after permission, then switch the live
@@ -390,19 +402,10 @@ function Room({ roomId }: { roomId: string }) {
   }, []);
 
   const leave = useCallback(() => {
+    mediaActiveRef.current = false;
     const s = getStore();
     const duration = s.callDuration;
-    try {
-      leaveRoomRef.current();
-    } catch {
-      // ignore — leaving a dead room is non-fatal
-    }
-    try {
-      cameraRef.current.stopCamera();
-      micRef.current.stopMicrophone();
-    } catch {
-      // ignore
-    }
+    stopWebCallMedia(leaveRoomRef.current, cameraRef.current, micRef.current);
     s.setCallEnded(duration);
     router.back();
   }, [getStore, router]);
@@ -410,11 +413,7 @@ function Room({ roomId }: { roomId: string }) {
   // Leave Fishjam on unmount (mirrors native cleanup effect).
   useEffect(() => {
     return () => {
-      try {
-        leaveRoomRef.current();
-      } catch {
-        // ignore
-      }
+      stopWebCallMedia(leaveRoomRef.current, cameraRef.current, micRef.current);
       getStore().reset();
       useVideoRoomUIStore.getState().setInitStarted(false);
     };
