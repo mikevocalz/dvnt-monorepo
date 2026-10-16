@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { URL } from "node:url";
 import { getRoomEntryStatus } from "./room-entry-status.ts";
 import { buildRoomParticipantStats, resolveRoomAudience } from "./api/room-stats.ts";
 
