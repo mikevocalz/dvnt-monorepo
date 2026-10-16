@@ -27,7 +27,7 @@ test('orientation normalizer owns only replaced frames and reuses its canvas', a
     const cropped = fakeFrame(90, true, { displayWidth: 48, displayHeight: 96, codedWidth: 128, codedHeight: 64, duration: null });
     const output = normalize(cropped); assert.equal(output.width, 48); assert.equal(output.height, 96); assert.equal(output.duration, undefined);
     assert.deepEqual(draws.at(-1).slice(1), [0, 0, 48, 96]);
-    const unknown = fakeFrame(undefined, undefined); assert.equal(normalize(unknown), unknown); assert.equal(unknown.closes, 0);
+    const unknown = fakeFrame(0, false, { rotation: undefined, flip: undefined }); assert.equal(normalize(unknown), unknown); assert.equal(unknown.closes, 0);
   } finally { delete global.OffscreenCanvas; delete global.VideoFrame; }
 });
 test('context/constructor failures close owned input and propagate', async () => {
@@ -72,7 +72,7 @@ test('patch has pnpm-compatible Git file boundaries and exact hunk lengths', () 
 });
 
 // Execute the exact patched fallback body, with only browser media objects faked.
-function fallbackHarness({ readyState = 2, width = 64, failures = [], playError, normalizeError, playPromise } = {}) {
+function fallbackHarness({ readyState = 2, width = 64, failures = [], playError, normalizeError, playPromise, contextError, drawError } = {}) {
   const postimage = patch.split('diff --git a/video/')[0].split('\n')
     .filter(line => (line.startsWith('+') && !line.startsWith('+++')) || line.startsWith(' '))
     .map(line => line.slice(1)).join('\n');
@@ -84,16 +84,26 @@ function fallbackHarness({ readyState = 2, width = 64, failures = [], playError,
     play() { return playPromise ?? (playError ? Promise.reject(playError) : Promise.resolve()); },
     pause() { this.pauses++; } };
   const track = { readyState: 'live' };
-  const frames = []; let attempts = 0;
+  const frames = []; const canvases = []; const draws = []; let attempts = 0;
   const Frame = class { constructor(_video, init) {
     attempts++;
     const failure = failures.shift(); if (failure) throw failure;
-    Object.assign(this, init); frames.push(this);
+    assert.notEqual(_video, video, 'fallback must not extract the opaque sensor frame from video');
+    Object.assign(this, init, { width: _video.width, height: _video.height }); frames.push(this);
   } };
-  const make = new Function('e', 'n', 't', 'normalizeOrientation', 'document', 'MediaStream', 'VideoFrame', body);
+  const document = { createElement: name => {
+    if (name === 'video') return video;
+    assert.equal(name, 'canvas');
+    const canvas = { width: 300, height: 150, getContext: () => contextError ? null : {
+      clearRect() {}, drawImage: (...args) => { if (drawError) throw drawError; draws.push(args); },
+    } };
+    canvases.push(canvas); return canvas;
+  } };
+  const createCapture = new Function('document', 'VideoFrame', helper.replaceAll('export function', 'function') + '\nreturn createVideoElementCapture;')(document, Frame);
+  const make = new Function('e', 'n', 't', 'normalizeOrientation', 'document', 'MediaStream', 'VideoFrame', 'createVideoElementCapture', body);
   const stream = make(track, { frameRate: 1000 }, { Milli: { now: () => performance.now(), sub: (a,b) => a-b }, Micro: { fromMilli: n => n*1000 } }, f => { if (normalizeError) throw normalizeError; return f; },
-    { createElement: () => video }, class {}, Frame);
-  return { stream, video, track, frames, attempts: () => attempts };
+    document, class {}, Frame, createCapture);
+  return { stream, video, track, frames, canvases, draws, attempts: () => attempts };
 }
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const bounded = promise => Promise.race([promise, new Promise((_, reject) => {
@@ -168,4 +178,29 @@ test('fallback cancellation detaches video while play startup is pending', async
   assert.equal(h.video.srcObject, null); assert.equal(h.attempts(), 0);
   rejectPlay(new DOMException('play interrupted', 'AbortError'));
   await delay(5);
+});
+
+test('fallback rasterizes live video presentation dimensions, reuses canvas, and keeps timestamps', async () => {
+  const h = fallbackHarness({ width: 32 }); h.video.videoHeight = 64;
+  const reader = h.stream.getReader();
+  try {
+    const first = (await bounded(reader.read())).value;
+    assert.equal(first.width, 32); assert.equal(first.height, 64);
+    assert.deepEqual(h.draws[0], [h.video, 0, 0, 32, 64]);
+    assert.ok(first.timestamp > 0);
+    h.video.videoWidth = 64; h.video.videoHeight = 32;
+    const next = (await bounded(reader.read())).value;
+    assert.equal(next.width, 64); assert.equal(next.height, 32);
+    assert.ok(next.timestamp > first.timestamp);
+    assert.equal(h.canvases.length, 1);
+    assert.deepEqual(h.draws.at(-1), [h.video, 0, 0, 64, 32]);
+  } finally { await reader.cancel(); }
+});
+test('fallback canvas failure propagates and detaches video without stopping its owner track', async () => {
+  for (const config of [{contextError:true}, {drawError:new TypeError('draw failed')}]) {
+    const h = fallbackHarness(config);
+    await assert.rejects(bounded(h.stream.getReader().read()), /2D canvas|draw failed/);
+    assert.equal(h.video.srcObject, null); assert.equal(h.attempts(), 0);
+    assert.equal(h.track.readyState, 'live');
+  }
 });
