@@ -11,6 +11,8 @@ const sdk = buildSync({ stdin: { contents: 'import * as Publish from "@moq/publi
   try {
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
+    page.on('console', message => console.log('browser:', message.text()));
+    page.on('pageerror', error => console.error('browser error:', error));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.addScriptTag({ content: sdk });
     const results = await page.evaluate(async () => {
@@ -20,6 +22,10 @@ const sdk = buildSync({ stdin: { contents: 'import * as Publish from "@moq/publi
       ctx.fillStyle = 'red'; ctx.fillRect(0, 0, 32, 32);
       ctx.fillStyle = 'blue'; ctx.fillRect(32, 0, 32, 32);
       const rows = [];
+      const avcSupport = await VideoEncoder.isConfigSupported({ codec: 'avc1.42001f', width: 64, height: 32, avc: { format: 'annexb' }, hardwareAcceleration: 'prefer-software' });
+      const codec = avcSupport.supported ? 'avc1' : 'vp8';
+      // Hosted Chromium may lack AVC. VP8 still exercises the same SDK catalog
+      // and WebCodecs orientation contract; never label that an AVC reproduction.
       const encode = async (frame, config, catalog) => {
         let chunk, metadata;
         const encoder = new VideoEncoder({ output: (c, m) => { chunk = c; metadata = m; }, error: e => { throw e; } });
@@ -43,10 +49,10 @@ const sdk = buildSync({ stdin: { contents: 'import * as Publish from "@moq/publi
         const frame = new VideoFrame(canvas, { timestamp: 0, rotation });
         if (frame.rotation !== rotation) throw new Error('Browser does not implement VideoFrame rotation');
         // Resolve exactly the locked SDK's encoder/catalog configuration; no transport.
-        const sdkEncoder = new Video.Encoder(new Signals.Signal(frame), new Signals.Signal({ getSettings: () => ({ frameRate: 30 }) }), new Signals.Signal(undefined), { enabled: true, config: { codec: 'avc1' } });
-        for (let n = 0; !sdkEncoder.resolved.peek() && n < 100; n++) await new Promise(r => setTimeout(r, 20));
+        const sdkEncoder = new Video.Encoder(new Signals.Signal(frame), new Signals.Signal({ getSettings: () => ({ frameRate: 30 }) }), new Signals.Signal(undefined), { enabled: true, config: { codec } });
+        for (let n = 0; (!sdkEncoder.resolved.peek() || !sdkEncoder.catalog.peek()) && n < 100; n++) await new Promise(r => setTimeout(r, 20));
         const config = sdkEncoder.resolved.peek(); const catalog = sdkEncoder.catalog.peek();
-        if (!config || !catalog) throw new Error('SDK failed to resolve AVC config');
+        if (!config || !catalog) throw new Error('SDK failed to resolve selected codec config');
         const wire = await encode(frame, config, catalog);
         // Control: rasterizing the display orientation before encoding should work
         // even when orientation metadata is omitted. This is NOT an app change.
@@ -67,7 +73,7 @@ const sdk = buildSync({ stdin: { contents: 'import * as Publish from "@moq/publi
       const fallback = new VideoFrame(video, { timestamp: 0 });
       const fallbackResult = { rotation: fallback.rotation ?? 0, width: fallback.displayWidth, height: fallback.displayHeight };
       fallback.close(); video.pause(); video.srcObject = null; stream.getTracks().forEach(t => t.stop());
-      return { userAgent: navigator.userAgent, rows, fallback: fallbackResult };
+      return { userAgent: navigator.userAgent, avcSupported: !!avcSupport.supported, exercisedCodec: codec, rows, fallback: fallbackResult };
     });
     console.log(JSON.stringify(results, null, 2));
     for (const row of results.rows) {
