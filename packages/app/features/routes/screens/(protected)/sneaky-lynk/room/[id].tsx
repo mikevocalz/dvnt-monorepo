@@ -87,7 +87,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useRoomStore } from "@dvnt/app/features/sneaky-lynk";
 import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
-import { eventLynkApi } from "@dvnt/app/lib/api/event-lynk";
+import { getRoomEntryStatus } from "@dvnt/app/features/sneaky-lynk/room-entry-status";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import { shareUrl } from "@dvnt/app/lib/deep-linking/share-link";
@@ -613,32 +613,21 @@ function SneakyLynkRoomScreenContent({
   const [roomLookup, setRoomLookup] = useState<{
     loading: boolean;
     room: SneakyRoom | null;
-    /** An event Lynk this account may wait for or enter (event-lynk-room). */
-    eventRoom: boolean;
   }>({
     loading: shouldGateJoin,
     room: null,
-    eventRoom: false,
   });
 
   useEffect(() => {
     if (!shouldGateJoin || !id) return;
 
     let cancelled = false;
-    setRoomLookup({ loading: true, room: null, eventRoom: false });
+    setRoomLookup({ loading: true, room: null });
 
     (async () => {
       const room = await sneakyLynkApi.getRoomById(id);
-      // An open event room with no host in it yet is not "ended": it is
-      // waiting for a host to start it. Ask the server whether this account
-      // may wait for it (or enter, for a host). Any refusal keeps the
-      // closed screen below.
-      let eventRoom = false;
-      if (room && room.status === "open" && !room.isLive) {
-        eventRoom = await eventLynkApi.wait(id).then(() => true, () => false);
-      }
       if (!cancelled) {
-        setRoomLookup({ loading: false, room, eventRoom });
+        setRoomLookup({ loading: false, room });
       }
     })();
 
@@ -673,9 +662,7 @@ function SneakyLynkRoomScreenContent({
 
   if (
     shouldGateJoin &&
-    (!roomLookup.room ||
-      roomLookup.room.status === "ended" ||
-      (!roomLookup.room.isLive && !roomLookup.eventRoom))
+    getRoomEntryStatus(roomLookup.room) !== "prejoin"
   ) {
     return (
       <ClosedRoomScreen
@@ -712,7 +699,6 @@ function SneakyLynkRoomScreenContent({
         initialCameraOn={joinCameraOn}
         initialMicOn={joinMicOn}
         initialRoom={roomLookup.room}
-        isEventRoom={roomLookup.eventRoom}
         billing={billing}
       />
     );
@@ -1112,7 +1098,6 @@ function ServerRoom({
   initialCameraOn = true,
   initialMicOn = true,
   initialRoom = null,
-  isEventRoom = false,
   billing = null,
 }: {
   id: string;
@@ -1123,8 +1108,6 @@ function ServerRoom({
   initialCameraOn?: boolean;
   initialMicOn?: boolean;
   initialRoom?: SneakyRoom | null;
-  /** Event Lynk not started yet: no host in it is expected, not "ended". */
-  isEventRoom?: boolean;
   billing?: SneakyBilling | null;
 }) {
   const router = useRouter();
@@ -1178,8 +1161,7 @@ function ServerRoom({
     initialRoom,
   );
   const [closedReason, setClosedReason] = useState<string | null>(
-    initialRoom &&
-      (initialRoom.status === "ended" || (!initialRoom.isLive && !isEventRoom))
+    getRoomEntryStatus(initialRoom) === "ended"
       ? "This Lynk has ended and can't be reopened."
       : null,
   );
@@ -1463,7 +1445,7 @@ function ServerRoom({
           if (cancelled) return;
           if (!latestRoom) {
             markRoomClosed(null, "This Lynk is unavailable.");
-          } else if (latestRoom.status === "ended" || !latestRoom.isLive) {
+          } else if (getRoomEntryStatus(latestRoom) === "ended") {
             markRoomClosed(
               latestRoom,
               "This Lynk has ended and can't be reopened.",
@@ -1750,9 +1732,8 @@ function ServerRoom({
         (payload: any) => {
           const updated = payload.new as {
             status?: string;
-            is_live?: boolean;
           };
-          if (updated.status === "ended" || updated.is_live === false) {
+          if (updated.status === "ended" || updated.status === "closed") {
             markRoomClosed(
               undefined,
               "The host has left. This Lynk has ended.",

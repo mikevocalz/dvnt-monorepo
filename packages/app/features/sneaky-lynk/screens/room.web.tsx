@@ -91,7 +91,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
-import { eventLynkApi } from "@dvnt/app/lib/api/event-lynk";
+import { getRoomEntryStatus } from "../room-entry-status";
 import { useEventLynkWaitingRoom } from "../hooks/useEventLynkWaitingRoom";
 import { getSneakyUserLabel } from "../ui/user-labels";
 import {
@@ -2027,17 +2027,7 @@ export function SneakyLynkRoomScreen() {
       if (cancelled) return;
       if (!room) {
         setClosed("This Lynk is unavailable.");
-      } else if (room.status === "ended") {
-        setRoomSnapshot(room);
-        setClosed("This Lynk has ended and can't be reopened.");
-      } else if (
-        !room.isLive &&
-        // An event Lynk with no host in it yet is waiting for a host to
-        // start it, not ended. The server says whether this account may
-        // wait for it; any refusal keeps the closed screen.
-        !(await eventLynkApi.wait(id).then(() => true, () => false))
-      ) {
-        if (cancelled) return;
+      } else if (getRoomEntryStatus(room) === "ended") {
         setRoomSnapshot(room);
         setClosed("This Lynk has ended and can't be reopened.");
       } else {
