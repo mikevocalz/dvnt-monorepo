@@ -29,9 +29,9 @@ const fixture = `
   export const noop = () => {};
   export const localUser = { id:'fixture-host', authId:'fixture-auth', username:'Local Host', displayName:'Local Host', avatar:'', isVerified:true };
   const defaults = { role:params.get('role') || 'host', publishers:2, listeners:0, hasVideo:true, overlayOpen:false,
-    insets:{top:0,right:0,bottom:0,left:0}, reactions:[], connection:'connected' };
+    insets:{top:0,right:0,bottom:0,left:0}, reactions:[], connection:'connected', rosterState:params.get('roster') || 'ready' };
   export const useFixture = create(() => ({...defaults}));
-  export const f = window.fixture = { actions:[], routes:[], sent:[], attachments:[], nativeMounts:[], roster:[], membersSync:null, commentsSync:null };
+  export const f = window.fixture = { actions:[], routes:[], sent:[], attachments:[], nativeMounts:[], roster:[], membersSync:null, membersError:null, commentsSync:null };
   const names = index => 'Participant ' + String(index).padStart(2,'0');
   function roster() {
     const c = useFixture.getState();
@@ -39,17 +39,22 @@ const fixture = `
       ...Array.from({length:c.publishers-1},(_,i)=>({userId:'publisher-'+String(i+1).padStart(2,'0'),role:'participant',status:'active',handRaised:false,displayName:names(i+1)})),
       ...Array.from({length:c.listeners},(_,i)=>({userId:'listener-'+i,role:'listener',status:'active',handRaised:i<3,displayName:'Listener '+i}))];
   }
-  f.configure = patch => { useFixture.setState(patch); f.roster=roster(); f.membersSync?.(f.roster); };
+  f.deliverRoster = () => {
+    const state=useFixture.getState().rosterState;
+    if(state==='ready')f.membersSync?.(f.roster);
+    else if(state==='error')f.membersError?.(new Error('fixture roster unavailable'));
+  };
+  f.configure = patch => { useFixture.setState(patch); f.roster=roster(); f.deliverRoster(); };
   f.configure({});
   export const attachCanvas = (peer, element) => { f.attachments.push({peer, attached:!!element}); };
-  const mediaActions = { goLive:async()=>{}, end:noop, setMicEnabled:noop, setCameraEnabled:noop, attachCanvas };
+  const mediaActions = { goLive:async()=>{}, end:noop, setMicEnabled:value=>f.actions.push('mic:'+value), setCameraEnabled:value=>f.actions.push('camera:'+value), attachCanvas };
   export function useLynkBroadcast() {
     const c=useFixture();
     return { ...mediaActions, state:'live', isLive:true, error:null, micEnabled:false,cameraEnabled:false,
       localStream:null,localAudioStream:null,coPublishers:f.roster.filter(m=>m.role!=='listener' && m.userId!==localUser.id).map(m=>({peerId:m.userId,path:'fixture/'+m.userId})) };
   }
   export const videoApi = {
-    subscribeToMembers:(_id,_change,options)=> {f.membersSync=options.onSync;queueMicrotask(()=>f.membersSync?.(f.roster));return()=>{f.membersSync=null}},
+    subscribeToMembers:(_id,_change,options)=> {f.membersSync=options.onSync;f.membersError=options.onError;queueMicrotask(()=>f.deliverRoster());return()=>{f.membersSync=null;f.membersError=null}},
     subscribeToRoomEvents:()=>noop,
     muteAll:async()=>({ok:true}),unmuteAll:async()=>({ok:true}),mutePeer:async()=>({ok:true}),unmutePeer:async()=>({ok:true}),
     promotePeer:async()=>({ok:true}),demotePeer:async()=>({ok:true}),kickUser:async()=>({ok:true})
@@ -279,7 +284,7 @@ async function setInsets(page, insets) {
   assert.deepEqual(actual,[insets.top,insets.right,insets.bottom,insets.left],'Chromium must really emulate CSS safe areas');
 }
 
-async function createPage(browser,url,c,role,rail='web') {
+async function createPage(browser,url,c,role,rail='web',rosterState='ready') {
   const context=await browser.newContext({viewport:{width:c.width,height:c.height},reducedMotion:'reduce'});
   const page=await context.newPage();
   page.setDefaultTimeout(8000);
@@ -290,7 +295,7 @@ async function createPage(browser,url,c,role,rail='web') {
     if(target.origin===url)return route.continue();
     unexpectedRequests.push(target.origin+target.pathname);return route.abort();
   });
-  await page.goto(url+'/?rail='+rail+'&role='+role);
+  await page.goto(url+'/?rail='+rail+'&role='+role+'&roster='+rosterState);
   await page.waitForFunction(()=>window.fixture);
   await setInsets(page,{...zeroInsets,...c.insets});
   if(rail==='web')await page.locator('main[data-room-phase="connected"]').waitFor();
@@ -406,6 +411,53 @@ async function timeUpCases(browser,url) {
       assert.deepEqual(unexpectedRequests,[],c.name+' time-limit must not access live endpoints');
       console.log('PASS time-limit dialog '+c.name+': scroll-safe upgrade and leave actions');
     } catch(error) {await evidence(page,'FAIL-time-limit-'+c.name,error);recordFailure('time-limit-'+c.name,error)} finally {await context.close()}
+  }
+}
+
+async function rosterNoticeCases(browser,url) {
+  for(const c of cases.filter(c=>['narrow-short-phone','landscape-667'].includes(c.name))) {
+  for(const state of ['pending','error']) {
+    const name='roster-'+state+'-'+c.name;
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'participant','web',state);
+    try {
+      const notice=page.getByTestId('lynk-roster-pending');
+      await notice.waitFor();
+      assert.match(await notice.textContent(),state==='error'?/Couldn't load participants/:/Connecting participants/);
+      await assertWebGeometry(page,c);
+      const dock=page.locator('[data-room-controls]');
+      const mic=dock.getByRole('button',{name:'Unmute',exact:true});
+      const camera=dock.getByRole('button',{name:'Camera on',exact:true});
+      const leave=dock.getByRole('button',{name:'Leave Lynk',exact:true});
+      await assertReachable(mic,name+' microphone');
+      await assertReachable(camera,name+' camera');
+      await assertReachable(leave,name+' leave');
+      await page.evaluate(()=>{window.fixture.actions.length=0});
+      await mic.click();await camera.click();
+      await page.waitForFunction(()=>window.fixture.actions.includes('mic:true')&&window.fixture.actions.includes('camera:true'));
+      await evidence(page,name);
+      // The real hook recovers once a fresh roster arrives, then retains it
+      // through a subsequent service error without re-showing the initial notice.
+      await page.evaluate(()=>window.fixture.configure({rosterState:'ready'}));
+      await notice.waitFor({state:'hidden'});await tick(page);
+      const tileCount=await page.locator('[data-tile]').count();
+      assert.equal(tileCount,2,'recovery must render the local and roster-identified remote participant');
+      const remote=page.locator('[data-tile]').filter({hasText:'Participant 01'});
+      assert.equal(await remote.count(),1,'remote tile must retain its roster display identity');
+      const mounts=await page.evaluate(()=>window.fixture.attachments.length);
+      assert.ok(await page.evaluate(()=>window.fixture.attachments.some(entry=>entry.attached)),'recovery must attach a real remote media canvas');
+      await page.evaluate(()=>window.fixture.configure({rosterState:'error'}));await tick(page);
+      assert.equal(await notice.count(),0,'later failures must not restore initial-loading UI');
+      assert.equal(await page.locator('[data-tile]').count(),tileCount,'last good roster must remain visible');
+      assert.equal(await remote.count(),1,'later failure must preserve the remote roster display identity');
+      assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mounts,'transient roster errors preserve media mounts');
+      await assertWebGeometry(page,c);
+      await leave.click();
+      await page.waitForFunction(()=>window.fixture.actions.includes('leaveRoom')&&window.fixture.routes.includes('/feed/messages'));
+      assert.deepEqual(errors,[],name+' runtime errors');
+      assert.deepEqual(unexpectedRequests,[],name+' must not access live endpoints');
+      console.log('PASS '+name+': reachable camera/mic/leave, recovery and retained roster');
+    } catch(error) {await evidence(page,'FAIL-'+name,error);recordFailure(name,error)} finally {await context.close()}
+  }
   }
 }
 
@@ -628,7 +680,7 @@ async function main() {
     // system executable or change sandbox settings to circumvent a denied run.
     browser=await load('@playwright/test').chromium.launch({headless:true});
     const url='http://127.0.0.1:'+server.address().port;
-    await webCases(browser,url);await keyboardCase(browser,url);await groupStageCase(browser,url);await timeUpCases(browser,url);await nativeCases(browser,url);
+    await webCases(browser,url);await rosterNoticeCases(browser,url);await keyboardCase(browser,url);await groupStageCase(browser,url);await timeUpCases(browser,url);await nativeCases(browser,url);
     assert.equal(failures.length,0,'Rendered regression failures:\n'+JSON.stringify(failures,null,2));
     console.log('PASS all rendered Lynk viewport, room and control layout regressions');
   } finally {await browser?.close();await new Promise(resolve=>server.close(resolve))}

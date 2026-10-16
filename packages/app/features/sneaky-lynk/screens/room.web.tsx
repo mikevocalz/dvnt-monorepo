@@ -210,7 +210,7 @@ function isClosedRoomError(message?: string | null) {
 
 /** Roster reads start after server admission and reconcile on every reconnect. */
 function useRoomMembersSync(roomId: string, localUserId: string | undefined, enabled: boolean) {
-  const { members: roster, error } = useRoomMembers(roomId, localUserId, enabled);
+  const { members: roster, error, ready } = useRoomMembers(roomId, localUserId, enabled);
   const members: WebMember[] = roster.map((m) => ({ ...m, handRaised: !!m.handRaised }));
   const setRaisedHands = useRoomStore((s) => s.setRaisedHands);
   useEffect(() => {
@@ -221,7 +221,7 @@ function useRoomMembersSync(roomId: string, localUserId: string | undefined, ena
     for (const m of members) if (m.handRaised && m.status === "active" && m.userId !== localUserId) hands[m.userId] = true;
     setRaisedHands(hands);
   }, [roster, localUserId, setRaisedHands]);
-  return members;
+  return { members, error, ready };
 }
 
 /** Host-moderation watcher — `videoApi.subscribeToRoomEvents`.
@@ -421,6 +421,7 @@ function RoomInner({
   // joiner gets — belongs here: without it a guest never asked for a publish
   // token, so the host was hosting people who could see and hear but could
   // never be seen or heard. Camera/mic still start from the pre-join choice.
+  const { members, ready: rosterReady, error: rosterError } = useRoomMembersSync(id, admission?.user.id, admitted);
   const canPublish = admitted && isPublisherRole(localRole);
   const lynk = useLynkBroadcast(admitted ? id : undefined, canPublish);
 
@@ -533,7 +534,6 @@ function RoomInner({
     currentUser,
   });
   const { comments, send: sendChat, error: chatError, loading: chatLoading } = useRoomChat({ roomId: id, currentUser, enabled: admitted });
-  const members = useRoomMembersSync(id, localUserId, admitted);
 
   // ── Role changes reach us on the ROSTER, not in the join response ─────────
   // `localRole` is what gates `canPublish`, and it was only ever set once, from
@@ -1502,6 +1502,16 @@ function RoomInner({
           ) : null}
         </span>
       </header>
+      {admitted && !rosterReady && (
+        <div className="mx-4 mb-3 rounded-xl bg-amber-400/10 px-4 py-3 text-sm text-amber-100" role="status" aria-live="polite" data-testid="lynk-roster-pending">
+          <p className="font-semibold">{rosterError ? "Couldn't load participants" : "Connecting participants…"}</p>
+          <p className="mt-1">{rosterError
+            ? "The participant service is unavailable. We're retrying automatically; other people may not appear yet."
+            : "Waiting for the room's participant list so everyone can appear."}</p>
+          <p className="mt-1">Your camera and microphone controls remain active below.</p>
+        </div>
+      )}
+
 
       {/* Standing disclosure — own row so the copy is never truncated by
           the three-column header. Renders only while a web viewer is in

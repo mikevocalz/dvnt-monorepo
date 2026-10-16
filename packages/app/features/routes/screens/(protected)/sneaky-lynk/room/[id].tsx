@@ -2267,6 +2267,11 @@ function ServerRoom({
     <View style={{ flex: 1 }}>
       <RoomLayout
         admitted={videoRoom.isAdmitted}
+        rosterStatus={videoRoom.isAdmitted && !videoRoom.rosterReady
+          ? videoRoom.rosterError
+            ? "Couldn't load participants. We're retrying automatically; other people may not appear yet."
+            : "Connecting participants… Waiting for the room's participant list."
+          : undefined}
         insets={insets}
         connectionState={connectionState}
         hostMuteLocked={videoRoom.hostMuteLocked}
@@ -2495,6 +2500,7 @@ function ServerRoom({
 
 function RoomLayout({
   admitted = true,
+  rosterStatus,
   insets,
   connectionState,
   hostMuteLocked,
@@ -2548,6 +2554,7 @@ function RoomLayout({
    *  drives this screen's media/teardown effects; only the banner moves, since
    *  the machine is what can tell a first join from a reconnect. */
   bannerPhase?: ConnectionPhase;
+  rosterStatus?: string;
   isHost: boolean;
   localRole:
     | "host"
@@ -2874,6 +2881,13 @@ function RoomLayout({
               under FLAG_SECURE / the iOS blackout. Everyone gets told. */}
           <CaptureDisclosureChip />
         </View>
+
+        {rosterStatus ? (
+          <View accessibilityLiveRegion="polite" className="mx-3 mb-3 rounded-xl bg-amber-400/10 px-4 py-3">
+            <Text className="text-foreground text-sm font-semibold">{rosterStatus}</Text>
+            <Text className="text-muted-foreground text-sm mt-1">Your camera and microphone controls remain active below.</Text>
+          </View>
+        ) : null}
 
         <View
           className="flex-1"
