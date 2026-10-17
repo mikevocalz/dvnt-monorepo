@@ -59,7 +59,14 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install dependencies (clean retry for pnpm linker errors)
+        run: |
+          set -euo pipefail
+          if ! pnpm install --frozen-lockfile --ignore-scripts; then
+            echo "::warning::pnpm install failed; clean retry on disposable runner."
+            rm -rf node_modules
+            pnpm install --frozen-lockfile --ignore-scripts --force
+          fi
 
       - name: Install Chromium for profile-entry regression
         run: pnpm --filter web exec playwright install --with-deps chromium
