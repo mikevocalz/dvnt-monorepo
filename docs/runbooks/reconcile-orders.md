@@ -66,3 +66,28 @@ Reporting SQL should count only paid orders for platform-fee revenue using
 separate checkout funnel. Count each order only once, and do not sum fees from
 failed orders into earned revenue. For suspected premature expiry, examine the
 Stripe session's `expires_at`, webhook timestamp and order creation time.
+
+### Early embedded-checkout cancellation
+
+An observed Atlanta ticket checkout on October 16 expired at Stripe about
+31 seconds after creation, although its checkout attempt was configured for
+approximately **35 minutes** and the reservation held inventory for about
+36 minutes. The session-expired webhook alone cannot establish whether the
+buyer clicked Cancel or another client invoked /expire. The historical
+`ticket_embed_checkout_attempts.state` remained `pending`, so there was
+no durable cancellation provenance.
+
+The embedded checkout now records `payment_cancelled` **only after**
+a verified explicit `cancel` request receives Stripe's confirmed expiry.
+The service-role, idempotent `mark_embed_checkout_cancelled` RPC atomically
+closes the order and the embedded attempt and can replace the generic
+`checkout_expired` classification if its webhook won the race first.
+A naturally expired Stripe session stays `checkout_expired`. This does
+not retroactively assert an explanation for the historical 31-second case.
+
+Before releasing, run `scripts/test-checkout-failure-taxonomy.sql`
+**only against a disposable PostgreSQL database** (CI does this) and
+`node --test apps/mobile/supabase/functions/ticket-embed/index.test.cjs`.
+The real sandbox acceptance test currently targets a fixed staging Vercel
+deployment, not necessarily the proposed PR commit; it is therefore an
+environment-wide health gate rather than evidence of PR-specific deployment.
