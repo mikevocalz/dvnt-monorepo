@@ -259,6 +259,18 @@ test('confirmed Stripe expiration releases only this attempt hold',async()=>{
   const r=await h.call('cancel',h.identity);assert.equal(r.body.state,'expired');
   assert.equal(h.tables.ticket_holds[0].status,'expired');assert.equal(h.tables.ticket_holds[1].status,'active');
 });
+test('failed diagnostic logging must not obscure Stripe-confirmed cancellation',async()=>{
+  const h=harness({faults:{mark_embed_checkout_cancelled:'database_error'}});
+  await h.open();
+  const result=await h.call('cancel',h.identity);
+  assert.equal(result.status,200);
+  assert.equal(result.body.state,'expired');
+  assert.equal(h.tables.ticket_holds[0].status,'expired');
+  // Diagnostic persistence is best effort; releasing inventory and not
+  // charging again are authoritative and must survive its outage.
+  assert.equal(h.tables.orders[0].status,'payment_pending');
+});
+
 test('buyer Cancel marks a verified early expiry as payment_cancelled (not a decline)',async()=>{
   const h=harness();
   await h.open();
