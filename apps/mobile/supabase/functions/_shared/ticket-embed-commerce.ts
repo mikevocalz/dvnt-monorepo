@@ -121,6 +121,29 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
       ...(origin.startsWith('https://') ? {'Access-Control-Allow-Origin':origin} : {}),
     };
     const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers});
+    // Stripe's /expire confirmation is evidence of a client-requested
+    // cancellation, unlike a provider expiry webhook. Update the order
+    // atomically so the webhook cannot erase this distinction. No buyer
+    // details or Stripe secrets are persisted in the timeline.
+    const recordExplicitCancellation = async (orderId: string) => {
+      const marked = checked(await db.rpc('mark_embed_checkout_cancelled', {
+        p_order_id: orderId,
+      }));
+      if (!marked) return;
+      const { error } = await db.from('order_timeline').insert({
+        order_id: orderId,
+        type: 'payment_failed',
+        label: 'Payment cancelled',
+        detail: 'Embedded checkout client requested cancellation; Stripe confirmed expiry',
+      });
+      // The diagnosis is durable even if a timeline insert fails. Avoid
+      // putting SQL errors or customer data in public API responses.
+      if (error) throw new EmbedError(
+        'cancellation_record_incomplete',
+        'Payment was cancelled. Please retry to confirm its status.',
+        503,
+      );
+    };
     if(req.method==='OPTIONS') return new Response(null,{status:204,headers});
     if(!deps.enabled) return json({error:'Embedded ticket sales are not enabled.',code:'not_enabled'},404);
     if(req.method!=='POST') return json({error:'Method not allowed.'},405);
@@ -200,7 +223,10 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
       if(attempt && !attempt.stripe_session_id && (action==='cancel' || attempt.quote.expiresAt*1000<=now())) {
         attempt=checked(await db.rpc('ticket_embed_cancel_unattached',{p_id:attempt.id}));
       }
-      if(attempt?.state==='cancelled') return json({state:'expired'});
+      if(attempt?.state==='cancelled') {
+        if(action==='cancel') await recordExplicitCancellation(attempt.order_id);
+        return json({state:'expired'});
+      }
       if(action==='checkout' || action==='resume') {
         // An old request never starts another provider session after Stripe's
         // idempotency retention window. Unknown outcomes retain their holds.
@@ -219,14 +245,17 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
       if(!attempt.stripe_session_id) return json({state:'preparing',message:'Checkout is being prepared. Retry the same request.'});
       let session=await stripe('GET',`/checkout/sessions/${attempt.stripe_session_id}`);
       verifySession(session,attempt,deps.livemode);
+      let explicitlyCancelled = false;
       if(action==='cancel' && session.status==='open') {
         session=await stripe('POST',`/checkout/sessions/${session.id}/expire`,{},`dvnt-embed-cancel-${attempt.id}`);
         verifySession(session,attempt,deps.livemode);
+        explicitlyCancelled = session.status==='expired';
       }
       if(session.status==='expired') {
         // Only a confirmed provider expiry may release this hold. No cleanup on
         // a timeout, decline, closing the dialog, or a client-reported success.
         checked(await db.from('ticket_holds').update({status:'expired'}).eq('id',attempt.hold_id).eq('status','active'));
+        if(explicitlyCancelled) await recordExplicitCancellation(attempt.order_id);
         return json({state:'expired'});
       }
       return await status(attempt,session);
