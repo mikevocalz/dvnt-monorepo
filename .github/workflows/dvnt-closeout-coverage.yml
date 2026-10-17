@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'docs/release/dvnt-65-closeout-2026-10-15.md'
+      - 'docs/release/dvnt-65-closeout-2026-10-16.md'
+      - 'scripts/test-dvnt-closeout-2026-10-16.cjs'
       - '.agents/closeout/**'
       - 'scripts/test-dvnt-closeout-matrix.cjs'
       - '.github/workflows/dvnt-closeout-coverage.yml'
@@ -17,4 +19,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: node --test scripts/test-dvnt-closeout-matrix.cjs
+      - run: node --test scripts/test-dvnt-closeout-matrix.cjs scripts/test-dvnt-closeout-2026-10-16.cjs
