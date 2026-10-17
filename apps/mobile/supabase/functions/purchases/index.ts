@@ -45,6 +45,9 @@ function mapOrderRow(row: any): any {
   return {
     id: row.id,
     status: row.status,
+    checkoutFailureReason: row.status === "payment_failed"
+      ? (row.checkout_failure_reason ?? null)
+      : null,
     type: row.type,
     currency: row.currency || "usd",
     fees: {
