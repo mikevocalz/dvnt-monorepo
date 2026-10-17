@@ -89,6 +89,8 @@ function harness(options={}) {
         order.status='payment_failed';
         order.checkout_failure_reason='payment_cancelled';
         order.checkout_failure_code=null;
+        const attempt=tables.ticket_embed_checkout_attempts.find(a=>a.order_id===order.id);
+        if(attempt && attempt.state==='pending')attempt.state='cancelled';
         return {data:true,error:null};
       }
       return {data:false,error:null};
@@ -267,6 +269,7 @@ test('buyer Cancel marks a verified early expiry as payment_cancelled (not a dec
   assert.equal(order.status,'payment_failed');
   assert.equal(order.checkout_failure_reason,'payment_cancelled');
   assert.equal(order.checkout_failure_code,null);
+  assert.equal(h.tables.ticket_embed_checkout_attempts[0].state,'cancelled');
   assert.equal(h.tables.order_timeline.length,1);
   assert.equal(h.tables.order_timeline[0].label,'Payment cancelled');
   assert.equal(h.tables.ticket_holds[0].status,'expired');
