@@ -24,6 +24,11 @@
  */
 
 import { withSentry, captureEdge } from "../_shared/sentry.ts";
+import {
+  checkoutFailureLabel,
+  classifyPaymentIntentFailure,
+  type CheckoutFailureReason,
+} from "../_shared/checkout-failure.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computePayoutReleaseAt } from "../_shared/business-days.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
@@ -140,6 +145,36 @@ async function verifyStripeSignature(
   }
 }
 
+
+/**
+ * Only attach a failure reason to an order that is STILL failed. A paid
+ * success/retry can win between the guarded Stripe status RPC and this write.
+ * Unknown legacy failures stay unclassified. Never persist raw error messages.
+ */
+async function annotateCheckoutFailure(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  orderId: string,
+  reason: CheckoutFailureReason,
+  safeCode: string | null = null,
+): Promise<void> {
+  const { data, error } = await supabase.from("orders")
+    .update({ checkout_failure_reason: reason, checkout_failure_code: safeCode })
+    .eq("id", orderId)
+    .eq("status", "payment_failed")
+    .select("id");
+  if (error) {
+    console.error("[stripe-webhook] Failed to record checkout diagnosis:", error);
+    return;
+  }
+  if (!data?.length) return;
+  await supabase.from("order_timeline").insert({
+    order_id: orderId,
+    type: "payment_failed",
+    label: checkoutFailureLabel(reason),
+    detail: safeCode ? `Stripe code: ${safeCode}` : "No payment was captured",
+  });
+}
 
 Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
   if (req.method !== "POST") {
@@ -677,28 +712,40 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
       }
 
       case "checkout.session.expired": {
-        // Checkout Session expired without payment — release hold, fail order
+        // A timed-out hosted Checkout is NOT evidence of a declined card.
+        // Keep the existing money status for backwards compatibility, but
+        // stamp an accurate reason and a timeline event only on a pending CAS.
         const expiredSession = event.data.object;
-
-        await supabase
-          .from("ticket_holds")
+        await supabase.from("ticket_holds")
           .update({ status: "expired" })
           .eq("payment_intent_id", expiredSession.id)
           .eq("status", "active");
 
-        await supabase
+        const { data: expiredOrders, error: expireError } = await supabase
           .from("orders")
           .update({
             status: "payment_failed",
+            checkout_failure_reason: "checkout_expired",
+            checkout_failure_code: null,
             updated_at: new Date().toISOString(),
           })
           .eq("stripe_checkout_session_id", expiredSession.id)
-          .eq("status", "payment_pending");
+          .eq("status", "payment_pending")
+          .select("id");
 
-        console.log(
-          "[stripe-webhook] Checkout session expired, hold released:",
-          expiredSession.id,
-        );
+        if (expireError) {
+          console.error("[stripe-webhook] Checkout expiry update failed:", expireError);
+        }
+        for (const order of expiredOrders || []) {
+          await supabase.from("order_timeline").insert({
+            order_id: order.id,
+            type: "payment_failed",
+            label: "Checkout expired",
+            detail: "Hosted Checkout session expired without payment",
+          });
+        }
+
+        console.log("[stripe-webhook] Checkout expired, hold released:", expiredSession.id);
         break;
       }
 
@@ -722,18 +769,17 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           .maybeSingle();
 
         if (failedSessionOrder) {
-          await upsertOrderMoneyState(supabase, {
+          const applied = await upsertOrderMoneyState(supabase, {
             orderId: failedSessionOrder.id,
             status: "payment_failed",
             eventCreatedAt,
             stripePaymentIntentId: failedSession.payment_intent ?? null,
           });
-          await supabase.from("order_timeline").insert({
-            order_id: failedSessionOrder.id,
-            type: "payment_failed",
-            label: "Bank payment failed",
-            detail: "Async settlement failed — inventory hold released",
-          });
+          if (applied) {
+            await annotateCheckoutFailure(
+              supabase, failedSessionOrder.id, "async_payment_failed",
+            );
+          }
         }
 
         console.log(
@@ -747,6 +793,7 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         // Release hold on failed payment
         const failedPi = event.data.object;
         const failedMetadata = failedPi.metadata || {};
+        const diagnosis = classifyPaymentIntentFailure(failedPi);
 
         if (failedMetadata.type === "cart_checkout" && failedMetadata.cart_id) {
           await supabase.rpc("cart_release_hold", {
@@ -760,12 +807,17 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             .eq("cart_id", failedMetadata.cart_id)
             .maybeSingle();
           if (failedCartOrder) {
-            await upsertOrderMoneyState(supabase, {
+            const applied = await upsertOrderMoneyState(supabase, {
               orderId: failedCartOrder.id,
               status: "payment_failed",
               eventCreatedAt,
               stripePaymentIntentId: failedPi.id,
             });
+            if (applied) {
+              await annotateCheckoutFailure(
+                supabase, failedCartOrder.id, diagnosis.reason, diagnosis.code,
+              );
+            }
           }
 
           console.log(
@@ -790,11 +842,16 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           .eq("stripe_payment_intent_id", failedPi.id)
           .maybeSingle();
         if (failedOrder) {
-          await upsertOrderMoneyState(supabase, {
+          const applied = await upsertOrderMoneyState(supabase, {
             orderId: failedOrder.id,
             status: "payment_failed",
             eventCreatedAt,
           });
+          if (applied) {
+            await annotateCheckoutFailure(
+              supabase, failedOrder.id, diagnosis.reason, diagnosis.code,
+            );
+          }
           // Session-rail holds are keyed by the Checkout Session id, not
           // the PI id — release those too (async_settlement holds).
           if (failedOrder.stripe_checkout_session_id) {
