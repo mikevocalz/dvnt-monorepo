@@ -126,23 +126,26 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
     // atomically so the webhook cannot erase this distinction. No buyer
     // details or Stripe secrets are persisted in the timeline.
     const recordExplicitCancellation = async (orderId: string) => {
-      const marked = checked(await db.rpc('mark_embed_checkout_cancelled', {
-        p_order_id: orderId,
-      }));
+      const { data: marked, error: classifyError } = await db.rpc(
+        'mark_embed_checkout_cancelled',
+        { p_order_id: orderId },
+      );
+      // Stripe already confirmed expiry: a failed diagnostic write must not
+      // make the customer believe cancellation failed or encourage a retry.
+      if (classifyError) {
+        console.error('[ticket-embed] Unable to save cancellation classification');
+        return;
+      }
       if (!marked) return;
-      const { error } = await db.from('order_timeline').insert({
+      const { error: timelineError } = await db.from('order_timeline').insert({
         order_id: orderId,
         type: 'payment_failed',
         label: 'Payment cancelled',
         detail: 'Embedded checkout client requested cancellation; Stripe confirmed expiry',
       });
-      // The diagnosis is durable even if a timeline insert fails. Avoid
-      // putting SQL errors or customer data in public API responses.
-      if (error) throw new EmbedError(
-        'cancellation_record_incomplete',
-        'Payment was cancelled. Please retry to confirm its status.',
-        503,
-      );
+      if (timelineError) {
+        console.error('[ticket-embed] Unable to save cancellation timeline');
+      }
     };
     if(req.method==='OPTIONS') return new Response(null,{status:204,headers});
     if(!deps.enabled) return json({error:'Embedded ticket sales are not enabled.',code:'not_enabled'},404);
