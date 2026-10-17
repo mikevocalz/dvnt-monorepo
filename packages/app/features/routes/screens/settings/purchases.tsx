@@ -25,7 +25,8 @@ import { LegendList } from "@dvnt/app/components/list";
 import { PaymentsListSkeleton } from "@dvnt/app/components/skeletons";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { purchasesApi } from "@dvnt/app/lib/api/payments";
-import { PAYMENT_STATUS_CONFIG, type Order } from "@dvnt/app/lib/types/payments";
+import type { Order } from "@dvnt/app/lib/types/payments";
+import { getOrderStatusAppearance } from "@dvnt/app/lib/payments/order-status-appearance";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", {
@@ -161,8 +162,7 @@ export default function PurchasesScreen() {
 
 function PurchaseCard({ order, index }: { order: Order; index: number }) {
   const router = useRouter();
-  const statusConfig =
-    PAYMENT_STATUS_CONFIG[order.status] || PAYMENT_STATUS_CONFIG.pending;
+  const statusConfig = getOrderStatusAppearance(order);
 
   return (
     <Animated.View
