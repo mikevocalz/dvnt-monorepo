@@ -11,6 +11,10 @@
  */
 
 import { captureEdge, withSentry } from "../_shared/sentry.ts";
+import {
+  checkoutFailureLabel,
+  classifyReconciledFailure,
+} from "../_shared/checkout-failure.ts";
 import { withHeartbeat, tryClaimJob, releaseJob } from "../_shared/heartbeat.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
@@ -565,22 +569,40 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
             }
           }
 
-          // Payment failed/expired — mark order accordingly.
-          // CAS on payment_pending, same as the paid path: without it a
-          // webhook that lands mid-run could be stomped back to failed.
-          await supabase
+          // Expiry/cancellation is not necessarily a card decline. The
+          // Stripe-side expiry has landed before this guarded DB transition.
+          const reason = classifyReconciledFailure({
+            paymentStatus: piStatus,
+            checkoutSessionStatus: checkoutSession?.status,
+            cancellationReason: paymentIntentObj?.cancellation_reason,
+          }) ?? "payment_attempt_failed";
+          const { data: changedOrders, error: failError } = await supabase
             .from("orders")
             .update({
               status: "payment_failed",
+              checkout_failure_reason: reason,
+              checkout_failure_code: null,
               updated_at: new Date().toISOString(),
             })
             .eq("id", order.id)
-            .eq("status", "payment_pending");
+            .eq("status", "payment_pending")
+            .select("id");
 
-          stats.failed++;
-          console.log(
-            `[reconcile] Order ${order.id} → payment_failed (${piStatus})`,
-          );
+          if (failError) {
+            console.error("[reconcile] Failed to classify checkout:", failError);
+          }
+          if (changedOrders?.length) {
+            await supabase.from("order_timeline").insert({
+              order_id: order.id,
+              type: "payment_failed",
+              label: checkoutFailureLabel(reason),
+              detail: `Reconciled terminal Stripe state: ${piStatus}`,
+            });
+            stats.failed++;
+            console.log(
+              `[reconcile] Order ${order.id} → payment_failed/${reason} (${piStatus})`,
+            );
+          }
         } else if (
           ["requires_payment_method", "requires_confirmation", "requires_action"]
             .includes(piStatus) &&
@@ -615,25 +637,33 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
             );
             const cancelled = await cancelRes.json();
             if (cancelled.status === "canceled") {
-              await supabase
+              const { data: abandonedOrders, error: abandonError } = await supabase
                 .from("orders")
                 .update({
                   status: "payment_failed",
+                  checkout_failure_reason: "checkout_abandoned",
+                  checkout_failure_code: null,
                   updated_at: new Date().toISOString(),
                 })
                 .eq("id", order.id)
-                .eq("status", "payment_pending");
-              await supabase.from("order_timeline").insert({
-                order_id: order.id,
-                type: "payment_failed",
-                label: "Checkout abandoned",
-                detail:
-                  `PaymentIntent was ${piStatus} past the reconciliation cutoff; cancelled at Stripe by reconciliation job`,
-              });
-              stats.abandoned++;
-              console.log(
-                `[reconcile] Order ${order.id} → payment_failed (abandoned, PI cancelled)`,
-              );
+                .eq("status", "payment_pending")
+                .select("id");
+              if (abandonError) {
+                console.error("[reconcile] Abandoned checkout update failed:", abandonError);
+              }
+              if (abandonedOrders?.length) {
+                await supabase.from("order_timeline").insert({
+                  order_id: order.id,
+                  type: "payment_failed",
+                  label: "Checkout abandoned",
+                  detail:
+                    `PaymentIntent was ${piStatus} past the reconciliation cutoff; cancelled at Stripe by reconciliation job`,
+                });
+                stats.abandoned++;
+                console.log(
+                  `[reconcile] Order ${order.id} → payment_failed/checkout_abandoned (PI cancelled)`,
+                );
+              }
             } else {
               // Race: it may have just been confirmed. Leave it; next run
               // sees the new status.
@@ -648,25 +678,33 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
           // key — minted under a test key or a previous account. No money
           // can ever be collected against it here, so the order cannot
           // become paid. Fail it.
-          await supabase
+          const { data: missingOrders, error: missingError } = await supabase
             .from("orders")
             .update({
               status: "payment_failed",
+              checkout_failure_reason: "payment_reference_missing",
+              checkout_failure_code: "resource_missing",
               updated_at: new Date().toISOString(),
             })
             .eq("id", order.id)
-            .eq("status", "payment_pending");
-          await supabase.from("order_timeline").insert({
-            order_id: order.id,
-            type: "payment_failed",
-            label: "Payment reference not found",
-            detail:
-              "Stripe has no record of this order's PaymentIntent/Session under the live key; closed by reconciliation job",
-          });
-          stats.failed++;
-          console.log(
-            `[reconcile] Order ${order.id} → payment_failed (stripe resource_missing)`,
-          );
+            .eq("status", "payment_pending")
+            .select("id");
+          if (missingError) {
+            console.error("[reconcile] Reference-missing classification failed:", missingError);
+          }
+          if (missingOrders?.length) {
+            await supabase.from("order_timeline").insert({
+              order_id: order.id,
+              type: "payment_failed",
+              label: "Payment reference not found",
+              detail:
+                "Stripe has no record of this order's PaymentIntent/Session under the live key; closed by reconciliation job",
+            });
+            stats.failed++;
+            console.log(
+              `[reconcile] Order ${order.id} → payment_failed/payment_reference_missing`,
+            );
+          }
         }
         // else: still processing, leave as-is
       } catch (err) {

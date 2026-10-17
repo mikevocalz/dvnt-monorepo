@@ -41,7 +41,13 @@ jobs:
         with:
           node-version: '22'
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install dependencies with clean retry if pnpm linker cache is corrupted
+        run: |
+          set -euo pipefail
+          if ! pnpm install --frozen-lockfile --ignore-scripts; then
+            echo "::warning::Initial pnpm install failed; forcing a clean relink once."
+            pnpm install --frozen-lockfile --ignore-scripts --force
+          fi
       - run: node --test scripts/test-event-widget.cjs packages/app/lib/auth/guest-event-route.test.ts packages/app/lib/tickets/guest-purchase-state.test.ts packages/app/lib/events/event-detail-state.test.ts packages/app/lib/api/ticket-types-read.test.ts
       - name: Install isolated pinned DOM test dependency
         run: npm install --prefix "$RUNNER_TEMP/dvnt-guest-dom" --ignore-scripts --no-audit --no-fund --no-save jsdom@26.1.0
