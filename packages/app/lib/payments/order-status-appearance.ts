@@ -3,7 +3,7 @@
  * A legacy 'payment_failed' row does not establish a declined card:
  * checkout expiration and abandonment share that database status.
  */
-import { PAYMENT_STATUS_CONFIG, type Order } from "../types/payments";
+import { PAYMENT_STATUS_CONFIG, type Order } from "../types/payments.ts";
 
 export function getOrderStatusAppearance(
   order: Pick<Order, "status" | "checkoutFailureReason">,
