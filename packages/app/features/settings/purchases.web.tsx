@@ -32,8 +32,8 @@ import {
 } from "lucide-react";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { purchasesApi } from "@dvnt/app/lib/api/payments";
+import { getOrderStatusAppearance } from "@dvnt/app/lib/payments/order-status-appearance";
 import {
-  PAYMENT_STATUS_CONFIG,
   type Order,
 } from "@dvnt/app/lib/types/payments";
 import {
@@ -81,8 +81,7 @@ function PurchaseCard({
   order: Order;
   onPress: () => void;
 }) {
-  const statusConfig =
-    PAYMENT_STATUS_CONFIG[order.status] || PAYMENT_STATUS_CONFIG.pending;
+  const statusConfig = getOrderStatusAppearance(order);
   const title = order.event?.title || order.type.replace(/_/g, " ");
   const imageUrl = resolveImageUrl(order.event?.coverImageUrl);
 

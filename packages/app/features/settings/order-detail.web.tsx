@@ -39,11 +39,11 @@ import {
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { purchasesApi } from "@dvnt/app/lib/api/payments";
 import {
-  PAYMENT_STATUS_CONFIG,
   type OrderFees,
   type OrderTimelineEvent,
 } from "@dvnt/app/lib/types/payments";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
+import { getOrderStatusAppearance } from "@dvnt/app/lib/payments/order-status-appearance";
 
 const BG = "#06070d";
 
@@ -240,8 +240,7 @@ export function OrderDetailScreen() {
   const fees: OrderFees = order.fees;
   const timeline = Array.isArray(order.timeline) ? order.timeline : [];
   const tickets = Array.isArray(order.tickets) ? order.tickets : [];
-  const statusConfig =
-    PAYMENT_STATUS_CONFIG[order.status] || PAYMENT_STATUS_CONFIG.pending;
+  const statusConfig = getOrderStatusAppearance(order);
 
   return (
     <div className="min-h-[100dvh] text-white" style={{ backgroundColor: BG }}>
