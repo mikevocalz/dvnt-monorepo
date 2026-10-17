@@ -1,5 +1,14 @@
 -- Disposable PostgreSQL integration test. Do NOT run in production.
 -- Requires a fresh throwaway database and psql -v ON_ERROR_STOP=1.
+-- Supabase normally supplies service_role; standalone PostgreSQL does not.
+-- Create this NOLOGIN role in the disposable runner cluster, never in live DB.
+DO $
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN
+   CREATE ROLE service_role NOLOGIN;
+ END IF;
+END;
+$;
 CREATE TABLE public.orders(
  id uuid PRIMARY KEY,
  status text NOT NULL,
