@@ -39,24 +39,26 @@ function harness(options={}) {
     event_ticket_widgets:[{id:EMBED,event_id:90,allowed_origin:ORIGIN,revision:2,published:true,...options.setting}],
     organizer_accounts:[{host_id:'owner',stripe_account_id:'acct_fixture',charges_enabled:true,...options.organizer}],
     event_promoters:[{id:PROMOTER,event_id:90,code:'TRE_1',customer_discount_bps:1000,promoter_commission_bps:2000,status:'active'}],
-    ticket_embed_checkout_attempts:[],orders:[],ticket_holds:[],tickets:[],
+    ticket_embed_checkout_attempts:[],orders:[],ticket_holds:[],tickets:[],order_timeline:[],
   };
   const copy=(value)=>value==null?value:JSON.parse(JSON.stringify(value));
   const db={from(table){
     assert.ok(table in tables,`Unexpected table ${table}`);
-    let filters=[],patch=null,columns='*';
+    let filters=[],patch=null,insertRows=null,columns='*';
     const query={
       select(c){columns=c;return query;},
       eq(k,v){filters.push(r=>r[k]===v);return query;},
       in(k,values){filters.push(r=>values.includes(r[k]));return query;},
       ilike(k,v){filters.push(r=>String(r[k]).toUpperCase()===v.replace(/\\([%_\\])/g,'$1').toUpperCase());return query;},
       update(value){patch=value;return query;},
+      insert(value){insertRows=Array.isArray(value)?value:[value];return query;},
       async maybeSingle(){const result=await execute();return {...result,data:result.data?.[0]??null};},
       then(resolve,reject){return execute().then(resolve,reject);},
     };
     async function execute(){
-      log.push(`${patch?'update':'select'}:${table}`);
+      log.push(`${insertRows?'insert':patch?'update':'select'}:${table}`);
       if(faults.table===table)return {data:null,error:{message:'private database failure'}};
+      if(insertRows){tables[table].push(...insertRows.map(copy));return {data:copy(insertRows),error:null};}
       const rows=tables[table].filter(row=>filters.every(f=>f(row)));
       if(table==='ticket_holds' && patch?.status && !['active','converted','expired'].includes(patch.status))
         return {data:null,error:{message:'ticket_holds_status_check'}};
@@ -78,6 +80,18 @@ function harness(options={}) {
       const a={id:args.p_id,embed_id:args.p_embed_id,origin:args.p_origin,proof_hash:args.p_proof_hash,request_hash:args.p_request_hash,
         state:'pending',quote:args.p_quote,order_id:order.id,hold_id:hold.id,created_at:new Date(clock).toISOString(),expires_at:new Date(args.p_quote.expiresAt*1000).toISOString(),stripe_session_id:null};
       tables.ticket_embed_checkout_attempts.push(a);return {data:copy(a),error:null};
+    }
+    if(name==='mark_embed_checkout_cancelled'){
+      const order=tables.orders.find(o=>o.id===args.p_order_id);
+      if(!order)return {data:false,error:null};
+      if(order.status==='payment_pending' || (order.status==='payment_failed' &&
+          (order.checkout_failure_reason==null || order.checkout_failure_reason==='checkout_expired'))){
+        order.status='payment_failed';
+        order.checkout_failure_reason='payment_cancelled';
+        order.checkout_failure_code=null;
+        return {data:true,error:null};
+      }
+      return {data:false,error:null};
     }
     if(name==='ticket_embed_cancel_unattached'){
       const a=tables.ticket_embed_checkout_attempts.find(a=>a.id===args.p_id);
@@ -243,6 +257,44 @@ test('confirmed Stripe expiration releases only this attempt hold',async()=>{
   const r=await h.call('cancel',h.identity);assert.equal(r.body.state,'expired');
   assert.equal(h.tables.ticket_holds[0].status,'expired');assert.equal(h.tables.ticket_holds[1].status,'active');
 });
+test('buyer Cancel marks a verified early expiry as payment_cancelled (not a decline)',async()=>{
+  const h=harness();
+  await h.open();
+  const order=h.tables.orders[0];
+  const r=await h.call('cancel',h.identity);
+  assert.equal(r.status,200);
+  assert.equal(r.body.state,'expired');
+  assert.equal(order.status,'payment_failed');
+  assert.equal(order.checkout_failure_reason,'payment_cancelled');
+  assert.equal(order.checkout_failure_code,null);
+  assert.equal(h.tables.order_timeline.length,1);
+  assert.equal(h.tables.order_timeline[0].label,'Payment cancelled');
+  assert.equal(h.tables.ticket_holds[0].status,'expired');
+  const again=await h.call('cancel',h.identity);
+  assert.equal(again.body.state,'expired');
+  assert.equal(h.tables.order_timeline.length,1,'Replay must not duplicate timeline');
+});
+
+test('explicit Cancel wins the race with the generic expired webhook',async()=>{
+  const h=harness();await h.open();
+  h.tables.orders[0].status='payment_failed';
+  h.tables.orders[0].checkout_failure_reason='checkout_expired';
+  const r=await h.call('cancel',h.identity);
+  assert.equal(r.body.state,'expired');
+  assert.equal(h.tables.orders[0].checkout_failure_reason,'payment_cancelled');
+  assert.equal(h.tables.order_timeline.length,1);
+});
+
+test('naturally expired Stripe session is not mislabeled customer cancellation',async()=>{
+  const h=harness();await h.open();
+  const session=[...h.sessions.values()][0];
+  session.status='expired';
+  const result=await h.call('status',h.identity);
+  assert.equal(result.body.state,'expired');
+  assert.equal(h.tables.orders[0].checkout_failure_reason,undefined);
+  assert.equal(h.tables.order_timeline.length,0);
+});
+
 test('paid cancellation cannot release held inventory or restart payment',async()=>{
   const h=harness();await h.open();const session=[...h.sessions.values()][0];session.status='complete';session.payment_status='paid';
   const r=await h.call('cancel',h.identity);assert.equal(r.body.state,'paid_issuing');assert.equal(h.tables.ticket_holds[0].status,'active');
