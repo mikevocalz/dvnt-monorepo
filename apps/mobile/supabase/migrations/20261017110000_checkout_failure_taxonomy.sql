@@ -73,9 +73,9 @@ RETURNS boolean
 LANGUAGE plpgsql
 SECURITY INVOKER
 SET search_path = public, pg_temp
-AS $
+AS $$
 DECLARE
-  v_changed boolean;
+  v_updated integer;
 BEGIN
   UPDATE public.orders
   SET status = 'payment_failed',
@@ -93,10 +93,17 @@ BEGIN
         )
       )
     );
-  GET DIAGNOSTICS v_changed = ROW_COUNT;
-  RETURN v_changed;
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+  IF v_updated > 0 THEN
+    -- An explicit cancellation must also close the attempt's recovery
+    -- state; previously the embed attempt remained pending indefinitely.
+    UPDATE public.ticket_embed_checkout_attempts
+    SET state = 'cancelled'
+    WHERE order_id = p_order_id AND state = 'pending';
+  END IF;
+  RETURN v_updated > 0;
 END;
-$;
+$$;
 
 REVOKE ALL ON FUNCTION public.mark_embed_checkout_cancelled(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.mark_embed_checkout_cancelled(uuid) TO service_role;
