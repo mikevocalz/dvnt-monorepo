@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { RedirectIfAuthed } from '@dvnt/app/components/web-auth-redirect';
+import { readReturnToFromUrl } from '@dvnt/app/lib/auth/return-to';
 
 const RouteScreen = dynamic(
   () =>
@@ -14,7 +15,7 @@ const RouteScreen = dynamic(
 export default function Page() {
   return (
     <>
-      <RedirectIfAuthed />
+      <RedirectIfAuthed to={readReturnToFromUrl('/feed')} />
       <RouteScreen />
     </>
   );
