@@ -66,6 +66,11 @@ const nextConfig: NextConfig = {
    */
   env: {
     EXPO_PUBLIC_KLIPY_API_KEY: process.env.EXPO_PUBLIC_KLIPY_API_KEY,
+    // Next doesn't inline EXPO_PUBLIC_* by default. Without this flag, the
+    // shared Better Auth client falls back to a cross-origin Supabase endpoint,
+    // so /admin cannot see the app session cookie. The Next /api/auth rewrite
+    // already supplies the first-party endpoint; native Expo is unaffected.
+    EXPO_PUBLIC_AUTH_SAME_ORIGIN: 'true',
   },
   transpilePackages: [
     'react-native',
