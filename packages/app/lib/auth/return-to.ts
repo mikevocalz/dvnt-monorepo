@@ -49,3 +49,20 @@ export function readReturnToFromUrl(fallback: string = DEFAULT): string {
     return fallback;
   }
 }
+
+/**
+ * Admin/console deep links are management work, not first-time social onboarding.
+ * After a valid DVNT login, take staff straight to the requested editor/console.
+ * Payload performs the actual staff authorization on arrival.
+ */
+export function isStaffReturnTo(returnTo: string): boolean {
+  const validated = safeReturnTo(returnTo, "");
+  if (!validated) return false;
+  const path = validated.split(/[?#]/, 1)[0];
+  return (
+    path === "/admin" ||
+    path.startsWith("/admin/") ||
+    path === "/console" ||
+    path.startsWith("/console/")
+  );
+}
