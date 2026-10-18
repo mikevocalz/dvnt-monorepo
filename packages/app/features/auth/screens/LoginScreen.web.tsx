@@ -13,7 +13,7 @@ import { useAuthStore } from '../../../lib/stores/auth-store';
 import { useLoginUiStore } from '../../../lib/stores/login-ui-store';
 import { syncAuthUser } from '../../../lib/api/privileged';
 import { auth } from '../../../lib/api/auth';
-import { readReturnToFromUrl } from '../../../lib/auth/return-to';
+import { isStaffReturnTo, loginPathWithReturn, readReturnToFromUrl } from '../../../lib/auth/return-to';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
 
 /**
@@ -83,7 +83,8 @@ export function LoginScreen() {
               !!localStorage.getItem(`dvnt-welcome-${profile.id}`);
             // Honor intent: return to the gated URL the user came from
             // (validated internal-only), else the feed.
-            router.replace(welcomeDone ? readReturnToFromUrl('/feed') : '/auth/welcome');
+            const destination = readReturnToFromUrl('/feed');
+            router.replace(welcomeDone || isStaffReturnTo(destination) ? destination : '/auth/welcome');
           } else {
             toast.error('Login Failed', { description: 'Could not load user profile from database' });
           }
@@ -184,10 +185,12 @@ export function LoginScreen() {
             <Pressable
               onPress={async () => {
                 try {
+                  const destination = readReturnToFromUrl('');
+                  const query = destination ? `?returnTo=${encodeURIComponent(destination)}` : '';
                   const result = await (signIn as any).social({
                     provider: 'google',
-                    callbackURL: '/auth/social-callback',
-                    errorCallbackURL: '/auth/login',
+                    callbackURL: `/auth/social-callback${query}`,
+                    errorCallbackURL: loginPathWithReturn(destination),
                   });
                   if (result.error) throw new Error(result.error.message || 'Google sign-in failed');
                 } catch (err: any) {
@@ -217,9 +220,11 @@ export function LoginScreen() {
                   return;
                 }
                 try {
+                  const destination = readReturnToFromUrl('');
+                  const query = destination ? `?returnTo=${encodeURIComponent(destination)}` : '';
                   const { error } = await (signIn as any).magicLink({
                     email,
-                    callbackURL: `${window.location.origin}/auth/social-callback`,
+                    callbackURL: `${window.location.origin}/auth/social-callback${query}`,
                   });
                   if (error) throw new Error(error.message || 'Could not send the link');
                   toast.success('Link sent', {
