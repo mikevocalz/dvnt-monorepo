@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { syncAuthUser } from '@dvnt/app/lib/api/privileged';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
 import { resumeAuthSession } from '@dvnt/app/lib/auth-client';
+import { isStaffReturnTo, loginPathWithReturn, readReturnToFromUrl } from '@dvnt/app/lib/auth/return-to';
 
 /**
  * OAuth landing (Google → Better Auth → here). The session cookie is already
@@ -33,9 +34,10 @@ export default function SocialCallbackPage() {
         const welcomeDone =
           typeof localStorage !== 'undefined' &&
           !!localStorage.getItem(`dvnt-welcome-${profile.id}`);
-        router.replace(welcomeDone ? '/feed' : '/auth/welcome');
+        const destination = readReturnToFromUrl('/feed');
+        router.replace(welcomeDone || isStaffReturnTo(destination) ? destination : '/auth/welcome');
       } catch {
-        router.replace('/auth/login');
+        router.replace(loginPathWithReturn(readReturnToFromUrl('')));
       }
     })();
   }, [router]);
