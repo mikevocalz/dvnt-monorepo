@@ -29,7 +29,7 @@ const root = path.resolve(__dirname, '..');
       else res.end('<html><body><div id="root"></div><script src="/app.js"></script></body></html>');
     });
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-    browser=await chromium.launch({headless:true, ...(fs.existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{}), args:['--no-sandbox','--autoplay-policy=user-gesture-required']});
+    browser=await chromium.launch({headless:true, ...(fs.existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{}), args:['--no-sandbox']});
     const page=await browser.newPage({viewport:{width:400,height:700}});
     const errors=[]; page.on('pageerror', e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -63,6 +63,16 @@ const root = path.resolve(__dirname, '..');
     // Ensure the actual feed route invokes the tested hook for ordinary videos.
     const home=fs.readFileSync(path.join(root,'packages/app/features/home/screen.web.tsx'),'utf8');
     assert.match(home, /: isVideo\s*\? media.url/); assert.match(home,/ref=\{playback.ref\}/);
-    console.log('PASS: real video time advances; scrolling, stories, background and unmount pause; user sound is exclusive.');
+    // The legacy user-gesture-required override blocks even muted media.
+    // Exercise its explicit Play fallback separately from normal browser policy.
+    await browser.close();
+    browser=await chromium.launch({headless:true, ...(fs.existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{}), args:['--no-sandbox','--autoplay-policy=user-gesture-required']});
+    const strictPage=await browser.newPage({viewport:{width:400,height:700}});
+    await strictPage.goto(`http://127.0.0.1:${server.address().port}`);
+    await strictPage.getByRole('button',{name:'Play',exact:true}).first().waitFor();
+    assert.equal(await strictPage.locator('#first').evaluate(v=>v.paused),true);
+    await strictPage.getByRole('button',{name:'Play',exact:true}).first().click();
+    await strictPage.waitForFunction(()=>document.querySelector('#first').currentTime>0.2);
+    console.log('PASS: real video time advances; scrolling, stories, background, source replacement and unmount work; sound is exclusive; strict-policy rejection offers functional Play fallback.');
   } finally {await browser?.close();if(server)await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});
