@@ -1,6 +1,6 @@
 /** All pairs must upload intact before completing the handoff. No publishing. */
 export async function uploadNativePairs(
-  assets: { type?: string; uri: string; mimeType?: string | null; pairedVideoAsset?: { uri: string; mimeType?: string | null } | null }[],
+  assets: { type?: string | null; uri: string; mimeType?: string | null; pairedVideoAsset?: { uri: string; mimeType?: string | null } | null }[],
   maxCount: number,
   deps: {
     assertActive: () => void;

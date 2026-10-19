@@ -35,7 +35,7 @@ Original browser backups are retained locally for up to 24 hours, keyed by owner
 - `node scripts/test-native-live-photo-handoff.cjs`
 - `node scripts/test-web-live-photo-handoff.cjs`
 - `node --test packages/app/features/create/live-photo-handoff-draft.test.ts`
-- `node --max-old-space-size=256 --wasm-lazy-compilation --liftoff-only apps/mobile/supabase/functions/_shared/live-photo-handoff.test.cjs`
+- `node --max-old-space-size=256 --wasm-lazy-compilation --liftoff-only apps/mobile/supabase/functions/_shared/live-photo-handoff.contract.cjs`
 - Existing unified composer/publish tests and the Feed media motion CI workflow.
 
 Tests use isolated files/DB and controlled auth/storage adapters. They are not evidence of production upload, native PhotoKit decoding, physical browser return, or a release installed on a user's phone.

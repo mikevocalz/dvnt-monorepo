@@ -47,5 +47,5 @@ are inert. Production retention cleanup is separate operational work and not
 included as a live scheduled job in this draft.
 
 Tests use `typescript` and `@electric-sql/pglite`. On memory-constrained hosts:
-`node --max-old-space-size=256 --wasm-lazy-compilation --liftoff-only --test apps/mobile/supabase/functions/_shared/live-photo-handoff.test.cjs`.
+`node --max-old-space-size=256 --wasm-lazy-compilation --liftoff-only --test apps/mobile/supabase/functions/_shared/live-photo-handoff.contract.cjs`.
 The SQL test executes the actual migration and RPC against a minimal media schema.

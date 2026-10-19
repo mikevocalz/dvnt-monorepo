@@ -19,6 +19,8 @@ const asset = n => ({ type:'livePhoto', uri:`file:///original-${n}.heic`, mimeTy
  const deps={ assertActive(){}, completedUploads:cache, async upload(uri,mime){ calls.push([uri,mime]); if(fail && uri.includes('1.mov')) return {success:false,error:'rate failed'}; return {success:true,mediaId:calls.length}; } };
  await assert.rejects(uploadNativePairs([asset(0),{type:'image',uri:'flat.jpg'}],2,deps));
  assert.equal(calls.length,0,'reject entire invalid selection before upload');
+ await assert.rejects(uploadNativePairs([{...asset(0),type:null}],1,deps));
+ assert.equal(calls.length,0,'nullable Expo type is rejected without uploading');
  await assert.rejects(uploadNativePairs([asset(0),asset(1)],1,deps));
  assert.equal(calls.length,0);
  await assert.rejects(uploadNativePairs([asset(0),asset(1)],2,deps),/rate failed/);
