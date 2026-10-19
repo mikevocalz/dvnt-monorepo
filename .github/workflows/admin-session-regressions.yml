@@ -1,0 +1,22 @@
+name: Admin session regressions
+on:
+  pull_request:
+    paths:
+      - 'apps/web/src/dashboard/**'
+      - 'apps/web/src/app/(payload)/admin/**'
+      - 'apps/web/src/middleware.ts'
+      - 'packages/cms/src/auth/**'
+      - 'packages/app/lib/auth/**'
+      - 'scripts/test-admin-session-browser.cjs'
+      - '.github/workflows/admin-session-regressions.yml'
+permissions:
+  contents: read
+jobs:
+  admin-sessions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test apps/web/src/dashboard/lib/admin-sign-out.test.ts packages/app/lib/auth/admin-entry.test.ts packages/app/lib/auth/return-to.test.ts packages/app/lib/auth/account-token-cache.test.ts packages/cms/src/auth/betterAuthSession.test.ts

@@ -71,6 +71,9 @@ jobs:
       - name: Install Chromium for profile-entry regression
         run: pnpm --filter web exec playwright install --with-deps chromium
 
+      - name: Admin logout, partial failures and shared-session refresh
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-admin-session-browser.cjs
+
       - name: Profile entry, account switches, keyboard focus and ticket access
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-profile-completion-browser.cjs
 

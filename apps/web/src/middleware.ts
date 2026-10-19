@@ -2,6 +2,7 @@
 // Staff authentication is ALWAYS enforced by Payload's Better Auth strategy;
 // these redirects only choose the right login origin and preserve the editor URL.
 import { NextResponse, type NextRequest } from 'next/server'
+import { adminLoginRedirect } from '@dvnt/app/lib/auth/admin-entry'
 
 const BLOG_HOST = 'blog.dvntapp.live'
 
@@ -10,6 +11,8 @@ const isAppAuthPath = (path: string) => path === '/auth' || path.startsWith('/au
 const isConsolePath = (path: string) => path === '/console' || path.startsWith('/console/')
 
 function hasAppSessionCookie(req: NextRequest): boolean {
+  // Routing hint only. The server admin page validates both session systems
+  // and sends expired/revoked cookies through shared login as well.
   return (
     req.cookies.has('__Secure-better-auth.session_token') ||
     req.cookies.has('better-auth.session_token')
@@ -59,12 +62,16 @@ export function middleware(req: NextRequest) {
   // explicit break-glass Payload login or an existing Payload session.
   if (
     isAdminPath(path) &&
+    path !== '/admin/logout' &&
     !(path === '/admin/login' && url.searchParams.get('local') === '1') &&
     !hasAppSessionCookie(req) &&
     !hasPayloadSessionCookie(req)
   ) {
-    const returnTo =
-      path === '/admin/login' ? '/admin/collections/posts' : `${path}${url.search}`
+    if (path === '/admin/login') {
+      const target = adminLoginRedirect({ path, search: Object.fromEntries(url.searchParams), hasAdminUser: false, hasActiveAppSession: false })
+      return NextResponse.redirect(new URL(target!, req.url))
+    }
+    const returnTo = `${path}${url.search}`
     const login = new URL('/auth/login', req.url)
     login.searchParams.set('returnTo', returnTo)
     return NextResponse.redirect(login)
