@@ -31,6 +31,8 @@ on:
       - 'scripts/test-feed-motion*'
       - 'scripts/test-live-photo*'
       - 'scripts/test-browser-live-photo*'
+      - 'scripts/test-browser-intake-diagnostic.cjs'
+      - 'scripts/diagnostics/**'
       - 'scripts/fixtures/live-photo-roundtrip/**'
       - 'scripts/test-native-post-carousel.cjs'
       - 'scripts/test-web-live-photo-carousel*'
@@ -51,6 +53,7 @@ jobs:
       - name: Install isolated media test dependencies
         run: |
           npm install --prefix "$RUNNER_TEMP/feed-motion" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.0.11 lucide-react@1.30.0 @electric-sql/pglite@0.3.15 @supabase/supabase-js@2.112.2
+          npm install --prefix "$RUNNER_TEMP/image-manipulator" --legacy-peer-deps --ignore-scripts --no-audit --no-fund --no-save expo-image-manipulator@57.0.18
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
           node "$RUNNER_TEMP/feed-motion/node_modules/playwright/cli.js" install --with-deps chrome
@@ -67,6 +70,8 @@ jobs:
           node scripts/test-live-photo-publish-original.cjs
           node scripts/test-live-photo-crop-guard.cjs
           node scripts/test-browser-live-photo-import-dom.cjs
+          node scripts/test-browser-live-photo-original-contract.cjs
+          node scripts/test-browser-intake-diagnostic.cjs
           node scripts/test-live-photo-roundtrip.cjs
           node scripts/test-live-photo-upload-rate.cjs
           node --test packages/app/features/create/browser-live-photo-import.test.ts packages/app/features/create/browser-media-intake.test.ts packages/app/lib/media/web-upload-rate.test.ts
@@ -75,9 +80,10 @@ jobs:
           node --test packages/app/lib/posts/publish-queue.test.ts
       - name: Real Chrome decoding, sound, scroll, source replacement and pause
         env:
-          NODE_PATH: ${{ runner.temp }}/feed-motion/node_modules
+          NODE_PATH: ${{ runner.temp }}/feed-motion/node_modules:${{ runner.temp }}/image-manipulator/node_modules
           FEED_BROWSER_CHANNEL: chrome
         run: |
           node scripts/test-feed-motion-browser.cjs
           node scripts/test-web-live-photo-carousel-browser.cjs
           node scripts/test-live-photo-roundtrip-browser.cjs
+          node scripts/test-browser-live-photo-original-boundary.cjs
