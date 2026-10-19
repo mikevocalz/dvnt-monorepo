@@ -217,6 +217,12 @@
   html:has(.dvnt-blog) { scroll-behavior: smooth; }
 }
 
+/* Let native focus/keyboard visibility adjustments settle immediately while a
+   comment, reply or edit field owns focus. Page-wide smooth scrolling otherwise
+   also animates focus-driven scrolling. Keep normal article/TOC scrolling and
+   user zoom intact; never pin scrollY or fight the visual viewport. */
+html:has(.dvnt-blog textarea:focus) { scroll-behavior: auto; }
+
 /* ── View Transitions API ──────────────────────────────────────────────── */
 /* Progressive cross-document opt-in: smooth cross-fade on supported browsers
    for MPA/back-forward navigations; a no-op everywhere else (hard fallback =
