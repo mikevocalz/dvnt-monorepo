@@ -1,0 +1,199 @@
+[
+  {
+    "name": "title",
+    "type": "text",
+    "required": true
+  },
+  {
+    "name": "slug",
+    "type": "text",
+    "index": true,
+    "unique": true
+  },
+  {
+    "name": "excerpt",
+    "type": "textarea"
+  },
+  {
+    "name": "eyebrow",
+    "type": "text"
+  },
+  {
+    "name": "heroImage",
+    "type": "upload",
+    "relationTo": "media"
+  },
+  {
+    "name": "heroVideoUrl",
+    "type": "text"
+  },
+  {
+    "name": "heroCaption",
+    "type": "text"
+  },
+  {
+    "name": "content",
+    "type": "richText",
+    "required": true
+  },
+  {
+    "name": "contentHtml",
+    "type": "code"
+  },
+  {
+    "name": "categories",
+    "type": "relationship",
+    "relationTo": "categories",
+    "hasMany": true
+  },
+  {
+    "name": "tags",
+    "type": "array",
+    "fields": [
+      {
+        "name": "tag",
+        "type": "text",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "authors",
+    "type": "relationship",
+    "relationTo": "authors",
+    "hasMany": true
+  },
+  {
+    "name": "createdBy",
+    "type": "relationship",
+    "relationTo": "admin-users"
+  },
+  {
+    "name": "contributors",
+    "type": "array",
+    "fields": [
+      {
+        "name": "author",
+        "type": "relationship",
+        "relationTo": "authors",
+        "required": true
+      },
+      {
+        "name": "role",
+        "type": "text",
+        "required": true,
+        "admin": {
+          "description": "e.g. \"Photographs by\", \"Video by\", \"Reporting by\", \"Edited by\""
+        }
+      }
+    ]
+  },
+  {
+    "name": "featured",
+    "type": "checkbox",
+    "defaultValue": false
+  },
+  {
+    "name": "editorsPick",
+    "type": "checkbox",
+    "defaultValue": false
+  },
+  {
+    "name": "trending",
+    "type": "checkbox",
+    "defaultValue": false
+  },
+  {
+    "name": "readTime",
+    "type": "number"
+  },
+  {
+    "name": "relatedPosts",
+    "type": "relationship",
+    "relationTo": "posts",
+    "hasMany": true,
+    "maxDepth": 1
+  },
+  {
+    "name": "publishedAt",
+    "type": "date",
+    "index": true
+  },
+  {
+    "name": "updatedAt",
+    "type": "date"
+  },
+  {
+    "type": "group",
+    "name": "seo",
+    "label": "SEO & Open Graph",
+    "fields": [
+      {
+        "name": "title",
+        "type": "text",
+        "admin": {
+          "description": "Defaults to post title."
+        }
+      },
+      {
+        "name": "description",
+        "type": "textarea",
+        "admin": {
+          "description": "Defaults to excerpt."
+        }
+      },
+      {
+        "name": "ogImage",
+        "type": "upload",
+        "relationTo": "media",
+        "admin": {
+          "description": "OG image (1200×630). Defaults to heroImage."
+        }
+      },
+      {
+        "name": "canonicalUrl",
+        "type": "text",
+        "admin": {
+          "description": "Canonical URL override."
+        }
+      },
+      {
+        "name": "noIndex",
+        "type": "checkbox",
+        "defaultValue": false
+      },
+      {
+        "name": "structuredData",
+        "type": "json",
+        "admin": {
+          "description": "Raw JSON-LD override (merged with auto-generated Article schema)."
+        }
+      }
+    ]
+  },
+  {
+    "type": "group",
+    "name": "meta",
+    "label": "Meta (legacy)",
+    "fields": [
+      {
+        "name": "title",
+        "type": "text"
+      },
+      {
+        "name": "description",
+        "type": "textarea"
+      },
+      {
+        "name": "image",
+        "type": "upload",
+        "relationTo": "media"
+      }
+    ]
+  },
+  {
+    "name": "coverImage",
+    "type": "upload",
+    "relationTo": "media"
+  }
+]

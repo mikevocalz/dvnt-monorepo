@@ -1,0 +1,30 @@
+name: Payload blog editor contracts
+on:
+  pull_request:
+    paths:
+      - 'packages/cms/**'
+      - 'apps/web/src/app/(payload)/**'
+      - '.github/workflows/payload-post-editor.yml'
+      - 'pnpm-lock.yaml'
+permissions:
+  contents: read
+jobs:
+  editor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Typecheck editor and registration contracts
+        run: >-
+          pnpm exec tsc --noEmit --target ESNext --module ESNext --moduleResolution bundler
+          --lib ESNext,DOM --jsx react-jsx --strict --esModuleInterop --skipLibCheck
+          --allowImportingTsExtensions packages/cms/src/posts/*.test.ts
+      - name: Verify native Payload form, access and schema registration
+        run: node --import tsx --test packages/cms/src/posts/*.test.ts
+      - name: Verify editorial approval contracts
+        run: node --test packages/cms/src/editorial/*.test.ts
