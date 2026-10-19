@@ -128,6 +128,22 @@ function generateKey(kind: MediaKind, userId: string, mime: string): string {
   return `${kind}/${userId}/${year}/${month}/${uuid}.${ext}`;
 }
 
+/**
+ * Only keys minted by this endpoint for the authenticated owner are deletable.
+ * Accept canonical relative keys, never URLs or encoded/normalized aliases.
+ * Uploads choose the owner segment server-side; callers cannot supply a key.
+ * No admin override: content moderation has its own authorized endpoints.
+ */
+function ownsCanonicalKey(key: string, userId: string): boolean {
+  if (key.length > 512 || !/^[A-Za-z0-9_./-]+$/.test(key)) return false;
+  const parts = key.split("/");
+  if (parts.length !== 5) return false;
+  const [kind, owner, year, month, filename] = parts;
+  return Object.hasOwn(SIZE_LIMITS, kind) && owner === userId &&
+    /^\d{4}$/.test(year) && /^(0[1-9]|1[0-2])$/.test(month) &&
+    /^[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/.test(filename);
+}
+
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -284,12 +300,15 @@ Deno.serve(async (req) => {
     return errorResponse("Unauthorized");
   }
 
-  if (new Date(session.expiresAt) < new Date()) {
+  if (!Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) {
     console.error("[media-upload] Session expired");
     return errorResponse("Unauthorized");
   }
 
   const userId = session.userId;
+  if (typeof userId !== "string" || !/^[A-Za-z0-9_-]+$/.test(userId)) {
+    return errorResponse("Unauthorized");
+  }
 
   // Rate limit check
   const rl = checkRateLimit(userId, "media-upload", UPLOAD_LIMIT);
@@ -303,7 +322,11 @@ Deno.serve(async (req) => {
     let keys: string[] = [];
     try {
       const body = await req.json();
-      keys = Array.isArray(body.keys) ? body.keys : [];
+      if (!body || !Array.isArray(body.keys) ||
+        !body.keys.every((key: unknown) => typeof key === "string")) {
+        return errorResponse("Invalid JSON body — expected { keys: string[] }");
+      }
+      keys = body.keys;
     } catch {
       return errorResponse("Invalid JSON body — expected { keys: string[] }");
     }
@@ -318,8 +341,9 @@ Deno.serve(async (req) => {
     const results: { key: string; deleted: boolean }[] = [];
 
     for (const key of keys) {
-      // Safety: keys must look like "kind/userId/..." — reject path traversal
-      if (!key || key.includes("..") || key.startsWith("/")) {
+      // Authenticate the complete owner segment, not a prefix. Reject aliases
+      // rather than normalizing them into a different storage target.
+      if (!ownsCanonicalKey(key, userId)) {
         results.push({ key, deleted: false });
         continue;
       }
@@ -329,6 +353,8 @@ Deno.serve(async (req) => {
         const resp = await fetch(deleteUrl, {
           method: "DELETE",
           headers: { AccessKey: BUNNY_ACCESS_KEY },
+          redirect: "error",
+          signal: AbortSignal.timeout(15_000),
         });
         const ok = resp.status === 200 || resp.status === 404; // 404 = already gone
         results.push({ key, deleted: ok });

@@ -1,0 +1,32 @@
+name: Media deletion ownership
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/media-upload/**'
+      - '.github/workflows/media-delete-ownership.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'apps/mobile/supabase/functions/media-upload/**'
+      - '.github/workflows/media-delete-ownership.yml'
+permissions:
+  contents: read
+jobs:
+  authorization-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated transpiler and upload test dependency
+        run: npm install --prefix "$RUNNER_TEMP/media-delete" --ignore-scripts --no-audit --no-fund --no-save typescript@6.0.3 @supabase/supabase-js@2.112.2
+      - name: Synthetic authorization and existing upload regressions
+        env:
+          NODE_PATH: ${{ runner.temp }}/media-delete/node_modules
+        run: |
+          node --test apps/mobile/supabase/functions/media-upload/delete.test.cjs
+          node scripts/test-live-photo-upload-rate.cjs
