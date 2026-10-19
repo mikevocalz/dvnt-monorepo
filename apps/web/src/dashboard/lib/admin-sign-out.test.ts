@@ -18,7 +18,7 @@ function fixture() {
 test('both authorities end before success; refresh/back cannot reauthenticate', async () => {
   const f = fixture()
   await createAdminSignOut(f.deps)()
-  assert.deepEqual(f.calls, ['clear', 'payload', 'app', 'verify'])
+  assert.deepEqual(f.calls, ['clear', 'app', 'payload', 'verify'])
   assert.equal((await f.reload()).user, null)
 })
 
@@ -64,8 +64,21 @@ test('a malformed verification response is not proof of logout', async () => {
 test('local cleanup failure cannot prevent attempting both server sign-outs', async () => {
   const f = fixture()
   await assert.rejects(createAdminSignOut({ ...f.deps, clearLocalState: () => { throw new Error('storage') } })(), /Browser cleanup/)
-  assert.deepEqual(f.calls, ['payload', 'app', 'verify'])
+  assert.deepEqual(f.calls, ['app', 'payload', 'verify'])
   assert.equal((await f.reload()).user, null)
+})
+
+test('SSO must be removed before Payload can identify and revoke its local session', async () => {
+  const calls: string[] = []
+  let app = true, local = true
+  await createAdminSignOut({
+    clearLocalState: () => {},
+    betterAuthSignOut: async () => { calls.push('app'); app = false; return { data: { success: true } } },
+    payloadLogout: async () => { calls.push('payload'); if (!app) local = false },
+    readPayloadUser: async () => ({ user: app || local ? { role: 'admin' } : null }),
+  })()
+  assert.deepEqual(calls, ['app', 'payload'])
+  assert.equal(local, false)
 })
 
 test('double click/StrictMode share one operation; partial failure can be retried', async () => {

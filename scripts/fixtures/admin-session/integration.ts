@@ -103,7 +103,7 @@ try {
       return body
     }
     const policy = () => resolveAdminEntry({ path: '/admin/collections/posts/fixture', search: { tab: 'content' } }, {
-      authenticate: async () => (await payload!.auth({ headers: new Headers({ cookie: cookie() }) })).user,
+      authenticate: async () => (await payload!.auth({ headers: new Headers({ cookie: cookie(), 'sec-fetch-site': 'none' }) })).user,
       readAppSession: () => readBetterAuthSession(cookie()),
     })
     const logout = createAdminSignOut({ clearLocalState: () => {}, payloadLogout: () => request('/payload-api/admin-users/logout', {}),
@@ -155,11 +155,24 @@ try {
   assert.ok(local.cookie().includes('payload-token='))
   assert.equal((await local.request('/payload-api/admin-users/me')).user.email, 'local-admin@example.invalid')
   assert.equal(await local.policy(), null)
+  assert.equal((await payload.auth({ headers: new Headers({ cookie: local.cookie(), 'sec-fetch-site': 'cross-site' }) })).user, null)
   const oldLocalCookie = local.cookie()
   await local.logout()
   const replay = browser(); for (const pair of oldLocalCookie.split('; ')) { const i = pair.indexOf('='); replay.jar.set(pair.slice(0, i), pair.slice(i + 1)) }
   assert.equal((await replay.request('/payload-api/admin-users/me')).user, null, 'Old local session must be revoked, not just hidden by a cleared cookie')
   pass('actual legacy CMS login remains supported and its server session is revoked by logout')
+
+  // Frozen pre-fix ordering from 9340dbc8. The real custom SSO strategy masks
+  // the legacy JWT's session id, so removing its cookie is not server revocation.
+  const baseline = await signup('Admin', 'baseline-dual')
+  await baseline.request('/payload-api/admin-users/login', { email: 'local-admin@example.invalid', password })
+  const baselineToken = baseline.jar.get('payload-token')!
+  await baseline.request('/payload-api/admin-users/logout', {})
+  assert.equal((await baseline.client.signOut()).data?.success, true)
+  const baselineReplay = browser(); baselineReplay.jar.set('payload-token', baselineToken)
+  assert.equal((await baselineReplay.request('/payload-api/admin-users/me')).user.email, 'local-admin@example.invalid')
+  await baselineReplay.logout()
+  pass('frozen Payload-first ordering reproduces a replayable masked local session')
 
   const dual = await signup('Admin', 'dual')
   await dual.request('/payload-api/admin-users/login', { email: 'local-admin@example.invalid', password })

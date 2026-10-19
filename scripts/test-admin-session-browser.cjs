@@ -89,10 +89,10 @@ const boundaries = {
       assert.deepEqual(await page.evaluate(() => ({ user: window.fixture.auth.user, cache: window.fixture.client.getQueryCache().getAll().length, appCacheCleared: window.fixture.appCacheCleared })), { user: null, cache: 0, appCacheCleared: true });
     };
 
-    reset({ cms: false }); // SSO-only: Payload logout must happen before Better Auth.
+    reset({ cms: false }); // SSO-only: an unauthenticated Payload logout is verified safely.
     await enter(); await signOut(); await login();
     assert.equal(state.app, false); assert.equal(state.cms, false);
-    assert.ok(state.calls.indexOf('/payload-api/admin-users/logout') < state.calls.indexOf('/api/auth/sign-out'));
+    assert.ok(state.calls.indexOf('/api/auth/sign-out') < state.calls.indexOf('/payload-api/admin-users/logout'));
     assert.equal(state.calls.filter(p => p === '/api/auth/sign-out').length, 1, 'StrictMode cannot duplicate logout');
     await page.goto(origin + '/admin');
     await page.getByRole('link', { name: 'Continue with DVNT', exact: true }).waitFor();

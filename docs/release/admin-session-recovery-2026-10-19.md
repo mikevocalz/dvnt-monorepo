@@ -6,8 +6,9 @@ session manipulation is included. Editorial schema/editor repair is separate.
 
 ## Behavior
 
-- Logout removes private app/console client state, attempts Payload logout
-  before Better Auth logout (SSO-only users still need that identity), and
+- Logout removes private app/console client state, removes Better Auth first
+  so its custom strategy cannot mask a legacy Payload session id, then attempts
+  Payload logout even if Better Auth failed, and
   verifies `/payload-api/admin-users/me` returns exactly `user: null` before a
   full navigation to shared sign-in. Partial failures retain a warning and
   retry action, not a successful sign-out message. Repeated clicks/StrictMode
