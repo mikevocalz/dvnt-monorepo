@@ -112,7 +112,7 @@ window.runCaptionScenarios=async()=>{
   return 'PASS: mounted composer/editor, real publish queue, legacy migration and reload assertions';
 };`;
 (async () => {
-  const result = await esbuild.build({stdin:{contents:scenario,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfigRaw:{compilerOptions:{jsx:'react-jsx',jsxImportSource:'react'}},nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),define:{'process.env.NODE_ENV':'"test"'},plugins:[{name:'caption-boundaries',setup(build){
+  const result = await esbuild.build({stdin:{contents:scenario,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfigRaw:{compilerOptions:{jsx:'react-jsx',jsxImportSource:'react'}},nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),define:{'process.env.NODE_ENV':'"test"','process.env.NEXT_PUBLIC_ENABLE_NATIVE_LIVE_PHOTO_HANDOFF':'"false"'},plugins:[{name:'caption-boundaries',setup(build){
     build.onResolve({filter:/.*/},args=>{
       if(Object.hasOwn(fixture,args.path))return {path:args.path,namespace:'fixture'};
       if(args.path.endsWith('create-post-location.web'))return {path:'next/dynamic',namespace:'fixture'};
