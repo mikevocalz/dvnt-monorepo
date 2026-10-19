@@ -157,7 +157,7 @@ photo on the public card; leave that upload empty to follow the app profile.
 Payload enables author version history by default. The June 2026 migrations
 added `user_id`, `avatar_url`, and `socials_onlyfans` only to `payload.authors`.
 Existing databases also need
-`20261019153500_repair_author_version_fields.sql` before profile saves work.
+`20261019160345_repair_author_version_fields.sql` before profile saves work.
 It adds the three nullable version columns and the account FK/index without
 rewriting historical snapshots or disabling versioning. Apply through the normal
 approved database migration process; deploying the application does not apply it.

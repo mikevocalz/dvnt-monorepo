@@ -26,7 +26,7 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dvnt-author-profiles-')
     // can read only this fixed fixture path and rewrites its schema locally.
     const migration = path.join(directory, 'author-version-repair.sql');
     fs.copyFileSync(path.join(root,
-      'apps/mobile/supabase/migrations/20261019153500_repair_author_version_fields.sql'), migration);
+      'apps/mobile/supabase/migrations/20261019160345_repair_author_version_fields.sql'), migration);
     await esbuild.build({
       entryPoints: [path.join(__dirname, 'fixtures/author-profiles/integration.ts')],
       outfile: path.join(directory, 'integration.mjs'), bundle: true,
