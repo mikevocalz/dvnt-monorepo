@@ -69,12 +69,18 @@ if (Platform.OS === "ios") {
   }
 }
 
-// Module-scoped set of photo URIs that have previously failed to load as
+// Module-scoped set of asset pairs that have previously failed to load as
 // native Live Photos. Once we know a pair is broken (metadata stripped),
 // there's no point retrying on remount — we go straight to the mp4 fallback.
 const brokenPairingCache = new Set<string>();
 
-export function DVNTLivePhotoView({
+export function DVNTLivePhotoView(props: DVNTLivePhotoViewProps) {
+  // Recycled feed cells may receive a different pair without unmounting. Native
+  // load/fallback refs belong to an asset, never to the reusable cell.
+  return <LivePhotoAsset key={JSON.stringify([props.photoUri, props.videoUri])} {...props} />;
+}
+
+function LivePhotoAsset({
   photoUri,
   videoUri,
   width,
@@ -86,7 +92,8 @@ export function DVNTLivePhotoView({
 }: DVNTLivePhotoViewProps) {
   const viewRef = useRef<any>(null);
   const isLoadedRef = useRef(false);
-  const fellBackRef = useRef(brokenPairingCache.has(photoUri));
+  const pairKey = JSON.stringify([photoUri, videoUri]);
+  const fellBackRef = useRef(brokenPairingCache.has(pairKey));
   // Dedicated render-nudge — flipping a ref alone doesn't re-render.
   // useReducer here (not useState) per the project's state-policy
   // preference; this is component-local transient state only.
@@ -128,11 +135,11 @@ export function DVNTLivePhotoView({
     // unsupported format, network hiccup, …). Remember this photo URI
     // so we skip native on remount, and re-render into the mp4 fallback
     // right now.
-    brokenPairingCache.add(photoUri);
+    brokenPairingCache.add(pairKey);
     fellBackRef.current = true;
     isLoadedRef.current = false;
     bumpRender();
-  }, [photoUri]);
+  }, [pairKey]);
 
   // Re-drive playback when `isPlaying` flips (viewport-aware control).
   useEffect(() => {

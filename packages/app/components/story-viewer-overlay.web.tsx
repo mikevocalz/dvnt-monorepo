@@ -160,7 +160,8 @@ export function StoryViewerOverlay() {
       document.body.style.overflow = prevOverflow;
       restore.forEach(({ v, prevVisibility, wasPlaying }) => {
         v.style.visibility = prevVisibility;
-        if (wasPlaying) v.play().catch(() => {});
+        // Feed players resume only through their visibility/background policy.
+        if (wasPlaying && !v.hasAttribute("data-feed-motion")) v.play().catch(() => {});
       });
     };
   }, [open, close]);

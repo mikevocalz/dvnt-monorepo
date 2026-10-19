@@ -17,6 +17,7 @@
 
 import { useState, useCallback } from "react";
 import { sizeLimitForKind } from "@dvnt/app/lib/media/upload-policy";
+import { uploadLivePhotoPair } from "@dvnt/app/lib/media/live-photo-upload";
 import { uploadSingleImage } from "@dvnt/app/lib/media/single-image-upload";
 import { imageFitDeps } from "@dvnt/app/lib/media/image-fit-deps";
 import { Platform } from "react-native";
@@ -591,47 +592,13 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
             });
           }
           updateProgress("GIF uploaded");
-        } else if (file.kind === "livePhoto" && file.pairedVideoUri) {
-          // ========== LIVE PHOTO PROCESSING (upload still + paired video) ==========
-          console.log(
-            "[useMediaUpload] Live Photo detected — uploading still + paired video",
-          );
+        } else if (file.kind === "livePhoto") {
+          // A Live Photo is an indivisible pair. Never publish success when
+          // only the still uploaded, or re-encode away Apple's pairing metadata.
           reportStatus("Uploading Live Photo...");
-
-          // Upload the still UNALTERED. Running it through manipulateAsync
-          // (resize / re-encode to JPEG) strips the Apple Live Photo
-          // pairing metadata that PHLivePhoto requires to instantiate
-          // the pair on another device. Without that metadata the
-          // native LivePhotoView fires onLoadError and the component
-          // falls back to a static image — which was the real cause of
-          // "Live Photos don't play" in prod.
-          const stillResult = await serverUpload(file.uri, folder);
-
-          // Upload the paired video (no compression — short clip, Live Photo quality must be preserved)
-          reportStatus("Uploading Live Photo video...");
-          const videoResult = await serverUpload(file.pairedVideoUri, folder);
-
-          if (!stillResult.success) {
-            results.push({
-              type: "image",
-              kind: "livePhoto",
-              url: "",
-              success: false,
-              error: stillResult.error,
-            });
-          } else {
-            results.push({
-              type: "image",
-              kind: "livePhoto",
-              url: stillResult.url,
-              livePhotoVideoUrl: videoResult.success
-                ? videoResult.url
-                : undefined,
-              mimeType: file.mimeType,
-              success: true,
-            });
-          }
-          updateProgress("Live Photo uploaded");
+          const result = await uploadLivePhotoPair(file, (uri) => serverUpload(uri, folder));
+          results.push(result);
+          updateProgress(result.success ? "Live Photo uploaded" : "Live Photo upload failed");
         } else {
           // ========== IMAGE PROCESSING (compress + upload) ==========
           reportStatus("Optimizing image...");
