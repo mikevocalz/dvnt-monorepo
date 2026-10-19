@@ -13,6 +13,7 @@ const resolve = name => require.resolve(name, { paths: [ROOT, path.join(ROOT, 'a
 const load = name => require(resolve(name));
 const uiContext = path.resolve(path.dirname(resolve('@payloadcms/ui')), '../../forms/Form/context.js');
 const blockContent = path.resolve(path.dirname(resolve('@payloadcms/richtext-lexical/client')), '../../features/blocks/client/component/BlockContent.js');
+const blockCollapsible = path.join(path.dirname(blockContent), 'components/BlockCollapsible.js');
 fs.mkdirSync(OUT, { recursive: true });
 
 async function main() {
@@ -53,18 +54,25 @@ async function main() {
     }
     createRoot(document.getElementById('root')).render(<Fixture/>);
   `;
-  await load('esbuild').build({ stdin: { contents: entry, loader: 'tsx', resolveDir: ROOT }, outfile: path.join(OUT,'fixture.js'), bundle: true, platform: 'browser', format: 'iife', jsx: 'automatic', tsconfigRaw: {compilerOptions:{jsx:'react-jsx',jsxImportSource:'react'}}, loader: {'.css':'empty','.scss':'empty'}, define: {'process.env.NODE_ENV':'"production"'}, logLevel:'warning' });
+  await load('esbuild').build({ stdin: { contents: entry, loader: 'tsx', resolveDir: ROOT }, outfile: path.join(OUT,'fixture.js'), bundle: true, platform: 'browser', format: 'iife', jsx: 'automatic', tsconfigRaw: {compilerOptions:{jsx:'react-jsx',jsxImportSource:'react'}}, loader: {'.css':'empty','.scss':'empty'}, plugins: [{name:'one-payload-block-context', setup(build){
+    // The published client barrel bundles a private BlockContent context. The
+    // fixture uses the unbundled provider, so use its real matching primitive.
+    // Production preview/editor both use the public bundle and need no alias.
+    build.onResolve({filter:/^@payloadcms\/richtext-lexical\/client$/}, args =>
+      args.importer.endsWith('/YouTubeBlockPreview.tsx') ? {path:blockCollapsible} : undefined);
+  }}], define: {'process.env.NODE_ENV':'"production"'}, logLevel:'warning' });
   if (process.argv.includes('--build-only')) { console.log('PASS: actual editor preview and public renderer bundle'); return; }
   const css='*{box-sizing:border-box}body{margin:0;background:#0c1118;color:#f3f4f6;font:16px/1.5 system-ui}main{width:min(100%,760px);margin:auto;padding:20px}h1{font-size:30px}h2{font-size:21px}label{display:block;margin:12px 0;font-size:14px}input{display:block;width:100%;min-width:0;margin:5px 0;padding:11px;border:1px solid #536171;border-radius:6px;background:#18212d;color:#fff;font:inherit}.note{color:#a8b2c0;font-size:13px}section{margin-top:26px}.preview{padding:16px;border:1px solid #526170;border-radius:10px}.preview header{font-weight:700;display:flex;justify-content:space-between}.preview header span{font-size:12px;color:#c7b1eb}.preview p{font-size:13px}.article{padding-top:22px;border-top:1px solid #536171}figure{margin:1.5em 0}figcaption{color:#b7bfcc}[role=alert]{color:#ffb3b3}';
   const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YouTube block component fixture</title><style>${css}</style></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>`;
   const server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/fixture.js'?'application/javascript':'text/html');res.end(req.url==='/fixture.js'?fs.readFileSync(path.join(OUT,'fixture.js')):html)});
   await new Promise(done=>server.listen(0,'127.0.0.1',done));
-  let browser;
+  let browser, page;
+  const errors=[];
   try {
     const {chromium}=load('playwright');
     browser=await chromium.launch({headless:true,...(process.env.CHROME_EXECUTABLE_PATH?{executablePath:process.env.CHROME_EXECUTABLE_PATH}:{}),args:['--no-sandbox']});
-    const page=await browser.newPage();
-    const errors=[];page.on('pageerror',error=>errors.push(error.message));
+    page=await browser.newPage();
+    page.on('pageerror',error=>errors.push(error.message));
     await page.route('**/*',route=>{
       const url=new URL(route.request().url());
       if(url.hostname==='127.0.0.1')return route.continue();
@@ -97,6 +105,13 @@ async function main() {
     assert.deepEqual(errors,[]);
     fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({scope:'Local editor-preview/public-render fixture; no live admin save or real player playback.',results,invalidURL:true,shortsURL:true,livePreviewUpdate:true,longCaption:true,errors},null,2));
     console.log(`PASS: editor and reader at 320/375/768/1280px, URL validation, reactive preview, long caption. Evidence: ${OUT}`);
+  } catch(error) {
+    if(page){
+      await page.screenshot({path:path.join(OUT,'failure.png'),fullPage:true}).catch(()=>{});
+      fs.writeFileSync(path.join(OUT,'failure.html'),await page.content().catch(()=>''));
+      fs.writeFileSync(path.join(OUT,'failure.json'),JSON.stringify({message:String(error),errors},null,2));
+    }
+    throw error;
   } finally {await browser?.close();await new Promise(done=>server.close(done));}
 }
 main().catch(error=>{console.error(error);process.exitCode=1});
