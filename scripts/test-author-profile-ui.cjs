@@ -66,7 +66,7 @@ async function run(browser, name, viewport, isMobile, origin) {
     await page.getByRole('alert').filter({ hasText: 'Please sign in again.' }).waitFor();
     assert.equal(await page.getByLabel('Primary author IDs').textContent(), '[1]');
     mode = 'success'; await press(page.getByRole('button', { name: 'Set me as author', exact: true }));
-    await page.getByRole('status').waitFor();
+    await page.getByRole('status').filter({ hasText: 'By Real fixture writer.' }).waitFor();
     assert.equal(await page.getByLabel('Primary author IDs').textContent(), '[42]');
 
     for (const label of ['Set me as author', 'My author profile']) {
