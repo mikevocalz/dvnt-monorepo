@@ -130,6 +130,13 @@ const ts = require('typescript');
     },
     './DVNTMediaBadge': { DVNTMediaBadge: () => null },
     './native-feed-playback': { feedAudio: {}, syncFeedPlayer: () => {} },
+    // This script isolates playback ownership. Original-file preparation is
+    // exercised with the real cache by test-live-photo-lifecycle.cjs.
+    '../../lib/media/native-live-photo-resources': {
+      isLivePhotoResourceUri: uri => typeof uri === 'string' && /^(https?|file):/.test(uri),
+      localLivePhotoSource: (photoUri, videoUri) => videoUri ? { photoUri, pairedVideoUri: videoUri } : null,
+      nativeLivePhotoResources: { acquire() { throw new Error('Unexpected resource preparation in playback-only test'); } },
+    },
   };
   function load(filename) {
     if (cache.has(filename)) return cache.get(filename).exports;

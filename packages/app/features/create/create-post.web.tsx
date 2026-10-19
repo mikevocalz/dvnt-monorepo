@@ -18,20 +18,17 @@
 
 import { getCaptionMetrics, validatePostCaption, MAX_CAPTION_LENGTH, MAX_CAPTION_RAW_LENGTH } from "@dvnt/app/lib/posts/post-caption";
 import dynamic from "next/dynamic";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "solito/navigation";
 import {
   Hash,
   X,
-  ImagePlus,
   MapPin,
   Trash2,
   Plus,
   Type as TypeIcon,
   Image as ImageIcon,
   CalendarPlus,
-  ArrowUp,
-  ArrowDown,
 } from "lucide-react";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
@@ -52,16 +49,13 @@ import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
 // a `resize` listener instead of react-native's `useWindowDimensions`, feeding
 // the same `resolveResponsiveGrid` the native composer calls.
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
-import type { MediaKind, TextPostThemeKey } from "@dvnt/app/lib/types";
+import type { TextPostThemeKey } from "@dvnt/app/lib/types";
 import { useCreatePostUIStore } from "./create-post-ui-store";
-import { readVideoDurationSec } from "@dvnt/app/lib/media/video-duration.web";
-import { validateVideoPick, videoLimitsLabel } from "@dvnt/app/lib/media/video-pick-policy";
 
-import { LivePhotoPairPicker } from "./live-photo-pair-picker.web";
+import { BrowserMediaPicker } from "./browser-media-picker.web";
+import { captureBrowserMediaReplacement, releaseUnselectedBrowserMedia } from "./browser-media-intake";
 import {
-  captureBrowserMediaCommit,
   MAX_BROWSER_POST_MEDIA,
-  releaseBrowserMediaAsset,
 } from "./browser-live-photo-import";
 
 const MAX_PHOTOS = MAX_BROWSER_POST_MEDIA;
@@ -88,7 +82,12 @@ const CreatePostLocation = dynamic(
 
 export function CreatePostScreen() {
   const router = useRouter();
-  const fileRef = useRef<HTMLInputElement>(null);
+  const pendingMediaRef = useRef(false);
+  const [pendingMedia, setPendingMedia] = useState(false);
+  const onPendingMediaChange = useCallback((pending: boolean) => {
+    pendingMediaRef.current = pending;
+    setPendingMedia(pending);
+  }, []);
   const mounted = useRef(true);
   const filePickVersion = useRef(0);
   useEffect(() => {
@@ -165,7 +164,6 @@ export function CreatePostScreen() {
   const captionMetrics = getCaptionMetrics(caption);
   const captionValidation = validatePostCaption(caption);
   const activeTextSlide = textSlides[activeTextSlideIndex] ?? textSlides[0];
-  const canAddMore = selectedMedia.length < MAX_PHOTOS;
 
   const areTextSlidesValid =
     textSlides.length > 0 &&
@@ -174,87 +172,17 @@ export function CreatePostScreen() {
         slide.content.trim().length > 0 &&
         slide.content.trim().length <= TEXT_POST_MAX_LENGTH,
     );
-  const isValid = isTextPost ? areTextSlidesValid : selectedMedia.length > 0 && captionValidation.valid;
+  const isValid = isTextPost ? areTextSlidesValid : selectedMedia.length > 0 && selectedMedia.length <= MAX_PHOTOS && captionValidation.valid;
   const busy = ui.isSubmitLocked;
 
   // ---- Media intake (file input → object-URL MediaAssets) ----
 
-  const beginMediaAdd = () => {
+  const beginMediaUpdate = () => {
     const operation = filePickVersion.current;
-    return captureBrowserMediaCommit(
+    return captureBrowserMediaReplacement(
       useCreatePostStore.getState,
       () => mounted.current && !submittingRef.current && operation === filePickVersion.current,
     );
-  };
-
-  const onPickFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const input = e.currentTarget;
-    const files = Array.from(input.files ?? []);
-    input.value = "";
-    if (files.length === 0 || submittingRef.current) return;
-    const operation = ++filePickVersion.current;
-    const commit = beginMediaAdd();
-    const remaining = MAX_PHOTOS - useCreatePostStore.getState().selectedMedia.length;
-    if (remaining <= 0) {
-      showToast("warning", "Photo limit", `Maximum ${MAX_PHOTOS} photos per post.`);
-      return;
-    }
-
-    const next: MediaAsset[] = [];
-    try {
-      for (const file of files) {
-        if (next.length >= remaining) {
-          showToast("warning", "Photo limit reached", `You can add up to ${MAX_PHOTOS} media items per post.`);
-          break;
-        }
-        const isVideo = file.type.startsWith("video/");
-        const isImage = file.type.startsWith("image/");
-        if (!isVideo && !isImage) continue;
-        let durationSec: number | null = null;
-        if (isVideo) {
-          durationSec = await readVideoDurationSec(file);
-          if (!mounted.current || operation !== filePickVersion.current) break;
-          const check = validateVideoPick({
-            kind: "post-video", mimeType: file.type, fileName: file.name,
-            sizeBytes: file.size, durationSec,
-          });
-          if (!check.ok) { showToast("error", check.title, check.message); continue; }
-        }
-        const uri = URL.createObjectURL(file);
-        const kind: MediaKind = isVideo ? "video" : file.type === "image/gif" ? "gif" : "image";
-        next.push({
-          id: `media-${crypto.randomUUID()}`, uri, type: isVideo ? "video" : "image", kind,
-          mimeType: file.type || undefined, fileName: file.name, fileSize: file.size,
-          ...(durationSec != null ? { duration: durationSec } : {}),
-        });
-      }
-      if (next.length > 0 && (operation !== filePickVersion.current || !commit(next))) {
-        next.forEach(releaseBrowserMediaAsset);
-        if (mounted.current && operation === filePickVersion.current && !submittingRef.current) {
-          showToast("warning", "Selection changed", "Your post changed while those files were checked. Please select them again.");
-        }
-      }
-    } catch {
-      next.forEach(releaseBrowserMediaAsset);
-      if (mounted.current && operation === filePickVersion.current) showToast("error", "Could not read media", "Choose your files again and retry.");
-    }
-  };
-
-  const handleRemoveMedia = (id: string) => {
-    if (submittingRef.current) return;
-    const removed = selectedMedia.find(m => m.id === id);
-    setSelectedMedia(selectedMedia.filter((m) => m.id !== id));
-    if (removed) releaseBrowserMediaAsset(removed);
-  };
-
-  const moveMedia = (index: number, dir: -1 | 1) => {
-    if (submittingRef.current) return;
-    const target = index + dir;
-    if (target < 0 || target >= selectedMedia.length) return;
-    const reordered = [...selectedMedia];
-    const [item] = reordered.splice(index, 1);
-    reordered.splice(target, 0, item);
-    setSelectedMedia(reordered);
   };
 
   const handleSetPostKind = (nextKind: "media" | "text") => {
@@ -262,7 +190,7 @@ export function CreatePostScreen() {
     filePickVersion.current += 1;
     setPostKind(nextKind);
     if (nextKind === "text") {
-      if (selectedMedia.length > 0) { setSelectedMedia([]); selectedMedia.forEach(releaseBrowserMediaAsset); }
+      if (selectedMedia.length > 0) { setSelectedMedia([]); releaseUnselectedBrowserMedia(selectedMedia, []); }
       if (isNSFW) setIsNSFW(false);
     }
   };
@@ -280,6 +208,15 @@ export function CreatePostScreen() {
 
   const submitPost = async () => {
     if (submittingRef.current) return;
+    // A ref closes the same-event/verification-delay race before React rerenders.
+    if (pendingMediaRef.current) {
+      showToast("warning", "Media is still being checked", "Wait for the selected files or motion to finish, or cancel checking before sharing.");
+      return;
+    }
+    if (useCreatePostStore.getState().selectedMedia.length > MAX_PHOTOS) {
+      showToast("warning", "Too many media items", `Pair or remove files until the post contains ${MAX_PHOTOS} items or fewer.`);
+      return;
+    }
     filePickVersion.current += 1;
     submittingRef.current = true;
     ui.setIsSubmitLocked(true);
@@ -324,7 +261,7 @@ export function CreatePostScreen() {
         <h1 className="text-[17px] font-semibold">New Post</h1>
         <button
           onClick={handlePost}
-          disabled={!isValid || busy}
+          disabled={!isValid || busy || pendingMedia}
           className="rounded-xl px-4 py-2 text-[15px] font-bold bg-cyan-500 text-white disabled:bg-white/8 disabled:text-white/30"
         >
           {busy ? "Posting…" : "Share"}
@@ -424,29 +361,9 @@ export function CreatePostScreen() {
 
         : null}
 
-        {/* One coherent media entry. The dedicated camera route remains
-            available to other product surfaces without duplicating controls here. */}
-        {!isTextPost && selectedMedia.length === 0 ? (
-          <div className="mt-3 flex">
-            <button
-              aria-describedby="live-photo-upload-help"
-              onClick={() => fileRef.current?.click()}
-              disabled={busy}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-500 py-3.5 font-semibold text-white"
-            >
-              <ImagePlus size={20} />
-              Add Photos or Videos
-            </button>
-          </div>
-        ) : null}
-
-        {!isTextPost && canAddMore ? (
-          <p className="mt-2 text-xs text-white/45">{videoLimitsLabel("post-video")}</p>
-        ) : null}
-
         {!isTextPost ? (
-          <LivePhotoPairPicker disabled={busy || !canAddMore} selectionIdentity={selectedMedia}
-            draftIdentity={textSlides} beginAdd={beginMediaAdd} />
+          <BrowserMediaPicker selectedMedia={selectedMedia} draftIdentity={textSlides} disabled={busy}
+            beginUpdate={beginMediaUpdate} onPendingChange={onPendingMediaChange} columns={mediaColumns} />
         ) : null}
 
         <CreatePostLocation />
@@ -582,80 +499,6 @@ export function CreatePostScreen() {
           </div>
         ) : null}
 
-        {/* Media previews — rounded square tiles, reorderable */}
-        {!isTextPost && selectedMedia.length > 0 ? (
-          <div
-            className="mt-4 grid"
-            style={{
-              gridTemplateColumns: `repeat(${mediaColumns}, minmax(0, 1fr))`,
-              gap: MEDIA_GRID_GAP,
-            }}
-          >
-            {selectedMedia.map((media, index) => (
-              <div
-                key={media.id}
-                className="relative aspect-[4/5] overflow-hidden rounded-2xl bg-[#111]"
-              >
-                {media.kind === "livePhoto" && media.pairedVideoUri ? (
-                  <video src={media.pairedVideoUri} poster={media.uri} controls muted loop playsInline preload="metadata"
-                    aria-label={`Live Photo ${index + 1} motion preview`} className="h-full w-full object-cover" />
-                ) : media.type === "video" ? (
-                  <video src={media.uri} controls muted loop playsInline className="h-full w-full object-cover" />
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={media.uri} alt="" className="h-full w-full object-cover" />
-                )}
-
-                {media.kind === "livePhoto" ? <span className="pointer-events-none absolute left-10 top-2 rounded-md bg-black/70 px-2 py-1 text-[10px] font-semibold">LIVE</span> : null}
-
-                <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md bg-black/70 text-xs font-semibold text-white">
-                  {index + 1}
-                </span>
-
-                <button
-                  onClick={() => handleRemoveMedia(media.id)}
-                  disabled={busy}
-                  className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/90 text-white"
-                  aria-label="Remove"
-                >
-                  <Trash2 size={14} />
-                </button>
-
-                <div className="absolute bottom-2 right-2 flex gap-1.5">
-                  <button
-                    onClick={() => moveMedia(index, -1)}
-                    disabled={busy || index === 0}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-black/70 text-white disabled:opacity-30"
-                    aria-label="Move up"
-                  >
-                    <ArrowUp size={14} />
-                  </button>
-                  <button
-                    onClick={() => moveMedia(index, 1)}
-                    disabled={busy || index === selectedMedia.length - 1}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-black/70 text-white disabled:opacity-30"
-                    aria-label="Move down"
-                  >
-                    <ArrowDown size={14} />
-                  </button>
-                </div>
-              </div>
-            ))}
-
-            {canAddMore ? (
-              <button
-                aria-describedby="live-photo-upload-help"
-                onClick={() => fileRef.current?.click()}
-                disabled={busy}
-                className="flex aspect-[4/5] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-white/20 bg-[#111] text-white/40"
-              >
-                <Plus size={32} />
-                <span className="text-xs">Add More</span>
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-
         {/* Caption — media posts */}
         {!isTextPost ? (
           <div className="mt-4">
@@ -673,17 +516,6 @@ export function CreatePostScreen() {
           </div>
         ) : null}
       </div>
-
-      {/* Hidden file input */}
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*,video/*"
-        multiple
-        hidden
-        onChange={onPickFiles}
-      />
-
 
     </div>
   );

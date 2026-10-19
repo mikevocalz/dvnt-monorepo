@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Actual file selector → original upload bytes → edge/SQL → page reload → real
-// video decoding. Identity/admission and media-upload/storage endpoint are
+// Actual unified file selector → original upload bytes → edge/SQL → page reload
+// → real video decoding. Identity/admission and media-upload/storage endpoint are
 // test adapters; create-post handler and checked-in PostgreSQL SQL are real.
 // --build-only validates bundling, NOT browser execution or playback.
 const assert = require('node:assert/strict');
@@ -19,12 +19,13 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
   try {
     await build({ entryPoints: [path.join(__dirname, 'fixtures/live-photo-roundtrip/browser.tsx')], bundle: true, outfile: path.join(directory, 'app.js'), platform: 'browser', jsx: 'automatic', plugins: [clientAdapters()], alias: { '@dvnt/app': path.join(root, 'packages/app') }, nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean), define: { 'process.env.NODE_ENV': '"test"', 'process.env': '{}' } });
     if (process.argv.includes('--build-only')) {
-      console.log('PASS real Live Photo selector/upload/read/carousel browser fixture bundles (build-only; HTTP, SQL and video playback not executed).'); return;
+      console.log('PASS unified media selector/upload/read/carousel browser fixture bundles (build-only; HTTP, SQL and video playback not executed).'); return;
     }
     const originals = [];
     for (let index = 0; index < 3; index++) {
-      const still = path.join(directory, `still-${index}.jpg`);
-      const motion = path.join(directory, `motion-${index}.mp4`);
+      // Equal stems are deliberately not proof of an Apple Live Photo pair.
+      const still = path.join(directory, `IMG_${index}.jpg`);
+      const motion = path.join(directory, `IMG_${index}.mp4`);
       execFileSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=${['red', 'green', 'blue'][index]}:size=96x96`, '-frames:v', '1', '-threads', '1', still]);
       execFileSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=96x96:rate=12', '-vf', `hue=h=${index * 90}`, '-t', '3', '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-metadata', `comment=synthetic-pair-${index}`, motion]);
       originals.push({ still, motion });
@@ -39,7 +40,7 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
           res.setHeader('Content-Type', 'text/html');
           res.end(`<html><head><style>
             body{margin:0;background:#111;color:white;font:14px sans-serif}#root{width:360px}button{min-height:40px}
-            [aria-label="Live Photo motion preview"]{width:240px;height:160px}input{display:block;margin:8px}
+            [data-browser-media-id] video,[data-browser-media-id] img{width:160px;height:120px;object-fit:contain}input{display:block;margin:8px}
             [data-post-media-carousel]{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;width:360px}
             [data-post-media-carousel]>div{flex:none;width:100%;scroll-snap-align:center}
             [data-post-media-carousel] button{display:block;width:100%;border:0;padding:0;background:black}
@@ -67,50 +68,126 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
       return url.startsWith(origin + '/') || url.startsWith('blob:') || url.startsWith('data:') ? route.continue() : route.abort('blockedbyclient');
     });
     await page.goto(origin);
-    const open = () => page.getByRole('button', { name: 'Add Live Photo', exact: true }).click();
-    const add = () => page.getByRole('button', { name: 'Add pair to post', exact: true });
-    await open();
-    await page.getByLabel('1. Still photo').setInputFiles(originals[0].still);
-    assert.equal(await add().isDisabled(), true, 'still-only input cannot claim a Live Photo');
+    const picker = page.getByLabel('Choose photos or videos', { exact: true });
+    const settled = count => page.waitForFunction(count => !window.fixture.isPending() && window.fixture.getSelection().selectedMedia.length === count, count);
+    const selection = () => page.evaluate(() => window.fixture.getSelection().selectedMedia.map(asset => ({ id: asset.id, kind: asset.kind, name: asset.fileName, uri: asset.uri, pairedVideoUri: asset.pairedVideoUri })));
+    const filePayload = (source, name, mimeType) => ({ name, mimeType, buffer: fs.readFileSync(source) });
+    const associate = async (imageName, videoName, expectedCount) => {
+      const video = (await selection()).find(asset => asset.kind === 'video' && asset.name === videoName);
+      assert.ok(video, `Selected motion ${videoName} must remain available`);
+      await page.getByLabel(`Motion for ${imageName}`, { exact: true }).selectOption(video.id);
+      await settled(expectedCount);
+    };
+    const resetDraft = async () => {
+      await page.evaluate(() => window.fixture.resetDraft());
+      await settled(0);
+    };
+    assert.equal(await page.locator('input[type=file]').count(), 1, 'one picker handles every media type');
+    assert.equal(await picker.getAttribute('multiple'), '', 'the unified picker accepts a selection of files');
+    assert.equal(await page.getByRole('button', { name: 'Add Photos or Videos', exact: true }).count(), 1);
+    assert.equal(await page.getByRole('button', { name: 'Add Live Photo', exact: true }).count(), 0, 'no redundant Live Photo entry point');
+
+    // A JPEG alone and a normal video are ordinary media, never false LIVE.
+    await picker.setInputFiles(filePayload(originals[0].still, 'IMG_0.jpg', 'image/jpeg')); await settled(1);
+    assert.deepEqual((await selection()).map(asset => asset.kind), ['image']);
+    assert.equal(await page.locator('[data-browser-media-kind="livePhoto"]').count(), 0);
+    await picker.setInputFiles(filePayload(originals[1].motion, 'ordinary-video.mp4', 'video/mp4')); await settled(2);
+    assert.deepEqual((await selection()).map(asset => asset.kind), ['image', 'video']);
+    assert.ok((await selection()).every(asset => !asset.pairedVideoUri));
+    const ordinaryBeforeRejectedBatch = await selection();
+    await picker.setInputFiles([
+      filePayload(originals[2].still, 'new-photo.jpg', 'image/jpeg'),
+      { name: 'unsupported-motion.webm', mimeType: 'video/webm', buffer: Buffer.from('unsupported motion') },
+    ]);
+    await page.getByRole('alert').filter({ hasText: 'unsupported-motion.webm' }).waitFor();
+    await settled(2);
+    assert.deepEqual(await selection(), ordinaryBeforeRejectedBatch, 'reject the whole new batch rather than silently retain only its still');
+    await resetDraft();
+
+    // Similar names cannot silently pair the wrong photo. An explicit inline
+    // association is reversible and cannot consume the same video twice.
+    await picker.setInputFiles([
+      filePayload(originals[0].still, 'DUPLICATE.jpg', 'image/jpeg'),
+      filePayload(originals[1].still, 'DUPLICATE.jpeg', 'image/jpeg'),
+      filePayload(originals[0].motion, 'DUPLICATE.mp4', 'video/mp4'),
+    ]);
+    await settled(3);
+    assert.deepEqual((await selection()).map(asset => asset.kind), ['image', 'image', 'video']);
+    const ambiguousBefore = await selection();
+    await associate('DUPLICATE.jpeg', 'DUPLICATE.mp4', 2);
+    let ambiguous = await selection();
+    assert.equal(ambiguous[0].kind, 'image'); assert.equal(ambiguous[1].kind, 'livePhoto');
+    assert.equal(ambiguous[1].id, ambiguousBefore[1].id, 'association preserves the chosen still identity');
+    assert.equal(ambiguous[1].uri, ambiguousBefore[1].uri);
+    assert.equal(ambiguous[1].pairedVideoUri, ambiguousBefore[2].uri);
+    assert.equal(await page.getByLabel('Motion for DUPLICATE.jpg', { exact: true }).locator(`option[value="${ambiguousBefore[2].id}"]`).count(), 0, 'one motion cannot be attached twice');
+    await page.getByLabel('Motion for DUPLICATE.jpeg', { exact: true }).selectOption(''); await settled(3);
+    ambiguous = await selection();
+    assert.equal(ambiguous.filter(asset => asset.kind === 'livePhoto').length, 0);
+    assert.ok(ambiguous.some(asset => asset.kind === 'video' && asset.uri === ambiguousBefore[2].uri), 'disassociation restores the original video without re-encoding');
+    assert.ok(ambiguous.some(asset => asset.id === ambiguousBefore[1].id && asset.kind === 'image'));
     assert.deepEqual(await harness.counts(), { posts: 0, media: 0, requests: 0 });
-    await page.getByLabel('2. Matching motion file').setInputFiles({ name: 'broken.mp4', mimeType: 'video/mp4', buffer: Buffer.from('not decodable motion') });
-    await page.getByRole('alert').filter({ hasText: 'could not play' }).waitFor();
-    assert.equal(await add().isDisabled(), true, 'invalid codec/container never commits a flattened still');
-    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-    for (let index = 0; index < originals.length; index++) {
-      await open();
-      await page.getByLabel('1. Still photo').setInputFiles(originals[index].still);
-      await page.getByLabel('2. Matching motion file').setInputFiles(originals[index].motion);
-      await page.waitForFunction(() => { const v = document.querySelector('[aria-label="Live Photo motion preview"]'); return v && v.readyState >= 2 && v.duration > 0; });
-      await add().click();
-      await page.waitForFunction(count => document.querySelector('[data-selected]')?.textContent === String(count), index + 1);
-    }
+    await resetDraft();
+
+    // Corrupt motion rejects the entire new selection. Never silently keep
+    // its still and unlock publishing as if a Live Photo had been imported.
+    await picker.setInputFiles([
+      filePayload(originals[0].still, 'IMG_0.jpg', 'image/jpeg'),
+      { name: 'broken.mp4', mimeType: 'video/mp4', buffer: Buffer.from('not decodable motion') },
+    ]);
+    await page.getByRole('alert').filter({ hasText: 'broken.mp4' }).waitFor();
+    await settled(0);
+    assert.deepEqual(await selection(), [], 'undecodable motion rejects its accompanying still too');
+    assert.equal(await page.locator('[data-publish]').isDisabled(), true);
+    assert.deepEqual(await harness.counts(), { posts: 0, media: 0, requests: 0 });
+    await resetDraft();
+
+    // Select a whole mixed array once, then attach motion inline. File names
+    // alone never create LIVE badges, including three unique equal stems.
+    await picker.setInputFiles([
+      ...originals.flatMap(pair => [
+        filePayload(pair.still, path.basename(pair.still), 'image/jpeg'),
+        filePayload(pair.motion, path.basename(pair.motion), 'video/mp4'),
+      ]),
+      filePayload(originals[0].still, 'ordinary-still.jpg', 'image/jpeg'),
+      filePayload(originals[2].motion, 'ordinary-video.mp4', 'video/mp4'),
+    ]);
+    await settled(8);
+    assert.ok((await selection()).every(asset => asset.kind !== 'livePhoto'));
+    for (let index = 0; index < originals.length; index++) await associate(`IMG_${index}.jpg`, `IMG_${index}.mp4`, 7 - index);
+    assert.deepEqual((await selection()).map(asset => asset.kind), ['livePhoto', 'livePhoto', 'livePhoto', 'image', 'video']);
     harness.state.failMotion = true;
     await page.locator('[data-publish]').click();
     await page.waitForFunction(() => document.querySelector('[data-status]')?.textContent.includes('motion upload failure'));
     assert.deepEqual(await harness.counts(), { posts: 0, media: 0, requests: 0 });
     assert.equal(harness.state.creates.length, 0);
-    assert.deepEqual(await page.evaluate(() => window.fixture.client.state.descriptor.uploaded), [null, null, null]);
+    const failedUploads = await page.evaluate(() => window.fixture.client.state.descriptor.uploaded);
+    assert.deepEqual(failedUploads.map(upload => upload !== null), [false, false, false, true, false], 'only the independent still may be cached after failed motion uploads');
     harness.state.failMotion = false;
     await page.locator('[data-publish]').click();
     await page.waitForFunction(() => document.querySelector('[data-status]')?.textContent === 'Saved post loaded');
-    assert.deepEqual(await harness.counts(), { posts: 1, media: 3, requests: 1 });
+    assert.deepEqual(await harness.counts(), { posts: 1, media: 5, requests: 1 });
     const rows = (await harness.db.query('SELECT * FROM posts_media ORDER BY _order')).rows;
-    for (let index = 0; index < rows.length; index++) {
+    for (let index = 0; index < originals.length; index++) {
       assert.equal(rows[index]._order, index);
       assert.equal(harness.state.objects.get(new URL(rows[index].url).pathname).sha256, digest(fs.readFileSync(originals[index].still)));
       assert.equal(harness.state.objects.get(new URL(rows[index].live_photo_video_url).pathname).sha256, digest(fs.readFileSync(originals[index].motion)));
     }
+    assert.equal(rows[3].type, 'image'); assert.equal(rows[3].live_photo_video_url, null);
+    assert.equal(rows[4].type, 'video'); assert.equal(rows[4].live_photo_video_url, null);
+    assert.equal(harness.state.objects.get(new URL(rows[3].url).pathname).sha256, digest(fs.readFileSync(originals[0].still)));
+    assert.equal(harness.state.objects.get(new URL(rows[4].url).pathname).sha256, digest(fs.readFileSync(originals[2].motion)));
     const active = index => page.waitForFunction(index => {
       const videos = [...document.querySelectorAll('[data-post-motion]')];
-      return videos.length === 3 && videos.every((video, i) => i === index ? !video.paused && video.currentTime > 0.1 && video.videoWidth > 0 : video.paused);
+      const videoSlides = [0, 1, 2, 4];
+      return videos.length === 4 && videos.every((video, i) => videoSlides[i] === index ? !video.paused && video.currentTime > 0.1 && video.videoWidth > 0 : video.paused);
     }, index);
     await active(0);
     await page.reload(); // No in-memory upload, object URL, or optimistic cache survives.
     await active(0);
     assert.ok(harness.state.reads.length >= 2, 'fresh page must fetch persisted rows again');
-    assert.deepEqual(await page.evaluate(() => window.fixture.getPost().media.map(m => ({ type: m.type, url: m.url, video: m.livePhotoVideoUrl }))), rows.map(row => ({ type: 'livePhoto', url: row.url, video: row.live_photo_video_url })));
-    for (const index of [1, 2, 0]) {
+    assert.deepEqual(await page.evaluate(() => window.fixture.getPost().media.map(m => ({ type: m.type, url: m.url, video: m.livePhotoVideoUrl ?? null }))), rows.map((row, index) => ({ type: index < 3 ? 'livePhoto' : row.type, url: row.url, video: row.live_photo_video_url })));
+    for (const index of [1, 2, 3, 4, 0]) {
       await page.evaluate(index => { const carousel = document.querySelector('[data-post-media-carousel]'); carousel.scrollTo({ left: index * carousel.clientWidth }); }, index);
       await active(index);
     }
@@ -119,7 +196,7 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     await page.waitForFunction(() => { const video = document.querySelector('[role=dialog] video'); return video && !video.paused && video.currentTime > 0.1 && [...document.querySelectorAll('[data-post-motion]')].every(v => v.paused); });
     await page.evaluate(() => window.fixture.closeLightbox()); await active(0);
     assert.deepEqual(errors, []); assert.deepEqual(routeErrors, []);
-    console.log('PASS actual Live Photo picker, decoded originals, multipart upload, edge+PostgreSQL persistence, browser reload, ordered carousel playback and lightbox; missing/unplayable motion refused and failed pair upload retries without a partial post.');
+    console.log('PASS one actual media picker: ordinary files never falsely LIVE, explicit ambiguous association/disassociation, decoded pairs, mixed original multipart upload, edge+PostgreSQL persistence, reload, selected-only carousel/lightbox and retry without a partial post.');
   } finally {
     await browser?.close();
     if (server?.listening) await new Promise(resolve => server.close(resolve));

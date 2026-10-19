@@ -91,7 +91,26 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     assert.equal(harness.state.uploads.length, uploadedBeforeRetry, 'retry must reuse the already uploaded complete pair');
     assert.deepEqual(await harness.counts(), { posts: 3, media: 5, requests: 3 }, 'lost acknowledgement retry must not create a duplicate');
     assert.equal((await client.read(client.state.created.id)).media[0].type, 'livePhoto');
-    console.log('PASS real browser pair helper → original multipart bytes → create-post edge → checked-in PostgreSQL migrations → fresh postsApi read → renderer source; ordered arrays, missing/failed motion refusal, upload retry and lost-response idempotency. Identity/admission and media-upload/storage endpoint are test adapters; no media decoding claimed.');
+
+    // The unified picker also accepts ordinary assets. Neither adjacency nor
+    // source reuse may create a false Live Photo association in persistence.
+    client.prepare([
+      files[0],
+      { uri: files[1].uri, type: 'image', kind: 'image', mimeType: 'image/jpeg' },
+      { uri: files[2].pairedVideoUri, type: 'video', kind: 'video', mimeType: 'video/quicktime' },
+    ], 'fixture-mixed-unified-selection');
+    await client.publish();
+    assert.deepEqual(await harness.counts(), { posts: 4, media: 8, requests: 4 });
+    const mixed = await client.read(client.state.created.id);
+    assert.deepEqual(mixed.media.map(media => media.type), ['livePhoto', 'image', 'video']);
+    assert.ok(mixed.media[0].livePhotoVideoUrl);
+    assert.equal(mixed.media[1].livePhotoVideoUrl, undefined);
+    assert.equal(mixed.media[2].livePhotoVideoUrl, undefined);
+    assert.equal(client.resolveWebPostMedia(mixed.media[1]).videoUrl, undefined);
+    assert.equal(client.resolveWebPostMedia(mixed.media[2]).videoUrl, mixed.media[2].url);
+    assert.equal(harness.state.objects.get(new URL(mixed.media[1].url).pathname).sha256, digest(originals[1].still));
+    assert.equal(harness.state.objects.get(new URL(mixed.media[2].url).pathname).sha256, digest(originals[2].motion));
+    console.log('PASS real browser pair helper → original multipart bytes → create-post edge → checked-in PostgreSQL migrations → fresh postsApi read → renderer source; ordered/mixed arrays without false LIVE, missing/failed motion refusal, upload retry and lost-response idempotency. Identity/admission and media-upload/storage endpoint are test adapters; no media decoding claimed.');
   } finally {
     global.fetch = realFetch; delete global.fixtureOrigin;
     objectUrls.forEach(url => URL.revokeObjectURL(url));

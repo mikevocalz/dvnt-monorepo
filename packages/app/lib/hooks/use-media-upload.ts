@@ -21,6 +21,7 @@ import { uploadLivePhotoPair } from "@dvnt/app/lib/media/live-photo-upload";
 import { uploadSingleImage } from "@dvnt/app/lib/media/single-image-upload";
 import { imageFitDeps } from "@dvnt/app/lib/media/image-fit-deps";
 import { Platform } from "react-native";
+import { getAuthToken } from "@dvnt/app/lib/auth-client";
 import {
   uploadToServer as serverUpload,
   deleteFromServer,
@@ -168,6 +169,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
       setIsUploading(true);
       setProgress(0);
       setError(null);
+      setStatusMessage(null);
 
       // Bring the picked image under its kind's cap first. Sending the raw
       // file meant every phone photo over 2 MB failed the avatar preflight in
@@ -175,7 +177,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
       const result = await uploadSingleImage(uri, folder, imageFitDeps, (prepared) =>
         serverUpload(prepared, folder, (p) => {
           setProgress(p.percentage);
-        }),
+        }, { onStatus: setStatusMessage }),
       ).catch((e: unknown): UploadResult => ({
         success: false,
         url: "",
@@ -185,6 +187,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
       }));
 
       setIsUploading(false);
+      setStatusMessage(null);
 
       if (result.success) {
         onSuccess?.([result]);
@@ -199,7 +202,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
   );
 
   const uploadMultiple = useCallback(
-    async (files: MediaFile[], onStatus?: (message: string) => void): Promise<MediaUploadResult[]> => {
+    async (files: MediaFile[], onStatus?: (message: string) => void, assertOwner?: () => void): Promise<MediaUploadResult[]> => {
       const reportStatus = (message: string | null) => {
         setStatusMessage(message);
         if (message) onStatus?.(message);
@@ -211,6 +214,11 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
       setStatusMessage(null);
 
       try {
+      // Keep every half/file of this web batch on the session that started it.
+      // This value stays in the active closure, never in the persisted job.
+      assertOwner?.();
+      const expectedAuthToken = Platform.OS === "web" ? await getAuthToken() : undefined;
+      assertOwner?.();
       const results: MediaUploadResult[] = [];
       const videoCount = files.filter((f) => f.type === "video" && f.kind !== "animated_video").length;
       const animatedVideoCount = files.filter((f) => f.kind === "animated_video").length;
@@ -232,6 +240,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
       };
 
       for (const file of files) {
+        assertOwner?.();
         console.log(
           "[useMediaUpload] Processing file:",
           file.type,
@@ -372,6 +381,8 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
             folder,
             reportBytes,
             {
+              onStatus: reportStatus,
+              expectedAuthToken,
               mimeType: uploadMimeForVideo(
                 file.uri,
                 file.mimeType,
@@ -412,6 +423,8 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
                 const thumbnailUploadResult = await serverUpload(
                   thumbnailAssetUri,
                   folder,
+                  undefined,
+                  { onStatus: reportStatus, expectedAuthToken },
                 );
 
                 if (thumbnailUploadResult.success) {
@@ -514,6 +527,8 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           } else {
             reportStatus("Uploading animated video...");
             const uploadResult = await serverUpload(compressionResult.outputPath, folder, reportBytes, {
+              onStatus: reportStatus,
+              expectedAuthToken,
               mimeType: uploadMimeForVideo(
                 file.uri,
                 file.mimeType,
@@ -529,7 +544,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
               reportStatus("Preparing video preview...");
               const preview = await generateVideoThumbnail(compressionResult.outputPath, 0);
               if (preview.success && preview.uri) {
-                const previewUpload = await serverUpload(preview.uri, folder);
+                const previewUpload = await serverUpload(preview.uri, folder, undefined, { onStatus: reportStatus, expectedAuthToken });
                 if (previewUpload.success) loopThumbnail = previewUpload.url;
                 await cleanupThumbnail(preview.uri);
               }
@@ -572,7 +587,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
               console.warn("[useMediaUpload] GIF ph:// copy failed:", copyErr);
             }
           }
-          const uploadResult = await serverUpload(gifUri, folder, reportBytes);
+          const uploadResult = await serverUpload(gifUri, folder, reportBytes, { onStatus: reportStatus, expectedAuthToken });
           if (!uploadResult.success) {
             results.push({
               type: "image",
@@ -596,7 +611,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           // A Live Photo is an indivisible pair. Never publish success when
           // only the still uploaded, or re-encode away Apple's pairing metadata.
           reportStatus("Uploading Live Photo...");
-          const result = await uploadLivePhotoPair(file, (uri) => serverUpload(uri, folder));
+          const result = await uploadLivePhotoPair(file, (uri) => serverUpload(uri, folder, undefined, { onStatus: reportStatus, expectedAuthToken }));
           results.push(result);
           updateProgress(result.success ? "Live Photo uploaded" : "Live Photo upload failed");
         } else {
@@ -628,6 +643,8 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
 
           reportStatus("Uploading image...");
           const uploadResult = await serverUpload(imageUri, folder, reportBytes, {
+            onStatus: reportStatus,
+            expectedAuthToken,
             blurhash,
           });
 

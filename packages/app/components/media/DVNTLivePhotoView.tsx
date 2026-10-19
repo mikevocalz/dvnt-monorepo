@@ -28,8 +28,14 @@
 import { View, ViewStyle, Platform } from "react-native";
 import { Image } from "expo-image";
 import type { ImageStyle } from "expo-image";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from "react";
 import { DVNTAnimatedVideoView } from "./DVNTAnimatedVideoView";
+import {
+  isLivePhotoResourceUri,
+  localLivePhotoSource,
+  nativeLivePhotoResources,
+  type NativeLivePhotoSource,
+} from "../../lib/media/native-live-photo-resources";
 
 interface DVNTLivePhotoViewProps {
   photoUri: string;
@@ -69,11 +75,6 @@ if (Platform.OS === "ios") {
   }
 }
 
-// Module-scoped set of asset pairs that have previously failed to load as
-// native Live Photos. Once we know a pair is broken (metadata stripped),
-// there's no point retrying on remount — we go straight to the mp4 fallback.
-const brokenPairingCache = new Set<string>();
-
 export function DVNTLivePhotoView(props: DVNTLivePhotoViewProps) {
   // Recycled feed cells may receive a different pair without unmounting. Native
   // load/fallback refs belong to an asset, never to the reusable cell.
@@ -97,28 +98,47 @@ function LivePhotoAsset({
   useLayoutEffect(() => {
     playingRef.current = isPlaying;
   }, [isPlaying]);
-  // Changing playback must not reload the same native asset pair.
-  const source = useMemo(
-    () => ({ photoUri, pairedVideoUri: videoUri }),
-    [photoUri, videoUri],
+  const [resource, setResource] = useReducer(
+    (_: { source: NativeLivePhotoSource | null; failed: boolean }, next: { source: NativeLivePhotoSource | null; failed: boolean }) => next,
+    undefined,
+    () => ({ source: localLivePhotoSource(photoUri, videoUri), failed: false }),
   );
-  const pairKey = JSON.stringify([photoUri, videoUri]);
-  const fellBackRef = useRef(brokenPairingCache.has(pairKey));
-  // Dedicated render-nudge — flipping a ref alone doesn't re-render.
-  // useReducer here (not useState) per the project's state-policy
-  // preference; this is component-local transient state only.
-  const [, bumpRender] = useReducer((x: number) => x + 1, 0);
-
-  const hasPairedVideo =
-    typeof videoUri === "string" && videoUri.startsWith("http");
+  const [shouldLoad, enableLoad] = useReducer(() => true, isPlaying);
+  const fellBackRef = useRef(false);
+  const hasPairedVideo = isLivePhotoResourceUri(videoUri);
 
   const nativeAvailable =
     Platform.OS === "ios" &&
     LivePhotoView !== null &&
-    hasPairedVideo &&
+    hasPairedVideo && isLivePhotoResourceUri(photoUri) &&
     (livePhotoIsAvailable?.() ?? false);
 
-  const canRenderNativeLivePhoto = nativeAvailable && !fellBackRef.current;
+  const canRenderNativeLivePhoto = nativeAvailable && !resource.failed && !!resource.source;
+
+  useEffect(() => {
+    if (isPlaying) enableLoad();
+  }, [isPlaying]);
+
+  useEffect(() => {
+    // Picker file:// pairs are already usable. Remote originals must both be
+    // cached before reaching PHLivePhoto.request(withResourceFileURLs:).
+    // Defer remote IO for carousel pages that have never been selected.
+    if (!nativeAvailable || !videoUri || localLivePhotoSource(photoUri, videoUri) || !shouldLoad || resource.failed) return;
+    let cancelled = false;
+    const lease = nativeLivePhotoResources.acquire(photoUri, videoUri);
+    lease.source.then(source => {
+      if (!cancelled) setResource({ source, failed: false });
+    }).catch(() => {
+      if (!cancelled) {
+        fellBackRef.current = true;
+        setResource({ source: null, failed: true });
+      }
+    });
+    return () => {
+      cancelled = true;
+      lease.release(fellBackRef.current);
+    };
+  }, [photoUri, videoUri, nativeAvailable, shouldLoad, resource.failed]);
 
   // Start playback only once the native view has finished loading both
   // the photo and the paired video. Calling startPlayback before the
@@ -144,15 +164,12 @@ function LivePhotoAsset({
   const handleLoadError = useCallback(() => {
     if (!isMountedRef.current || fellBackRef.current) return;
     try { viewRef.current?.stopPlayback?.(); } catch {}
-    // PHLivePhoto couldn't pair photo + video (metadata stripped,
-    // unsupported format, network hiccup, …). Remember this photo URI
-    // so we skip native on remount, and re-render into the mp4 fallback
-    // right now.
-    brokenPairingCache.add(pairKey);
+    // Do not permanently blacklist URLs: failures may be transient and a
+    // repaired original at the same URL must be allowed to retry on remount.
     fellBackRef.current = true;
     isLoadedRef.current = false;
-    bumpRender();
-  }, [pairKey]);
+    setResource({ source: null, failed: true });
+  }, []);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -176,7 +193,7 @@ function LivePhotoAsset({
           ref={viewRef}
           // Native asset shape is { photoUri, pairedVideoUri }. The old
           // `videoUri` prop name was silently ignored by the native view.
-          source={source}
+          source={resource.source}
           style={{ width: "100%", height: "100%" }}
           contentFit={contentFit}
           isMuted={true}
@@ -195,7 +212,7 @@ function LivePhotoAsset({
   // Apple pairing metadata during upload: play the paired mp4 as a muted
   // loop. Motion still renders; users just don't get the tap-and-hold
   // still⇄live transition.
-  if (hasPairedVideo && videoUri) {
+  if (hasPairedVideo && videoUri && (!nativeAvailable || resource.failed)) {
     return (
       <View style={[{ width, height } as ViewStyle, style]}>
         <DVNTAnimatedVideoView
@@ -210,7 +227,8 @@ function LivePhotoAsset({
     );
   }
 
-  // No paired video at all — still image only.
+  // Show the still while originals are being prepared, or when no pair exists.
+  // Do not briefly autoplay the fallback behind a native view that is loading.
   return (
     <View style={[{ width, height } as ViewStyle, style]}>
       <Image

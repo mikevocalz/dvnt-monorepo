@@ -28,6 +28,7 @@ export interface PublishTaskDeps {
   uploadMedia: (
     files: PublishMediaFile[],
     report: (message: string) => void,
+    assertOwner?: () => void,
   ) => Promise<PublishUploadOutcome[]>;
   createPost: (
     input: PublishCreatePostInput,
@@ -68,6 +69,7 @@ export function createPublishTask(
           job.uploaded[index] ? file : deps.persistMedia(file),
         ),
       );
+      assertOwner();
       job = { ...job, files };
       save(job);
       const pending = files.flatMap((_, index) =>
@@ -77,6 +79,7 @@ export function createPublishTask(
         const results = await deps.uploadMedia(
           pending.map((index) => files[index]),
           report,
+          assertOwner,
         );
         const uploaded = [...job.uploaded];
         pending.forEach((index, at) => {

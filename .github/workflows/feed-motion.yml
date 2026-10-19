@@ -16,9 +16,12 @@ on:
       - 'apps/mobile/lib/hooks/use-media-picker.ts'
       - 'packages/app/lib/posts/publish*'
       - 'packages/app/lib/media/live-photo*'
+      - 'packages/app/lib/media/native-live-photo-resources.ts'
+      - 'packages/app/lib/media/web-upload-rate*'
       - 'packages/app/lib/server-upload.ts'
       - 'packages/app/lib/api/posts.ts'
       - 'packages/app/features/create/*live-photo*'
+      - 'packages/app/features/create/browser-media*'
       - 'apps/mobile/supabase/migrations/*post*'
       - 'apps/mobile/supabase/functions/create-post/**'
       - 'packages/app/lib/hooks/use-media-upload.ts'
@@ -60,12 +63,13 @@ jobs:
           node scripts/test-feed-motion-dom.cjs
           node scripts/test-live-photo-lifecycle.cjs
           node scripts/test-live-photo-picker.cjs
-          node --test packages/app/lib/media/live-photo-original.test.ts
+          node --test packages/app/lib/media/live-photo-original.test.ts packages/app/lib/media/live-photo-resource-cache.test.ts
           node scripts/test-live-photo-publish-original.cjs
           node scripts/test-live-photo-crop-guard.cjs
           node scripts/test-browser-live-photo-import-dom.cjs
           node scripts/test-live-photo-roundtrip.cjs
-          node --test packages/app/features/create/browser-live-photo-import.test.ts
+          node scripts/test-live-photo-upload-rate.cjs
+          node --test packages/app/features/create/browser-live-photo-import.test.ts packages/app/features/create/browser-media-intake.test.ts packages/app/lib/media/web-upload-rate.test.ts
           node scripts/test-native-post-carousel.cjs
           node scripts/test-web-live-photo-carousel-dom.cjs
           node --test packages/app/lib/posts/publish-queue.test.ts

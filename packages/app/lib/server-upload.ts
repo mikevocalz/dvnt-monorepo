@@ -12,6 +12,7 @@ import { supabase } from "@dvnt/app/lib/supabase/client";
 import { beginUpload, settleUpload } from "@dvnt/app/lib/media/upload-watchdog-store";
 
 import { folderToKind, sizeLimitForKind, uploadPercentage, withUploadTimeout } from "@dvnt/app/lib/media/upload-policy";
+import { scheduleWebUpload } from "@dvnt/app/lib/media/web-upload-rate";
 
 const FileSystem = LegacyFileSystem;
 
@@ -167,6 +168,9 @@ export async function uploadToServer(
   folder: string = "uploads",
   onProgress?: (progress: UploadProgress) => void,
   opts?: {
+    onStatus?: (message: string) => void;
+    /** In-memory web batch identity. Never persist this value. */
+    expectedAuthToken?: string | null;
     blurhash?: string;
     mimeType?: string;
     width?: number | null;
@@ -190,6 +194,9 @@ async function uploadToServerImpl(
   folder: string = "uploads",
   onProgress?: (progress: UploadProgress) => void,
   opts?: {
+    /** Queue/progress UI, including a bounded wait after an explicit rate refusal. */
+    onStatus?: (message: string) => void;
+    expectedAuthToken?: string | null;
     /**
      * Compact inline fade-in placeholder (base64 WebP micro-preview, data URI)
      * generated client-side. Sent alongside the file so the media-upload edge
@@ -224,6 +231,9 @@ async function uploadToServerImpl(
         filename: "",
         error: "Not authenticated — cannot upload",
       };
+    }
+    if (opts?.expectedAuthToken !== undefined && authToken !== opts.expectedAuthToken) {
+      return { success: false, url: "", path: "", filename: "", error: "Your sign-in changed during upload. Sign in to the account that started this post." };
     }
 
     // ── Web: native FileSystem.uploadAsync doesn't exist in the browser. Fetch
@@ -268,13 +278,20 @@ async function uploadToServerImpl(
         // browser (empty apikey in the web bundle + preflight); invoke uses the
         // correctly-initialized client key + the mechanism that works for every
         // other web edge call. supabase-js sets Content-Type for FormData.
-        const controller = new AbortController();
         const { data: body, error: invokeErr } =
-          await withUploadTimeout(supabase.functions.invoke("media-upload", {
-            body: form,
-            headers: { Authorization: `Bearer ${authToken}` },
-            signal: controller.signal,
-          }), () => controller.abort());
+          await scheduleWebUpload(async () => {
+            // A queued request or cooldown can outlive a logout/account switch.
+            // Never replace the original session with another account's token.
+            if (await getAuthToken() !== authToken) {
+              return { data: { ok: false, error: "Your sign-in changed during upload. Sign in to the account that started this post." }, error: null };
+            }
+            const controller = new AbortController();
+            return withUploadTimeout(supabase.functions.invoke("media-upload", {
+              body: form,
+              headers: { Authorization: `Bearer ${authToken}` },
+              signal: controller.signal,
+            }), () => controller.abort());
+          }, opts?.onStatus);
         // supabase-js collapses any non-2xx into "Edge Function returned a
         // non-2xx status code" and hides the response on `.context`. The
         // function's own validation failures come back as HTTP 200 + ok:false,

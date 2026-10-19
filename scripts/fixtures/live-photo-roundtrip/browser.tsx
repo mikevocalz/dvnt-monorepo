@@ -1,7 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { LivePhotoPairPicker } from '../../../packages/app/features/create/live-photo-pair-picker.web';
-import { captureBrowserMediaCommit } from '../../../packages/app/features/create/browser-live-photo-import';
+import { BrowserMediaPicker } from '../../../packages/app/features/create/browser-media-picker.web';
+import { captureBrowserMediaReplacement } from '../../../packages/app/features/create/browser-media-intake';
+import { MAX_BROWSER_POST_MEDIA, releaseBrowserMediaAsset, type BrowserMediaSelection } from '../../../packages/app/features/create/browser-live-photo-import';
 import { PostMediaCarousel } from '../../../packages/app/components/feed/post-media-carousel.web';
 import { Lightbox } from '../../../packages/app/components/lightbox.web';
 import { useLightboxStore } from '../../../packages/app/lib/stores/lightbox-store';
@@ -13,9 +14,15 @@ const root = createRoot(document.getElementById('root')!);
 let post: Awaited<ReturnType<typeof client.read>>;
 let status = 'Select original Live Photo files';
 let inFlight = false;
-let selection = {
+let pending = false;
+let selection: BrowserMediaSelection = {
   selectedMedia: [], textSlides: [{}], postKind: 'media',
   setSelectedMedia: (media: any[]) => { selection = { ...selection, selectedMedia: media }; render(); },
+};
+const updatePending = (value: boolean) => {
+  if (pending === value) return;
+  pending = value;
+  render();
 };
 async function showPost(id: string) {
   post = await client.read(id);
@@ -23,6 +30,7 @@ async function showPost(id: string) {
   status = 'Saved post loaded'; render();
 }
 async function publish() {
+  if (inFlight || pending || selection.selectedMedia.length > MAX_BROWSER_POST_MEDIA) return;
   inFlight = true; status = 'Publishing'; render();
   try {
     if (!client.state.descriptor) client.prepare(selection.selectedMedia, 'browser-pair-roundtrip');
@@ -37,14 +45,24 @@ async function publish() {
 function render() {
   root.render(<>
     {!post ? <>
-      <LivePhotoPairPicker disabled={inFlight} selectionIdentity={selection.selectedMedia} draftIdentity={selection.textSlides} beginAdd={() => captureBrowserMediaCommit(() => selection)} />
+      <BrowserMediaPicker selectedMedia={selection.selectedMedia} draftIdentity={selection.textSlides} disabled={inFlight}
+        beginUpdate={() => captureBrowserMediaReplacement(() => selection, () => !inFlight)}
+        onPendingChange={updatePending} />
       <output data-selected>{selection.selectedMedia.length}</output>
-      <button type="button" data-publish disabled={inFlight || !selection.selectedMedia.length} onClick={() => void publish()}>Publish selected pairs</button>
+      <button type="button" data-publish disabled={inFlight || pending || !selection.selectedMedia.length || selection.selectedMedia.length > MAX_BROWSER_POST_MEDIA} onClick={() => void publish()}>Publish selected media</button>
     </> : <PostMediaCarousel key={post.id} media={post.media} caption={post.caption} />}
     <output data-status>{status}</output><Lightbox />
   </>);
 }
-Object.assign(window, { fixture: { client, getSelection: () => selection, getPost: () => post, closeLightbox: () => useLightboxStore.getState().close() } });
+function resetDraft() {
+  if (inFlight || pending || post) throw new Error('Cannot reset an active or published fixture');
+  selection.selectedMedia.forEach(releaseBrowserMediaAsset);
+  selection = { ...selection, selectedMedia: [], textSlides: [{}] };
+  client.state.descriptor = undefined;
+  client.state.created = undefined;
+  render();
+}
+Object.assign(window, { fixture: { client, getSelection: () => selection, getPost: () => post, resetDraft, isPending: () => pending, closeLightbox: () => useLightboxStore.getState().close() } });
 render();
 const id = new URLSearchParams(location.hash.slice(1)).get('post');
 if (id) void showPost(id).catch(error => { status = String(error); render(); });
