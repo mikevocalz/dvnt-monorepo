@@ -1,3 +1,4 @@
+import { resolveStaffPhoto, resolveStaffPhotos } from './account-photo'
 import type { AdminUser } from '../payload-types'
 import { randomUUID } from 'node:crypto'
 import { sql, type PostgresAdapter } from '@payloadcms/db-postgres'
@@ -63,15 +64,24 @@ function publicAccountName(account: { name?: string | null; email?: string | nul
   return name && name.toLowerCase() !== account.email?.trim().toLowerCase() ? name : 'Staff writer'
 }
 
+export async function ensureAccountAuthor(req: PayloadRequest, accountID: string | number) {
+  const actor = staffAccount(req)
+  if (!actor || (!canEditBylines(req) && !sameID(actor.id, accountID)))
+    throw new APIError('You can only choose your own account. An editor must assign other staff.', 403)
+  await lockAccount(req, accountID)
+  const account = sameID(actor.id, accountID) ? actor : await req.payload.findByID({
+    collection: 'admin-users', id: accountID, depth: 0, overrideAccess: true, req,
+  })
+  if (!['super_admin', 'admin', 'moderator'].includes(account.role)) throw new APIError('Choose an existing staff account.', 400)
+  const existing = (await linkedAuthors(req, accountID)).docs[0]
+  if (existing) return existing
+  return req.payload.create({ collection: 'authors', overrideAccess: true, req, depth: 0,
+    data: { user: account.id, name: publicAccountName(account), slug: `writer-${randomUUID()}` } })
+}
 export async function ensureOwnAuthor(req: PayloadRequest) {
   const user = staffAccount(req)
   if (!user) throw new APIError('Sign in with a staff account to edit your author profile.', 403)
-  await lockAccount(req, user.id)
-  const existing = (await linkedAuthors(req, user.id)).docs[0]
-  if (existing) return existing
-  return req.payload.create({ collection: 'authors', overrideAccess: true, req, depth: 0,
-    data: { user: user.id, name: publicAccountName(user),
-      slug: `writer-${randomUUID()}` } })
+  return ensureAccountAuthor(req, user.id)
 }
 
 export const prepareAuthorProfile: CollectionBeforeChangeHook = async ({ data, operation, originalDoc, req }) => {
@@ -124,7 +134,7 @@ export const prepareAuthorProfile: CollectionBeforeChangeHook = async ({ data, o
   data.user = account.id
   if (!String(data.name ?? originalDoc?.name ?? '').trim()) data.name = publicAccountName(account)
   // This is a fallback, not an editorial override. Never copy private email.
-  data.avatarUrl = account.avatarUrl || null
+  data.avatarUrl = await resolveStaffPhoto(account)
   return data
 }
 
@@ -173,4 +183,67 @@ export const authorsProfileEndpoint: Endpoint = {
       throw error
     }
   },
+}
+
+// Read-only choices expose real staff before they have an Authors record.
+// Loading an editor never provisions profiles or rewrites its historical byline.
+export const authorAccountsEndpoint: Endpoint = {
+  path: '/accounts', method: 'get',
+  handler: async req => {
+    const actor = staffAccount(req)
+    if (!actor) throw new APIError('Staff sign-in is required.', 403)
+    const url = new URL(req.url || 'http://localhost')
+    const page = Math.max(1, Math.min(10000, Math.trunc(Number(url.searchParams.get('page'))) || 1))
+    const query = (url.searchParams.get('q') || '').trim().slice(0, 100)
+    const result = canEditBylines(req) ? await req.payload.find({ collection: 'admin-users',
+      where: { and: [{ role: { in: ['super_admin', 'admin', 'moderator'] } },
+        ...(query ? [{ name: { contains: query } }] : [])] },
+      limit: 25, page, sort: 'name', depth: 0, overrideAccess: false, req,
+    }) : { docs: [actor], hasNextPage: false, nextPage: null }
+    const includeID = url.searchParams.get('include')
+    if (canEditBylines(req) && page === 1 && !query && includeID && /^\d+$/.test(includeID) && !result.docs.some(account => sameID(account.id, includeID))) {
+      try {
+        const preferred = await req.payload.findByID({ collection: 'admin-users', id: includeID, depth: 0, overrideAccess: false, req })
+        if (['super_admin', 'admin', 'moderator'].includes(preferred.role)) result.docs.unshift(preferred)
+      } catch { /* A deleted or inaccessible creator is not a selectable account. */ }
+    }
+    const photos = await resolveStaffPhotos(result.docs)
+    return Response.json({ accounts: result.docs.map((account, index) => ({
+      id: account.id, name: publicAccountName(account), avatarUrl: photos[index],
+    })), nextPage: result.hasNextPage ? result.nextPage : null })
+  },
+}
+export const accountAuthorProfileEndpoint: Endpoint = {
+  path: '/account/profile', method: 'post',
+  handler: async req => {
+    if (!staffAccount(req)) throw new APIError('Staff sign-in is required.', 403)
+    if (!req.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
+      throw new APIError('Send an application/json request.', 415)
+    const data = await req.json?.()
+    const accountID = relationshipID(data?.accountID)
+    if (accountID == null || !/^\d+$/.test(String(accountID))) throw new APIError('Choose a staff account.', 400)
+    const ownsTransaction = await initTransaction(req)
+    try {
+      const author = await ensureAccountAuthor(req, accountID)
+      if (ownsTransaction) await commitTransaction(req)
+      return Response.json({ author: { id: author.id, name: author.name },
+        editURL: `${req.payload.config.routes.admin}/collections/authors/${encodeURIComponent(author.id)}` })
+    } catch (error) {
+      if (ownsTransaction) await killTransaction(req)
+      throw error
+    }
+  },
+}
+
+// Run before field privacy filtering: the owner ID is needed to resolve the
+// current public image, but private account/contact fields remain hidden.
+export const hydrateAuthorPhoto = async ({ doc, req }: { doc: any; req: PayloadRequest }) => {
+  const accountID = relationshipID(doc.user)
+  if (accountID == null) return doc
+  try {
+    const account = await req.payload.findByID({ collection: 'admin-users', id: accountID,
+      depth: 0, overrideAccess: true, req })
+    doc.avatarUrl = await resolveStaffPhoto(account)
+  } catch { /* Preserve the last known image if the linked account is unavailable. */ }
+  return doc
 }

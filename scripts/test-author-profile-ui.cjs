@@ -20,7 +20,7 @@ async function build() {
     nodePaths: paths.flatMap(p => [p, path.join(p, 'node_modules')]),
     plugins: [{ name: 'isolated-payload-context', setup(b) {
       b.onResolve({ filter: /^@payloadcms\/ui$/ }, () => ({ path: 'ui', namespace: 'fixture' }));
-      b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ loader: 'tsx', resolveDir: ROOT, contents: `import React,{createContext,useContext,useState}from'react';const Form=createContext(null);export function FixtureProvider({children}){const[value,setValue]=useState([1]);const[id,setID]=useState('fixture-post');return <Form.Provider value={{value,setValue,id}}><button onClick={()=>{setID('another-post');setValue([1])}}>Switch post</button>{children}<output aria-label="Primary author IDs">{JSON.stringify(value)}</output></Form.Provider>}export const useAuth=()=>({user:{id:3,role:'moderator',collection:'admin-users'}});export const useField=()=>useContext(Form);export const useDocumentInfo=()=>({id:useContext(Form).id});` }));
+      b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ loader: 'tsx', resolveDir: ROOT, contents: `import React,{createContext,useContext,useState}from'react';const Form=createContext(null);export function FixtureProvider({children}){const[value,setValue]=useState([1]);const[id,setID]=useState('fixture-post');return <Form.Provider value={{value,setValue,id}}><button onClick={()=>{setID('another-post');setValue([1])}}>Switch post</button>{children}<button onClick={()=>setValue([99])}>Manual author change</button><output aria-label="Primary author IDs">{JSON.stringify(value)}</output></Form.Provider>}export const useAuth=()=>({user:{id:3,role:new URLSearchParams(location.search).has('admin')?'admin':'moderator',collection:'admin-users'}});export const useField=({path})=>{const form=useContext(Form);return path==='createdBy'?{value:7}:form};export const useDocumentInfo=()=>({id:useContext(Form).id});` }));
     } }],
   });
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{font:16px system-ui;background:#151515;color:#eee;max-width:900px;margin:auto;padding:24px}section{border:1px solid #555;border-radius:12px;padding:20px;margin:20px 0}button{font:inherit;padding:12px;border:1px solid #999;border-radius:8px;cursor:pointer}button:disabled{opacity:.6}a{color:#87b5ff}output{display:block;padding:12px;background:#252525}</style></head><body><div id="root"></div><script>${outputFiles[0].text.replaceAll('</script>', '<\\/script>')}</script></body></html>`;
@@ -105,6 +105,74 @@ async function run(browser, name, viewport, isMobile, origin) {
     console.log(`PASS ${name}: profile and attribution, repeat click, failure/retry, unmount, navigation/Back`);
   } finally { await context.close(); }
 }
+async function runAccountPicker(browser, name, viewport, isMobile, origin) {
+  const context = await browser.newContext({ viewport, isMobile, hasTouch: isMobile });
+  const page = await context.newPage();
+  const errors = []; page.on('pageerror', error => errors.push(String(error)));
+  let writes = 0, mode = 'success', choicesFail = false, release, arrived;
+  const press = locator => isMobile ? locator.tap() : locator.click();
+  await context.route('**/*', async route => {
+    const request = route.request(), url = new URL(request.url());
+    assert.equal(url.origin, origin, 'Account picker must not contact external services in fixture');
+    if (url.pathname === '/current-photo.svg') return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36"><rect width="36" height="36" fill="purple"/></svg>' });
+    if (url.pathname === '/payload-api/authors/accounts') {
+      if (choicesFail) return route.fulfill({ status: 503, json: { errors: [{ message: 'Account list unavailable.' }] } });
+      const q = url.searchParams.get('q') || '';
+      const accounts = url.searchParams.get('page') === '2' ? [{ id: 12, name: 'Later staff account', avatarUrl: null }] : [
+        { id: 7, name: 'Micah fixture', avatarUrl: origin + '/current-photo.svg' },
+        { id: 11, name: 'Another real staff account', avatarUrl: null },
+      ];
+      return route.fulfill({ json: { accounts: accounts.filter(a => a.name.toLowerCase().includes(q.toLowerCase())), nextPage: !q && url.searchParams.get('page') !== '2' ? 2 : null } });
+    }
+    if (url.pathname !== '/payload-api/authors/account/profile') return route.continue();
+    writes++; assert.equal(request.method(), 'POST'); assert.deepEqual(request.postDataJSON(), { accountID: 7 });
+    if (mode === 'pending') await new Promise(resolve => { release = resolve; arrived?.(); });
+    await route.fulfill({ status: mode === 'error' ? 403 : 200, json: mode === 'error' ? { errors: [{ message: 'Sign in again.' }] }
+      : { author: { id: 42, name: 'Micah fixture' }, editURL: '/admin/collections/authors/42' } });
+  });
+  const loadPage = async () => {
+    await page.goto(origin + '/fixture?admin');
+    await page.getByRole('radio', { name: 'Micah fixture (Created by)' }).waitFor();
+  };
+  const button = () => page.getByRole('button', { name: 'Add account as author', exact: true });
+  try {
+    await loadPage(); assert.equal(writes, 0, 'Opening an old article must not provision profiles or rewrite authors');
+    assert.equal(await page.getByRole('radio', { name: 'Micah fixture (Created by)' }).isChecked(), true);
+    assert.equal(await page.locator('section[aria-label="Choose an account author"] img').getAttribute('src'), origin + '/current-photo.svg');
+    assert.equal(await page.getByLabel('Primary author IDs').textContent(), '[1]');
+    await press(button()); await page.getByRole('status').filter({ hasText: 'Added Micah fixture.' }).waitFor();
+    assert.equal(await page.getByLabel('Primary author IDs').textContent(), '[1,42]', 'Keep existing legitimate coauthor');
+    await press(button()); await page.getByRole('status').filter({ hasText: 'Added Micah fixture.' }).waitFor();
+    assert.equal(await page.getByLabel('Primary author IDs').textContent(), '[1,42]', 'Never duplicate selected profile');
+    await page.screenshot({ path: path.join(out, `${name}-account-picker.png`), fullPage: true });
+    await press(page.getByRole('button', { name: 'More accounts' }));
+    await page.getByRole('radio', { name: 'Later staff account' }).waitFor();
+    await page.getByLabel('Search staff accounts').fill('missing-account');
+    await page.getByText('No matching staff accounts.').waitFor();
+    await page.getByLabel('Search staff accounts').fill('Micah');
+    await page.getByRole('radio', { name: 'Micah fixture (Created by)' }).waitFor();
+    choicesFail = true; await page.getByLabel('Search staff accounts').fill('another');
+    await page.getByRole('alert').filter({ hasText: 'Account list unavailable.' }).waitFor();
+    choicesFail = false; await press(page.getByRole('button', { name: 'Reload accounts' }));
+    await page.getByRole('radio', { name: 'Another real staff account' }).waitFor();
+
+    await loadPage(); mode = 'error'; await press(button()); await page.getByRole('alert').filter({ hasText: 'Sign in again.' }).waitFor();
+    assert.equal(await page.getByLabel('Primary author IDs').textContent(), '[1]');
+    mode = 'success'; await press(button()); await page.getByRole('status').filter({ hasText: 'Added Micah fixture.' }).waitFor();
+    for (const action of ['Switch post', 'Manual author change', 'Leave editor']) {
+      await loadPage(); mode = 'pending'; const pendingRequest = new Promise(resolve => { arrived = resolve; });
+      const before = writes; await press(button()); await pendingRequest;
+      await page.getByRole('button', { name: 'Adding account…' }).evaluate(el => el.click());
+      assert.equal(writes, before + 1, 'Repeated click must not provision twice');
+      await press(page.getByRole('button', { name: action, exact: true }));
+      mode = 'success'; release(); await page.waitForTimeout(300);
+      assert.equal(await page.getByLabel('Primary author IDs').textContent(), action === 'Manual author change' ? '[99]' : '[1]', 'Late result must not clobber newer form state');
+    }
+    assert.deepEqual(errors, []);
+    console.log(`PASS ${name}: account image, recorded creator default, no write-on-read, additive byline, duplicate/retry and late-response guards`);
+  } finally { await context.close(); }
+}
+
 (async () => {
   const html = await build();
   if (process.argv.includes('--build-only')) return console.log(`PASS author controls bundle (${html.length} bytes)`);
@@ -114,7 +182,7 @@ async function run(browser, name, viewport, isMobile, origin) {
   try {
     for (const engine of ['chromium', 'webkit']) {
       const browser = await load('playwright')[engine].launch({ headless: true });
-      try { await run(browser, `${engine}-375`, { width: 375, height: 812 }, true, origin); await run(browser, `${engine}-1440`, { width: 1440, height: 900 }, false, origin); }
+      try { await run(browser, `${engine}-375`, { width: 375, height: 812 }, true, origin); await run(browser, `${engine}-1440`, { width: 1440, height: 900 }, false, origin); await runAccountPicker(browser, `${engine}-375`, { width: 375, height: 812 }, true, origin); await runAccountPicker(browser, `${engine}-1440`, { width: 1440, height: 900 }, false, origin); }
       finally { await browser.close(); }
     }
   } finally { await new Promise(resolve => server.close(resolve)); }

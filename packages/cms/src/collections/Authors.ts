@@ -3,7 +3,7 @@
 import type { CollectionConfig } from 'payload'
 import { slugField } from '../fields/slug'
 import { authorStaffAccess, authorEditorAccess, updateAuthorAccess,
-  authorsProfileEndpoint, prepareAuthorProfile } from '../authors/profiles'
+  authorsProfileEndpoint, authorAccountsEndpoint, accountAuthorProfileEndpoint, hydrateAuthorPhoto, prepareAuthorProfile } from '../authors/profiles'
 
 export const Authors: CollectionConfig = {
   slug: 'authors',
@@ -23,8 +23,9 @@ export const Authors: CollectionConfig = {
   },
   hooks: {
     beforeChange: [prepareAuthorProfile],
+    beforeRead: [hydrateAuthorPhoto],
   },
-  endpoints: [authorsProfileEndpoint],
+  endpoints: [authorsProfileEndpoint, authorAccountsEndpoint, accountAuthorProfileEndpoint],
   fields: [
     // Reuse the existing nullable relationship. New profiles require an
     // account in the write hook; historical unlinked bylines stay untouched.
