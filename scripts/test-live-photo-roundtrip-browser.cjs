@@ -71,7 +71,7 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     const picker = page.getByLabel('Choose photos or videos', { exact: true });
     const settled = count => page.waitForFunction(count => !window.fixture.isPending() && window.fixture.getSelection().selectedMedia.length === count, count);
     const selection = () => page.evaluate(() => window.fixture.getSelection().selectedMedia.map(asset => ({ id: asset.id, kind: asset.kind, name: asset.fileName, uri: asset.uri, pairedVideoUri: asset.pairedVideoUri })));
-    const payload = (source, name, mimeType) => ({ name, mimeType, buffer: fs.readFileSync(source) });
+    const filePayload = (source, name, mimeType) => ({ name, mimeType, buffer: fs.readFileSync(source) });
     const associate = async (imageName, videoName, expectedCount) => {
       const video = (await selection()).find(asset => asset.kind === 'video' && asset.name === videoName);
       assert.ok(video, `Selected motion ${videoName} must remain available`);
@@ -88,15 +88,15 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     assert.equal(await page.getByRole('button', { name: 'Add Live Photo', exact: true }).count(), 0, 'no redundant Live Photo entry point');
 
     // A JPEG alone and a normal video are ordinary media, never false LIVE.
-    await picker.setInputFiles(originals[0].still); await settled(1);
+    await picker.setInputFiles(filePayload(originals[0].still, 'IMG_0.jpg', 'image/jpeg')); await settled(1);
     assert.deepEqual((await selection()).map(asset => asset.kind), ['image']);
     assert.equal(await page.locator('[data-browser-media-kind="livePhoto"]').count(), 0);
-    await picker.setInputFiles(payload(originals[1].motion, 'ordinary-video.mp4', 'video/mp4')); await settled(2);
+    await picker.setInputFiles(filePayload(originals[1].motion, 'ordinary-video.mp4', 'video/mp4')); await settled(2);
     assert.deepEqual((await selection()).map(asset => asset.kind), ['image', 'video']);
     assert.ok((await selection()).every(asset => !asset.pairedVideoUri));
     const ordinaryBeforeRejectedBatch = await selection();
     await picker.setInputFiles([
-      payload(originals[2].still, 'new-photo.jpg', 'image/jpeg'),
+      filePayload(originals[2].still, 'new-photo.jpg', 'image/jpeg'),
       { name: 'unsupported-motion.webm', mimeType: 'video/webm', buffer: Buffer.from('unsupported motion') },
     ]);
     await page.getByRole('alert').filter({ hasText: 'unsupported-motion.webm' }).waitFor();
@@ -107,9 +107,9 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     // Similar names cannot silently pair the wrong photo. An explicit inline
     // association is reversible and cannot consume the same video twice.
     await picker.setInputFiles([
-      payload(originals[0].still, 'DUPLICATE.jpg', 'image/jpeg'),
-      payload(originals[1].still, 'DUPLICATE.jpeg', 'image/jpeg'),
-      payload(originals[0].motion, 'DUPLICATE.mp4', 'video/mp4'),
+      filePayload(originals[0].still, 'DUPLICATE.jpg', 'image/jpeg'),
+      filePayload(originals[1].still, 'DUPLICATE.jpeg', 'image/jpeg'),
+      filePayload(originals[0].motion, 'DUPLICATE.mp4', 'video/mp4'),
     ]);
     await settled(3);
     assert.deepEqual((await selection()).map(asset => asset.kind), ['image', 'image', 'video']);
@@ -132,7 +132,7 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     // Corrupt motion rejects the entire new selection. Never silently keep
     // its still and unlock publishing as if a Live Photo had been imported.
     await picker.setInputFiles([
-      originals[0].still,
+      filePayload(originals[0].still, 'IMG_0.jpg', 'image/jpeg'),
       { name: 'broken.mp4', mimeType: 'video/mp4', buffer: Buffer.from('not decodable motion') },
     ]);
     await page.getByRole('alert').filter({ hasText: 'broken.mp4' }).waitFor();
@@ -145,9 +145,12 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     // Select a whole mixed array once, then attach motion inline. File names
     // alone never create LIVE badges, including three unique equal stems.
     await picker.setInputFiles([
-      ...originals.flatMap(pair => [pair.still, pair.motion]),
-      payload(originals[0].still, 'ordinary-still.jpg', 'image/jpeg'),
-      payload(originals[2].motion, 'ordinary-video.mp4', 'video/mp4'),
+      ...originals.flatMap(pair => [
+        filePayload(pair.still, path.basename(pair.still), 'image/jpeg'),
+        filePayload(pair.motion, path.basename(pair.motion), 'video/mp4'),
+      ]),
+      filePayload(originals[0].still, 'ordinary-still.jpg', 'image/jpeg'),
+      filePayload(originals[2].motion, 'ordinary-video.mp4', 'video/mp4'),
     ]);
     await settled(8);
     assert.ok((await selection()).every(asset => asset.kind !== 'livePhoto'));
