@@ -63,7 +63,7 @@ function usePublishTaskDeps(): PublishTaskDeps {
         : undefined;
       return { ...file, uri, ...(pairedVideoUri ? { pairedVideoUri } : null) };
     },
-    uploadMedia: async (files, report) => {
+    uploadMedia: async (files, report, assertOwner) => {
       const results = await uploadMultiple(
         files.map((file) => ({
           uri: file.uri,
@@ -73,6 +73,7 @@ function usePublishTaskDeps(): PublishTaskDeps {
           pairedVideoUri: file.pairedVideoUri,
         })),
         report,
+        assertOwner,
       );
       return results.map((result) =>
         result.success

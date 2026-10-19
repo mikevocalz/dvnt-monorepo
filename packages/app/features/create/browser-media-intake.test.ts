@@ -1,0 +1,82 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import type { MediaAsset } from "../../lib/hooks/use-media-picker";
+import { readBrowserMediaFiles, associateBrowserMedia, separateBrowserMedia, captureBrowserMediaReplacement, releaseUnselectedBrowserMedia } from "./browser-media-intake.ts";
+import { sizeLimitForKind } from "../../lib/media/upload-policy.ts";
+
+const image = (name = "IMG_1234.jpg", type = "image/jpeg") => new File([new Uint8Array([255, 216, 0, 1, 2, 3])], name, { type });
+const video = (name = "IMG_1234.mov", type = "video/quicktime") => new File([new Uint8Array([0, 1, 2, 3, 4, 255])], name, { type });
+const readDuration = async () => 3;
+const readFiles = (files: File[]) => readBrowserMediaFiles(files, { readDuration });
+
+test("one multi-file intake preserves originals and never pairs even unique matching filenames", async () => {
+  const files = [image(), video()]; const result = await readFiles(files);
+  assert.deepEqual(result.errors, []); assert.deepEqual(result.assets.map(item => item.kind), ["image", "video"]);
+  assert.ok(result.assets.every(item => !item.pairedVideoUri));
+  for (let i = 0; i < files.length; i++) assert.deepEqual(await (await fetch(result.assets[i].uri)).arrayBuffer(), await files[i].arrayBuffer());
+  releaseUnselectedBrowserMedia(result.assets, []);
+});
+
+test("empty OS MIME uses approved extensions for format only; HEIF and corrupt/oversize motion fail", async () => {
+  const result = await readFiles([image("photo.HEIC", ""), video("different.MOV", "")]);
+  assert.deepEqual(result.assets.map(item => item.mimeType), ["image/heic", "video/quicktime"]);
+  releaseUnselectedBrowserMedia(result.assets, []);
+  const bad = await readFiles([image("photo.heif", "image/heif"), new File([new Uint8Array(sizeLimitForKind("post-video") + 1)], "large.mp4", { type: "video/mp4" })]);
+  assert.equal(bad.assets.length, 0); assert.equal(bad.errors.length, 2);
+  for (const duration of [null, 0, NaN, Infinity, 61]) {
+    const invalid = await readBrowserMediaFiles([video()], { readDuration: async () => duration });
+    assert.equal(invalid.assets.length, 0); assert.equal(invalid.errors.length, 1);
+  }
+});
+
+test("explicit association preserves chosen identities and disassociation restores both without revocation", async () => {
+  const { assets } = await readFiles([image(), image(), video()]);
+  const pair = await associateBrowserMedia(assets, assets[1].id, assets[2].id, readDuration);
+  assert.ok(pair.ok); if (!pair.ok) return;
+  assert.equal(pair.media.length, 2); assert.equal(pair.media[0].kind, "image");
+  assert.equal(pair.media[1].id, assets[1].id); assert.equal(pair.media[1].pairedVideoUri, assets[2].uri);
+  assert.equal(pair.media[1].uri, assets[1].uri); assert.equal(pair.media[1].kind, "livePhoto");
+  releaseUnselectedBrowserMedia(assets, pair.media);
+  assert.equal((await fetch(assets[2].uri)).ok, true, "paired source URL still owned");
+  const separated = separateBrowserMedia(pair.media, assets[1].id);
+  assert.ok(separated.ok); if (!separated.ok) return;
+  assert.deepEqual(separated.media, assets);
+  releaseUnselectedBrowserMedia(pair.media, separated.media);
+  assert.equal((await fetch(assets[2].uri)).ok, true, "split source URL still owned");
+  releaseUnselectedBrowserMedia(separated.media, []);
+  await assert.rejects(fetch(assets[2].uri));
+});
+
+test("ambiguous, wrong-kind and unplayable motion never invent a Live Photo", async () => {
+  const { assets } = await readFiles([image(), image(), video()]);
+  assert.equal((await associateBrowserMedia(assets, assets[0].id, assets[1].id, readDuration)).ok, false);
+  assert.equal((await associateBrowserMedia(assets, assets[0].id, assets[2].id, async () => null)).ok, false);
+  assert.deepEqual(assets.map(item => item.kind), ["image", "image", "video"]);
+  releaseUnselectedBrowserMedia(assets, []);
+});
+
+test("twenty original files can become ten explicit pairs; separating cannot exceed ten published items", async () => {
+  const files = Array.from({ length: 10 }, (_, i) => [image(`photo-${i}.jpg`), video(`clip-${i}.mov`)]).flat();
+  const { assets } = await readFiles(files); let selected = assets;
+  assert.equal(selected.length, 20);
+  for (let i = 0; i < 10; i++) {
+    const result = await associateBrowserMedia(selected, assets[i * 2].id, assets[i * 2 + 1].id, readDuration);
+    assert.ok(result.ok); if (result.ok) selected = result.media;
+  }
+  assert.equal(selected.length, 10); assert.ok(selected.every(item => item.kind === "livePhoto"));
+  assert.equal(separateBrowserMedia(selected, selected[0].id).ok, false);
+  releaseUnselectedBrowserMedia([selected[0]], selected.slice(1));
+  const split = separateBrowserMedia(selected.slice(1), selected[1].id);
+  assert.ok(split.ok); if (split.ok) { assert.equal(split.media.length, 10); releaseUnselectedBrowserMedia(split.media, []); }
+});
+
+test("review commits are atomic against draft changes, cancellation and >20 raw files", () => {
+  const first: MediaAsset = { id: "first", uri: "blob:first", type: "image", kind: "image" };
+  let state = { selectedMedia: [first], postKind: "media", textSlides: [{}], setSelectedMedia: (media: MediaAsset[]) => { state = { ...state, selectedMedia: media }; } };
+  const commit = captureBrowserMediaReplacement(() => state);
+  state = { ...state, textSlides: [{}] };
+  assert.equal(commit([first]), false);
+  assert.equal(captureBrowserMediaReplacement(() => state, () => false)([first]), false);
+  assert.equal(captureBrowserMediaReplacement(() => state)(Array(21).fill(first)), false);
+  assert.equal(captureBrowserMediaReplacement(() => state)(Array(20).fill(first)), true);
+});

@@ -17,6 +17,21 @@ A rendering fix cannot recover motion from those JPEGs. Repairing this specific
 post requires the original pairs or a newly uploaded selection, with separate
 authorization to change the post.
 
+Post `/post/677`, created at 19:50:20 UTC after #136 deployed, likewise contains
+one JPEG with null paired-video/MIME fields. Its upload inventory in the
+19:45–19:52 window contains only one `image/jpeg` record. The production alias
+was verified on #136's merge commit, so this is not evidence that the patch was
+undeployed. It also does not prove which picker control the reporter used.
+An ordinary browser still upload produces exactly this record shape. The stored
+publish request for 677 also contains only `{type: "image", url: "…jpg"}`:
+no motion/MIME fields were supplied to persistence. Read-only inspection of the
+deployed `create_post_idempotent` definition confirms it preserves both fields
+when provided, rather than silently stripping them.
+
+The initial separate photo/motion import controls were rejected as redundant.
+The follow-up uses one media input and optional inline association of motion
+files actually supplied by the user. It cannot extract an absent Photos resource.
+
 ## Independently confirmed code defects
 
 - Web detail's carousel discarded the paired-video field and rendered valid
@@ -38,11 +53,15 @@ cannot supply a paired resource, and the application must not invent one.
 
 ## Supported browser import
 
-The browser composer offers an explicit still + motion pair, with the user
-choosing which two files belong together. It does not infer pairing from names
-or claim to verify Apple's embedded asset identifiers. Both original file bodies
-are retained, and the saved record uses the existing paired-video column. A
-browser selection that contains only a JPEG remains a still.
+The browser composer has one Photos or Videos input. Ordinary files need no
+additional step. If a selection supplies both photos and motion clips, an inline
+Motion selector associates a user-chosen pair and merges its two cards into one
+LIVE item. Association can be reversed. There is no separate Live Photo upload
+button and no filename-based pairing or claim to verify Apple's embedded IDs.
+Both original file bodies are retained in a pair, using the existing paired-video
+column. A browser selection containing only a JPEG remains a still. Up to twenty
+originals can be reviewed to build ten pairs, but publication remains limited to
+ten media items. Share is blocked while intake or association is pending.
 
 Native iOS can obtain paired resources directly from Photos. Expo documents that
 `livePhotos` is ignored on Web and Android, while the native iOS picker returns
@@ -59,9 +78,10 @@ successful moving upload. No server transcoder is introduced by this change.
 
 ## Validation and limits
 
-- All 1,397 repository Node tests pass; full web TypeScript and focused native
-  component TypeScript pass. Full native-package TypeScript was killed by local
-  memory pressure, so that aggregate check is not reported as passed.
+- #136 passed 1,397 repository Node tests, all eight PR workflows, full monorepo
+  TypeScript in CI, production web build/bundle budgets, and both postmerge
+  workflows. Local native-package TypeScript exceeded memory, but CI completed
+  that check. Follow-up validation must be recorded separately.
 - Real React DOM/native-bridge tests exercise first autoplay, both swipe
   directions, late callbacks, background/visibility, modal handoff, source
   replacement, mixed media, missing motion, and original-file import cancellation.
@@ -77,3 +97,19 @@ successful moving upload. No server transcoder is introduced by this change.
 - Native Apple pairing/decoding and physical iPhone Safari remain device-QA
   boundaries. Browser codec support is checked per selected clip, not inferred
   from MOV/MP4 extension. No production post or storage record was modified.
+
+## Upload request budget
+
+The real media-upload handler permits ten requests per minute per user/instance.
+Each pair consumes two requests; the original adapter-only roundtrip did not
+exercise that limiter. Web uploads now serialize requests and retry only an
+explicit rate refusal once, honoring Retry-After when available or waiting sixty
+seconds for the current known refusal. Longer-than-two-minute instructions fail
+without an early retry; unknown network/storage failures are never automatically
+replayed. Session changes abort queued/retried requests. Waiting status reaches
+the publication queue. No backend rate policy or deployed function was changed.
+
+The new real-handler regression executes media-upload and its actual limiter,
+using simulated time and isolated identity/media DB/Bunny adapters. It proves
+ten original pairs, retry retention, refusal handling and account-switch safety,
+not production CDN writes.

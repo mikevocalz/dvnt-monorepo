@@ -21,9 +21,17 @@ export async function publish() {
   await createPublishTask(state.descriptor, 'fixture-owner', {
     currentOwnerId: () => 'fixture-owner', persistMedia: async file => file,
     uploadMedia: async files => Promise.all(files.map(async file => {
-      const result = await uploadLivePhotoPair(file, uri => uploadToServer(uri, 'posts'));
+      if (file.kind === 'livePhoto') {
+        const result = await uploadLivePhotoPair(file, uri => uploadToServer(uri, 'posts'));
+        if (!result.success) return { error: result.error };
+        return { type: result.type, url: result.url, mimeType: result.mimeType, livePhotoVideoUrl: result.livePhotoVideoUrl };
+      }
+      // The fixture exercises the shared transport, not the composer's image
+      // optimization/thumbnail pipeline. Ordinary media must keep its ordinary
+      // kind and cannot acquire a Live Photo association from an adjacent file.
+      const result = await uploadToServer(file.uri, 'posts');
       if (!result.success) return { error: result.error };
-      return { type: result.type, url: result.url, mimeType: result.mimeType, livePhotoVideoUrl: result.livePhotoVideoUrl };
+      return { type: file.type, url: result.url, mimeType: file.mimeType };
     })),
     createPost: async input => { state.created = await postsApi.createPost(input); return state.created; },
     addPlacedTags: () => { throw new Error('No tags expected'); },

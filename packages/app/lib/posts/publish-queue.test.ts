@@ -157,6 +157,33 @@ test('a restored job never publishes under whoever is signed in now', async () =
   assert.match(job.message, /Sign back into the account/);
 });
 
+test('account switch while media preparation waits prevents every upload request', async () => {
+  const gate = deferred();
+  let owner = 'owner-a';
+  const { published, uploads, deps } = recorder({
+    currentOwnerId: () => owner,
+    persistMedia: async file => { await gate.promise; return file; },
+  });
+  const task = createPublishTask(draft(), 'owner-a', deps)(() => {}, () => {});
+  const failed = assert.rejects(task, /Sign back into the account/);
+  owner = 'owner-b'; gate.resolve(); await failed;
+  assert.deepEqual(uploads, []); assert.deepEqual(published, []);
+});
+
+test('upload dependency receives a live owner assertion across session lookup waits', async () => {
+  let owner = 'owner-a';
+  const { published, deps } = recorder({
+    currentOwnerId: () => owner,
+    uploadMedia: async (_files, _report, assertOwner) => {
+      assert.equal(typeof assertOwner, 'function'); assertOwner!();
+      await Promise.resolve(); owner = 'owner-b'; assertOwner!();
+      assert.fail('changed owner cannot start an upload');
+    },
+  });
+  await assert.rejects(createPublishTask(draft(), 'owner-a', deps)(() => {}, () => {}), /Sign back into the account/);
+  assert.deepEqual(published, []);
+});
+
 test('required first-post onboarding waits for server-side publish completion', async () => {
   const queue = createPublishQueue();
   const gate = deferred();
