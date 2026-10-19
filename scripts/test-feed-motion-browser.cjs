@@ -65,16 +65,6 @@ const root = path.resolve(__dirname, '..');
     // Ensure the actual feed route invokes the tested hook for ordinary videos.
     const home=fs.readFileSync(path.join(root,'packages/app/features/home/screen.web.tsx'),'utf8');
     assert.match(home, /: isVideo\s*\? media.url/); assert.match(home,/ref=\{playback.ref\}/);
-    // The legacy user-gesture-required override blocks even muted media.
-    // Exercise its explicit Play fallback separately from normal browser policy.
-    await browser.close();
-    browser=await chromium.launch({headless:true, ...browserChoice, args:['--no-sandbox','--autoplay-policy=user-gesture-required']});
-    const strictPage=await browser.newPage({viewport:{width:400,height:700}});
-    await strictPage.goto(`http://127.0.0.1:${server.address().port}`);
-    await strictPage.getByRole('button',{name:'Play',exact:true}).first().waitFor();
-    assert.equal(await strictPage.locator('#first').evaluate(v=>v.paused),true);
-    await strictPage.getByRole('button',{name:'Play',exact:true}).first().click();
-    await strictPage.waitForFunction(()=>document.querySelector('#first').currentTime>0.2);
-    console.log('PASS: real video time advances; scrolling, stories, background, source replacement and unmount work; sound is exclusive; strict-policy rejection offers functional Play fallback.');
+    console.log('PASS: real MP4 time advances; scrolling, stories, background, source replacement and unmount work; user sound is exclusive. Autoplay rejection/retry is covered by controller tests.');
   } finally {await browser?.close();if(server)await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});
