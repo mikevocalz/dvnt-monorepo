@@ -148,6 +148,11 @@ function mapMedia(m: any): PostMedia | undefined {
   }
 }
 
+function safeExternalURL(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  try { return ['http:', 'https:'].includes(new URL(value).protocol) ? value : undefined } catch { return undefined }
+}
+
 function mapAuthor(a: any): PostAuthor | null {
   if (!a || typeof a !== 'object') return null
   // Avatar: an explicit media upload overrides; otherwise use the avatar synced
@@ -167,9 +172,9 @@ function mapAuthor(a: any): PostAuthor | null {
       twitter: a.socials?.twitter ?? undefined,
       tiktok: a.socials?.tiktok ?? undefined,
       onlyfans: a.socials?.onlyfans ?? undefined,
-      website: a.socials?.website ?? undefined,
+      website: safeExternalURL(a.socials?.website),
     },
-    profileUrl: a.profileUrl ?? undefined,
+    profileUrl: safeExternalURL(a.profileUrl),
   }
 }
 
@@ -198,6 +203,10 @@ function docToPost(d: any): Post {
     heroCaption: d.heroCaption ?? undefined,
     heroVideoUrl: d.heroVideoUrl ?? undefined,
     authors: Array.isArray(d.authors) ? (d.authors.map(mapAuthor).filter(Boolean) as PostAuthor[]) : [],
+    contributors: Array.isArray(d.contributors) ? d.contributors.flatMap((entry: any) => {
+      const author = mapAuthor(entry?.author)
+      return author ? [{ id: entry.id != null ? String(entry.id) : undefined, author, role: entry.role ?? 'Contributor' }] : []
+    }) : [],
     categories: Array.isArray(d.categories) ? (d.categories.map(mapCategory).filter(Boolean) as PostCategory[]) : [],
     tags: Array.isArray(d.tags) ? d.tags : undefined,
     featured: !!d.featured,

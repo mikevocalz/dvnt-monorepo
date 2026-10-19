@@ -1,3 +1,4 @@
+import { default as default_6ca984b2c1f93fdd6080a498078764c2 } from '@dvnt/cms/components/AuthorProfileLink'
 import { default as default_3245a2a2b01636659cb10cfa6576da43 } from '@dvnt/cms/components/AvatarCell'
 import { default as default_0c31c3f77c53b1834442b1a64f6def36 } from '@dvnt/cms/components/TicketsLinkCell'
 import { default as default_1a14ef5d8c2bad13ca2191e1bfe7dca9 } from '@dvnt/cms/components/TicketQRField'
@@ -26,6 +27,7 @@ import { StrikethroughFeatureClient as StrikethroughFeatureClient_e70f5e05f09f93
 import { UnderlineFeatureClient as UnderlineFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { BoldFeatureClient as BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
 import { ItalicFeatureClient as ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864 } from '@payloadcms/richtext-lexical/client'
+import { default as default_32d909c0b84dfcacedaf438c12e7862d } from '@dvnt/cms/components/PostAuthorProfile'
 import { default as default_0ccfca3c4dc527a80f5674d21fdb9861 } from '@dvnt/cms/components/Icon'
 import { default as default_e6ec51973242ecc02deba9d3e1f63635 } from '@dvnt/cms/components/Logo'
 import { default as default_ce66db0d635f062c1393c5ec9a235b74 } from '@dvnt/cms/components/ObservabilityNavLink'
@@ -43,6 +45,7 @@ import { RecentlyViewedCollectionsField as RecentlyViewedCollectionsField_3817bf
 
 /** @type import('payload').ImportMap */
 export const importMap = {
+  "@dvnt/cms/components/AuthorProfileLink#default": default_6ca984b2c1f93fdd6080a498078764c2,
   "@dvnt/cms/components/AvatarCell#default": default_3245a2a2b01636659cb10cfa6576da43,
   "@dvnt/cms/components/TicketsLinkCell#default": default_0c31c3f77c53b1834442b1a64f6def36,
   "@dvnt/cms/components/TicketQRField#default": default_1a14ef5d8c2bad13ca2191e1bfe7dca9,
@@ -71,6 +74,7 @@ export const importMap = {
   "@payloadcms/richtext-lexical/client#UnderlineFeatureClient": UnderlineFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@payloadcms/richtext-lexical/client#BoldFeatureClient": BoldFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
   "@payloadcms/richtext-lexical/client#ItalicFeatureClient": ItalicFeatureClient_e70f5e05f09f93e00b997edb1ef0c864,
+  "@dvnt/cms/components/PostAuthorProfile#default": default_32d909c0b84dfcacedaf438c12e7862d,
   "@dvnt/cms/components/Icon#default": default_0ccfca3c4dc527a80f5674d21fdb9861,
   "@dvnt/cms/components/Logo#default": default_e6ec51973242ecc02deba9d3e1f63635,
   "@dvnt/cms/components/ObservabilityNavLink#default": default_ce66db0d635f062c1393c5ec9a235b74,

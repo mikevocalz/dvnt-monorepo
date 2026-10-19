@@ -14,6 +14,7 @@ import {
 } from '@payloadcms/richtext-lexical'
 import { canModerate } from '../access/roles'
 import { slugField } from '../fields/slug'
+import { enforcePostAttribution, authorEditorAccess } from '../authors/profiles'
 import { YouTubeBlock } from '../blocks/YouTube'
 import { postHTMLConverters } from '../posts/youtube-html'
 
@@ -266,10 +267,11 @@ export const Posts: CollectionConfig = {
           }
           // Stamp the creating staff member so a moderator can be scoped to
           // editing only their own posts (see access.update).
-          if (operation === 'create' && req?.user && !data.createdBy) data.createdBy = req.user.id
+          if (operation === 'create' && req?.user) data.createdBy = req.user.id
         }
         return data
       },
+      enforcePostAttribution,
     ],
   },
   fields: [
@@ -348,7 +350,8 @@ export const Posts: CollectionConfig = {
     ]),
 
     // ─── Authorship ─────────────────────────────────────────────────────
-    postSection('Authors & contributors', 'Set the byline and secondary credits. The creating staff member remains read-only.', [
+    postSection('Authors & contributors', 'New articles use your signed-in author profile automatically. Editors can adjust credits. Existing article bylines stay unchanged until you edit them.', [
+      { name: 'authorProfileTools', type: 'ui', admin: { components: { Field: '@dvnt/cms/components/PostAuthorProfile' } } },
       // Primary byline — shown as "By Alice Kim" (and co-authors) in the article
       // header. hasMany = NYT-style multi-writer credit, picked from a dropdown.
       {
@@ -364,7 +367,7 @@ export const Posts: CollectionConfig = {
         name: 'createdBy',
         type: 'relationship',
         relationTo: 'admin-users',
-        access: { update: () => false },
+        access: { create: () => false, update: () => false },
         admin: { position: 'sidebar', readOnly: true, description: 'Staff member who created this post.' },
       },
       // Contributors — NYT-style secondary credits shown beneath the byline.
@@ -372,6 +375,7 @@ export const Posts: CollectionConfig = {
       {
         name: 'contributors',
         type: 'array',
+        access: { create: authorEditorAccess, update: authorEditorAccess },
         admin: { position: 'sidebar', description: 'Secondary credits shown beneath the byline ("Photographs by …")' },
         fields: [
           {

@@ -173,11 +173,11 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
         </div>
 
         {/* ── Author footer ── */}
-        {(post.authors?.length ?? 0) > 0 && (
+        {((post.authors?.length ?? 0) + (post.contributors?.length ?? 0)) > 0 && (
           <div style={authorSection as any}>
-            <span style={authorSectionLabel as any}>About the author{(post.authors?.length ?? 0) > 1 ? 's' : ''}</span>
-            {post.authors?.map((a) => <AuthorCard key={a.id} author={a} role={a.role ?? 'Staff Writer'} />)}
-            {post.contributors?.map((c) => <AuthorCard key={c.author.id} author={c.author} role={c.role} />)}
+            <span style={authorSectionLabel as any}>{post.authors?.length ? `About the author${post.authors.length > 1 ? 's' : ''}` : `About the contributor${(post.contributors?.length ?? 0) > 1 ? 's' : ''}`}</span>
+            {post.authors?.map((a) => <AuthorCard key={`author-${a.id}`} author={a} role={a.role ?? 'Staff Writer'} />)}
+            {post.contributors?.map((c, index) => <AuthorCard key={`contributor-${c.id ?? index}-${c.author.id}`} author={c.author} role={c.role} />)}
           </div>
         )}
 
@@ -296,7 +296,9 @@ function AuthorCard({ author, role }: { author: PostAuthor; role: string }) {
       </div>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 } as any}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' } as any}>
-          <span style={authorName as any}>{author.name}</span>
+          {author.profileUrl
+            ? <a href={author.profileUrl} style={authorName as any} target="_blank" rel="noopener noreferrer">{author.name}</a>
+            : <span style={authorName as any}>{author.name}</span>}
           <span style={authorRole as any}>{role}</span>
         </div>
         {author.bio && <p style={authorBio as any}>{author.bio}</p>}

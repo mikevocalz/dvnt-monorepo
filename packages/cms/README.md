@@ -83,3 +83,45 @@ Regression tests (no database or production credentials required):
 ```bash
 node --import tsx --test packages/cms/src/posts/*.test.ts
 ```
+
+## Account-linked author profiles
+
+A writer is the authenticated `admin-users` account, including the same account
+returned by the Better Auth staff strategy. App user IDs are not CMS IDs. The
+existing `authors.user` relationship is the only ownership link; profiles are
+never claimed by matching an author name, slug or email.
+
+- **My author profile** in the admin/account page opens or creates the writer's
+  existing profile. The native Authors form retains name, slug, editorial title,
+  bio, avatar selection, contact email, all social links and external profile URL.
+  The avatar URL fallback remains synced/read-only; existing Media upload roles
+  are unchanged. The editorial title does not change the staff permission role.
+- New posts stamp `createdBy` from authentication and default their byline to
+  that account's author. Admins/super-admins retain editorial credit overrides.
+  Moderators may edit only their own profiles and posts, and cannot impersonate
+  another byline or forge creator IDs.
+- **Set me as author** explicitly replaces the native primary-author field on an
+  existing post. Payload still owns autosave, Save Draft, Publish and locking.
+  Ordinary edits do not change historical bylines or claim unlinked seed authors.
+- Profile fields populate through the existing author relationship on every
+  article. Contact email and the private staff-account link are not public REST
+  fields. Profile links must use HTTP(S).
+
+No new columns, collection, unique index or migration is required. Provisioning
+and initial linking serialize on the existing staff-account row in the same Payload
+Postgres transaction. Every nested Local API call receives that request. If an
+account already has several historical profiles, the lowest author ID is reused;
+no profiles or article relationships are deleted or backfilled. Established
+account links cannot be transferred or removed, including by admins; change the
+article byline for editorial reassignment instead. New duplicate
+links are rejected through ordinary collection writes. Direct database writers
+must not bypass these hooks. Database transactions must remain enabled.
+
+Verification:
+
+```bash
+node --import tsx --test packages/cms/src/authors/*.test.ts packages/cms/src/posts/*.test.ts
+# Requires an EMPTY disposable loopback Postgres database, never app credentials:
+DVNT_AUTHOR_TEST_DATABASE_URL=postgresql://dvnt_author_fixture:...@127.0.0.1:5432/dvnt_author_fixture \
+  node scripts/test-author-profiles-integration.cjs
+```
