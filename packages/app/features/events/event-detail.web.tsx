@@ -124,6 +124,7 @@ import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog } from "@dvnt/ui";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
 import { GuestRsvpSheet } from "./guest-rsvp-sheet.web";
+import { ticketUpgradeBenefits as ticketTierBenefits } from "./ticket-upgrade-benefits";
 import { InviteGuestsSheet } from "./ui/invite-guests-sheet.web";
 import { TicketsOpeningSoonCard } from "@dvnt/app/components/event/TicketsOpeningSoonCard.web";
 import { useSaleNotifyStore } from "@dvnt/app/lib/stores/sale-notify-store";
@@ -137,7 +138,6 @@ import {
 } from "@dvnt/app/lib/api/ticket-types";
 import {
   filterBuyerVisibleTiers,
-  pickDefaultBuyerTier,
   tierIsHiddenFromBuyers,
   tierIsLockedForBuyer,
   effectiveAddonUnitPriceCents,
@@ -955,6 +955,14 @@ export function EventDetailScreen() {
     unlockedTierIds: unlockedSet,
   };
   const guestPurchase = resolveGuestPurchase(guestPurchaseInput);
+  // The highlighted choice and the adjacent purchase action share one source
+  // of truth. Never replace an explicit choice silently if its stock changes.
+  const selectedPurchase = selectedTierId
+    ? resolveGuestPurchase({ ...guestPurchaseInput, selectedTierId })
+    : guestPurchase;
+  const selectedCheckoutTier =
+    selectedPurchase.kind === "checkout" ? selectedPurchase.tier : undefined;
+  const displayedSelectionId = selectedTierId ?? selectedCheckoutTier?.id;
   const retryGuestTickets = () => {
     retryEvent();
     void ticketTypesQuery.refetch();
@@ -978,7 +986,13 @@ export function EventDetailScreen() {
   };
   const liveById = (tid: unknown) =>
     liveList.find((lt) => String(lt.id) === String(tid));
-  const buyerVisibleTiers = tiers.filter((t) => {
+  // Include authoritative live rows even if the event aggregate is older.
+  // Payload-only rows remain visible but cannot initiate checkout.
+  const displayTiers = [
+    ...tiers,
+    ...liveList.filter((live) => !tiers.some((t) => String(t.id) === String(live.id))),
+  ];
+  const buyerVisibleTiers = displayTiers.filter((t) => {
     const live = liveById(t.id);
     const vis = {
       id: live?.id ?? t.id,
@@ -1541,197 +1555,357 @@ export function EventDetailScreen() {
             </div>
           ) : null}
 
-          {/* CTA — drives the real checkout / view-ticket / waitlist flow. */}
-          {(() => {
-            // Buyer-visible only: hidden tiers never sell here, locked tiers
-            // join once the server unlocks them (v2 tier model).
-            const sellableTiers = filterBuyerVisibleTiers(
-              liveList.filter((t) => t.is_active),
-              unlockedSet,
-            ).visible;
-            const allSoldOut =
-              sellableTiers.length > 0 &&
-              sellableTiers.every(
-                (t) => tierAvailable(t) <= 0,
-              );
-            // Free + no ticket tiers → a pure RSVP event (no checkout sheet to
-            // open). Authed users RSVP directly into event_rsvps.
-            const isFreeRsvp = !e.price && sellableTiers.length === 0;
-            const isGoing = e.userRsvpStatus === "going";
-
-            // Authed "going" → show a toggle to cancel the RSVP.
-            if (isAuthenticated && isFreeRsvp && isGoing) {
-              return (
-                <button
-                  onClick={() =>
-                    rsvpMutation.mutate({ eventId, status: "not_going" })
-                  }
-                  disabled={rsvpMutation.isPending}
-                  className="w-full mt-4 h-12 rounded-xl border border-white/15 bg-white/[0.04] text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  <Check size={18} color="#379ED8" /> You&apos;re going · Tap to cancel
-                </button>
-              );
-            }
-
-            // Unknown beats a wrong answer. A skeleton for a moment is
-            // recoverable; "RSVP" shown to someone holding two passes is the
-            // bug this whole chain has been about.
-            if (ownershipUnknown) {
-              return (
-                <div
-                  role="status"
-                  aria-label="Checking your tickets"
-                  className="w-full mt-4 h-12 rounded-xl bg-white/[0.06] flex items-center justify-center"
-                >
-                  <span className="text-[13px] font-semibold text-white/45">
-                    Checking your tickets…
-                  </span>
-                </div>
-              );
-            }
-
-            if (hasTicket) {
-              // Route by TICKET id, not event id.
-              //
-              // `/feed/ticket/:id` accepts either, but an integer is read as an
-              // event and `resolveTicketRoute` answers `{kind: "group"}` for
-              // anyone holding more than one pass. The web pass screen only
-              // unwraps `kind: "ticket"`, so a group resolved to undefined and
-              // rendered "Ticket Not Found · This ticket may have been
-              // removed" — to 24 of the 70 people coming on Friday, about
-              // their perfectly valid tickets. `myTicketData` is the group's
-              // display representative, so this opens a real pass; the picker
-              // native already has is the proper fix.
-              const ticketPath = myTicketData?.id
-                ? `/feed/ticket/${myTicketData.id}`
-                : `/feed/ticket/${eventId}`;
-              return (
-                <button
-                  onClick={() => router.push(ticketPath)}
-                  className="w-full mt-4 h-12 rounded-xl bg-white/10 text-white font-bold flex items-center justify-center gap-2"
-                >
-                  <Ticket size={18} color="#379ED8" /> View ticket
-                </button>
-              );
-            }
-
-            // Sales window closed — every checkout/RSVP rail enforces the
-            // same cutoff server-side (end − 30 min), so a live button here
-            // would only click through to a sales_closed error. Ticket
-            // holders still get "View ticket" above; everyone else sees the
-            // honest state instead of Buy/RSVP/Waitlist on a dead event.
-            if (eventSalesClosed(e)) {
-              return (
-                <div className="w-full mt-4 h-12 rounded-xl bg-white/5 text-white/50 font-bold flex items-center justify-center">
-                  {eventEnded(e) ? "Event ended" : "Ticket sales ended"}
-                </div>
-              );
-            }
-
-            if (!isAuthenticated && guestPurchase.kind === "loading") {
-              return (
-                <div
-                  role="status"
-                  className="w-full mt-4 h-12 rounded-xl bg-white/5 text-white/60 font-semibold flex items-center justify-center"
-                >
-                  Loading tickets…
-                </div>
-              );
-            }
-            if (
-              !isAuthenticated &&
-              (guestPurchase.kind === "error" ||
-                (guestPurchase.kind === "unavailable" &&
-                  !(allSoldOut && full && !eventQuery.isError && !ticketTypesQuery.isError)))
-            ) {
-              return (
-                <div className="mt-4 rounded-xl border border-white/10 p-4 text-center">
-                  <p role="status" className="text-sm text-white/70">
-                    {guestPurchase.kind === "error"
-                      ? "Tickets couldn't be loaded. Please try again."
-                      : "Tickets are currently unavailable. Please check back soon."}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={retryGuestTickets}
-                    disabled={ticketTypesQuery.isFetching || eventQuery.isFetching}
-                    className="mt-2 text-sm font-semibold text-[#379ED8] disabled:opacity-50"
-                  >
-                    Try again
-                  </button>
-                </div>
-              );
-            }
-
-            if (allSoldOut) {
-              // 2. WAITLIST — sold out → join/leave waitlist.
-              return (
-                <button
-                  onClick={waitlistJoined ? handleLeaveWaitlist : handleJoinWaitlist}
-                  disabled={isWaitlistBusy}
-                  className={`w-full mt-4 h-12 rounded-xl font-bold disabled:opacity-50 ${
-                    waitlistJoined
-                      ? "border border-white/15 bg-white/[0.04] text-white"
-                      : "bg-linear-to-r from-[#379ED8] to-[#874E9F] text-white"
-                  }`}
-                >
-                  {isWaitlistBusy
-                    ? "Working…"
-                    : waitlistJoined
-                      ? "Leave waitlist"
-                      : "Join waitlist · Sold out"}
-                </button>
-              );
-            }
-
-            // 1. TICKETS — open the checkout sheet (or RSVP for free events).
-            const openCheckout = () => {
-              if (sellableTiers.length > 0 && !selectedTierId) {
-                const firstTier = pickDefaultBuyerTier(
-                  sellableTiers,
-                  Number(e.price || 0) > 0,
-                  (candidate) => candidate.price_cents ?? 0,
-                );
-                if (firstTier) setSelectedTierId(String(firstTier.id));
-              }
-              setCheckoutOpen(true);
-            };
-            return (
-              <button
-                onClick={() => {
-                  // Public events, logged out → guest flow, NEVER /login.
-                  if (!isAuthenticated) {
-                    openGuestPurchase();
-                    return;
-                  }
-                  // B3: first age-gated action triggers the verify interstitial.
-                  if (
-                    needsAgeVerification(
-                      (e as any).ageRestriction,
-                      verificationStatus,
-                    )
-                  ) {
-                    onboardingCheckpoint("verification.triggered", {
-                      surface: "event_detail",
+          <div data-testid="event-purchase" role="group" aria-label="Ticket selection and purchase">
+            {/* Choose a ticket here, then continue with the adjacent action.
+                Selection alone does not open a second purchase flow. The live
+                ticket_types query (useTicketTypes) is the source of truth for
+                sold-out + the real UUID id checkout needs; falls back to the
+                event payload tiers for display only. */}
+            {buyerVisibleTiers.length > 0 || hasLockedTiers ? (
+              <Section title="Tickets">
+                <div className="flex flex-col gap-2">
+                  {buyerVisibleTiers.map((t, i) => {
+                    // Resolve the live tier so we get sold-out + the real id.
+                    const live = (liveTicketTypes as TicketTypeRecord[]).find(
+                      (lt) => String(lt.id) === String(t.id),
+                    );
+                    const tperks = ticketTierBenefits(live ?? t);
+                    const priceCents = tierDisplayPriceCents(live, t);
+                    const price = priceCents / 100;
+                    const tierId = String(live?.id ?? t.id ?? i);
+                    const soldOut = live
+                      ? tierAvailable(live) <= 0
+                      : false;
+                    const isSelected = displayedSelectionId === tierId;
+                    const tierPurchase = resolveGuestPurchase({
+                      ...guestPurchaseInput,
+                      selectedTierId: String(t.id),
                     });
-                    setVerifyOpen(true);
-                    return;
-                  }
-                  // Authed: free tier-less event → RSVP; else open checkout.
-                  if (isFreeRsvp) {
-                    rsvpMutation.mutate({ eventId, status: "going" });
-                    return;
-                  }
-                  gateAuth(openCheckout);
-                }}
-                disabled={isFreeRsvp && rsvpMutation.isPending}
-                className="w-full mt-4 h-12 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-white font-bold"
-              >
-                {e.price ? "Get tickets" : "RSVP"}
-              </button>
-            );
-          })()}
+                    const tierUnavailable = tierPurchase.kind !== "checkout";
+                    return (
+                      <button
+                        key={t.id ?? i}
+                        type="button"
+                        data-testid={`ticket-tier-${tierId}`}
+                        aria-pressed={isSelected}
+                        disabled={soldOut || hasTicket || ownershipUnknown || tierUnavailable || eventSalesClosed(e) || isCancelledEvent}
+                        onClick={() => {
+                          setSelectedTierId(tierId);
+                          // A different tier may have a lower quantity cap.
+                          setTicketQty(1);
+                        }}
+                        className={`w-full text-left rounded-xl border p-4 disabled:opacity-50 ${
+                          isSelected
+                            ? "border-[#379ED8] bg-[#379ED8]/[0.06]"
+                            : "border-white/10 bg-white/[0.03]"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="min-w-0 break-words font-bold">{t.name || t.title || "Ticket"}</span>
+                          <span className="shrink-0 text-[#379ED8] font-bold">
+                            {soldOut
+                              ? "Sold out"
+                              : priceCents
+                                ? `$${price % 1 ? price.toFixed(2) : price}`
+                                : "Free"}
+                          </span>
+                        </div>
+                        {tierUnavailable && !soldOut ? (
+                          <p className="mt-1 text-xs text-white/50">
+                            {tierPurchase.kind === "loading"
+                              ? "Loading ticket availability…"
+                              : "Currently unavailable"}
+                          </p>
+                        ) : null}
+                        {t.description ? (
+                          <p className="text-white/55 text-sm mt-1">{t.description}</p>
+                        ) : null}
+                        {tperks.length > 0 ? (
+                          <ul className="mt-2 flex flex-col gap-1">
+                            {tperks.map((p, j) => (
+                              <li key={j} className="text-white/70 text-sm flex items-center gap-2">
+                                <span className="w-1 h-1 rounded-full bg-white/40" />
+                                {p}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+
+                  {/* Locked tiers — "Have a code?" affordance. The code goes to
+                      the server for validation; on success the unlocked tier(s)
+                      appear in the list above. Never a client-side comparison. */}
+                  {hasLockedTiers ? (
+                    <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-4">
+                      {!unlockOpen ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUnlockError(null);
+                            setUnlockOpen(true);
+                          }}
+                          className="flex w-full items-center gap-2 text-left text-sm font-medium text-white/70 hover:text-white"
+                        >
+                          <Lock size={14} color="#F5C518" />
+                          Have a code? Unlock a hidden tier
+                        </button>
+                      ) : (
+                        <div className="flex flex-col gap-2">
+                          <span className="flex items-center gap-2 text-sm font-medium text-white/85">
+                            <Lock size={14} color="#F5C518" /> Enter your access
+                            code
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              value={unlockCodeInput}
+                              onChange={(ev) =>
+                                setUnlockCodeInput(ev.target.value.toUpperCase())
+                              }
+                              onKeyDown={(ev) => {
+                                if (ev.key === "Enter") {
+                                  ev.preventDefault();
+                                  void handleUnlockSubmit();
+                                }
+                              }}
+                              placeholder="ACCESS CODE"
+                              autoCapitalize="characters"
+                              className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 font-mono text-sm uppercase tracking-widest text-white placeholder:text-white/30 outline-none focus:border-[#F5C518]/60"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void handleUnlockSubmit()}
+                              disabled={unlockBusy || !unlockCodeInput.trim()}
+                              className="h-10 shrink-0 rounded-xl border border-[#F5C518]/40 bg-[#F5C518]/10 px-4 text-sm font-semibold text-[#F5C518] disabled:opacity-40"
+                            >
+                              {unlockBusy ? "…" : "Unlock"}
+                            </button>
+                          </div>
+                          {unlockError ? (
+                            <p className="text-sm text-[#FC253A]">{unlockError}</p>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </Section>
+            ) : null}
+
+            {/* CTA — drives the real checkout / view-ticket / waitlist flow. */}
+            {(() => {
+              // Buyer-visible only: hidden tiers never sell here, locked tiers
+              // join once the server unlocks them (v2 tier model).
+              const sellableTiers = filterBuyerVisibleTiers(
+                liveList.filter((t) => t.is_active),
+                unlockedSet,
+              ).visible;
+              const allSoldOut =
+                sellableTiers.length > 0 &&
+                sellableTiers.every(
+                  (t) => tierAvailable(t) <= 0,
+                );
+              // Free + no ticket tiers → a pure RSVP event (no checkout sheet to
+              // open). Authed users RSVP directly into event_rsvps.
+              const isFreeRsvp = guestPurchase.kind === "rsvp";
+              const isGoing = e.userRsvpStatus === "going";
+
+              // Authed "going" → show a toggle to cancel the RSVP.
+              if (isAuthenticated && isFreeRsvp && isGoing) {
+                return (
+                  <button
+                    onClick={() =>
+                      rsvpMutation.mutate({ eventId, status: "not_going" })
+                    }
+                    disabled={rsvpMutation.isPending}
+                    className="w-full mt-4 h-12 rounded-xl border border-white/15 bg-white/[0.04] text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Check size={18} color="#379ED8" /> You&apos;re going · Tap to cancel
+                  </button>
+                );
+              }
+
+              // Unknown beats a wrong answer. A skeleton for a moment is
+              // recoverable; "RSVP" shown to someone holding two passes is the
+              // bug this whole chain has been about.
+              if (ownershipUnknown) {
+                return (
+                  <div
+                    role="status"
+                    aria-label="Checking your tickets"
+                    className="w-full mt-4 h-12 rounded-xl bg-white/[0.06] flex items-center justify-center"
+                  >
+                    <span className="text-[13px] font-semibold text-white/45">
+                      Checking your tickets…
+                    </span>
+                  </div>
+                );
+              }
+
+              if (hasTicket) {
+                // Route by TICKET id, not event id.
+                //
+                // `/feed/ticket/:id` accepts either, but an integer is read as an
+                // event and `resolveTicketRoute` answers `{kind: "group"}` for
+                // anyone holding more than one pass. The web pass screen only
+                // unwraps `kind: "ticket"`, so a group resolved to undefined and
+                // rendered "Ticket Not Found · This ticket may have been
+                // removed" — to 24 of the 70 people coming on Friday, about
+                // their perfectly valid tickets. `myTicketData` is the group's
+                // display representative, so this opens a real pass; the picker
+                // native already has is the proper fix.
+                const ticketPath = myTicketData?.id
+                  ? `/feed/ticket/${myTicketData.id}`
+                  : `/feed/ticket/${eventId}`;
+                return (
+                  <button
+                    onClick={() => router.push(ticketPath)}
+                    className="w-full mt-4 h-12 rounded-xl bg-white/10 text-white font-bold flex items-center justify-center gap-2"
+                  >
+                    <Ticket size={18} color="#379ED8" /> View ticket
+                  </button>
+                );
+              }
+
+              // Sales window closed — every checkout/RSVP rail enforces the
+              // same cutoff server-side (end − 30 min), so a live button here
+              // would only click through to a sales_closed error. Ticket
+              // holders still get "View ticket" above; everyone else sees the
+              // honest state instead of Buy/RSVP/Waitlist on a dead event.
+              if (eventSalesClosed(e)) {
+                return (
+                  <div className="w-full mt-4 h-12 rounded-xl bg-white/5 text-white/50 font-bold flex items-center justify-center">
+                    {eventEnded(e) ? "Event ended" : "Ticket sales ended"}
+                  </div>
+                );
+              }
+
+              if (guestPurchase.kind === "loading") {
+                return (
+                  <div
+                    role="status"
+                    className="w-full mt-4 h-12 rounded-xl bg-white/5 text-white/60 font-semibold flex items-center justify-center"
+                  >
+                    Loading tickets…
+                  </div>
+                );
+              }
+              if (
+                guestPurchase.kind === "error" ||
+                (guestPurchase.kind === "unavailable" &&
+                  !(allSoldOut && full && !eventQuery.isError && !ticketTypesQuery.isError))
+              ) {
+                return (
+                  <div className="mt-4 rounded-xl border border-white/10 p-4 text-center">
+                    <p role="status" className="text-sm text-white/70">
+                      {guestPurchase.kind === "error"
+                        ? "Tickets couldn't be loaded. Please try again."
+                        : "Tickets are currently unavailable. Please check back soon."}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={retryGuestTickets}
+                      disabled={ticketTypesQuery.isFetching || eventQuery.isFetching}
+                      className="mt-2 text-sm font-semibold text-[#379ED8] disabled:opacity-50"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                );
+              }
+
+              if (allSoldOut) {
+                // 2. WAITLIST — sold out → join/leave waitlist.
+                return (
+                  <button
+                    onClick={waitlistJoined ? handleLeaveWaitlist : handleJoinWaitlist}
+                    disabled={isWaitlistBusy}
+                    className={`w-full mt-4 h-12 rounded-xl font-bold disabled:opacity-50 ${
+                      waitlistJoined
+                        ? "border border-white/15 bg-white/[0.04] text-white"
+                        : "bg-linear-to-r from-[#379ED8] to-[#874E9F] text-white"
+                    }`}
+                  >
+                    {isWaitlistBusy
+                      ? "Working…"
+                      : waitlistJoined
+                        ? "Leave waitlist"
+                        : "Join waitlist · Sold out"}
+                  </button>
+                );
+              }
+
+              // 1. TICKETS — open the checkout sheet (or RSVP for free events).
+              const openCheckout = () => {
+                if (!selectedCheckoutTier) return;
+                setSelectedTierId(String(selectedCheckoutTier.id));
+                setCheckoutOpen(true);
+              };
+              return (
+                <button
+                  onClick={() => {
+                    // Public events, logged out → guest flow, NEVER /login.
+                    if (!isAuthenticated) {
+                      openGuestPurchase(isFreeRsvp ? undefined : selectedCheckoutTier?.id);
+                      return;
+                    }
+                    // B3: first age-gated action triggers the verify interstitial.
+                    if (
+                      needsAgeVerification(
+                        (e as any).ageRestriction,
+                        verificationStatus,
+                      )
+                    ) {
+                      onboardingCheckpoint("verification.triggered", {
+                        surface: "event_detail",
+                      });
+                      setVerifyOpen(true);
+                      return;
+                    }
+                    // Authed: free tier-less event → RSVP; else open checkout.
+                    if (isFreeRsvp) {
+                      rsvpMutation.mutate({ eventId, status: "going" });
+                      return;
+                    }
+                    gateAuth(openCheckout);
+                  }}
+                  disabled={isFreeRsvp ? rsvpMutation.isPending : !selectedCheckoutTier}
+                  data-testid="event-purchase-action"
+                  className="w-full mt-4 h-12 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-white font-bold disabled:opacity-50"
+                >
+                  {isFreeRsvp
+                    ? "RSVP"
+                    : !selectedCheckoutTier
+                      ? "Select an available ticket"
+                      : tierDisplayPriceCents(selectedCheckoutTier) === 0
+                        ? "Get free ticket"
+                        : "Get tickets"}
+                </button>
+              );
+            })()}
+
+            {/* TICKETS NOT YET ON SALE — parity with native's "Sale Starts" card.
+                A PAID event with no tier rows rendered nothing here on web: no
+                tiers, no CTA, no explanation, so the page read as though the
+                event had no tickets rather than tickets that had not opened yet.
+                Free events keep the normal RSVP CTA — gating a free RSVP behind
+                tier setup is the polish bug native already fixed.
+                Hidden once the viewer holds a ticket: telling someone
+                "Tickets coming soon" directly under their own "View ticket"
+                button reads as a bug. */}
+            {!isCancelledEvent &&
+            !hasTicket &&
+            (isAuthenticated || guestPurchase.kind === "unavailable") &&
+            displayTiers.length === 0 &&
+            (Number(e.price) || 0) > 0 ? (
+              <TicketsOpeningSoonCard
+                saleStart={(e as any).ticketSaleStart ?? null}
+                notifyEnabled={saleNotifyOn}
+                onToggleNotify={handleToggleSaleNotify}
+              />
+            ) : null}
+          </div>
 
           {/* Upgrade affordance — only when the user holds a ticket and a
               higher tier is available (4. useTicketUpgradeOptions). */}
@@ -1941,170 +2115,6 @@ export function EventDetailScreen() {
           {e.doorPolicy ? (
             <Section title="Door policy" Icon={DoorOpen}>
               <p className="text-white/85 text-[15px]">{e.doorPolicy}</p>
-            </Section>
-          ) : null}
-
-          {/* TICKETS NOT YET ON SALE — parity with native's "Sale Starts" card.
-              A PAID event with no tier rows rendered nothing here on web: no
-              tiers, no CTA, no explanation, so the page read as though the
-              event had no tickets rather than tickets that had not opened yet.
-              Free events keep the normal RSVP CTA — gating a free RSVP behind
-              tier setup is the polish bug native already fixed.
-              Hidden once the viewer holds a ticket: telling someone
-              "Tickets coming soon" directly under their own "View ticket"
-              button reads as a bug. */}
-          {!isCancelledEvent &&
-          !hasTicket &&
-          (isAuthenticated || guestPurchase.kind === "unavailable") &&
-          tiers.length === 0 &&
-          (Number(e.price) || 0) > 0 ? (
-            <TicketsOpeningSoonCard
-              saleStart={(e as any).ticketSaleStart ?? null}
-              notifyEnabled={saleNotifyOn}
-              onToggleNotify={handleToggleSaleNotify}
-            />
-          ) : null}
-
-          {/* Ticket tiers — selectable. Tapping a tier selects it and (when
-              not already ticketed) opens the checkout sheet. The live
-              ticket_types query (useTicketTypes) is the source of truth for
-              sold-out + the real UUID id checkout needs; falls back to the
-              event payload tiers for display only. */}
-          {buyerVisibleTiers.length > 0 || hasLockedTiers ? (
-            <Section title="Tickets">
-              <div className="flex flex-col gap-2">
-                {buyerVisibleTiers.map((t, i) => {
-                  const tperks: string[] = Array.isArray(t.perks) ? t.perks : [];
-                  // Resolve the live tier so we get sold-out + the real id.
-                  const live = (liveTicketTypes as TicketTypeRecord[]).find(
-                    (lt) => String(lt.id) === String(t.id),
-                  );
-                  const priceCents = tierDisplayPriceCents(live, t);
-                  const price = priceCents / 100;
-                  const tierId = String(live?.id ?? t.id ?? i);
-                  const soldOut = live
-                    ? tierAvailable(live) <= 0
-                    : false;
-                  const isSelected = selectedTierId === tierId;
-                  const guestTierPurchase = resolveGuestPurchase({
-                    ...guestPurchaseInput,
-                    selectedTierId: String(t.id),
-                  });
-                  const guestTierUnavailable =
-                    !isAuthenticated && guestTierPurchase.kind !== "checkout";
-                  return (
-                    <button
-                      key={t.id ?? i}
-                      type="button"
-                      disabled={soldOut || hasTicket || guestTierUnavailable}
-                      onClick={() => {
-                        if (!isAuthenticated) {
-                          // Both free and paid selections use the fetched row.
-                          // A display-only fallback must never start checkout.
-                          openGuestPurchase(String(t.id));
-                          return;
-                        }
-                        gateAuth(() => {
-                          setSelectedTierId(tierId);
-                          if (!hasTicket) setCheckoutOpen(true);
-                        });
-                      }}
-                      className={`w-full text-left rounded-xl border p-4 disabled:opacity-50 ${
-                        isSelected
-                          ? "border-[#379ED8] bg-[#379ED8]/[0.06]"
-                          : "border-white/10 bg-white/[0.03]"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold">{t.name || t.title || "Ticket"}</span>
-                        <span className="text-[#379ED8] font-bold">
-                          {soldOut
-                            ? "Sold out"
-                            : priceCents
-                              ? `$${price % 1 ? price.toFixed(2) : price}`
-                              : "Free"}
-                        </span>
-                      </div>
-                      {guestTierUnavailable && !soldOut ? (
-                        <p className="mt-1 text-xs text-white/50">
-                          {guestTierPurchase.kind === "loading"
-                            ? "Loading ticket availability…"
-                            : "Currently unavailable"}
-                        </p>
-                      ) : null}
-                      {t.description ? (
-                        <p className="text-white/55 text-sm mt-1">{t.description}</p>
-                      ) : null}
-                      {tperks.length > 0 ? (
-                        <ul className="mt-2 flex flex-col gap-1">
-                          {tperks.map((p, j) => (
-                            <li key={j} className="text-white/70 text-sm flex items-center gap-2">
-                              <span className="w-1 h-1 rounded-full bg-white/40" />
-                              {p}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                    </button>
-                  );
-                })}
-
-                {/* Locked tiers — "Have a code?" affordance. The code goes to
-                    the server for validation; on success the unlocked tier(s)
-                    appear in the list above. Never a client-side comparison. */}
-                {hasLockedTiers ? (
-                  <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-4">
-                    {!unlockOpen ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setUnlockError(null);
-                          setUnlockOpen(true);
-                        }}
-                        className="flex w-full items-center gap-2 text-left text-sm font-medium text-white/70 hover:text-white"
-                      >
-                        <Lock size={14} color="#F5C518" />
-                        Have a code? Unlock a hidden tier
-                      </button>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        <span className="flex items-center gap-2 text-sm font-medium text-white/85">
-                          <Lock size={14} color="#F5C518" /> Enter your access
-                          code
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <input
-                            value={unlockCodeInput}
-                            onChange={(ev) =>
-                              setUnlockCodeInput(ev.target.value.toUpperCase())
-                            }
-                            onKeyDown={(ev) => {
-                              if (ev.key === "Enter") {
-                                ev.preventDefault();
-                                void handleUnlockSubmit();
-                              }
-                            }}
-                            placeholder="ACCESS CODE"
-                            autoCapitalize="characters"
-                            className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 font-mono text-sm uppercase tracking-widest text-white placeholder:text-white/30 outline-none focus:border-[#F5C518]/60"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => void handleUnlockSubmit()}
-                            disabled={unlockBusy || !unlockCodeInput.trim()}
-                            className="h-10 shrink-0 rounded-xl border border-[#F5C518]/40 bg-[#F5C518]/10 px-4 text-sm font-semibold text-[#F5C518] disabled:opacity-40"
-                          >
-                            {unlockBusy ? "…" : "Unlock"}
-                          </button>
-                        </div>
-                        {unlockError ? (
-                          <p className="text-sm text-[#FC253A]">{unlockError}</p>
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-              </div>
             </Section>
           ) : null}
 
