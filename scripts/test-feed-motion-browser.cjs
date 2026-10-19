@@ -33,7 +33,12 @@ const root = path.resolve(__dirname, '..');
     const page=await browser.newPage({viewport:{width:400,height:700}});
     const errors=[]; page.on('pageerror', e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await page.waitForFunction(()=>document.querySelector('#first')?.currentTime>0.2 && document.querySelector('#second')?.currentTime>0.2);
+    try {
+      await page.waitForFunction(()=>document.querySelector('#first')?.currentTime>0.2 && document.querySelector('#second')?.currentTime>0.2);
+    } catch (error) {
+      console.error('Initial playback diagnostics', await page.evaluate(()=>({hidden:document.hidden,text:document.body.innerText,videos:[...document.querySelectorAll('video')].map(v=>({src:v.currentSrc,time:v.currentTime,paused:v.paused,muted:v.muted,ready:v.readyState,network:v.networkState,error:v.error?.message,rect:v.getBoundingClientRect().toJSON()}))})), errors);
+      throw error;
+    }
     assert.ok(await page.locator('#first').evaluate(v=>!v.paused && v.muted));
     await page.click('#first-sound'); assert.equal(await page.locator('#first').evaluate(v=>v.muted),false);
     await page.click('#second-sound'); assert.equal(await page.locator('#first').evaluate(v=>v.muted),true); assert.equal(await page.locator('#second').evaluate(v=>v.muted),false);
