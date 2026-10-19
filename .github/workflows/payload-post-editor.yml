@@ -4,6 +4,8 @@ on:
     paths:
       - 'packages/cms/**'
       - 'apps/web/src/app/(payload)/**'
+      - 'apps/web/src/components/RichText/**'
+      - 'scripts/test-blog-youtube-browser.cjs'
       - '.github/workflows/payload-post-editor.yml'
       - 'pnpm-lock.yaml'
 permissions:
@@ -23,8 +25,21 @@ jobs:
         run: >-
           pnpm exec tsc --noEmit --target ESNext --module ESNext --moduleResolution bundler
           --lib ESNext,DOM --jsx react-jsx --strict --esModuleInterop --skipLibCheck
-          --allowImportingTsExtensions packages/cms/src/posts/*.test.ts
+          --allowImportingTsExtensions packages/cms/src/posts/*.test.ts packages/cms/src/posts/*.test.tsx
       - name: Verify native Payload form, access and schema registration
-        run: node --import tsx --test packages/cms/src/posts/*.test.ts
+        run: node --import tsx --test packages/cms/src/posts/*.test.ts packages/cms/src/posts/*.test.tsx
       - name: Verify editorial approval contracts
         run: node --test packages/cms/src/editorial/*.test.ts
+      - name: Install browser for YouTube preview regression
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Verify YouTube preview and responsive reader rendering
+        env:
+          BLOG_YOUTUBE_OUTPUT_DIR: ${{ runner.temp }}/blog-youtube-evidence
+        run: node scripts/test-blog-youtube-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blog-youtube-browser-evidence
+          path: ${{ runner.temp }}/blog-youtube-evidence
+          if-no-files-found: warn
+          retention-days: 7
