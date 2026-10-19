@@ -214,7 +214,7 @@ test('Live Photo arrays retain original pairs and ordering across persisted uplo
   let saved = draft({ files, uploaded: files.map(() => null) });
   const actualUploads: string[] = [];
   let failSecondMotion = true;
-  let published: PublishDescriptor['uploaded'] | undefined;
+  const published: Array<Parameters<PublishTaskDeps['createPost']>[0]['media']> = [];
   const { deps } = recorder({
     persistMedia: async (file) => ({ ...file }),
     uploadMedia: async (pending) => Promise.all(pending.map(async (file) => {
@@ -225,10 +225,10 @@ test('Live Photo arrays retain original pairs and ordering across persisted uplo
       });
       return result.success ? result : { error: result.error };
     })),
-    createPost: async (input) => { published = input.media; return { id: 673 }; },
+    createPost: async (input) => { published.push(input.media); return { id: 673 }; },
   });
   await assert.rejects(createPublishTask(saved, 'owner-a', deps)(() => {}, next => { saved = next; }));
-  assert.equal(published, undefined, 'never publishes a flattened partial pair');
+  assert.equal(published.length, 0, 'never publishes a flattened partial pair');
   assert.equal(saved.uploaded[1], null);
   assert.ok(saved.uploaded[0]?.livePhotoVideoUrl);
   // Simulate process death: serialization must preserve both remaining input
@@ -238,6 +238,6 @@ test('Live Photo arrays retain original pairs and ordering across persisted uplo
   actualUploads.length = 0;
   await createPublishTask(saved, 'owner-a', deps)(() => {}, next => { saved = next; });
   assert.deepEqual(actualUploads, [files[1].uri, files[1].pairedVideoUri]);
-  assert.deepEqual(published?.map(media => media?.url), files.map(file => file.uri.replace('file:///', 'https://cdn.test/')));
-  assert.deepEqual(published?.map(media => media?.livePhotoVideoUrl), files.map(file => file.pairedVideoUri.replace('file:///', 'https://cdn.test/')));
+  assert.deepEqual(published[0]?.map(media => media?.url), files.map(file => file.uri.replace('file:///', 'https://cdn.test/')));
+  assert.deepEqual(published[0]?.map(media => media?.livePhotoVideoUrl), files.map(file => file.pairedVideoUri.replace('file:///', 'https://cdn.test/')));
 });
