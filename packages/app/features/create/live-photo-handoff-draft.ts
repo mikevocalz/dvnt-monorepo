@@ -29,7 +29,7 @@ export type SavedHandoff = {
 export function snapshotHandoffDraft(draft: HandoffDraft): HandoffDraft {
   // Explicit allowlist: never persist store methods, auth or transient locks.
   return {
-    selectedMedia: draft.selectedMedia.map(media => ({ ...media })), caption: draft.caption,
+    selectedMedia: structuredClone(draft.selectedMedia), caption: draft.caption,
     textSlides: structuredClone(draft.textSlides), activeTextSlideIndex: draft.activeTextSlideIndex,
     location: draft.location, locationData: structuredClone(draft.locationData),
     taggedPeople: [...draft.taggedPeople], tags: [...draft.tags], placedTags: structuredClone(draft.placedTags),
@@ -38,6 +38,11 @@ export function snapshotHandoffDraft(draft: HandoffDraft): HandoffDraft {
 }
 export function draftFingerprint(draft: HandoffDraft): string {
   return JSON.stringify(snapshotHandoffDraft(draft));
+}
+type PairedMedia = MediaAsset & { browserPair?: { still: PairedMedia; motion: PairedMedia } };
+function* mediaResources(media: PairedMedia): Generator<MediaAsset> {
+  yield media;
+  if (media.browserPair) { yield* mediaResources(media.browserPair.still); yield* mediaResources(media.browserPair.motion); }
 }
 const URI_FIELDS = ['uri', 'originalUri', 'editedUri', 'pairedVideoUri'] as const;
 /** A failed/quota-limited save must prevent opening the app. Blob URLs alone cannot survive reload. */
@@ -51,7 +56,7 @@ export async function captureHandoffDraft(
 ): Promise<SavedHandoff> {
   const snapshot = snapshotHandoffDraft(draft);
   const blobs: Record<string, Blob> = {};
-  for (const media of snapshot.selectedMedia) {
+  for (const media of snapshot.selectedMedia.flatMap(item => [...mediaResources(item)])) {
     for (const field of URI_FIELDS) {
       const uri = media[field];
       if (uri?.startsWith('blob:') && !blobs[uri]) blobs[uri] = await readBlob(uri);
@@ -63,7 +68,7 @@ export function restoreHandoffDraft(saved: SavedHandoff, ownerId: string, create
   if (saved.ownerId !== ownerId) throw new Error('Sign in to the account that started this draft.');
   const urls = new Map<string, string>();
   const draft = snapshotHandoffDraft(saved.draft);
-  for (const media of draft.selectedMedia) {
+  for (const media of draft.selectedMedia.flatMap(item => [...mediaResources(item)])) {
     for (const field of URI_FIELDS) {
       const uri = media[field];
       if (!uri?.startsWith('blob:')) continue;

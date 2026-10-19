@@ -39,3 +39,18 @@ test('fingerprint changes for newer draft edits including motion and tags',()=>{
   const a=draft(),b=draft();assert.equal(draftFingerprint(a),draftFingerprint(b));
   b.tags.push('new'); assert.notEqual(draftFingerprint(a),draftFingerprint(b));
 });
+test('restored reversible browser pair separates into fresh original blob resources', async()=>{
+  const input=draft();
+  const still=input.selectedMedia[0], motion={id:'motion',uri:'blob:motion',originalUri:'blob:motion',type:'video' as const,kind:'video' as const};
+  input.selectedMedia=[{...still,kind:'livePhoto',pairedVideoUri:motion.uri,browserPair:{still,motion}} as any];
+  const saved=await captureHandoffDraft('owner',input,async uri=>new Blob([uri]));
+  let id=0; const restored=restoreHandoffDraft(saved,'owner',()=>`blob:new-${++id}`);
+  const pair=restored.selectedMedia[0] as any;
+  assert.equal(pair.browserPair.still.uri,pair.uri);
+  assert.equal(pair.browserPair.motion.uri,pair.pairedVideoUri);
+  assert.notEqual(pair.browserPair.motion.uri,'blob:motion');
+  const {separateBrowserMedia}=await import('./browser-media-intake.ts');
+  const separated=separateBrowserMedia(restored.selectedMedia, pair.id);
+  assert.equal(separated.ok,true);
+  if(separated.ok) assert.deepEqual(separated.media.map(media=>media.uri),[pair.uri,pair.pairedVideoUri]);
+});

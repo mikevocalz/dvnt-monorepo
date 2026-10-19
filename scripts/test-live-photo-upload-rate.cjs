@@ -31,6 +31,7 @@ function setup() {
   } });
   const admin = { from(table) {
     if (table === 'session') return { select() { return this; }, eq(column, value) { assert.equal(column, 'token'); assert.equal(value, 'fixture-session'); return this; }, async single() { return { data: { userId: 'fixture-owner', expiresAt: '2099-01-01' }, error: null }; } };
+    if (table === 'live_photo_upload_receipts') return { async insert(receipt) { assert.equal(receipt.owner_auth_id, 'fixture-owner'); assert.ok(state.rows.some(row => row.filename === receipt.object_key && row.url === receipt.url)); return { error: null }; } };
     assert.equal(table, 'media');
     return { insert(record) { state.rows.push(record); return { select() { return this; }, async single() { return { data: { id: state.rows.length, ...record }, error: null }; } }; } };
   } };
