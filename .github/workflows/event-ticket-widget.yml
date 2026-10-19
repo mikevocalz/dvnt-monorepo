@@ -62,7 +62,7 @@ jobs:
       - name: Install Chromium for the existing guest checkout flow
         run: pnpm --filter web exec playwright install --with-deps chromium
       - name: Event ticket selection and purchase responsive layout
-        run: EVENT_PURCHASE_OUTPUT_DIR=.event-purchase-browser NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-event-purchase-layout.cjs
+        run: EVENT_PURCHASE_OUTPUT_DIR=event-purchase-browser NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-event-purchase-layout.cjs
       - name: Actual guest route hydration and legacy-link recovery
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-guest-event-route-browser.cjs
       - name: Signed-out checkout sheet and real handler with fixture Stripe
@@ -99,5 +99,6 @@ jobs:
         if: always()
         with:
           name: event-purchase-layout-evidence
-          path: .event-purchase-browser/
+          path: event-purchase-browser/
+          if-no-files-found: error
           retention-days: 3
