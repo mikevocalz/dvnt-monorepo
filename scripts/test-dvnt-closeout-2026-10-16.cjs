@@ -14,6 +14,10 @@ const rows = Array.from(tracker.matchAll(
 test("all 65 original requirements have exactly one status", () => {
   assert.equal(rows.length, 65);
   assert.equal(new Set(rows.map(row => row.id)).size, 65);
+  // Count-only checks can silently accept a typo such as P13 replacing P12.
+  const expectedIds = Object.entries({ A: 6, P: 12, E: 10, T: 10, S: 12, R: 7, W: 1, C: 4, D: 3 })
+    .flatMap(([prefix, count]) => Array.from({ length: count }, (_, i) => `${prefix}${String(i + 1).padStart(2, "0")}`));
+  assert.deepEqual(rows.map(row => row.id).sort(), expectedIds.sort());
   const counts = Object.fromEntries(["MERGED CODE","PARTIAL","OPEN","SUPERSEDED"]
     .map(status => [status,rows.filter(row=>row.status===status).length]));
   assert.deepEqual(counts, {
@@ -38,4 +42,17 @@ test("merged PR references never masquerade as successful production acceptance"
   assert.match(tracker, /1,933 DMs queued/);
   assert.match(tracker, /deployed `video_join_room` source still contains/);
   assert.match(tracker, /No merge or production mutation is authorized/);
+});
+
+test("latest reconciliation separates fresh observations from historical evidence", () => {
+  assert.match(tracker, /refreshed October 19, 2026/);
+  assert.match(tracker, /Historical October 16 deployment snapshot/);
+  assert.match(tracker, /Observed October 19, 2026 at 17:22 UTC/);
+  assert.match(tracker, /1,946 queued DMs/);
+  assert.match(tracker, /26 MERGED CODE \/ 31 PARTIAL \/ 5 OPEN \/ 3 SUPERSEDED/);
+  assert.match(tracker, /open and unmerged/);
+  assert.match(tracker, /Security\/incident review for #135 is not signed off/);
+  for (const pr of [123,124,125,126,127,128,129,130,131,132,133,134,135]) {
+    assert.ok(tracker.includes(`https://github.com/mikevocalz/dvnt-monorepo/pull/${pr}`), `Missing PR #${pr}`);
+  }
 });

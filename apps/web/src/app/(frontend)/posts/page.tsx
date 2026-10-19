@@ -20,7 +20,7 @@ const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace'
 export const metadata = {
   title: 'DVNT Magazine — Culture, Events & Editorial',
   description: 'Premium nightlife culture, event guides, creator features, and more from DVNT.',
-  alternates: { canonical: 'https://blog.dvntapp.live' },
+  alternates: { canonical: 'https://dvntapp.live/posts' },
   openGraph: {
     title: 'DVNT Magazine',
     description: 'Culture, community, and pleasure — unapologetically Black, queer, and loud.',

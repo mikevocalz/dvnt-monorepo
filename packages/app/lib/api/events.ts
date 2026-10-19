@@ -1,3 +1,4 @@
+import { storedEventType, eventTypeUpdate } from "@dvnt/app/lib/events/event-type";
 import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import {
@@ -345,7 +346,7 @@ export const eventsApi = {
           isLiked: event.is_liked || false,
           attendees: avatars.length > 0 ? avatars : totalCount,
           totalAttendees: totalCount,
-          category: event.category || undefined,
+          category: storedEventType(event),
           // Surface status so the feed card can render the CANCELLED
           // badge. RPC now returns this; we just pass it through.
           status: event.status || undefined,
@@ -443,7 +444,7 @@ export const eventsApi = {
           isLiked: event.is_liked || false,
           attendees: avatars.length > 0 ? avatars : totalCount,
           totalAttendees: totalCount,
-          category: event.category || undefined,
+          category: storedEventType(event),
           status: event.status || undefined,
           cancelledAt: event.cancelled_at || undefined,
           event_tz: zone.event_tz,
@@ -532,6 +533,7 @@ export const eventsApi = {
           location: event[DB.events.location],
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
+          category: storedEventType(event),
           price: Number(event[DB.events.price]) || 0,
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           status: event.status || undefined,
@@ -587,6 +589,7 @@ export const eventsApi = {
           location: event[DB.events.location],
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
+          category: storedEventType(event),
           price: Number(event[DB.events.price]) || 0,
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           status: event.status || undefined,
@@ -667,6 +670,7 @@ export const eventsApi = {
           location: event[DB.events.location],
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
+          category: storedEventType(event),
           price: Number(event[DB.events.price]) || 0,
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           host: {
@@ -800,7 +804,7 @@ export const eventsApi = {
         locationType: ev.location_type || undefined,
         visibility: ev.visibility || undefined,
         ticketingEnabled: ev.ticketing_enabled || false,
-        category: ev.category || undefined,
+        category: storedEventType(ev),
         ageRestriction: ev.age_restriction || undefined,
         nsfw: ev.nsfw || false,
         shareSlug: ev.share_slug || undefined,
@@ -1020,7 +1024,7 @@ export const eventsApi = {
         price: Number(data[DB.events.price]) || 0,
         attendees: 0,
         totalAttendees: 0,
-        category: "Event",
+        category: storedEventType(data),
         likes: 0,
         host: {
           username: "You",
@@ -1096,7 +1100,7 @@ export const eventsApi = {
       if (updates.publishAt !== undefined)
         updateData.publish_at = updates.publishAt || null;
       if (updates.category !== undefined)
-        updateData.category = updates.category || null;
+        Object.assign(updateData, eventTypeUpdate(updates.category));
       if (updates.visibility !== undefined)
         updateData.visibility = normalizeVisibility(updates.visibility);
       if (updates.ageRestriction !== undefined)
@@ -1742,6 +1746,7 @@ export const eventsApi = {
           location: event[DB.events.location],
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
+          category: storedEventType(event),
           price: Number(event[DB.events.price]) || 0,
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           host: {

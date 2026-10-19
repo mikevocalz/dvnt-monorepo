@@ -42,6 +42,17 @@ with sync_playwright() as p:
     page.set_default_timeout(60000)
     observed={'checkout':None,'fulfilled':None}
     api_results=[]
+    # Only HTTP status codes, never Stripe URLs, request bodies, client
+    # secrets, payment IDs or card data. This proves whether a confirm
+    # request reached Stripe versus a checkout form stuck before submit.
+    stripe_confirm_http=[]
+    def observe_stripe_confirmation(response):
+        parsed=urllib.parse.urlparse(response.url)
+        if (parsed.hostname or '').endswith('.stripe.com') and (
+            '/payment_intents/' in parsed.path and parsed.path.endswith('/confirm')
+        ) and response.request.method=='POST':
+            stripe_confirm_http.append(response.status)
+    page.on('response',observe_stripe_confirmation)
     def observe(response):
         if urllib.parse.urlparse(response.url).path!='/embed/api' or response.request.method!='POST':return
         try:
@@ -104,7 +115,8 @@ with sync_playwright() as p:
         submitted=False
         for f in page.frames:
             if not (urllib.parse.urlparse(f.url).hostname or '').endswith('.stripe.com'):continue
-            if not f.locator('input[name="cardNumber"]').count():continue
+            card_input=f.locator('input[name="cardNumber"]')
+            if not card_input.count() or not card_input.first.is_visible():continue
             billing_name=f.locator('input[name="billingName"],input[autocomplete="cc-name"]')
             if billing_name.count() and billing_name.first.is_visible():billing_name.first.fill('DVNT Sandbox Test')
             postal=f.locator('input[name="billingPostalCode"],input[autocomplete="postal-code"]')
@@ -153,12 +165,24 @@ with sync_playwright() as p:
         if not result['passed']:
             print('Sandbox API results:',json.dumps(api_results))
             if observed['fulfilled']:print('Fulfillment:',len(observed['fulfilled'].get('tickets',[])),'tickets; email status:',observed['fulfilled'].get('emailStatus'))
+            print('Stripe payment confirm HTTP statuses:',stripe_confirm_http)
             if observed['checkout']:
                 session_id=observed['checkout']['clientSecret'].split('_secret_')[0]
                 if re.fullmatch(r'cs_test_[A-Za-z0-9]+',session_id):
                     try:
                         session=stripe('GET','/checkout/sessions/'+session_id)
                         print('Stripe session status:',session.get('status'),'payment status:',session.get('payment_status'))
+                        pi_id=session.get('payment_intent')
+                        if isinstance(pi_id,str) and re.fullmatch(r'pi_[A-Za-z0-9]+',pi_id):
+                            pi=stripe('GET','/payment_intents/'+pi_id)
+                            error=pi.get('last_payment_error') or {}
+                            def safe_code(value):
+                                return value if isinstance(value,str) and re.fullmatch(r'[a-z0-9_]{1,64}',value) else None
+                            print('Stripe PaymentIntent status:',pi.get('status'),
+                                  'last error code:',safe_code(error.get('code')),
+                                  'decline code:',safe_code(error.get('decline_code')))
+                        else:
+                            print('No Stripe PaymentIntent attached to open Checkout session')
                         if session.get('livemode') is False and session.get('payment_status')=='paid':
                             refund=stripe('POST','/refunds',{'payment_intent':session['payment_intent']},idempotency_key='dvnt-sandbox-refund-'+session_id)
                             print('Failed acceptance test refund:',refund.get('status'))

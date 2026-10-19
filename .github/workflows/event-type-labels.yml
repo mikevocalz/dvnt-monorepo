@@ -1,0 +1,51 @@
+name: Event type and card label regression
+on:
+  pull_request:
+    paths:
+      - 'packages/app/lib/events/event-type*'
+      - 'packages/app/lib/events/event-card-render.test.ts'
+      - 'packages/app/lib/api/events.ts'
+      - 'apps/mobile/lib/api/events.ts'
+      - 'packages/app/components/event-card.tsx'
+      - 'packages/app/components/event/FeedEventCard.web.tsx'
+      - 'packages/app/components/feed/feed-event-card.tsx'
+      - 'packages/app/features/routes/screens/(protected)/(tabs)/events.tsx'
+      - 'packages/app/lib/constants/event-categories.ts'
+      - 'packages/app/features/events/**'
+      - 'packages/app/features/routes/screens/(protected)/events/**'
+      - 'apps/mobile/supabase/functions/create-event/**'
+      - 'apps/mobile/supabase/functions/bootstrap-events/**'
+      - 'apps/mobile/supabase/functions/event-drafts/**'
+      - 'apps/mobile/supabase/functions/live-surface/**'
+      - 'packages/app/lib/hooks/use-event-realtime.ts'
+      - 'packages/app/lib/normalization/safe-entity.ts'
+      - 'apps/mobile/supabase/__tests__/event-type-taxonomy-migration.test.cjs'
+      - 'apps/mobile/supabase/__tests__/fixtures/event-type*'
+      - 'packages/app/lib/hooks/use-events.ts'
+      - 'packages/app/lib/hooks/use-bootstrap-events.ts'
+      - 'apps/mobile/supabase/migrations/20261019050000_event_type_taxonomy.sql'
+      - 'scripts/test-event-type-card-browser.cjs'
+      - '.github/workflows/event-type-labels.yml'
+permissions:
+  contents: read
+jobs:
+  taxonomy-and-card:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated fixture tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/event-type" --ignore-scripts --no-audit --no-fund --no-save typescript@6.0.3 esbuild@0.25.11 playwright@1.58.2 react@19.2.3 react-dom@19.2.3 @electric-sql/pglite@0.3.7
+          node "$RUNNER_TEMP/event-type/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Taxonomy, persistence, migration contract, and rendered markup
+        run: NODE_PATH="$RUNNER_TEMP/event-type/node_modules" node --test packages/app/lib/events/event-type*.test.ts packages/app/lib/events/event-card-render.test.ts packages/app/features/events/create/event-form.test.ts apps/mobile/supabase/functions/create-event/index.test.cjs apps/mobile/supabase/functions/event-drafts/index.test.cjs
+      - name: Public repository-definition migration and rollback in isolated PostgreSQL
+        run: NODE_PATH="$RUNNER_TEMP/event-type/node_modules" node --test apps/mobile/supabase/__tests__/event-type-taxonomy-migration.test.cjs
+      - name: Actual card markup and editor choice interactions
+        run: NODE_PATH="$RUNNER_TEMP/event-type/node_modules" node scripts/test-event-type-card-browser.cjs

@@ -1,3 +1,4 @@
+import { storedEventType } from "@dvnt/app/lib/events/event-type";
 /**
  * Bootstrap Events Hook
  *
@@ -20,7 +21,7 @@ function hydrateFromEventsBootstrap(
   data: BootstrapEventsResponse,
 ) {
   // Seed the events list cache
-  queryClient.setQueryData(eventKeys.list(), data.events);
+  queryClient.setQueryData(eventKeys.list(), data.events.map(event => ({ ...event, category: storedEventType(event) })));
 
   console.log(
     `[BootstrapEvents] Hydrated cache: ${data.events.length} events`,

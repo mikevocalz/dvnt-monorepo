@@ -37,9 +37,9 @@ import * as Haptics from "expo-haptics";
 import { OrderDetailSkeleton } from "@dvnt/app/components/skeletons";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { purchasesApi } from "@dvnt/app/lib/api/payments";
+import { getOrderStatusAppearance } from "@dvnt/app/lib/payments/order-status-appearance";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
-  PAYMENT_STATUS_CONFIG,
   type Order,
   type OrderTimelineEvent,
 } from "@dvnt/app/lib/types/payments";
@@ -172,8 +172,7 @@ export default function OrderDetailScreen() {
   const safeTimeline = normalizeArray(activeOrder.timeline);
   const safeTickets = normalizeArray(activeOrder.tickets);
 
-  const statusConfig =
-    PAYMENT_STATUS_CONFIG[activeOrder.status] || PAYMENT_STATUS_CONFIG.pending;
+  const statusConfig = getOrderStatusAppearance(activeOrder);
 
   return (
     <View className="flex-1 bg-background">

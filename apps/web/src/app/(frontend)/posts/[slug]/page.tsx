@@ -37,7 +37,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const description = post.seo?.description ?? post.meta?.description ?? post.excerpt
   const image = post.seo?.ogImage ? mediaUrl(post.seo.ogImage, 'og')
     : post.meta?.image?.url ?? post.heroImage ? mediaUrl(post.heroImage!, 'og') : post.coverImage?.url
-  const url = `https://blog.dvntapp.live/posts/${post.slug}`
+  const url = `https://dvntapp.live/posts/${post.slug}`
   return {
     title,
     description,
@@ -77,7 +77,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   const heroSrc = post.heroImage ? mediaUrl(post.heroImage, 'full') : (post.coverImage?.url ?? null)
   const cat = post.categories?.[0]
   const toc = extractToc(post.content)
-  const articleUrl = `https://blog.dvntapp.live/posts/${post.slug}`
+  const articleUrl = `https://dvntapp.live/posts/${post.slug}`
 
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -92,7 +92,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
     breadcrumb: {
       '@type': 'BreadcrumbList',
       itemListElement: [
-        { '@type': 'ListItem', position: 1, name: 'The Blog', item: 'https://blog.dvntapp.live/posts' },
+        { '@type': 'ListItem', position: 1, name: 'The Blog', item: 'https://dvntapp.live/posts' },
         { '@type': 'ListItem', position: 2, name: post.title, item: articleUrl },
       ],
     },
@@ -173,11 +173,11 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
         </div>
 
         {/* ── Author footer ── */}
-        {(post.authors?.length ?? 0) > 0 && (
+        {((post.authors?.length ?? 0) + (post.contributors?.length ?? 0)) > 0 && (
           <div style={authorSection as any}>
-            <span style={authorSectionLabel as any}>About the author{(post.authors?.length ?? 0) > 1 ? 's' : ''}</span>
-            {post.authors?.map((a) => <AuthorCard key={a.id} author={a} role={a.role ?? 'Staff Writer'} />)}
-            {post.contributors?.map((c) => <AuthorCard key={c.author.id} author={c.author} role={c.role} />)}
+            <span style={authorSectionLabel as any}>{post.authors?.length ? `About the author${post.authors.length > 1 ? 's' : ''}` : `About the contributor${(post.contributors?.length ?? 0) > 1 ? 's' : ''}`}</span>
+            {post.authors?.map((a) => <AuthorCard key={`author-${a.id}`} author={a} role={a.role ?? 'Staff Writer'} />)}
+            {post.contributors?.map((c, index) => <AuthorCard key={`contributor-${c.id ?? index}-${c.author.id}`} author={c.author} role={c.role} />)}
           </div>
         )}
 
@@ -296,7 +296,9 @@ function AuthorCard({ author, role }: { author: PostAuthor; role: string }) {
       </div>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 } as any}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' } as any}>
-          <span style={authorName as any}>{author.name}</span>
+          {author.profileUrl
+            ? <a href={author.profileUrl} style={authorName as any} target="_blank" rel="noopener noreferrer">{author.name}</a>
+            : <span style={authorName as any}>{author.name}</span>}
           <span style={authorRole as any}>{role}</span>
         </div>
         {author.bio && <p style={authorBio as any}>{author.bio}</p>}

@@ -6,11 +6,10 @@
  * multi-section form (event-create.web.tsx). Mobile and web render different
  * layouts but MUST stay one schema: same fields, same validation, same payload.
  *
- * Important schema facts (verified against migrations, 2026-06-20):
- *  - The `events` table has a `category` column but NO `event_type` column
- *    (event_type lives on `stripe_events`). The 26-option Event Type therefore
- *    persists to `category`. There is no `tags` column — tags are secondary and
- *    fall back into `category` only when no Event Type is chosen.
+ * Storage contract:
+ *  - Canonical Event Type persists to events.event_type; the existing category
+ *    enum remains the legacy broad taxonomy. Read adapters prefer event_type.
+ *  - There is no tags column; category is only a legacy fallback for old clients.
  *  - Paid tiers must be >= $2.00 (MIN_PAID_TIER_CENTS) or server-side fee
  *    computation produces a negative organizer transfer at checkout.
  */
@@ -27,39 +26,9 @@ import {
 } from "../../../lib/events/event-publication.ts";
 
 // ── Event Type taxonomy (canonical) ─────────────────────────────────────────
-export const EVENT_TYPE_LABELS: Record<EventType, string> = {
-  virtual_session: "Virtual Session",
-  party: "Party",
-  picnic: "Picnic",
-  game_night: "Game Night",
-  panel: "Panel",
-  happy_hour: "Happy Hour",
-  wine_down: "Wine Down",
-  kickback: "Kickback",
-  ball: "Ball",
-  kiki: "Kiki",
-  pool_party: "Pool Party",
-  spoken_word: "Spoken Word",
-  open_mic: "Open Mic",
-  karaoke: "Karaoke",
-  bike_ride: "Bike Ride",
-  walk_run: "Walk / Run",
-  fitness_training: "Fitness Training",
-  yoga: "Yoga",
-  meditation: "Meditation",
-  bate_session: "Bate Session",
-  sex_party: "Sex Party",
-  kink_fetish_party: "Kink / Fetish Party",
-  training: "Training",
-  cooking_class: "Cooking Class",
-  mixology: "Mixology",
-  dance_class: "Dance Class",
-  other: "Other",
-};
-
-export const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = (
-  Object.keys(EVENT_TYPE_LABELS) as EventType[]
-).map((value) => ({ value, label: EVENT_TYPE_LABELS[value] }));
+// Compatibility export for existing creation consumers; definitions also serve editors/cards.
+// eslint-disable-next-line no-barrel-files/no-barrel-files
+export { EVENT_TYPE_LABELS, EVENT_TYPE_OPTIONS } from "../../../lib/events/event-type.ts";
 
 /** Suggested freeform tags surfaced in both create flows. */
 export const SUGGESTED_TAGS = [
@@ -281,8 +250,7 @@ export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {})
     locationName: d.locationData?.name,
     locationAddress: d.locationData?.address,
     locationType: d.isOnline ? "virtual" : "physical",
-    // Event Type is the structured category (no event_type column on events).
-    // event_type is forwarded too so createEvent can prefer it over tags[0].
+    // event_type is authoritative; category is kept for older server compatibility.
     category: d.eventType || d.tags[0] || undefined,
     event_type: d.eventType || undefined,
     ageRestriction: d.ageRestriction !== "none" ? d.ageRestriction : undefined,

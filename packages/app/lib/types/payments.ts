@@ -92,9 +92,21 @@ export interface OrderFees {
   totalCents: number;
 }
 
+export type CheckoutFailureReason =
+  | "checkout_expired"
+  | "checkout_abandoned"
+  | "payment_cancelled"
+  | "payment_declined"
+  | "payment_attempt_failed"
+  | "async_payment_failed"
+  | "payment_reference_missing"
+  | "technical_failure";
+
 export interface Order {
   id: string;
   status: OrderStatus;
+  /** Null means not classified, not a proven card decline. */
+  checkoutFailureReason?: CheckoutFailureReason | null;
   type: "event_ticket" | "promotion" | "sneaky_access";
   currency: string;
   fees: OrderFees;
@@ -134,7 +146,11 @@ export interface OrderTimelineEvent {
     | "refund_requested"
     | "refund_processed"
     | "dispute_opened"
-    | "dispute_resolved";
+    | "dispute_resolved"
+    | "payment_failed"
+    | "payment_processing"
+    | "reconciled"
+    | "reconcile_blocked";
   label: string;
   timestamp: string;
   detail?: string;

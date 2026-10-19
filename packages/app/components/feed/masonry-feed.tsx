@@ -19,7 +19,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Image } from "expo-image";
-import { useMemo, useCallback, memo, useEffect, useRef, useState } from "react";
+import { useMemo, useCallback, memo, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Heart, Bookmark, Play, Grid3x3 } from "lucide-react-native";
@@ -86,7 +86,39 @@ import {
 import { LegendList } from "@dvnt/app/components/list";
 import type { LegendListRef } from "@dvnt/app/components/list";
 import { feedScrollY, resetFeedScroll } from "@dvnt/app/lib/stores/feed-scroll-shared";
+import { FeedInlineVideo, useFeedPlaybackEnabled } from "./feed-inline-video";
+import { isFeedCellVisible } from "./native-feed-playback";
 import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
+
+// A section can be much taller than the viewport. Measure individual cells,
+// not section visibility, so recycled/offscreen rows never keep videos alive.
+const MasonryViewport = createContext<{
+  revision: number;
+  enabled: boolean;
+  container: React.RefObject<View | null>;
+} | null>(null);
+
+function useCellVisibility(ref: React.RefObject<View | null>, animated: boolean) {
+  const viewport = useContext(MasonryViewport);
+  const [visible, setVisible] = useState(false);
+  const enabled = viewport?.enabled ?? false;
+  useEffect(() => {
+    if (!animated || !enabled || !viewport) {
+      setVisible(false);
+      return;
+    }
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      viewport.container.current?.measureInWindow((_x, top, _width, height) => {
+        ref.current?.measureInWindow((_cx, y, _cw, cellHeight) => {
+          if (!cancelled) setVisible(isFeedCellVisible(y, cellHeight, top, top + height));
+        });
+      });
+    });
+    return () => { cancelled = true; cancelAnimationFrame(frame); };
+  }, [viewport, animated, enabled, ref]);
+  return visible && enabled;
+}
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -364,6 +396,8 @@ const MasonryCell = memo(function MasonryCell({
   const isGif = media?.type === "gif";
   const isAnimatedVideo = media?.type === "animated_video";
   const isLivePhoto = media?.type === "livePhoto";
+  const cellRef = useRef<View>(null);
+  const isPlaying = useCellVisibility(cellRef, isVideo || isGif || isAnimatedVideo || isLivePhoto);
   const coverUrl = isVideo
     ? post.thumbnail || media?.thumbnail || null
     : media?.thumbnail || media?.url || null;
@@ -375,6 +409,8 @@ const MasonryCell = memo(function MasonryCell({
     >
       {/* Flattened: expo-router's <Slot> (Link asChild) rejects style arrays. */}
       <View
+        ref={cellRef}
+        collapsable={false}
         style={StyleSheet.flatten([
           styles.cell,
           { width, height, borderRadius: CELL_RADIUS, marginBottom: COLUMN_GAP },
@@ -387,6 +423,8 @@ const MasonryCell = memo(function MasonryCell({
             variant="grid"
             style={{ minHeight: height, height }}
           />
+        ) : isVideo && isPlaying && media?.url ? (
+          <FeedInlineVideo uri={media.url} isPlaying={isPlaying} />
         ) : isVideo ? (
           <VideoThumb
             videoUrl={media?.url || ""}
@@ -402,7 +440,7 @@ const MasonryCell = memo(function MasonryCell({
             width={width}
             height={height}
             contentFit="cover"
-            isPlaying
+            isPlaying={isPlaying}
           />
         ) : isAnimatedVideo && media?.url ? (
           // Short video auto-tagged as a silent looping animation (gif-like).
@@ -413,14 +451,14 @@ const MasonryCell = memo(function MasonryCell({
             width={width}
             height={height}
             contentFit="cover"
-            isPlaying
+            isPlaying={isPlaying}
           />
         ) : isLivePhoto && media?.url ? (
-          // Live Photo — native player on iOS (tap-and-hold), still
-          // fallback on Android.
+          // Live Photo — visible tiles move; paired video fallback on Android.
           <DVNTLivePhotoView
             photoUri={media.url}
             videoUri={media.livePhotoVideoUrl}
+            isPlaying={isPlaying}
             width={width}
             height={height}
             contentFit="cover"
@@ -720,12 +758,30 @@ export function MasonryFeed() {
     () => buildFeedSections(filteredPosts, forYouEvents ?? [], sectionSize),
     [filteredPosts, forYouEvents, sectionSize],
   );
+  const playbackEnabled = useFeedPlaybackEnabled();
+  const containerRef = useRef<View>(null);
+  const [viewportRevision, setViewportRevision] = useState(0);
+  const viewportTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshViewport = useCallback(() => {
+    // Trailing measurement also runs when scrolling stops between samples.
+    if (viewportTimer.current) return;
+    viewportTimer.current = setTimeout(() => {
+      viewportTimer.current = null;
+      setViewportRevision((revision) => revision + 1);
+    }, 80);
+  }, []);
+  useEffect(() => () => {
+    if (viewportTimer.current) clearTimeout(viewportTimer.current);
+  }, []);
+  const viewport = useMemo(() => ({ revision: viewportRevision, enabled: playbackEnabled, container: containerRef }), [viewportRevision, playbackEnabled]);
+
   const handleContainerLayout = useCallback(
     (e: { nativeEvent: { layout: { width: number } } }) => {
       const w = Math.round(e.nativeEvent.layout.width);
       if (w > 0) setContainerWidth((prev) => (prev === w ? prev : w));
+      refreshViewport();
     },
-    [],
+    [refreshViewport],
   );
 
   const handlePress = useCallback(
@@ -746,13 +802,14 @@ export function MasonryFeed() {
       const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
       // Drives the stories-row collapse (UI thread, no re-render).
       feedScrollY.value = Math.max(0, contentOffset.y);
+      refreshViewport();
       const distanceFromBottom =
         contentSize.height - layoutMeasurement.height - contentOffset.y;
       if (distanceFromBottom < 800 && hasNextPage && !isFetchingNextPage) {
         fetchNextPage();
       }
     },
-    [hasNextPage, isFetchingNextPage, fetchNextPage],
+    [hasNextPage, isFetchingNextPage, fetchNextPage, refreshViewport],
   );
 
   // While the grid itself is loading, render a minimal grid-shaped
@@ -797,7 +854,8 @@ export function MasonryFeed() {
   }
 
   return (
-    <View style={{ flex: 1 }} onLayout={handleContainerLayout}>
+    <MasonryViewport.Provider value={viewport}>
+    <View ref={containerRef} collapsable={false} style={{ flex: 1 }} onLayout={handleContainerLayout}>
     <LegendList
       ref={listRef}
       // Remount when the column geometry changes — i.e. on rotation, or when
@@ -889,6 +947,7 @@ export function MasonryFeed() {
       }
     />
     </View>
+    </MasonryViewport.Provider>
   );
 }
 

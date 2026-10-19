@@ -1,3 +1,4 @@
+import { eventTypeLabel } from "@dvnt/app/lib/events/event-type";
 import { LinearGradient } from "@dvnt/app/components/ui/html";
 import { View, Text, Pressable } from "react-native";
 import { Image } from "expo-image";
@@ -234,7 +235,7 @@ export function EventCard({
               >
                 <View className="bg-white/20 px-3 py-1.5 rounded-xl">
                   <Text className="text-white text-xs font-medium">
-                    {event.category}
+                    {eventTypeLabel(event.category)}
                   </Text>
                 </View>
                 {event.isPromoted ? (

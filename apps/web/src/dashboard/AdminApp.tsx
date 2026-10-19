@@ -70,7 +70,7 @@ function Gate() {
 
   if (state === 'loading')
     return <div className="dv-center"><span style={{ color: 'var(--dim)' }}>Loading…</span></div>
-  if (state === 'out') return <Login onIn={(r) => { setRole(r); setState('in') }} />
+  if (state === 'out') return <Login />
   return (
     <RoleProvider role={role}>
       <Console onSignOut={signOut} />
@@ -202,39 +202,27 @@ function Drawer({ tabs, active, onClose, onNav, onSignOut }: { tabs: [string, st
   )
 }
 
-function Login({ onIn }: { onIn: (role: Role) => void }) {
-  const [email, setEmail] = useState('')
-  const [pw, setPw] = useState('')
-  const [err, setErr] = useState('')
-  const [busy, setBusy] = useState(false)
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setErr('')
-    setBusy(true)
-    try {
-      await payload.login(email, pw)
-      const { user } = await payload.me()
-      if (user) onIn(user.role)
-      else setErr('Login failed.')
-    } catch {
-      setErr('Invalid credentials.')
-    } finally {
-      setBusy(false)
-    }
-  }
+function Login() {
   return (
     <div className="dv-center">
-      <form className="dv-login" onSubmit={submit}>
+      <div className="dv-login">
         <img src="/dvnt-wordmark.svg" alt="DVNT" />
         <p className="dv-kicker">Admin · Moderation &amp; CMS</p>
-        <input className="dv-input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <input className="dv-input" type="password" placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} />
-        {!!err && <span style={{ color: 'var(--danger)', fontSize: 12 }}>{err}</span>}
-        <button className="dv-btn dv-btn--primary" type="submit" disabled={busy} style={{ padding: '10px' }}>
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-        <a href="/admin" className="dv-link">Open the Payload CMS →</a>
-      </form>
+        <p style={{ color: 'var(--dim)', fontSize: 14, lineHeight: 1.6 }}>
+          Use your regular DVNT app account to manage members, events and blog posts.
+          Admin permissions are verified after sign-in.
+        </p>
+        <a
+          className="dv-btn dv-btn--primary"
+          href="/auth/login?returnTo=%2Fadmin"
+          style={{ display: 'block', padding: 12, textAlign: 'center', textDecoration: 'none' }}
+        >
+          Continue with DVNT
+        </a>
+        <a href="/admin/login?local=1" className="dv-link">
+          Emergency legacy CMS sign-in
+        </a>
+      </div>
     </div>
   )
 }

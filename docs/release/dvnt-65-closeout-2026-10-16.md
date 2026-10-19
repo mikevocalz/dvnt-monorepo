@@ -1,10 +1,47 @@
-# DVNT — verified 65-item status, October 16, 2026
+# DVNT — 65-item status, refreshed October 19, 2026
 
 **Audit sources:** connected GitHub `mikevocalz/dvnt-monorepo` and read-only DVNT Supabase (October 16, latest `master` merge [#121](https://github.com/mikevocalz/dvnt-monorepo/pull/121) at 20:18 UTC). Original labels, full PR context and ownership remain in [October 15 closeout](./dvnt-65-closeout-2026-10-15.md) and the preserved October 14 DOCX. This file updates evidence, not production configuration.
 
+## October 19 reconciliation
+
+**Scope:** documentation and coverage tests only. Integrated against `master` commit `07a775707e5d9b39d9a41d267d2bee54fc894a09` (#134). GitHub PR state was checked on October 19 at 17:21 UTC. The October 16 baseline below is preserved as historical evidence, not silently presented as a fresh live audit. The filename remains stable for existing links.
+
+**Current disposition remains 26 MERGED CODE / 31 PARTIAL / 5 OPEN / 3 SUPERSEDED.** MERGED CODE means implementation landed, not production acceptance or complete release sign-off. PARTIAL includes unfinished functionality and unverified acceptance; OPEN denotes an outstanding original deliverable. No original requirement was newly signed off as live complete in this refresh.
+
+### Fresh read-only production snapshot
+
+Observed October 19, 2026 at 17:22 UTC through the connected DVNT Supabase project; aggregate SQL and deployed Edge source only:
+
+- `verified_admission_policy.enforce = false` remains unchanged. This is not permission to turn it on.
+- **1,946 queued DMs**, no other outbox state/channel groups and therefore zero recorded sends in this table. The historical 1,933 count below is not current. No messages were sent by this review.
+- `event_followup_campaigns` and `event_followup_outbox` both contain zero rows. Cron execution was not revalidated.
+- `public.editorial_channels` and `public.editorial_queue` are still absent. The blog editor repair does not provision the editorial workflow.
+- Deployed `video_join_room` version 97 still calls `count_active_participants`, not `lynk_admit_member_atomic`. Both `lynk_admit_member_atomic` and `lynk_accept_cohost_atomic` exist in the database; their presence does not establish live admission parity or device acceptance.
+- No `member-proximity` function appears in the deployed function list.
+- Deployed `brand-outbox-worker` version 7 still lacks the merged `validEmailProviderReceipt` guard. Provider IDs, when present, are not mailbox-delivery proof.
+
+### Merged since the previous snapshot
+
+| PRs | Verified code change | What this does not establish |
+|---|---|---|
+| [#123](https://github.com/mikevocalz/dvnt-monorepo/pull/123), [#124](https://github.com/mikevocalz/dvnt-monorepo/pull/124) | Checkout outcome taxonomy and web/native labels merged | Historical failures are not proven card declines; Stripe/backend rollout and real receipt acceptance are separate gates |
+| [#125](https://github.com/mikevocalz/dvnt-monorepo/pull/125), [#127](https://github.com/mikevocalz/dvnt-monorepo/pull/127) | Shared staff login and native Payload editor repair merged; unprovisioned editorial collections gated off | Does not finish C01–C04 or establish every staff role/device save-and-publish flow |
+| [#126](https://github.com/mikevocalz/dvnt-monorepo/pull/126), [#133](https://github.com/mikevocalz/dvnt-monorepo/pull/133) | Ticket choice placement, explicit perks, event type editing and paid card prices merged | Fixture/browser checks are not live organizer saves or physical native acceptance; #133 records a separately approved RPC/Edge rollout, not a rollout performed here |
+| [#129](https://github.com/mikevocalz/dvnt-monorepo/pull/129), [#130](https://github.com/mikevocalz/dvnt-monorepo/pull/130) | Comment focus mitigation, canonical URLs and YouTube rendering merged | Physical iPhone symptom reproduction and live authenticated YouTube save/playback remain distinct checks |
+| [#131](https://github.com/mikevocalz/dvnt-monorepo/pull/131), [#134](https://github.com/mikevocalz/dvnt-monorepo/pull/134) | Linked author profiles and real staff picker/photos merged | Does not automatically assign historical bylines or complete labeled editorial profiles under C04 |
+| [#132](https://github.com/mikevocalz/dvnt-monorepo/pull/132) | Feed video/Live Photo motion merged; real Chromium decoding covered in CI | Mocked native bridge coverage is not iOS/Android decoder acceptance; P06 remains PARTIAL |
+
+[#128](https://github.com/mikevocalz/dvnt-monorepo/pull/128) (Lynk session stability) and [#135](https://github.com/mikevocalz/dvnt-monorepo/pull/135) (author version-schema repair) remain **open and unmerged** at this snapshot. Their work is tracked separately, not counted as merged here. The separately reported live schema repair and successful author-profile save do not establish broad editorial acceptance or all historical bylines. Security/incident review for #135 is not signed off by this tracker.
+
+### Concrete remaining scope
+
+- Five OPEN IDs: **A06** identity-linked re-registration prevention/appeal; **S09** consented anonymous-room proximity; **S12** real two-device paid/comp/private-link rehearsal; **C03** approved editorial automation rollout; **D01** unspecified original Deviant Events requirement.
+- Thirty-one PARTIAL IDs retain their explicit remaining conditions in the full index below, including deployment parity, delivery receipts, device acceptance, capture/share transport, tipping approval and editorial publishing. The fresh snapshot above supersedes the baseline numeric observations, not these unresolved acceptance conditions.
+- No automatic implementation of all 65 requirements, production policy switch, message send, financial action, historical attribution, migration, deployment or merge is included in #122.
+
 ## 65-item totals
 
-| Status | Original Oct 14 | Current Oct 16 |
+| Status | Original Oct 14 | Current Oct 19 |
 |---|---:|---:|
 | Code implemented and merged (not necessarily live tested) | 26 | 26 |
 | Partial implementation / pending verification | 25 | 31 |
@@ -14,7 +51,7 @@
 
 **Reclassified OPEN → PARTIAL:** S06, S07, C01, C02, C04, D02. Their engineering foundations are in merged code, not complete functioning products. **No new original requirement was independently signed off as live DONE.**
 
-## Critical deployment reality
+## Historical October 16 deployment snapshot
 
 - **GitHub:** all 28 PRs #94–#121 are closed and confirmed **merged to `master`**, contrary to the earlier "keep drafts unmerged" instruction. This status review did not initiate those merges.
 - **Universal verified-only policy:** `verified_admission_policy.enforce = false`. Existing identity and underage guards should be assessed independently; universal verification is not enabled.
@@ -26,7 +63,7 @@
 - **Stage ticket validation:** [#107](https://github.com/mikevocalz/dvnt-monorepo/actions/runs/38795258497) and [#108](https://github.com/mikevocalz/dvnt-monorepo/actions/runs/38795664232) have successful TEST-mode staging order/ticket/email-status/refund runs. This does not verify every production recipient, comp, or inbox arrival.
 - **Media:** [#121](https://github.com/mikevocalz/dvnt-monorepo/pull/121) passed nine GitHub workflows. Real iPhone/iPad orientation, deployed MoQ publisher and AVC/camera behavior still require two-device tests.
 
-## Full status index
+## Full status index (October 16 baseline; October 19 disposition unchanged)
 
 ### Adult access
 

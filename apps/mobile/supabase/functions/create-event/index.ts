@@ -90,30 +90,45 @@ function normalizeVisibility(value: unknown): "public" | "private" | "link_only"
   return "public";
 }
 
-function normalizeCategory(value: unknown):
-  | "music"
-  | "sports"
-  | "art"
-  | "food"
-  | "tech"
-  | "business"
-  | "health"
-  | "other"
-  | null {
+// Canonical Event Type has its own existing text column.
+function normalizeEventType(value: unknown): string | null {
   const v = text(value);
-  if (
-    v === "music" ||
-    v === "sports" ||
-    v === "art" ||
-    v === "food" ||
-    v === "tech" ||
-    v === "business" ||
-    v === "health" ||
-    v === "other"
-  ) {
-    return v;
-  }
-  return v ? "other" : null;
+  const allowed = new Set([
+    "virtual_session",
+    "party",
+    "picnic",
+    "game_night",
+    "panel",
+    "happy_hour",
+    "wine_down",
+    "kickback",
+    "ball",
+    "kiki",
+    "pool_party",
+    "spoken_word",
+    "open_mic",
+    "karaoke",
+    "bike_ride",
+    "walk_run",
+    "fitness_training",
+    "yoga",
+    "meditation",
+    "bate_session",
+    "sex_party",
+    "kink_fetish_party",
+    "training",
+    "cooking_class",
+    "mixology",
+    "dance_class",
+    "other",
+  ]);
+  return v !== null && allowed.has(v) ? v : null;
+}
+
+function normalizeCategory(value: unknown): string | null {
+  const v = text(value);
+  if (!v) return null;
+  return ["music", "sports", "art", "food", "tech", "business", "health", "other"].includes(v) ? v : "other";
 }
 
 Deno.serve(async (req) => {
@@ -258,9 +273,14 @@ Deno.serve(async (req) => {
     if (locationType === "virtual" || locationType === "physical") {
       insertPayload.location_type = locationType;
     }
-    const category = normalizeCategory(
-      text(body.event_type) || text(body.category) || text(body.eventCategory),
-    );
+    const typeInput = text(body.event_type);
+    const categoryInput = text(body.category) || text(body.eventCategory);
+    const eventType = normalizeEventType(typeInput || categoryInput);
+    if (typeInput && !eventType) {
+      return errorResponse(req, "validation_error", "Pick a valid event type", 400);
+    }
+    if (eventType) insertPayload.event_type = eventType;
+    const category = normalizeCategory(categoryInput);
     if (category) insertPayload.category = category;
     if (ageRestriction === "18+" || ageRestriction === "21+" || ageRestriction === "none") {
       insertPayload.age_restriction = ageRestriction;

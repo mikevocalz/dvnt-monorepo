@@ -1,3 +1,4 @@
+import { storedEventType, eventTypeUpdate } from "@dvnt/app/lib/events/event-type";
 import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import {
@@ -240,7 +241,7 @@ export const eventsApi = {
           isLiked: event.is_liked || false,
           attendees: avatars.length > 0 ? avatars : totalCount,
           totalAttendees: totalCount,
-          category: event.category || undefined,
+          category: storedEventType(event),
           // Surface status so the feed card can render the CANCELLED
           // badge. RPC now returns this; we just pass it through.
           status: event.status || undefined,
@@ -312,7 +313,7 @@ export const eventsApi = {
           isLiked: event.is_liked || false,
           attendees: avatars.length > 0 ? avatars : totalCount,
           totalAttendees: totalCount,
-          category: event.category || undefined,
+          category: storedEventType(event),
           status: event.status || undefined,
           cancelledAt: event.cancelled_at || undefined,
           friendsGoing: event.friends_going || 0,
@@ -515,7 +516,7 @@ export const eventsApi = {
         locationType: ev.location_type || undefined,
         visibility: ev.visibility || undefined,
         ticketingEnabled: ev.ticketing_enabled || false,
-        category: ev.category || undefined,
+        category: storedEventType(ev),
         ageRestriction: ev.age_restriction || undefined,
         nsfw: ev.nsfw || false,
         shareSlug: ev.share_slug || undefined,
@@ -679,8 +680,8 @@ export const eventsApi = {
       if (eventData.locationType)
         insertPayload.location_type = eventData.locationType;
       insertPayload.visibility = normalizeVisibility(eventData.visibility);
-      if (eventData.eventCategory)
-        insertPayload.category = eventData.eventCategory;
+      const eventCategory = eventData.event_type || eventData.category || eventData.eventCategory;
+      if (eventCategory) Object.assign(insertPayload, eventTypeUpdate(eventCategory));
       if (eventData.ageRestriction)
         insertPayload.age_restriction = eventData.ageRestriction;
       if (eventData.endDate) insertPayload.end_date = eventData.endDate;
@@ -718,7 +719,7 @@ export const eventsApi = {
         price: Number(data[DB.events.price]) || 0,
         attendees: 0,
         totalAttendees: 0,
-        category: "Event",
+        category: storedEventType(data),
         likes: 0,
         host: {
           username: "You",
@@ -777,7 +778,7 @@ export const eventsApi = {
       if (updates.endDate !== undefined)
         updateData.end_date = updates.endDate || null;
       if (updates.category !== undefined)
-        updateData.category = updates.category || null;
+        Object.assign(updateData, eventTypeUpdate(updates.category));
       if (updates.visibility !== undefined)
         updateData.visibility = normalizeVisibility(updates.visibility);
       if (updates.ageRestriction !== undefined)

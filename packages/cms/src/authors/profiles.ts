@@ -1,0 +1,249 @@
+import { resolveStaffPhoto, resolveStaffPhotos } from './account-photo'
+import type { AdminUser } from '../payload-types'
+import { randomUUID } from 'node:crypto'
+import { sql, type PostgresAdapter } from '@payloadcms/db-postgres'
+import { APIError, commitTransaction, initTransaction, killTransaction,
+  type Access, type CollectionBeforeChangeHook, type Endpoint, type PayloadRequest } from 'payload'
+
+// Always use Payload's authenticated staff ID. App IDs, author IDs, names and
+// email addresses belong to different namespaces and never establish ownership.
+export function staffAccount(req: Pick<PayloadRequest, 'user'>) {
+  const user = req.user as (AdminUser & { collection?: string }) | null | undefined
+  return user?.collection === 'admin-users' &&
+    ['super_admin', 'admin', 'moderator'].includes(user.role) ? user : null
+}
+export const canEditBylines = (req: Pick<PayloadRequest, 'user'>) =>
+  ['super_admin', 'admin'].includes(staffAccount(req)?.role ?? '')
+export const authorStaffAccess = ({ req }: { req: PayloadRequest }) => Boolean(staffAccount(req))
+export const authorEditorAccess = ({ req }: { req: PayloadRequest }) => canEditBylines(req)
+export const updateAuthorAccess: Access = ({ req }) => {
+  const user = staffAccount(req)
+  if (!user) return false
+  return canEditBylines(req) || { user: { equals: user.id } }
+}
+export function relationshipID(value: any): string | number | undefined {
+  const id = value && typeof value === 'object' ? value.id : value
+  return typeof id === 'string' || typeof id === 'number' ? id : undefined
+}
+const sameID = (a: unknown, b: unknown) =>
+  relationshipID(a) != null && String(relationshipID(a)) === String(relationshipID(b))
+const ids = (value: unknown): string[] => Array.isArray(value) ? value.map(v => String(relationshipID(v))) : []
+const sameByline = (a: unknown, b: unknown) => JSON.stringify(ids(a)) === JSON.stringify(ids(b))
+
+// Serialize all profile provisioning/linking on the existing account row. The
+// outer Payload write already owns a transaction; standalone endpoints create
+// one. An autocommit lock would be ineffective, so fail closed without a tx.
+// No schema migration, uniqueness index or legacy author backfill is needed.
+async function lockAccount(req: PayloadRequest, accountID: string | number) {
+  const db = req.payload.db as unknown as PostgresAdapter
+  const transactionID = await req.transactionID
+  const tx = transactionID == null ? undefined : db.sessions[transactionID]?.db
+  const table = db.tables.admin_users
+  if (!tx || !table) throw new APIError('Author profiles require an active database transaction.', 503)
+  const result = await db.execute({ db: tx, sql: sql`SELECT ${table.id} FROM ${table} WHERE ${table.id} = ${accountID} FOR UPDATE` })
+  if (result.rows.length !== 1) throw new APIError('The linked staff account does not exist.', 400)
+}
+async function lockExistingAuthor(req: PayloadRequest, authorID: string | number) {
+  const db = req.payload.db as unknown as PostgresAdapter
+  const transactionID = await req.transactionID
+  const tx = transactionID == null ? undefined : db.sessions[transactionID]?.db
+  const table = db.tables.authors
+  if (!tx || !table) throw new APIError('Author profiles require an active database transaction.', 503)
+  const result = await db.execute({ db: tx,
+    sql: sql`SELECT ${table.user} AS "linkedUser" FROM ${table} WHERE ${table.id} = ${authorID} FOR UPDATE` })
+  if (result.rows.length !== 1) throw new APIError('This author profile no longer exists.', 404)
+  return relationshipID(result.rows[0].linkedUser)
+}
+async function linkedAuthors(req: PayloadRequest, accountID: string | number) {
+  return req.payload.find({ collection: 'authors', where: { user: { equals: accountID } },
+    sort: 'id', limit: 1, depth: 0, overrideAccess: true, req })
+}
+
+function publicAccountName(account: { name?: string | null; email?: string | null }) {
+  const name = account.name?.trim()
+  return name && name.toLowerCase() !== account.email?.trim().toLowerCase() ? name : 'Staff writer'
+}
+
+export async function ensureAccountAuthor(req: PayloadRequest, accountID: string | number) {
+  const actor = staffAccount(req)
+  if (!actor || (!canEditBylines(req) && !sameID(actor.id, accountID)))
+    throw new APIError('You can only choose your own account. An editor must assign other staff.', 403)
+  await lockAccount(req, accountID)
+  const account = sameID(actor.id, accountID) ? actor : await req.payload.findByID({
+    collection: 'admin-users', id: accountID, depth: 0, overrideAccess: true, req,
+  })
+  if (!['super_admin', 'admin', 'moderator'].includes(account.role)) throw new APIError('Choose an existing staff account.', 400)
+  const existing = (await linkedAuthors(req, accountID)).docs[0]
+  if (existing) return existing
+  return req.payload.create({ collection: 'authors', overrideAccess: true, req, depth: 0,
+    data: { user: account.id, name: publicAccountName(account), slug: `writer-${randomUUID()}` } })
+}
+export async function ensureOwnAuthor(req: PayloadRequest) {
+  const user = staffAccount(req)
+  if (!user) throw new APIError('Sign in with a staff account to edit your author profile.', 403)
+  return ensureAccountAuthor(req, user.id)
+}
+
+export const prepareAuthorProfile: CollectionBeforeChangeHook = async ({ data, operation, originalDoc, req }) => {
+  const actor = staffAccount(req)
+  for (const value of [data.profileUrl, data.socials?.website]) {
+    if (value == null || value === '') continue
+    let valid = false
+    try { valid = ['http:', 'https:'].includes(new URL(String(value)).protocol) } catch { /* invalid URL */ }
+    if (!valid) throw new APIError('Author links must be full http:// or https:// URLs.', 400)
+  }
+  const originalID = relationshipID(originalDoc?.user)
+  if (operation === 'update') {
+    // Payload loads originalDoc before hooks. Lock and recheck the current row
+    // so two editors cannot claim one legacy profile for different accounts.
+    const currentID = await lockExistingAuthor(req, originalDoc.id)
+    if (String(currentID ?? '') !== String(originalID ?? ''))
+      throw new APIError('This profile account changed while you were editing. Reload before saving.', 409)
+  }
+  let accountID = relationshipID(data.user ?? originalDoc?.user)
+  if (actor && !canEditBylines(req)) {
+    if (operation === 'update' && !sameID(originalID, actor.id)) throw new APIError('You can only edit your own author profile.', 403)
+    // Field access may strip a forged link before this hook. Either way the
+    // stored association always comes from authentication, never the request.
+    accountID = actor.id
+    data.user = actor.id
+  } else if (operation === 'create' && accountID == null && actor) {
+    accountID = actor.id
+    data.user = actor.id
+  }
+  // Preserve unlinked legacy bylines on ordinary edits. They are not silently
+  // claimed by matching a name/email or rewritten when an old post is saved.
+  if (accountID == null) {
+    if (operation === 'create') throw new APIError('Choose a linked staff account for this author.', 400)
+    if (originalID != null) throw new APIError('An existing author account link cannot be removed.', 400)
+    return data
+  }
+  if (data.user === null && originalID != null) throw new APIError('An existing author account link cannot be removed.', 400)
+  if (originalID != null && !sameID(originalID, accountID))
+    throw new APIError('An established author account link cannot be transferred. Change the article byline instead.', 400)
+  await lockAccount(req, accountID)
+  if (operation === 'create' || !sameID(originalID, accountID)) {
+    const existing = (await linkedAuthors(req, accountID)).docs[0]
+    if (existing && !sameID(existing.id, originalDoc?.id))
+      throw new APIError('This account already has an author profile. Edit the existing profile instead.', 409)
+  }
+  const account = await req.payload.findByID({ collection: 'admin-users', id: accountID,
+    depth: 0, overrideAccess: true, req })
+  if (!['super_admin', 'admin', 'moderator'].includes(account.role))
+    throw new APIError('Choose an existing staff account.', 400)
+  data.user = account.id
+  if (!String(data.name ?? originalDoc?.name ?? '').trim()) data.name = publicAccountName(account)
+  // This is a fallback, not an editorial override. Never copy private email.
+  data.avatarUrl = await resolveStaffPhoto(account)
+  return data
+}
+
+export const enforcePostAttribution: CollectionBeforeChangeHook = async ({ data, operation, originalDoc, req }) => {
+  const user = staffAccount(req)
+  // Trusted, server-side imports without an authenticated user retain their
+  // explicit legacy attribution; HTTP creation still requires staff access.
+  if (!user) return data
+  if (operation === 'create') {
+    data.createdBy = user.id
+    const author = await ensureOwnAuthor(req)
+    if (!canEditBylines(req) || !Array.isArray(data.authors) || data.authors.length === 0) data.authors = [author.id]
+    if (!canEditBylines(req)) data.contributors = []
+  } else {
+    data.createdBy = relationshipID(originalDoc?.createdBy) ?? null
+    if (data.authors === undefined) data.authors = originalDoc?.authors ?? []
+    if (!canEditBylines(req)) {
+      if (Array.isArray(data.authors) && data.authors.length === 0) data.authors = originalDoc?.authors ?? []
+      data.contributors = originalDoc?.contributors ?? []
+      if (!sameByline(data.authors, originalDoc?.authors)) {
+        const author = await ensureOwnAuthor(req)
+        if (!sameByline(data.authors, [author.id]))
+          throw new APIError('You can set your own byline. An editor must change other author credits.', 403)
+      }
+    }
+  }
+  return data
+}
+
+export const authorsProfileEndpoint: Endpoint = {
+  path: '/me/profile', method: 'post',
+  handler: async req => {
+    if (!staffAccount(req)) return Response.json({ errors: [{ message: 'Staff sign-in is required.' }] }, { status: 403 })
+    // Require a non-simple request; the admin fetch supplies JSON. This prevents
+    // cross-site HTML forms from provisioning a profile through a cookie.
+    if (!req.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
+      return Response.json({ errors: [{ message: 'Send an application/json request.' }] }, { status: 415 })
+    const ownsTransaction = await initTransaction(req)
+    try {
+      const author = await ensureOwnAuthor(req)
+      if (ownsTransaction) await commitTransaction(req)
+      return Response.json({ author: { id: author.id, name: author.name },
+        editURL: `${req.payload.config.routes.admin}/collections/authors/${encodeURIComponent(author.id)}` })
+    } catch (error) {
+      if (ownsTransaction) await killTransaction(req)
+      throw error
+    }
+  },
+}
+
+// Read-only choices expose real staff before they have an Authors record.
+// Loading an editor never provisions profiles or rewrites its historical byline.
+export const authorAccountsEndpoint: Endpoint = {
+  path: '/accounts', method: 'get',
+  handler: async req => {
+    const actor = staffAccount(req)
+    if (!actor) throw new APIError('Staff sign-in is required.', 403)
+    const url = new URL(req.url || 'http://localhost')
+    const page = Math.max(1, Math.min(10000, Math.trunc(Number(url.searchParams.get('page'))) || 1))
+    const query = (url.searchParams.get('q') || '').trim().slice(0, 100)
+    const result = canEditBylines(req) ? await req.payload.find({ collection: 'admin-users',
+      where: { and: [{ role: { in: ['super_admin', 'admin', 'moderator'] } },
+        ...(query ? [{ name: { contains: query } }] : [])] },
+      limit: 25, page, sort: 'name', depth: 0, overrideAccess: false, req,
+    }) : { docs: [actor], hasNextPage: false, nextPage: null }
+    const includeID = url.searchParams.get('include')
+    if (canEditBylines(req) && page === 1 && !query && includeID && /^\d+$/.test(includeID) && !result.docs.some(account => sameID(account.id, includeID))) {
+      try {
+        const preferred = await req.payload.findByID({ collection: 'admin-users', id: includeID, depth: 0, overrideAccess: false, req })
+        if (['super_admin', 'admin', 'moderator'].includes(preferred.role)) result.docs.unshift(preferred)
+      } catch { /* A deleted or inaccessible creator is not a selectable account. */ }
+    }
+    const photos = await resolveStaffPhotos(result.docs)
+    return Response.json({ accounts: result.docs.map((account, index) => ({
+      id: account.id, name: publicAccountName(account), avatarUrl: photos[index],
+    })), nextPage: result.hasNextPage ? result.nextPage : null })
+  },
+}
+export const accountAuthorProfileEndpoint: Endpoint = {
+  path: '/account/profile', method: 'post',
+  handler: async req => {
+    if (!staffAccount(req)) throw new APIError('Staff sign-in is required.', 403)
+    if (!req.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
+      throw new APIError('Send an application/json request.', 415)
+    const data = await req.json?.()
+    const accountID = relationshipID(data?.accountID)
+    if (accountID == null || !/^\d+$/.test(String(accountID))) throw new APIError('Choose a staff account.', 400)
+    const ownsTransaction = await initTransaction(req)
+    try {
+      const author = await ensureAccountAuthor(req, accountID)
+      if (ownsTransaction) await commitTransaction(req)
+      return Response.json({ author: { id: author.id, name: author.name },
+        editURL: `${req.payload.config.routes.admin}/collections/authors/${encodeURIComponent(author.id)}` })
+    } catch (error) {
+      if (ownsTransaction) await killTransaction(req)
+      throw error
+    }
+  },
+}
+
+// Run before field privacy filtering: the owner ID is needed to resolve the
+// current public image, but private account/contact fields remain hidden.
+export const hydrateAuthorPhoto = async ({ doc, req }: { doc: any; req: PayloadRequest }) => {
+  const accountID = relationshipID(doc.user)
+  if (accountID == null) return doc
+  try {
+    const account = await req.payload.findByID({ collection: 'admin-users', id: accountID,
+      depth: 0, overrideAccess: true, req })
+    doc.avatarUrl = await resolveStaffPhoto(account)
+  } catch { /* Preserve the last known image if the linked account is unavailable. */ }
+  return doc
+}
