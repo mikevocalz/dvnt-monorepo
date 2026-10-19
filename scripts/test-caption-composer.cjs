@@ -11,6 +11,8 @@ const fixture = {
     export const router={push:p=>state.navigations.push(p),replace:p=>state.navigations.push(p),back:()=>state.navigations.push('back')};
     export const createPost=async input=>{state.published.push(input);return {id:77}};
     export const uploadMultiple=async files=>{state.uploads.push(files);return files.map(file=>({success:true,type:file.type,url:'https://fixture.invalid/image.jpg'}))};`,
+  // App-assisted import has separate React/IndexedDB contracts; keep this caption harness offline.
+  './native-live-photo-handoff.web': `export const NativeLivePhotoHandoff=()=>null;`,
   'next/dynamic': `export default ()=>()=>null;`,
   'solito/navigation': `export {router as unused} from 'caption-fixture';import {router} from 'caption-fixture';export const useRouter=()=>router;export const useParams=()=>({id:'7'});`,
   'react-native': `export const Platform={OS:'web'};`,
