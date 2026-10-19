@@ -2,6 +2,7 @@ name: Blog author profiles
 on:
   pull_request:
     paths:
+      - 'apps/mobile/supabase/migrations/*author*.sql'
       - 'packages/cms/src/authors/**'
       - 'packages/cms/src/collections/Authors.ts'
       - 'packages/cms/src/collections/Posts.ts'
