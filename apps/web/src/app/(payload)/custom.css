@@ -451,3 +451,15 @@ a:not(.btn):not(.nav__link):hover {
 }
 .nav-group__toggle:hover { color: #3fdcff; }
 .nav-group { margin-bottom: 6px; }
+
+/* Blog posts use always-open, unnamed Payload groups. Keep every section in
+ * the same editable document flow, including on narrow screens and at zoom. */
+.dvnt-post-section {
+  min-width: 0;
+  margin-block: 0 24px;
+  padding-block: 8px;
+}
+.dvnt-post-section .group-field__title,
+.dvnt-post-section .field-description {
+  overflow-wrap: anywhere;
+}

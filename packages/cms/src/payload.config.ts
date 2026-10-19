@@ -25,8 +25,7 @@ import { Authors } from './collections/Authors'
 import { Media } from './collections/Media'
 import { Comments } from './collections/Comments'
 import { SentryAlerts } from './collections/SentryAlerts'
-import { EditorialChannels } from './collections/EditorialChannels'
-import { EditorialQueue } from './collections/EditorialQueue'
+import { getOptionalEditorialCollections } from './config/editorialCollections'
 import { appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint, appVerifyEndpoint } from './endpoints/appData'
 import { sentryWebhookEndpoint } from './endpoints/sentryWebhook'
 import { getServerSideURL } from './utilities/getURL'
@@ -130,7 +129,7 @@ export default buildConfig({
     api: '/payload-api',
   },
 
-  collections: [AdminUsers, Members, Reports, Events, Tickets, BanList, ModerationActions, Posts, Categories, Authors, Media, Comments, SentryAlerts, EditorialChannels, EditorialQueue],
+  collections: [AdminUsers, Members, Reports, Events, Tickets, BanList, ModerationActions, Posts, Categories, Authors, Media, Comments, SentryAlerts, ...getOptionalEditorialCollections(process.env.PAYLOAD_EDITORIAL_COLLECTIONS_READY)],
 
   // Read-only windows onto the live app DB (real members/events). See appData.ts.
   endpoints: [sentryWebhookEndpoint, appMembersEndpoint, appEventsEndpoint, appEventEndpoint, appEventUpdateEndpoint, appStatsEndpoint, appPromoteEndpoint, appSyncEndpoint, appVerifyEndpoint],

@@ -57,3 +57,29 @@ which proxies S3) instead of the static `/blog-media` rewrite.
 reference (so Payload can serve them). Until that's done, only newly-uploaded
 media will resolve via S3; the static `/blog-media` copies remain for old posts
 only while `S3_BUCKET` is unset.
+
+## Blog editor and optional editorial workspace
+
+Blog posts use one native Payload edit form with always-visible sections. The
+unnamed groups are presentation-only: persisted field paths and REST payloads
+stay unchanged, including `seo.*`, `meta.*`, relationships and Lexical content.
+Payload still owns draft saves, publication, validation, versions and document
+locking. Legacy SEO/cover fields remain editable for existing articles.
+
+The unfinished `editorial-channels` and `editorial-queue` workspace is **not
+registered by default**. Registering collections without their schema also
+changes Payload's shared document-lock relationship, which can break every
+existing collection's edit page (`editorial_channels_id does not exist`).
+
+Only set `PAYLOAD_EDITORIAL_COLLECTIONS_READY=true` after a separately reviewed
+migration has provisioned both collection tables, indexes/constraints and all
+Payload-managed relationship columns, and an isolated-database test has passed.
+The flag is an explicit readiness assertion, not a schema detector or migration
+runner. Keep it unset on the existing production schema. Do not enable
+`PAYLOAD_PUSH` in production. No migration is needed for the blog editor fix.
+
+Regression tests (no database or production credentials required):
+
+```bash
+node --import tsx --test packages/cms/src/posts/*.test.ts
+```
