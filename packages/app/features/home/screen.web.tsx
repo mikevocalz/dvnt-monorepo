@@ -1,3 +1,4 @@
+import { useFeedVideo } from "@dvnt/app/components/feed/use-feed-video.web";
 import { PostUploadStatus } from "@dvnt/app/components/feed/post-upload-status.web";
 import { VerifiedAdmissionBanner } from "@dvnt/app/components/verified-admission-banner.web";
 /**
@@ -473,7 +474,10 @@ function MasonryCell({
       ? media.livePhotoVideoUrl
       : media?.type === "animated_video"
         ? media.url
-        : "";
+        : isVideo
+          ? media.url
+          : "";
+  const playback = useFeedVideo(liveVideoUrl);
   const {
     likes,
     hasLiked,
@@ -519,10 +523,12 @@ function MasonryCell({
         ) : liveVideoUrl ? (
           // Live Photo / animated video — auto-playing muted loop.
           <video
+            ref={playback.ref}
+            data-feed-motion
             src={liveVideoUrl}
+            preload="metadata"
             poster={cover || undefined}
-            autoPlay
-            muted
+            muted={playback.muted}
             loop
             playsInline
             className="block w-full object-cover"
@@ -559,6 +565,19 @@ function MasonryCell({
           </span>
         ) : null}
       </CardLink>
+
+      {liveVideoUrl && (isVideo || playback.blocked) ? (
+        <div className="absolute top-2 left-2 flex gap-2">
+          {playback.blocked ? (
+            <button type="button" onClick={playback.play} className="min-h-11 rounded-lg bg-black/70 px-3 text-white" aria-label="Play video">Play</button>
+          ) : null}
+          {isVideo ? (
+            <button type="button" onClick={playback.toggleSound} className="min-h-11 rounded-lg bg-black/70 px-3 text-white" aria-label={playback.muted ? "Unmute video" : "Mute video"} aria-pressed={!playback.muted}>
+              {playback.muted ? "Sound on" : "Mute"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Actions layer: a sibling of the link, laid over its bottom edge.
           Always visible on touch (no hover); on desktop it reveals on hover or

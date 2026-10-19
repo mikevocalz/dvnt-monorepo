@@ -58,6 +58,7 @@ const adapters = {
   },
 };
 const sourceModules = {
+  "@dvnt/app/lib/events/event-type": "packages/app/lib/events/event-type.ts",
   "@dvnt/app/lib/events/flyer-layout": "packages/app/lib/events/flyer-layout.ts",
   "@dvnt/app/lib/posts/text-post": "packages/app/lib/posts/text-post.ts",
 };
