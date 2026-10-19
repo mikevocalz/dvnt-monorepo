@@ -22,6 +22,11 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dvnt-author-profiles-')
 (async () => {
   try {
     fs.symlinkSync(path.join(root, 'node_modules'), path.join(directory, 'node_modules'), 'junction');
+    // Copy the checked-in migration, never a caller-supplied SQL file. The child
+    // can read only this fixed fixture path and rewrites its schema locally.
+    const migration = path.join(directory, 'author-version-repair.sql');
+    fs.copyFileSync(path.join(root,
+      'apps/mobile/supabase/migrations/20261019153500_repair_author_version_fields.sql'), migration);
     await esbuild.build({
       entryPoints: [path.join(__dirname, 'fixtures/author-profiles/integration.ts')],
       outfile: path.join(directory, 'integration.mjs'), bundle: true,
@@ -33,6 +38,7 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dvnt-author-profiles-')
       env: {
         PATH: process.env.PATH, HOME: directory, NODE_ENV: 'development',
         DVNT_AUTHOR_TEST_DATABASE_URL: connection,
+        DVNT_AUTHOR_TEST_MIGRATION_PATH: migration,
         NEXT_TELEMETRY_DISABLED: '1', DO_NOT_TRACK: '1',
       },
     });

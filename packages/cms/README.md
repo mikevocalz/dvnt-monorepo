@@ -107,7 +107,8 @@ never claimed by matching an author name, slug or email.
   article. Contact email and the private staff-account link are not public REST
   fields. Profile links must use HTTP(S).
 
-No new columns, collection, unique index or migration is required. Provisioning
+No new collection or unique index is required. Existing databases must apply the
+author-history schema repair described below before author saves. Provisioning
 and initial linking serialize on the existing staff-account row in the same Payload
 Postgres transaction. Every nested Local API call receives that request. If an
 account already has several historical profiles, the lowest author ID is reused;
@@ -150,3 +151,17 @@ falls back to a safe cached CMS image. The picker batches its image lookups.
 Private account/contact information is never returned by the choices endpoint.
 An explicitly selected editorial Authors.avatar upload still overrides the app
 photo on the public card; leave that upload empty to follow the app profile.
+
+### Author history schema prerequisite
+
+Payload enables author version history by default. The June 2026 migrations
+added `user_id`, `avatar_url`, and `socials_onlyfans` only to `payload.authors`.
+Existing databases also need
+`20261019153500_repair_author_version_fields.sql` before profile saves work.
+It adds the three nullable version columns and the account FK/index without
+rewriting historical snapshots or disabling versioning. Apply through the normal
+approved database migration process; deploying the application does not apply it.
+
+The isolated author integration test now models this populated legacy schema,
+checks failed saves roll back before migration, applies the checked-in repair
+twice, and verifies full HTTP profile saves and version retrieval afterwards.

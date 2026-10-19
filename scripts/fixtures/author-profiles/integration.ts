@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import net from 'node:net'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { Pool } from 'pg'
 import sharp from 'sharp'
@@ -37,7 +39,7 @@ assert.throws(() => assertLocalConnection([[{ host: 'outside.invalid', port: 443
 assert.throws(() => assertLocalConnection([443, 'outside.invalid']), /outbound/)
 assert.throws(() => assertLocalConnection([[{ path: '/tmp/forbidden.sock' }]]), /Unix socket/)
 assert.doesNotThrow(() => assertLocalConnection([[{ host: '127.0.0.1', port: 5432 }]]))
-net.Socket.prototype.connect = function (...args: any[]) {
+net.Socket.prototype.connect = function (this: net.Socket, ...args: any[]) {
   assertLocalConnection(args)
   return connect.apply(this, args as any)
 } as any
@@ -50,13 +52,24 @@ globalThis.fetch = async (input, init) => {
 }
 
 const schema = 'payload_author_fixture'
+const migrationPath = path.join(process.cwd(), 'author-version-repair.sql')
+assert.equal(process.env.DVNT_AUTHOR_TEST_MIGRATION_PATH, migrationPath, 'Only the wrapper-copied repository migration may run')
+const checkedInMigration = readFileSync(migrationPath, 'utf8')
+assert.match(checkedInMigration, /\bpayload\._authors_v\b/, 'The repair must target the production author history schema')
+// This is the only change to the shipped SQL. It must never target a real
+// Payload schema, even in our empty, credential-isolated loopback database.
+const repairMigration = checkedInMigration.replace(/\bpayload\b/g, schema)
+assert.doesNotMatch(repairMigration, /\bpayload\b/)
 const db = new Pool({ connectionString: dbURL.href })
 let payload: Awaited<ReturnType<typeof getPayload>> | undefined
 let server: http.Server | undefined
 const results: string[] = []
 const pass = (message: string) => { results.push(message); console.log('PASS: ' + message) }
 const id = (value: any): number => Number(typeof value === 'object' && value !== null ? value.id : value)
-const ids = (values: any[]) => values.map(id)
+const ids = (values: any[] | null | undefined) => {
+  assert.ok(Array.isArray(values), 'Expected a relationship array')
+  return values.map(id)
+}
 const content = {
   root: { type: 'root', version: 1, direction: null, format: '', indent: 0, children: [
     { type: 'paragraph', version: 1, direction: null, format: '', indent: 0, children: [
@@ -342,6 +355,99 @@ try {
   assert.equal(visibleProfile.avatarUrl, changedPhoto, 'Read hydration follows linked profile instead of stale author copy')
   assert.equal(visibleProfile.user, undefined); assert.equal(visibleProfile.email, undefined)
   pass('real-account picker includes unprovisioned staff without writes, enforces roles, provisions once and preserves credits; public image hydrates privately')
+
+  // push:true alone cannot catch production drift: the adapter supplies every
+  // version column on a clean database. Reproduce the populated legacy table
+  // only after real requests have produced documents and historical versions.
+  assert.ok(payload.collections.authors.config.versions, 'Pinned Payload must retain author versioning')
+  const versionColumns = ['version_user_id', 'version_avatar_url', 'version_socials_onlyfans']
+  const inspectVersionSchema = async () => ({
+    columns: (await db.query(`select column_name, data_type, udt_name, is_nullable, column_default, character_maximum_length
+      from information_schema.columns where table_schema = $1 and table_name = '_authors_v' order by column_name`, [schema])).rows,
+    constraints: (await db.query(`select conname, pg_get_constraintdef(oid) as definition from pg_constraint
+      where conrelid = '${schema}._authors_v'::regclass order by conname`)).rows,
+    indexes: (await db.query(`select indexname, indexdef from pg_indexes
+      where schemaname = $1 and tablename = '_authors_v' order by indexname`, [schema])).rows,
+    tables: (await db.query(`select table_name from information_schema.tables where table_schema = $1 order by table_name`, [schema])).rows,
+  })
+  const pristineVersionSchema = await inspectVersionSchema()
+  assert.ok(!pristineVersionSchema.tables.some(table => table.table_name === '_authors_v_rels'),
+    'The adapter stores these has-one author relationships directly, without a history relation table')
+  for (const column of versionColumns) assert.ok(pristineVersionSchema.columns.some(field => field.column_name === column))
+  const authorRows = async () => (await db.query(`select to_jsonb(a) as doc from ${schema}.authors a order by id`)).rows
+  const historicRows = async () => (await db.query(`select to_jsonb(v) - 'version_user_id' - 'version_avatar_url' - 'version_socials_onlyfans' as doc
+    from ${schema}._authors_v v order by id`)).rows
+  const authorsBeforeDrift = await authorRows()
+  const historyBeforeDrift = await historicRows()
+  assert.ok(authorsBeforeDrift.length > 0 && historyBeforeDrift.length > 0, 'Regression must exercise populated, not empty, tables')
+  assert.ok(historyBeforeDrift.some(row => row.doc.parent_id === legacy.id), 'Historical unlinked author must have a version')
+  await db.query(`alter table ${schema}._authors_v
+    drop column version_user_id, drop column version_avatar_url, drop column version_socials_onlyfans`)
+  for (const column of versionColumns) {
+    await assert.rejects(db.query(`select ${column} from ${schema}._authors_v limit 1`),
+      (error: any) => error.code === '42703', `Legacy history must lack ${column}`)
+  }
+  const failedSave = await owner.browser.request(`/payload-api/authors/${ownerAuthorID}`, 'PATCH', {
+    ...publicFields, name: 'Must roll back while history is incomplete', bio: 'Must not persist after failed version save',
+  })
+  assert.equal(failedSave.status, 500, 'Missing version columns must reproduce the failing real author PATCH')
+  assert.deepEqual(await authorRows(), authorsBeforeDrift, 'Failed version insertion must roll back the entire document update')
+  assert.deepEqual(await historicRows(), historyBeforeDrift, 'Failed save must not alter existing historical versions')
+  pass('populated legacy author history reproduces the HTTP 500 and rolls back the entire profile save')
+
+  for (let application = 1; application <= 2; application += 1) {
+    await db.query(repairMigration)
+    assert.deepEqual(await inspectVersionSchema(), pristineVersionSchema,
+      `Repair application ${application} must match the pinned adapter columns, FK, indexes and tables exactly`)
+    assert.deepEqual(await authorRows(), authorsBeforeDrift, 'History repair must never rewrite live author documents')
+    assert.deepEqual(await historicRows(), historyBeforeDrift, 'History repair must preserve every original historical value')
+    const inferredHistory = await db.query(`select count(*)::int as count from ${schema}._authors_v
+      where version_user_id is not null or version_avatar_url is not null or version_socials_onlyfans is not null`)
+    assert.equal(inferredHistory.rows[0].count, 0, 'Unknown old ownership, avatars and OnlyFans fields must remain NULL, never backfilled')
+  }
+  pass('shipped repair is idempotent, matches adapter schema, adds no relation table and preserves all documents and historical data')
+
+  const repairedFields = { ...publicFields, name: 'Author saved after history repair', slug: 'author-saved-after-history-repair',
+    bio: 'Full author PATCH works against the repaired legacy schema.',
+    socials: { ...publicFields.socials, onlyfans: 'repaired_history_handle' } }
+  const repairedAuthor = (await owner.browser.ok(`/payload-api/authors/${ownerAuthorID}`, 'PATCH', repairedFields)).doc
+  const assertFullProfile = (doc: any, fields: typeof publicFields, account: typeof owner.user) => {
+    for (const key of ['name', 'slug', 'email', 'role', 'bio', 'profileUrl'] as const) assert.equal(doc[key], fields[key])
+    assert.equal(id(doc.user), account.id)
+    assert.equal(doc.avatarUrl, account.avatarUrl)
+    assert.equal(id(doc.avatar), avatar.id)
+    assert.deepEqual(doc.socials, fields.socials)
+  }
+  assertFullProfile(repairedAuthor, repairedFields, owner.user)
+  const repairedVersions = await admin.browser.ok(`/payload-api/authors/versions?where[parent][equals]=${ownerAuthorID}&depth=0&limit=100`)
+  const savedVersion = repairedVersions.docs.find((entry: any) => entry.version.name === repairedFields.name)
+  assert.ok(savedVersion, 'HTTP version listing must include the repaired profile save')
+  assertFullProfile(savedVersion.version, repairedFields, owner.user)
+  const readVersion = await admin.browser.ok(`/payload-api/authors/versions/${savedVersion.id}?depth=0`)
+  assertFullProfile(readVersion.version, repairedFields, owner.user)
+  const oldVersion = historyBeforeDrift.find(row => row.doc.parent_id === legacy.id)!.doc
+  const historicalRead = await admin.browser.ok(`/payload-api/authors/versions/${oldVersion.id}?depth=0`)
+  assert.equal(historicalRead.version.name, oldVersion.version_name, 'Pre-migration version remains readable')
+  assert.equal(historicalRead.version.user, null, 'Unlinked historical author must remain unlinked')
+
+  const newWriter = await staff('created-after-history-repair', 'moderator')
+  const createdFields = { ...publicFields, name: 'New author after history repair', slug: 'new-author-after-history-repair',
+    socials: { ...publicFields.socials, onlyfans: 'created_history_handle' } }
+  const createdAuthor = (await newWriter.browser.ok('/payload-api/authors', 'POST', createdFields)).doc
+  assertFullProfile(createdAuthor, createdFields, newWriter.user)
+  const createdVersions = await admin.browser.ok(`/payload-api/authors/versions?where[parent][equals]=${createdAuthor.id}&depth=0&limit=100`)
+  assert.equal(createdVersions.totalDocs, 1, 'Real HTTP author creation must save its first version')
+  assertFullProfile(createdVersions.docs[0].version, createdFields, newWriter.user)
+  const storedNewVersions = await db.query(`select parent_id, version_user_id, version_avatar_url, version_socials_onlyfans
+    from ${schema}._authors_v where id = any($1::int[]) order by parent_id`, [[savedVersion.id, createdVersions.docs[0].id]])
+  assert.deepEqual(storedNewVersions.rows, [
+    { parent_id: ownerAuthorID, version_user_id: owner.user.id, version_avatar_url: owner.user.avatarUrl, version_socials_onlyfans: repairedFields.socials.onlyfans },
+    { parent_id: createdAuthor.id, version_user_id: newWriter.user.id, version_avatar_url: newWriter.user.avatarUrl, version_socials_onlyfans: createdFields.socials.onlyfans },
+  ], 'Successful HTTP saves must persist all three repaired fields, not merely hide a version failure')
+  const oldIDs = new Set(historyBeforeDrift.map(row => row.doc.id))
+  assert.deepEqual((await historicRows()).filter(row => oldIDs.has(row.doc.id)), historyBeforeDrift,
+    'Subsequent saves must leave pre-migration history unchanged')
+  pass('repaired legacy schema supports full HTTP profile update, author creation and historical/current version reads with all three fields stored')
   console.log(`${results.length} real HTTP/PostgreSQL author-profile integration groups passed; no external accounts or database used`)
 } finally {
   console.log('CLEANUP: fixture HTTP server')
