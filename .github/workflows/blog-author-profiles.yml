@@ -1,0 +1,56 @@
+name: Blog author profiles
+on:
+  pull_request:
+    paths:
+      - 'packages/cms/src/authors/**'
+      - 'packages/cms/src/collections/Authors.ts'
+      - 'packages/cms/src/collections/Posts.ts'
+      - 'packages/cms/src/collections/AdminUsers.ts'
+      - 'packages/cms/src/collections/Media.ts'
+      - 'packages/cms/src/components/**'
+      - 'packages/cms/src/access/**'
+      - 'packages/cms/src/posts/**'
+      - 'packages/cms/src/payload.config.ts'
+      - 'apps/web/src/app/(payload)/**'
+      - 'scripts/test-author-profiles-integration.cjs'
+      - 'scripts/fixtures/author-profiles/**'
+      - '.github/workflows/blog-author-profiles.yml'
+permissions:
+  contents: read
+jobs:
+  real-author-profile-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: dvnt_author_fixture
+          POSTGRES_PASSWORD: disposable-runner-fixture-only
+          POSTGRES_DB: dvnt_author_fixture
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dvnt_author_fixture -d dvnt_author_fixture"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install pinned fixture dependencies
+        run: |
+          if ! pnpm install --frozen-lockfile --ignore-scripts; then
+            rm -rf node_modules
+            pnpm install --frozen-lockfile --ignore-scripts --force
+          fi
+      - name: Real Payload authentication, profile ownership and transaction races
+        env:
+          DVNT_AUTHOR_TEST_DATABASE_URL: postgresql://dvnt_author_fixture:disposable-runner-fixture-only@127.0.0.1:5432/dvnt_author_fixture
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-author-profiles-integration.cjs

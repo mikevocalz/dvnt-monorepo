@@ -81,7 +81,7 @@ export default buildConfig({
       },
       beforeLogin: ['@dvnt/cms/components/BeforeLogin'],
       beforeDashboard: ['@dvnt/cms/components/SyncFromApp'],
-      afterNavLinks: ['@dvnt/cms/components/ObservabilityNavLink', '@dvnt/cms/components/KeepNavInteractive'],
+      afterNavLinks: ['@dvnt/cms/components/AuthorProfileLink', '@dvnt/cms/components/ObservabilityNavLink', '@dvnt/cms/components/KeepNavInteractive'],
       views: {
         // ONE portal: the admin homepage IS the ops console (Overview ·
         // Members · Events · Reports · Health · Team); the sidebar is the

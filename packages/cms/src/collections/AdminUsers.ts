@@ -35,6 +35,7 @@ export const AdminUsers: CollectionConfig = {
     ],
   },
   fields: [
+    { name: 'authorProfile', type: 'ui', admin: { components: { Field: '@dvnt/cms/components/AuthorProfileLink' } } },
     { name: 'name', type: 'text' },
     // Mirrored from the app user (public.users) when promoted, so the console
     // Team list can show the same avatar. Rounded-square per DVNT.

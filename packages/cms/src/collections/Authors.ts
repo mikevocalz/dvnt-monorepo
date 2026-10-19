@@ -1,76 +1,48 @@
-// src/collections/Authors.ts — editorial bylines for blog posts.
-// An Author is a public-facing editorial identity (the "About the author" card:
-// title, bio, socials), but it is ALWAYS backed by a real user — a moderator in
-// `admin-users`. Blog authors come from moderators (who are users), so every
-// author MUST link to one (`user`, enforced below). Name + avatar SYNC from that
-// linked user at save time, so the byline is the user's identity; author-level
-// fields act as optional editorial overrides (e.g. a pen name, a staff title).
-import type { CollectionConfig, CollectionBeforeChangeHook } from 'payload'
-import { isAdminPlus } from '../access/roles'
+// Public editorial profiles backed by an existing CMS staff account. The same
+// account is used by local admin sign-in and the Better Auth staff bridge.
+import type { CollectionConfig } from 'payload'
 import { slugField } from '../fields/slug'
-
-// Pull the byline identity from the linked moderator/user. Avatar always mirrors
-// the user's app avatar; name defaults to the user's name unless the author set
-// an explicit one (pen name / editorial byline).
-const syncAuthorFromUser: CollectionBeforeChangeHook = async ({ data, req }) => {
-  const raw = (data as any)?.user
-  if (raw == null) return data
-  const userId = typeof raw === 'object' ? (raw.value ?? raw.id) : raw
-  if (userId == null) return data
-  try {
-    const u = await req.payload.findByID({
-      collection: 'admin-users',
-      id: userId,
-      depth: 0,
-      overrideAccess: true,
-    })
-    if (u) {
-      if ((u as any).avatarUrl) (data as any).avatarUrl = (u as any).avatarUrl
-      if (!(data as any).name?.trim() && (u as any).name) (data as any).name = (u as any).name
-    }
-  } catch {
-    /* a bad link shouldn't block saving; validate() already guards presence */
-  }
-  return data
-}
+import { authorStaffAccess, authorEditorAccess, updateAuthorAccess,
+  authorsProfileEndpoint, prepareAuthorProfile } from '../authors/profiles'
 
 export const Authors: CollectionConfig = {
   slug: 'authors',
   dbName: 'authors',
   access: {
     read: () => true,
-    create: isAdminPlus,
-    update: isAdminPlus,
-    delete: isAdminPlus,
+    create: authorStaffAccess,
+    update: updateAuthorAccess,
+    delete: authorEditorAccess,
   },
   admin: {
     group: 'Content',
-    description: 'Blog bylines (linked to staff users).',
+    description: 'Your public writer profile. Changes appear on every article using this byline.',
     useAsTitle: 'name',
     defaultColumns: ['name', 'slug', 'role'],
     listSearchableFields: ['name', 'email'],
   },
   hooks: {
-    beforeChange: [syncAuthorFromUser],
+    beforeChange: [prepareAuthorProfile],
   },
+  endpoints: [authorsProfileEndpoint],
   fields: [
-    // The user (moderator) this byline belongs to. Required — every blog author
-    // is a real user. Enforced via validate (not a DB NOT NULL) so the column
-    // stays nullable and the change migrates cleanly onto existing author rows.
+    // Reuse the existing nullable relationship. New profiles require an
+    // account in the write hook; historical unlinked bylines stay untouched.
     {
       name: 'user',
       type: 'relationship',
       relationTo: 'admin-users',
-      // required at the application layer; see note above.
-      validate: (value: unknown) => (value ? true : 'An author must be linked to a user (moderator).'),
+      // New profiles require a real account in the hook. Legacy rows remain
+      // nullable and are never claimed automatically. Keep the existing schema.
+      access: { create: authorEditorAccess, update: authorEditorAccess, read: authorStaffAccess },
       admin: {
         position: 'sidebar',
-        description: 'The moderator/user this byline belongs to. Name + avatar sync from them.',
+        description: 'Your signed-in staff account is linked automatically. Editors can link another existing staff account.',
       },
     },
     { name: 'name', type: 'text', required: true, admin: { description: 'Defaults to the linked user; set to override (pen name / byline).' } },
     ...slugField('name'),
-    { name: 'email', type: 'email', admin: { position: 'sidebar' } },
+    { name: 'email', type: 'email', access: { read: authorStaffAccess }, admin: { position: 'sidebar', description: 'Editorial contact email, visible only to signed-in staff.' } },
     { name: 'role', type: 'text', admin: { description: 'e.g. Editor-at-Large, Photographer, Staff Writer' } },
     { name: 'bio', type: 'textarea' },
     // Editorial avatar override (upload). When empty the card uses `avatarUrl`,
@@ -80,6 +52,7 @@ export const Authors: CollectionConfig = {
     {
       name: 'avatarUrl',
       type: 'text',
+      access: { create: () => false, update: () => false },
       admin: { readOnly: true, position: 'sidebar', description: 'Synced from the linked user’s avatar.' },
     },
     {

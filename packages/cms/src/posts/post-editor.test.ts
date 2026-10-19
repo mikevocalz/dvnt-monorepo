@@ -9,7 +9,7 @@ import { Posts } from '../collections/Posts.ts'
 // Snapshot of the pre-layout collection's persisted schema. Presentation groups
 // must not rename a column, relationship, array table or stored JSON path.
 const previousSchema = JSON.parse(readFileSync(new URL('./__fixtures__/post-schema.json', import.meta.url), 'utf8'))
-const flatFields = Posts.fields.flatMap((field: any) => field.type === 'group' && !field.name ? field.fields : [field])
+const flatFields = Posts.fields.flatMap((field: any) => field.type === 'group' && !field.name ? field.fields : [field]).filter((field: any) => field.type !== 'ui')
 const field = (name: string): any => flatFields.find((item: any) => item.name === name)
 
 const content = {
