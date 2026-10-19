@@ -305,6 +305,7 @@ function CommentForm({
         multiline
         numberOfLines={3}
         maxLength={4000}
+        accessibilityLabel={parentId ? 'Write a reply' : 'Add a comment'}
         placeholder={parentId ? 'Write a reply…' : 'Add a comment…'}
         placeholderTextColor="rgba(245,245,247,0.4)"
         style={textarea as any}
@@ -366,6 +367,7 @@ function EditForm({
         numberOfLines={3}
         maxLength={4000}
         autoFocus
+        accessibilityLabel="Edit your comment"
         placeholder="Edit your comment…"
         placeholderTextColor="rgba(245,245,247,0.4)"
         style={textarea as any}
@@ -444,7 +446,9 @@ const textarea = {
   borderColor: 'rgba(255,255,255,0.12)',
   backgroundColor: 'rgba(8,10,20,0.6)',
   padding: 12,
-  fontSize: 14,
+  // Smaller text makes iOS zoom the page when the keyboard opens. Keep the
+  // editable text readable without changing the user's pinch-zoom settings.
+  fontSize: 16,
   color: '#FAFAF9',
   minHeight: 80,
 }

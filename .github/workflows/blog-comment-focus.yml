@@ -1,0 +1,46 @@
+name: Blog comment mobile focus
+on:
+  pull_request:
+    paths:
+      - 'apps/web/src/components/Comments/**'
+      - 'apps/web/src/app/(frontend)/posts/**'
+      - 'apps/web/src/app/(frontend)/styles/dvnt-theme.css'
+      - 'packages/app/components/app-shell.web.tsx'
+      - 'scripts/test-blog-comment-focus.cjs'
+      - '.github/workflows/blog-comment-focus.yml'
+permissions:
+  contents: read
+jobs:
+  comment-focus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated rendering tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/blog-tests" --no-package-lock --no-save --legacy-peer-deps esbuild@0.28.2 react@19.2.3 react-dom@19.2.3 react-native-web@0.21.2 @expo/html-elements@56.0.1 lucide-react@1.17.0 sonner@2.0.7 playwright@1.64.1
+          "$RUNNER_TEMP/blog-tests/node_modules/.bin/playwright" install --with-deps chromium webkit
+      - name: Record exact pre-fix focus conditions
+        env:
+          NODE_PATH: ${{ runner.temp }}/blog-tests/node_modules
+          BLOG_COMMENT_OUTPUT_DIR: ${{ runner.temp }}/blog-focus-evidence
+        run: node scripts/test-blog-comment-focus.cjs --baseline
+      - name: Test actual article, comment form and responsive shell
+        if: success() || failure()
+        env:
+          NODE_PATH: ${{ runner.temp }}/blog-tests/node_modules
+          BLOG_COMMENT_OUTPUT_DIR: ${{ runner.temp }}/blog-focus-evidence
+        run: node scripts/test-blog-comment-focus.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blog-comment-focus-evidence
+          path: ${{ runner.temp }}/blog-focus-evidence
+          if-no-files-found: error
+          retention-days: 7
