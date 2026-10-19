@@ -48,10 +48,9 @@ export function validateLivePhotoFiles(still: File | null, motion: File | null):
 }
 
 /** Metadata alone does not prove the browser can decode an Apple HEVC clip. */
-export function readPlayableLivePhotoDuration(file: File): Promise<number | null> {
+export function readPlayableLivePhotoSource(uri: string): Promise<number | null> {
   return new Promise(resolve => {
     if (typeof document === "undefined") return resolve(null);
-    const url = URL.createObjectURL(typedOriginal(file, fileMime(file)));
     const video = document.createElement("video");
     let settled = false;
     let timeout: ReturnType<typeof setTimeout>;
@@ -62,7 +61,6 @@ export function readPlayableLivePhotoDuration(file: File): Promise<number | null
       video.onloadeddata = null; video.oncanplay = null; video.onerror = null;
       video.removeAttribute("src");
       video.load();
-      URL.revokeObjectURL(url);
       resolve(duration);
     };
     const ready = () => {
@@ -72,8 +70,14 @@ export function readPlayableLivePhotoDuration(file: File): Promise<number | null
     video.onerror = () => done(null);
     timeout = setTimeout(() => done(null), 10_000);
     video.preload = "auto"; video.muted = true; video.playsInline = true;
-    video.src = url;
+    video.src = uri;
   });
+}
+
+export async function readPlayableLivePhotoDuration(file: File): Promise<number | null> {
+  const url = URL.createObjectURL(typedOriginal(file, fileMime(file)));
+  try { return await readPlayableLivePhotoSource(url); }
+  finally { URL.revokeObjectURL(url); }
 }
 
 /** The user supplies both halves explicitly. File names are NEVER used to pair assets. */
