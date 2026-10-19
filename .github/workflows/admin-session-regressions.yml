@@ -8,6 +8,8 @@ on:
       - 'packages/cms/src/auth/**'
       - 'packages/app/lib/auth/**'
       - 'scripts/test-admin-session-browser.cjs'
+      - 'scripts/test-admin-session-integration.cjs'
+      - 'scripts/fixtures/admin-session/**'
       - '.github/workflows/admin-session-regressions.yml'
 permissions:
   contents: read
@@ -20,3 +22,33 @@ jobs:
         with:
           node-version: 24
       - run: node --test apps/web/src/dashboard/lib/admin-sign-out.test.ts packages/app/lib/auth/admin-entry.test.ts packages/app/lib/auth/return-to.test.ts packages/app/lib/auth/account-token-cache.test.ts packages/cms/src/auth/betterAuthSession.test.ts
+  real-session-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install fixture dependencies
+        run: |
+          if ! pnpm install --frozen-lockfile --ignore-scripts; then
+            rm -rf node_modules
+            pnpm install --frozen-lockfile --ignore-scripts --force
+          fi
+      - name: Create disposable runner-only PostgreSQL database
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE dvnt_admin_fixture LOGIN PASSWORD 'disposable-runner-fixture-only';"
+          sudo -u postgres createdb -O dvnt_admin_fixture dvnt_admin_auth_fixture
+      - name: Real Payload and Better Auth handlers, cookies and database sessions
+        env:
+          DVNT_ADMIN_TEST_DATABASE_URL: postgresql://dvnt_admin_fixture:disposable-runner-fixture-only@127.0.0.1:5432/dvnt_admin_auth_fixture
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-admin-session-integration.cjs
+      - name: Remove disposable fixture database
+        if: always()
+        run: |
+          sudo -u postgres dropdb --if-exists dvnt_admin_auth_fixture
+          sudo -u postgres dropuser --if-exists dvnt_admin_fixture
