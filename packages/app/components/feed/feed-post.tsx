@@ -58,16 +58,14 @@ import {
   useState,
   type ElementRef,
 } from "react";
-import { useIsFocused } from "@react-navigation/native";
+import { FeedInlineVideo, useFeedPlaybackEnabled } from "./feed-inline-video";
+import { feedAudio, syncFeedPlayer } from "./native-feed-playback";
 import {
   useVideoLifecycle,
   safePlay,
-  safePause,
-  safeMute,
   safeSeek,
   safeGetCurrentTime,
   safeGetDuration,
-  cleanupPlayer,
   logVideoHealth,
 } from "@dvnt/app/lib/video-lifecycle";
 import { DVNTSeekBar } from "@dvnt/app/components/media/DVNTSeekBar";
@@ -242,14 +240,15 @@ function FeedPostVideo({
   const player = useVideoPlayer(videoUrl, (p) => {
     if (p && isMountedRef.current) {
       try {
-        p.loop = false;
-        p.muted = isMuted;
+        p.loop = true;
+        // Start silent; the visibility effect claims sound ownership before unmuting.
+        p.muted = true;
         // Never preempt background audio from feed scrolling. Muted
         // videos: always mixWithOthers. Unmuted (user tapped to
         // hear it): duck other audio (lower their Spotify) rather
         // than stopping it entirely — matches the user contract
         // "audio should only stop when a story plays".
-        p.audioMixingMode = isMuted ? "mixWithOthers" : "duckOthers";
+        p.audioMixingMode = "mixWithOthers";
         logVideoHealth("FeedPost", "player configured", { id });
       } catch (error) {
         logVideoHealth("FeedPost", "config error", { error: String(error) });
@@ -257,32 +256,24 @@ function FeedPostVideo({
     }
   });
 
-  // Mute sync — also re-assigns audioMixingMode so toggling the speaker
-  // in the feed switches between "don't touch background audio" (muted)
-  // and "duck it while video plays" (unmuted). Without this the mode
-  // stays whatever it was on first render.
-  useEffect(() => {
-    if (!player) return;
-    safeMute(player, isMountedRef, isMuted, "FeedPost");
-    try {
-      player.audioMixingMode = isMuted ? "mixWithOthers" : "duckOthers";
-    } catch {}
-  }, [player, isMuted, isMountedRef]);
-
-  // Play/pause based on focus + active + not fullscreen
+  // One boundary controls visibility, foreground and sound ownership. Claim
+  // sound before unmuting so standalone/carousel effect ordering cannot leave
+  // two players audible during a scroll transition.
   useEffect(() => {
     if (!player) return;
     if (isSafeToOperate()) {
-      if (isFocused && isActivePost) {
-        safePlay(player, isMountedRef, "FeedPost");
-      } else {
-        safePause(player, isMountedRef, "FeedPost");
+      try {
+        syncFeedPlayer(player, isFocused && isActivePost, isMuted);
+      } catch (error) {
+        logVideoHealth("FeedPost", "playback sync error", { error: String(error) });
       }
     }
     return () => {
-      if (player) cleanupPlayer(player, "FeedPost");
+      feedAudio.release(player);
+      // Do not rewind here: this effect also reruns for a sound toggle.
+      try { player.pause(); } catch { /* Native player already released. */ }
     };
-  }, [isFocused, player, isActivePost, id, isMountedRef, isSafeToOperate]);
+  }, [isFocused, player, isActivePost, isMuted, id, isMountedRef, isSafeToOperate]);
 
   // Poll seek bar progress
   useEffect(() => {
@@ -568,7 +559,7 @@ function FeedPostComponent({
   const isVideo = mediaMode === "single-video";
   const currentSlide = currentSlides[id] || 0;
 
-  const isFocused = useIsFocused();
+  const isFocused = useFeedPlaybackEnabled();
 
   // Kept whole so it can be handed to <FeedPostVideo/>: the player's guards and
   // this component's handlers must share one mount flag, or a teardown races.
@@ -1122,6 +1113,9 @@ function FeedPostComponent({
                               // that has one — not just the first.
                               showBadge
                               isPlaying={isActivePost && isFocused && index === currentSlide}
+                              videoSlot={medium.type === "video" && isActivePost && isFocused && index === currentSlide ? (
+                                <FeedInlineVideo uri={medium.url} isPlaying />
+                              ) : undefined}
                             />
                           ) : (
                             <View
