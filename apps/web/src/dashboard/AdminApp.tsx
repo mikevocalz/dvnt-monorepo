@@ -3,7 +3,9 @@
 // Plain semantic HTML + CSS (ui.css). No react-native-web — robust, no
 // SSR/white-panel issues. Client-only (auth + fetch). Same DVNT design family.
 import { useEffect, useState } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { adminQueryClient } from './lib/admin-session'
+import { AdminSignOut } from './AdminSignOut'
 import { payload, type Role } from './lib/payload'
 import { RoleProvider, useRole } from './lib/role'
 import { OverviewScreen } from './screens/OverviewScreen'
@@ -15,8 +17,6 @@ import { TeamScreen } from './screens/TeamScreen'
 import { SentryHealthScreen } from './screens/SentryHealthScreen'
 import { MessageButtonCommandCenter } from './screens/MessageButtonCommandCenter'
 import './ui.css'
-
-const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } })
 
 const BASE_TABS: [string, string][] = [
   ['overview', 'Overview'],
@@ -39,7 +39,7 @@ const CMS_LINKS: [string, string][] = [
 
 export function AdminApp() {
   return (
-    <QueryClientProvider client={qc}>
+    <QueryClientProvider client={adminQueryClient}>
       <div className="dv">
         <div className="dv__wash" aria-hidden />
         <Gate />
@@ -49,31 +49,30 @@ export function AdminApp() {
 }
 
 function Gate() {
-  const [state, setState] = useState<'loading' | 'in' | 'out'>('loading')
+  const [state, setState] = useState<'loading' | 'in' | 'out' | 'signing-out'>('loading')
   const [role, setRole] = useState<Role>('moderator')
   useEffect(() => {
+    let active = true
     payload
       .me()
       .then(({ user }) => {
+        if (!active) return
         if (user) {
           setRole(user.role)
-          setState('in')
-        } else setState('out')
+          setState(current => current === 'signing-out' ? current : 'in')
+        } else setState(current => current === 'signing-out' ? current : 'out')
       })
-      .catch(() => setState('out'))
+      .catch(() => { if (active) setState(current => current === 'signing-out' ? current : 'out') })
+    return () => { active = false }
   }, [])
 
-  const signOut = async () => {
-    await payload.logout().catch(() => {})
-    setState('out')
-  }
-
+  if (state === 'signing-out') return <AdminSignOut autoStart />
   if (state === 'loading')
     return <div className="dv-center"><span style={{ color: 'var(--dim)' }}>Loading…</span></div>
   if (state === 'out') return <Login />
   return (
     <RoleProvider role={role}>
-      <Console onSignOut={signOut} />
+      <Console onSignOut={() => setState('signing-out')} />
     </RoleProvider>
   )
 }

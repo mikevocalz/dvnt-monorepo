@@ -100,7 +100,7 @@ export type Paginated<T> = {
 }
 
 export const payload = {
-  me: () => req<{ user: { id: string; email: string; role: Role } | null }>('/admin-users/me'),
+  me: () => req<{ user: { id: string; email: string; role: Role } | null }>('/admin-users/me', { cache: 'no-store' }),
 
   login: (email: string, password: string) =>
     req('/admin-users/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
