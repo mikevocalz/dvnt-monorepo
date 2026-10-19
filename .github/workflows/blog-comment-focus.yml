@@ -42,5 +42,5 @@ jobs:
         with:
           name: blog-comment-focus-evidence
           path: ${{ runner.temp }}/blog-focus-evidence
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7

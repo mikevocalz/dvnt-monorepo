@@ -181,9 +181,20 @@ async function runCase(browser, name, viewport, isMobile, origin) {
     for (let i = 0; i < 3; i++) { await center(input); await focusVisible(input); await input.fill(`Repeat ${i}`); await input.press('Tab'); await keepBelowFold('repeat focus'); }
     await page.getByRole('heading', { name: 'Comments', exact: true }).click();
     assert.equal((await metrics()).scrollBehavior, 'smooth', 'normal article smooth scrolling remains available');
+    await page.screenshot({ path: path.join(out, `${name}-${baseline ? 'baseline' : 'after'}-submitted.png`) });
+    // Exercise the real table-of-contents action after leaving the composer;
+    // computed CSS alone would not catch a broken anchor interaction.
+    const articleUrl = page.url();
+    if (isMobile) await press(page.getByRole('button', { name: 'Toggle table of contents' }));
+    await press(page.getByRole('button', { name: 'First section', exact: true }));
+    await page.waitForFunction(() => {
+      const heading = document.getElementById('first-section');
+      return heading && Math.abs(heading.getBoundingClientRect().top - 100) < 3;
+    });
+    assert.equal(page.url(), articleUrl, 'TOC scrolling does not navigate away');
+    assert.equal(await input.inputValue(), 'Repeat 2', 'TOC does not discard the comment draft');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     assert.equal((await metrics()).scrollBehavior, 'auto', 'reduced motion remains respected');
-    await page.screenshot({ path: path.join(out, `${name}-${baseline ? 'baseline' : 'after'}-submitted.png`) });
     assert.deepEqual(errors, [], 'no error-boundary-triggering render errors');
     const result = { name, baseline, before, focused, after: await metrics(), requests: requests.map(r => ({ method: r.method, parentId: r.body.parentId })), physicalIOSKeyboardTested: false };
     fs.writeFileSync(path.join(out, `${name}-${baseline ? 'baseline' : 'result'}.json`), JSON.stringify(result, null, 2));
