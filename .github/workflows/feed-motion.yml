@@ -29,7 +29,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/feed-motion" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.0.11
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
-          node "$RUNNER_TEMP/feed-motion/node_modules/playwright/cli.js" install --with-deps chromium
+          node "$RUNNER_TEMP/feed-motion/node_modules/playwright/cli.js" install --with-deps chrome
       - name: Playback policy, native component lifecycle and paired upload
         env:
           NODE_PATH: ${{ runner.temp }}/feed-motion/node_modules
@@ -38,7 +38,8 @@ jobs:
           node --test packages/app/components/feed/native-feed-playback.test.ts packages/app/components/feed/web-video-playback.test.ts packages/app/lib/media/live-photo-upload.test.ts
           node scripts/test-feed-motion-dom.cjs
           node scripts/test-live-photo-lifecycle.cjs
-      - name: Real Chromium decoding, sound, scroll, source replacement and pause
+      - name: Real Chrome decoding, sound, scroll, source replacement and pause
         env:
           NODE_PATH: ${{ runner.temp }}/feed-motion/node_modules
+          FEED_BROWSER_CHANNEL: chrome
         run: node scripts/test-feed-motion-browser.cjs

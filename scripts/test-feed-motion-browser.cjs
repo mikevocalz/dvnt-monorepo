@@ -13,6 +13,8 @@ const root = path.resolve(__dirname, '..');
 (async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-motion-'));
   let browser, server;
+  // Branded Chrome includes the H.264/AAC codecs used by production uploads.
+  const browserChoice=process.env.FEED_BROWSER_CHANNEL ? {channel:process.env.FEED_BROWSER_CHANNEL} : (fs.existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{});
   try {
     execFileSync('ffmpeg', ['-loglevel','error','-f','lavfi','-i','testsrc=size=120x120:rate=15','-f','lavfi','-i','sine=frequency=440:sample_rate=44100','-t','4','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-movflags','+faststart',path.join(dir,'clip.mp4')]);
     await build({ stdin: { contents: `
@@ -29,7 +31,7 @@ const root = path.resolve(__dirname, '..');
       else res.end('<html><body><div id="root"></div><script src="/app.js"></script></body></html>');
     });
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-    browser=await chromium.launch({headless:true, ...(fs.existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{}), args:['--no-sandbox']});
+    browser=await chromium.launch({headless:true, ...browserChoice, args:['--no-sandbox']});
     const page=await browser.newPage({viewport:{width:400,height:700}});
     const errors=[]; page.on('pageerror', e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -66,7 +68,7 @@ const root = path.resolve(__dirname, '..');
     // The legacy user-gesture-required override blocks even muted media.
     // Exercise its explicit Play fallback separately from normal browser policy.
     await browser.close();
-    browser=await chromium.launch({headless:true, ...(fs.existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{}), args:['--no-sandbox','--autoplay-policy=user-gesture-required']});
+    browser=await chromium.launch({headless:true, ...browserChoice, args:['--no-sandbox','--autoplay-policy=user-gesture-required']});
     const strictPage=await browser.newPage({viewport:{width:400,height:700}});
     await strictPage.goto(`http://127.0.0.1:${server.address().port}`);
     await strictPage.getByRole('button',{name:'Play',exact:true}).first().waitFor();
