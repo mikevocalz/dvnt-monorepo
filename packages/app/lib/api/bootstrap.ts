@@ -143,6 +143,8 @@ export interface BootstrapEventsResponse {
   events: {
     id: string;
     title: string;
+    category?: string;
+    event_type?: string | null;
     description: string;
     date: string;
     month: string;

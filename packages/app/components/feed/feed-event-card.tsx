@@ -1,3 +1,4 @@
+import { eventTypeLabel } from "@dvnt/app/lib/events/event-type";
 /** Feed event flyer: square artwork, with details in a separate panel. */
 import { View, Text } from "react-native";
 import { Image } from "expo-image";
@@ -194,7 +195,7 @@ export const FeedEventCard = memo(function FeedEventCard({
                       textTransform: "uppercase",
                     }}
                   >
-                    {event.category}
+                    {eventTypeLabel(event.category)}
                   </Text>
                 </View>
               ) : (

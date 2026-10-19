@@ -1,3 +1,4 @@
+import { eventTypeLabel, eventCardActionLabel } from "@dvnt/app/lib/events/event-type";
 /**
  * Events home — WEB (@dvnt/app/features/events/events-list). Mirrors the mobile
  * events screen: date header + NSFW toggle, search bar with filter button, tabs
@@ -680,7 +681,7 @@ function LargeEventCard({
         ) : null}
         {e.category ? (
           <span className="px-2.5 py-1 rounded-lg bg-white/15 backdrop-blur text-white text-[10px] font-bold uppercase tracking-wider">
-            {e.category}
+            {eventTypeLabel(e.category)}
           </span>
         ) : null}
       </div>
@@ -709,7 +710,7 @@ function LargeEventCard({
             </span>
           ) : (
             <span className="px-5 py-1.5 rounded-lg bg-[#3EA4E5] text-white text-sm font-bold">
-              RSVP
+              {eventCardActionLabel(e.price)}
             </span>
           )}
         </div>

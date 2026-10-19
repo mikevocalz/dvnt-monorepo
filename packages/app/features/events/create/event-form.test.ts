@@ -64,3 +64,9 @@ test("promo code templates read as plain discounts, enabled first", async () => 
   ]);
   assert.deepEqual(sorted.map((p) => p.code), ["SAVE", "OLD"]);
 });
+
+test("Event Type reaches the server independently of secondary tags", () => {
+  const payload = buildEventInsert(draft({ eventType: "game_night", tags: ["music"] }));
+  assert.equal(payload.category, "game_night");
+  assert.equal(payload.event_type, "game_night");
+});

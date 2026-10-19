@@ -1,3 +1,4 @@
+import { eventTypeOptions } from "@dvnt/app/lib/events/event-type";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 /**
@@ -1417,34 +1418,19 @@ function EditEventScreenContent() {
           </View>
         </View>
 
-        {/* Category */}
+        {/* Event Type: same taxonomy as create, with legacy values retained. */}
         <View className="mb-4">
-          <Text className="text-sm font-medium text-foreground mb-2">
-            Category
-          </Text>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              backgroundColor: colors.card,
-              borderRadius: 12,
-              paddingHorizontal: 16,
-            }}
-          >
-            <Tag size={18} color={colors.mutedForeground} />
-            <TextInput
-              value={category}
-              onChangeText={setCategory}
-              placeholder="e.g. Music, Nightlife, Tech..."
-              placeholderTextColor={colors.mutedForeground}
-              maxLength={50}
-              style={{
-                flex: 1,
-                padding: 16,
-                color: colors.foreground,
-                fontSize: 16,
-              }}
-            />
+          <Text className="text-sm font-medium text-foreground mb-2">Event Type</Text>
+          <View className="flex-row flex-wrap gap-2" accessibilityRole="radiogroup">
+            {eventTypeOptions(category).map((option) => (
+              <Pressable key={option.value} accessibilityRole="radio"
+                accessibilityState={{ checked: category === option.value }}
+                onPress={() => setCategory(option.value)}
+                className="px-3 py-2 rounded-xl"
+                style={{ backgroundColor: category === option.value ? colors.primary : colors.card }}>
+                <Text style={{ color: category === option.value ? "#000" : colors.foreground }}>{option.label}</Text>
+              </Pressable>
+            ))}
           </View>
         </View>
 

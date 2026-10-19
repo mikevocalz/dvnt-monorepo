@@ -103,7 +103,7 @@ async function buildTile1(
   const { data: upcoming } = await supabase
     .from("events")
     .select(
-      "id, title, start_date, location, location_name, cover_image_url, flyer_image_url, images, category, attendees_count",
+      "id, title, start_date, location, location_name, cover_image_url, flyer_image_url, images, category, event_type, attendees_count",
     )
     .gte("start_date", now)
     .order("start_date", { ascending: true })
@@ -124,7 +124,7 @@ async function buildTile1(
       startAt: ev.start_date,
       venueName: ev.location_name || undefined,
       city: ev.location || undefined,
-      category: ev.category || undefined,
+      category: ev.event_type || ev.category || undefined,
       heroThumbUrl:
         toAbsoluteUrl(ev.cover_image_url || ev.flyer_image_url || firstImage) ??
         null,
@@ -138,7 +138,7 @@ async function buildTile1(
   const { data: recent } = await supabase
     .from("events")
     .select(
-      "id, title, start_date, location, location_name, cover_image_url, flyer_image_url, images, category, attendees_count",
+      "id, title, start_date, location, location_name, cover_image_url, flyer_image_url, images, category, event_type, attendees_count",
     )
     .order("start_date", { ascending: false })
     .limit(1);
@@ -157,7 +157,7 @@ async function buildTile1(
       startAt: ev.start_date,
       venueName: ev.location_name || undefined,
       city: ev.location || undefined,
-      category: ev.category || undefined,
+      category: ev.event_type || ev.category || undefined,
       heroThumbUrl:
         toAbsoluteUrl(
           ev.cover_image_url || ev.flyer_image_url || firstImageRecent,

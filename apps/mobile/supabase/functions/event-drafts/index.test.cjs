@@ -299,3 +299,11 @@ test('a fully redeemed code stays off on the copy even after the shift', async (
   const row = h.tables.promo_codes.find((r) => r.event_id === 77 && r.code === 'GONE');
   assert.ok(new Date(row.valid_until) <= new Date());
 });
+
+test('duplicate preserves canonical Event Type and does not invent one from a broad legacy category', async () => {
+  for (const [eventType,category,expected] of [['party','music','party'],['game_night','other','game_night'],[null,'music',null],[null,'other','other']]) {
+    const tables=eventsWithCodes([]);Object.assign(tables.events[0],{event_type:eventType,category});
+    const got=await tableHarness(tables).call({action:'duplicate_event',eventId:42});
+    assert.equal(got.status,200);assert.equal(got.body.draft.payload.eventType,expected);
+  }
+});

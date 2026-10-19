@@ -1,4 +1,5 @@
 "use client";
+import { eventTypeOptions } from "@dvnt/app/lib/events/event-type";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 /**
  * Edit Event — WEB (@dvnt/app/features/events/event-edit). Real web port of the
@@ -878,17 +879,14 @@ export function EventEditScreen() {
               />
             </div>
           </FormField>
-          <FormField label="Category">
-            <div className="flex items-center gap-2 bg-white/[0.05] border border-white/12 rounded-xl px-3 h-11">
-              <Tag size={18} className="text-white/40 shrink-0" />
-              <input
-                className="flex-1 bg-transparent text-[15px] text-white placeholder:text-white/40 outline-none"
-                maxLength={50}
-                placeholder="e.g. Music, Nightlife, Tech…"
-                value={s.category}
-                onChange={(e) => s.setCategory(e.target.value)}
-              />
-            </div>
+          <FormField label="Event Type">
+            <select aria-label="Event Type" className="w-full bg-[#15151c] border border-white/12 rounded-xl px-3 h-11 text-white"
+              value={s.category} onChange={(e) => s.setCategory(e.target.value)}>
+              <option value="" disabled>Pick an event type</option>
+              {eventTypeOptions(s.category).map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
           </FormField>
           <FormField label="Visibility">
             <div className="flex gap-2" role="radiogroup" aria-label="Visibility">

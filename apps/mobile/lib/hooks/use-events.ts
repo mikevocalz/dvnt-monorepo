@@ -1,3 +1,4 @@
+import { storedEventType } from "@dvnt/app/lib/events/event-type";
 /**
  * React Query hooks for events
  */
@@ -313,7 +314,7 @@ export function useCreateEvent() {
           image:
             newEventData.image ||
             "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&h=1000&fit=crop",
-          category: newEventData.category || "Event",
+          category: storedEventType(newEventData),
           attendees: [],
           totalAttendees: 0,
           likes: 0,
@@ -474,7 +475,7 @@ export function useUpdateEvent() {
             locationLng: r.location_lng,
             price: r.price,
             maxAttendees: r.max_attendees,
-            category: r.category,
+            category: storedEventType(r),
             visibility: r.visibility,
             ageRestriction: r.age_restriction,
             dressCode: r.dress_code,

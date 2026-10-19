@@ -1,3 +1,4 @@
+import { storedEventType } from "@dvnt/app/lib/events/event-type";
 /**
  * Safe Entity Normalization
  *
@@ -278,7 +279,7 @@ export function normalizeEvent(event: any | null | undefined): SafeEvent {
     coOrganizer: event.coOrganizer,
     month: event.month,
     time: event.time,
-    category: event.category,
+    category: storedEventType(event),
     likes: event.likes || 0,
     isLiked: event.isLiked || false,
     locationLat: event.locationLat,
