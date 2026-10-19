@@ -205,6 +205,8 @@ Deno.serve(async (req: Request) => {
       return {
         id: String(event.id),
         title: event.title,
+        category: event.event_type || event.category || undefined,
+        event_type: event.event_type || null,
         description: event.description,
         date: d ? d.getDate().toString().padStart(2, "0") : "--",
         month: d

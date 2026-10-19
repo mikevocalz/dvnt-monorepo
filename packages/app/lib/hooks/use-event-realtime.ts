@@ -1,3 +1,4 @@
+import { realtimeEventType } from "@dvnt/app/lib/events/event-type";
 /**
  * useEventRealtime — subscribe to live changes for a single event
  *
@@ -245,7 +246,7 @@ export function useEventsFeedRealtime(enabled = true): void {
                   // Numeric / categorical
                   price: next.price ?? e.price,
                   maxAttendees: next.max_attendees ?? e.maxAttendees,
-                  category: next.category ?? e.category,
+                  category: realtimeEventType(next, e.category),
                   visibility: next.visibility ?? e.visibility,
                   ageRestriction: next.age_restriction ?? e.ageRestriction,
                   dressCode: next.dress_code ?? e.dressCode,

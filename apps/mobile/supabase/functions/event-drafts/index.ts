@@ -342,7 +342,8 @@ async function duplicatePayload(db: any, authId: string, eventId: number) {
     flyerImage: primaryVideo || flyerImage,
     flyerMediaType: primaryVideo ? "video" : "image",
     flyerFallbackImage: primaryVideo ? flyerImage : null,
-    eventType: event.category || null,
+    // Legacy broad categories are not valid create-picker choices: require reselection.
+    eventType: event.event_type || (event.category === "other" ? "other" : null),
     disclaimers: event.disclaimers || "",
     isNsfw: Boolean(event.nsfw),
     currentStep: 0,

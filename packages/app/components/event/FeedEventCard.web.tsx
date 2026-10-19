@@ -1,4 +1,5 @@
 "use client";
+import { eventTypeLabel } from "@dvnt/app/lib/events/event-type";
 
 import { useLayoutEffect, useRef } from "react";
 import { webEventDetailRoute } from "@dvnt/app/lib/events/event-detail-route";
@@ -78,7 +79,7 @@ export function FeedEventCard({ data, onHeightChange }: {
                 <Zap size={10} color={color.gold} /> Promoted
               </span>
             ) : data.category ? (
-              <span style={pill("rgba(138,64,207,0.7)")}>{data.category}</span>
+              <span style={pill("rgba(138,64,207,0.7)")}>{eventTypeLabel(data.category)}</span>
             ) : (
               <span />
             )}

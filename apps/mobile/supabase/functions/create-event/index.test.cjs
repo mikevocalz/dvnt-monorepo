@@ -110,3 +110,32 @@ test('a creator whose hosting is closed publishes nothing', async () => {
   const result = await h.publish(draft);
   assert.equal(result.ok, false); assert.equal(result.error.code, 'creator_hosting_closed'); assert.equal(h.rows.length, 0);
 });
+
+// Execute the real handler, not a copy of normalization.
+const eventTypeSource = fs.readFileSync(`${__dirname}/../../../../../packages/app/lib/events/event-type.ts`, 'utf8');
+const canonicalTypes = [...eventTypeSource.matchAll(/^  (\w+): "/gm)].map(match => match[1]);
+test('every canonical Event Type survives create, replay, and storage without collapsing to Other', async () => {
+  assert.equal(canonicalTypes.length, 27);
+  for (const eventType of canonicalTypes) {
+    const h = harness();
+    const payload = { ...draft, event_type: eventType, category: 'music' };
+    const first = await h.publish(payload);
+    assert.equal(first.ok, true, eventType);
+    assert.equal(first.data.event.event_type, eventType);
+    assert.equal(first.data.event.category, "music");
+    const retry = await h.publish(payload);
+    assert.equal(retry.data.event.event_type, eventType);
+    assert.equal(h.rows.length, 1);
+  }
+});
+test('old category clients remain compatible, unknown values fail without silently saving Other', async () => {
+  for (const category of ['music', 'sports', 'art', 'food', 'tech', 'business', 'health', 'other']) {
+    const h = harness();
+    assert.equal((await h.publish({ ...draft, category })).data.event.category, category);
+  }
+  const h = harness();
+  const result = await h.publish({ ...draft, event_type: 'not_a_real_type' });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'validation_error');
+  assert.equal(h.rows.length, 0);
+});
