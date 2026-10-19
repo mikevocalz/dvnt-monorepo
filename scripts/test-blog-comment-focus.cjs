@@ -133,6 +133,10 @@ async function runCase(browser, name, viewport, isMobile, origin) {
     await input.pressSequentially('Still here');
     assert.equal(await node.evaluate(el => el === document.querySelector('textarea')), true, 'keyboard geometry must not remount textarea');
     await keepBelowFold('keyboard-height resize');
+    assert.equal(await input.evaluate(el => {
+      const rect = el.getBoundingClientRect();
+      return document.activeElement === el && rect.top >= 0 && rect.bottom <= visualViewport.height;
+    }), true, 'focused composer stays visible while typing after keyboard-height resize');
     await page.setViewportSize(viewport);
     await keepBelowFold('keyboard close');
     await center(input);
@@ -186,17 +190,33 @@ async function runCase(browser, name, viewport, isMobile, origin) {
     // computed CSS alone would not catch a broken anchor interaction.
     const articleUrl = page.url();
     if (isMobile) await press(page.getByRole('button', { name: 'Toggle table of contents' }));
+    const tocBefore = await page.locator('#first-section').evaluate(el => ({ top: el.getBoundingClientRect().top, y: scrollY, transform: getComputedStyle(el).transform }));
     await press(page.getByRole('button', { name: 'First section', exact: true }));
-    await page.waitForFunction(() => {
-      const heading = document.getElementById('first-section');
-      return heading && Math.abs(heading.getBoundingClientRect().top - 100) < 3;
-    });
+    let toc;
+    try {
+      // ScrollReveal can remove its 16px translation after the TOC has measured
+      // the target. Allow that existing visual offset plus 2px rounding, while
+      // still requiring the actual heading near the intended 100px destination.
+      await page.waitForFunction(() => {
+        const heading = document.getElementById('first-section');
+        return heading && Math.abs(heading.getBoundingClientRect().top - 100) <= 18;
+      });
+      // Read after both native smooth scroll and the 0.65s reveal settle.
+      await page.waitForTimeout(750);
+      toc = await page.locator('#first-section').evaluate(el => ({ top: el.getBoundingClientRect().top, bottom: el.getBoundingClientRect().bottom, y: scrollY, transform: getComputedStyle(el).transform, height: innerHeight }));
+      assert.ok(Math.abs(toc.top - 100) <= 18 && toc.bottom <= toc.height, `TOC must settle on visible heading: ${JSON.stringify(toc)}`);
+    } finally {
+      const actual = await page.locator('#first-section').evaluate(el => ({ top: el.getBoundingClientRect().top, y: scrollY, transform: getComputedStyle(el).transform }));
+      fs.writeFileSync(path.join(out, `${name}-${baseline ? 'baseline' : 'current'}-toc.json`), JSON.stringify({ before: tocBefore, after: actual }, null, 2));
+      await page.screenshot({ path: path.join(out, `${name}-${baseline ? 'baseline' : 'current'}-toc.png`) });
+      console.log(`TOC ${name}: ${JSON.stringify({ before: tocBefore, after: actual })}`);
+    }
     assert.equal(page.url(), articleUrl, 'TOC scrolling does not navigate away');
     assert.equal(await input.inputValue(), 'Repeat 2', 'TOC does not discard the comment draft');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     assert.equal((await metrics()).scrollBehavior, 'auto', 'reduced motion remains respected');
     assert.deepEqual(errors, [], 'no error-boundary-triggering render errors');
-    const result = { name, baseline, before, focused, after: await metrics(), requests: requests.map(r => ({ method: r.method, parentId: r.body.parentId })), physicalIOSKeyboardTested: false };
+    const result = { name, baseline, before, focused, toc, after: await metrics(), requests: requests.map(r => ({ method: r.method, parentId: r.body.parentId })), physicalIOSKeyboardTested: false };
     fs.writeFileSync(path.join(out, `${name}-${baseline ? 'baseline' : 'result'}.json`), JSON.stringify(result, null, 2));
     console.log(`PASS ${name}: ${baseline ? 'pre-fix 14px/smooth focus conditions recorded' : '16px/native focus scrolling'}, auth/guest, multiline, keyboard geometry, submit/reject/reply/edit, repeat focus, reduced motion`);
   } finally { await context.close(); }
