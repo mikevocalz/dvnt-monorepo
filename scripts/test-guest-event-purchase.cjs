@@ -77,6 +77,7 @@ app('lib/hooks/use-ticket-upgrade', { useTicketUpgradeOptions: () => [], useInit
 app('lib/hooks/use-event-waitlist', { useEventWaitlistStatus: () => query(null), useJoinWaitlist: () => ({ isPending: false }), useLeaveWaitlist: () => ({ isPending: false }) });
 app('lib/hooks/use-event-reviews', { useCreateEventReview: () => ({ isPending: false }) });
 app('lib/hooks/use-age-verification', { useAgeVerificationStatus: () => query(null), needsAgeVerification: () => false });
+app('components/event/TicketsOpeningSoonCard.web', { TicketsOpeningSoonCard: () => React.createElement('div', { 'data-testid': 'tickets-opening-soon' }, 'Tickets coming soon') });
 app('lib/hooks/use-event-role', { useEventRole: () => ({ role: null }) });
 app('lib/hooks/use-event-lynk-host', { useEventLynkHost: () => ({}) });
 app('lib/color/useEventDominantColor', { useEventDominantColor: () => ({ color: '#000' }) });
@@ -99,6 +100,7 @@ Object.assign(mocks['@dvnt/ui'], { Dialog: Object.assign(Empty, { Root: Empty, C
 for (const relative of ['lib/tickets/pricing', 'lib/tickets/guest-purchase-state', 'lib/events/event-detail-state', 'lib/events/event-discovery', 'lib/events/event-time', 'lib/events/event-zone', 'lib/auth/return-to']) {
   mocks['@dvnt/app/' + relative] = load(path.join(ROOT, 'packages/app', relative + '.ts'));
 }
+mocks['./ticket-upgrade-benefits'] = load(path.join(ROOT, 'packages/app/features/events/ticket-upgrade-benefits.ts'));
 const exportsObject = {};
 const compiled = ts.transpileModule(source, { fileName: detailFile, compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, jsxImportSource: 'react', target: ts.ScriptTarget.ES2022 } });
 vm.runInNewContext(compiled.outputText, {
@@ -158,7 +160,7 @@ test('empty paid tiers remain unavailable instead of opening login', async () =>
   assertNoPurchase();
 });
 
-test('a missing display-tier row is disabled while a valid free row opens guest checkout', async () => {
+test('a missing display-tier row is disabled while an adjacent action buys the selected free row', async () => {
   scenario.tiersQuery = query([free]);
   await render();
   const buttons = [...document.querySelectorAll('button')];
@@ -167,6 +169,8 @@ test('a missing display-tier row is disabled while a valid free row opens guest 
   await click(missing);
   assertNoPurchase();
   await click(buttons.find((node) => node.textContent.includes(free.name)));
+  assertNoPurchase();
+  await click(button('Get free ticket'));
   assert.equal(scenario.guestCheckouts[0].tierId, free.id);
   assert.equal(scenario.guestCheckouts[0].priceCents, 0);
   assert.equal(scenario.guestRsvps.length, 0);
@@ -266,4 +270,138 @@ test('stale cached ticket rows after a failed refresh cannot bypass retry state'
   assert.equal(row.disabled, true);
   await click(row);
   assertNoPurchase();
+});
+
+
+test('selection and purchase share one top-of-page area before event details', async () => {
+  scenario.eventQuery = query({ ...fixtureEvent, description: 'Fixture event details' });
+  await render();
+  const group = document.querySelector('[data-testid="event-purchase"]');
+  assert.ok(group);
+  assert.equal(document.querySelectorAll('[data-testid="event-purchase"]').length, 1);
+  assert.equal([...document.querySelectorAll('h2')].filter((n) => n.textContent === 'Tickets').length, 1);
+  const rows = group.querySelectorAll('[data-testid^="ticket-tier-"]');
+  assert.equal(rows.length, 2);
+  assert.equal(group.querySelector('[data-testid="event-purchase-action"]').textContent, 'Get tickets');
+  assert.equal(rows[0].getAttribute('aria-pressed'), 'false');
+  assert.equal(rows[1].getAttribute('aria-pressed'), 'true');
+  const about = [...document.querySelectorAll('h2')].find((n) => n.textContent === 'About');
+  assert.ok(group.compareDocumentPosition(about) & window.Node.DOCUMENT_POSITION_FOLLOWING);
+});
+
+test('guest paid/free choices only select until the adjacent purchase action is pressed', async () => {
+  await render();
+  const row = (id) => document.querySelector(`[data-testid="ticket-tier-${id}"]`);
+  await click(row(free.id));
+  assert.equal(ui.getState().selectedTierId, free.id);
+  assert.equal(row(free.id).getAttribute('aria-pressed'), 'true');
+  assert.equal(row(paid.id).getAttribute('aria-pressed'), 'false');
+  assert.equal(ui.getState().checkoutOpen, false);
+  assertNoPurchase();
+  await click(button('Get free ticket'));
+  assert.equal(scenario.guestCheckouts[0].tierId, free.id);
+  assert.equal(scenario.guestCheckouts[0].priceCents, 0);
+  scenario.guestCheckouts = [];
+  await click(row(paid.id));
+  assertNoPurchase();
+  await click(button('Get tickets'));
+  assert.equal(scenario.guestCheckouts[0].tierId, paid.id);
+  assert.equal(scenario.guestCheckouts[0].priceCents, 2500);
+  assert.deepEqual(scenario.navigation, []);
+});
+
+test('member selection stays inline, resets stale quantity and opens that exact tier', async () => {
+  scenario.auth = { isAuthenticated: true, user: { id: 'member', username: 'fixture-member' } };
+  await render();
+  await React.act(async () => ui.getState().setTicketQty(6));
+  await click(document.querySelector(`[data-testid="ticket-tier-${free.id}"]`));
+  assert.equal(ui.getState().ticketQty, 1);
+  assert.equal(ui.getState().checkoutOpen, false);
+  assertNoPurchase();
+  await click(button('Get free ticket'));
+  assert.equal(ui.getState().checkoutOpen, true);
+  assert.equal(ui.getState().selectedTierId, free.id);
+  assertNoPurchase();
+});
+
+test('a selected tier becoming unavailable never silently buys another tier', async () => {
+  await render();
+  await click(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`));
+  scenario.tiersQuery = query([free, { ...paid, quantity_sold: 20 }]);
+  await render();
+  const action = button('Select an available ticket');
+  assert.ok(action);
+  assert.equal(action.disabled, true);
+  await click(action);
+  assertNoPurchase();
+  await click(document.querySelector(`[data-testid="ticket-tier-${free.id}"]`));
+  await click(button('Get free ticket'));
+  assert.equal(scenario.guestCheckouts[0].tierId, free.id);
+});
+
+test('live tiers missing from an older display aggregate are visible and selectable', async () => {
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [] });
+  await render();
+  assert.equal(document.querySelector('[data-testid="tickets-opening-soon"]'), null);
+  const paidRow = document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`);
+  assert.ok(paidRow);
+  assert.equal(paidRow.disabled, false);
+  assert.equal(paidRow.getAttribute('aria-pressed'), 'true');
+  await click(button('Get tickets'));
+  assert.equal(scenario.guestCheckouts[0].tierId, paid.id);
+});
+
+test('hidden/locked tiers are not selectable and members do not RSVP into missing inventory', async () => {
+  scenario.auth = { isAuthenticated: true, user: { id: 'member', username: 'fixture-member' } };
+  scenario.eventQuery = query({ ...fixtureEvent, price: 0 });
+  scenario.tiersQuery = query([{ ...free, tier_visibility: 'hidden' }, { ...paid, tier_visibility: 'locked' }]);
+  await render();
+  assert.equal(document.querySelectorAll('[data-testid^="ticket-tier-"]').length, 0);
+  assert.equal(button('RSVP'), undefined);
+  assert.equal(button('Get tickets'), undefined);
+  assert.match(document.body.textContent, /Have a code/);
+  assertNoPurchase();
+});
+
+
+test('live-only legacy benefit objects render safely as explicit organizer text', async () => {
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [free] });
+  scenario.tiersQuery = query([free, { ...paid, perks: [{ label: 'Coat check' }, { text: 'Dungeon access' }, null, { invalid: true }] }]);
+  await render();
+  const paidRow = document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`);
+  assert.ok(paidRow);
+  assert.match(paidRow.textContent, /Coat check/);
+  assert.match(paidRow.textContent, /Dungeon access/);
+  assert.doesNotMatch(paidRow.textContent, /object Object|welcome drink|VIP lounge/);
+  await click(button('Get tickets'));
+  assert.equal(scenario.guestCheckouts[0].tierId, paid.id);
+});
+
+test('member stale selection remains blocked until an explicit replacement', async () => {
+  scenario.auth = { isAuthenticated: true, user: { id: 'member', username: 'fixture-member' } };
+  await render();
+  await click(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`));
+  scenario.tiersQuery = query([free, { ...paid, tier_visibility: 'locked' }]);
+  await render();
+  assert.equal(button('Select an available ticket').disabled, true);
+  assert.equal(ui.getState().checkoutOpen, false);
+  await click(document.querySelector(`[data-testid="ticket-tier-${free.id}"]`));
+  await click(button('Get free ticket'));
+  assert.equal(ui.getState().selectedTierId, free.id);
+  assert.equal(ui.getState().checkoutOpen, true);
+});
+
+test('server-unlocked tier becomes selectable inline', async () => {
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [] });
+  scenario.tiersQuery = query([{ ...paid, tier_visibility: 'locked' }]);
+  await render();
+  assert.equal(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`), null);
+  await React.act(async () => ui.getState().addUnlockedTierIds([paid.id]));
+  const row = document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`);
+  assert.ok(row);
+  assert.equal(row.disabled, false);
+  await click(row);
+  assertNoPurchase();
+  await click(button('Get tickets'));
+  assert.equal(scenario.guestCheckouts[0].tierId, paid.id);
 });

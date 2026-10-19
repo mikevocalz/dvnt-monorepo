@@ -10,8 +10,9 @@
  * tiers priced above what the holder paid; the upgrade itself invokes the EXACT
  * native edge function `supabase.functions.invoke("ticket-upgrade", ...)` with
  * the same `{ ticket_id, new_ticket_type_id }` body and bearer/x-auth-token
- * headers from `requireBetterAuthToken()`. Tier-level inference, default perks,
- * price-difference and buyer-fee math are ported verbatim.
+ * headers from `requireBetterAuthToken()`. Tier-level inference, price-difference
+ * and buyer-fee math are ported verbatim. Benefits come only from the ticket
+ * type's explicitly configured perks; a tier label never implies benefits.
  *
  * Payment note: native presents a Stripe PaymentSheet via
  * @stripe/stripe-react-native (native-only). On web that module cannot be
@@ -62,6 +63,7 @@ import {
   type TicketTierLevel,
 } from "@dvnt/app/lib/stores/ticket-store";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
+import { ticketUpgradeBenefits } from "./ticket-upgrade-benefits";
 
 /**
  * One vocabulary for tiers across native and web. This file used to declare its
@@ -92,30 +94,6 @@ function inferTier(name: string, priceCents: number): TierLevel {
   if (n.includes("vip") || n.includes("premium")) return "vip";
   if (priceCents === 0) return "free";
   return "ga";
-}
-
-/** Derive a default perks list from tier level when DB doesn't store perks. */
-function defaultPerks(tier: TierLevel): string[] {
-  switch (tier) {
-    case "table":
-      return [
-        "Reserved table with bottle service",
-        "Dedicated server for your group",
-        "Skip-the-line VIP entry",
-        "Private coat check",
-      ];
-    case "vip":
-      return [
-        "VIP entrance — skip the line",
-        "Access to VIP lounge",
-        "Complimentary welcome drink",
-        "Priority bar service",
-      ];
-    case "ga":
-      return ["Entry to the event", "Access to main floor"];
-    case "free":
-      return ["Free entry"];
-  }
 }
 
 function formatPrice(cents: number): string {
@@ -282,7 +260,7 @@ export function TicketUpgradeScreen() {
       tierLevel,
       accent: TIER_ACCENT[tierLevel],
       label: TIER_LABEL[tierLevel],
-      perks: defaultPerks(tierLevel),
+      perks: ticketUpgradeBenefits(match),
       diffCents: 0,
       soldOut: false,
     };
@@ -309,7 +287,7 @@ export function TicketUpgradeScreen() {
           tierLevel,
           accent: TIER_ACCENT[tierLevel],
           label: TIER_LABEL[tierLevel],
-          perks: defaultPerks(tierLevel),
+          perks: ticketUpgradeBenefits(t),
           diffCents: t.price_cents - paidCents,
           soldOut: remaining <= 0,
         };
@@ -501,19 +479,21 @@ export function TicketUpgradeScreen() {
             tier on your phone.
           </p>
 
-          <div className="mt-6 w-full max-w-sm">
-            {(newTier?.perks ?? []).slice(0, 4).map((perk) => (
-              <div key={perk} className="mb-2.5 flex items-center gap-2.5">
-                <span
-                  className="h-2 w-2 shrink-0 rounded-sm"
-                  style={{ backgroundColor: accent }}
-                />
-                <span className="flex-1 text-left text-sm text-white">
-                  {perk}
-                </span>
-              </div>
-            ))}
-          </div>
+          {newTier && newTier.perks.length > 0 ? (
+            <div className="mt-6 w-full max-w-sm">
+              {newTier.perks.slice(0, 4).map((perk) => (
+                <div key={perk} className="mb-2.5 flex items-center gap-2.5">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-sm"
+                    style={{ backgroundColor: accent }}
+                  />
+                  <span className="flex-1 text-left text-sm text-white">
+                    {perk}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           <button
             type="button"
