@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { pgSchema, serial } from 'drizzle-orm/pg-core'
 import { ensureOwnAuthor, enforcePostAttribution, prepareAuthorProfile,
-  staffAccount, updateAuthorAccess, authorsProfileEndpoint } from './profiles.ts'
+  staffAccount, updateAuthorAccess, authorsProfileEndpoint, ensureAccountAuthor, authorAccountsEndpoint, accountAuthorProfileEndpoint, hydrateAuthorPhoto } from './profiles.ts'
 import { Authors } from '../collections/Authors.ts'
 
 const accounts = pgSchema('fixture').table('admin_users', { id: serial('id') })
@@ -128,4 +128,50 @@ test('a concurrent first legacy-profile link is detected from the locked current
   const { req } = fixture('admin')
   req.liveAuthorUser = 11
   await assert.rejects(() => hook(prepareAuthorProfile, req, { user: 3 }, 'update', { id: 1, user: null }), /changed while you were editing/)
+})
+
+
+test('real account choices include staff without profiles, never provision on read, and reveal no private fields', async () => {
+  const { req, docs } = fixture('admin')
+  req.url = 'https://example.invalid/payload-api/authors/accounts?include=11'
+  req.payload.find = async (args: any) => {
+    assert.equal(args.collection, 'admin-users'); assert.equal(args.overrideAccess, false)
+    return { docs: [req.user], hasNextPage: true, nextPage: 2 }
+  }
+  const result = await (await authorAccountsEndpoint.handler(req)).json()
+  assert.deepEqual(result.accounts.map((a: any) => a.id), ['11', 3])
+  assert.equal(result.nextPage, 2)
+  assert.ok(!JSON.stringify(result).includes('private@example.invalid'))
+  assert.equal(docs.length, 0)
+  req.user.role = 'moderator'
+  const own = await (await authorAccountsEndpoint.handler(req)).json()
+  assert.deepEqual(own.accounts.map((a: any) => a.id), [3])
+  req.user = null
+  await assert.rejects(async () => authorAccountsEndpoint.handler(req), /Staff sign-in/)
+})
+test('editors can provision selected real staff; moderators cannot choose other accounts', async () => {
+  const { req, docs } = fixture('admin')
+  const author = await ensureAccountAuthor(req, 11)
+  assert.equal(author.user, 11)
+  assert.equal(author.name, 'Linked writer')
+  assert.equal((await ensureAccountAuthor(req, 11)).id, author.id)
+  assert.equal(docs.length, 1)
+  req.user.role = 'moderator'
+  await assert.rejects(() => ensureAccountAuthor(req, 11), /own account/)
+  req.json = async () => ({ accountID: 11 })
+  await assert.rejects(async () => accountAuthorProfileEndpoint.handler(req), /own account/)
+  req.user.role = 'admin'
+  req.payload.findByID = async () => ({ id: 22, role: 'Basic' })
+  await assert.rejects(() => ensureAccountAuthor(req, 22), /existing staff/)
+  req.json = async () => ({ accountID: {} })
+  await assert.rejects(async () => accountAuthorProfileEndpoint.handler(req), /Choose a staff/)
+  req.headers = new Headers()
+  await assert.rejects(async () => accountAuthorProfileEndpoint.handler(req), /application.json/)
+})
+test('author reads refresh the linked image before private owner fields are filtered', async () => {
+  const { req } = fixture()
+  const doc = await hydrateAuthorPhoto({ doc: { id: 50, user: 3, avatarUrl: 'https://example.invalid/stale.jpg' }, req })
+  assert.equal(doc.avatarUrl, 'https://example.invalid/avatar.jpg')
+  const legacy = { id: 1, user: null, avatarUrl: 'https://example.invalid/legacy.jpg' }
+  assert.deepEqual(await hydrateAuthorPhoto({ doc: legacy, req }), legacy)
 })

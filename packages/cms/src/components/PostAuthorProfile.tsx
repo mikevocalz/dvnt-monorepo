@@ -1,17 +1,21 @@
 /** @jsxImportSource react */
 'use client'
 import React, { useEffect, useRef, useState } from 'react'
-import { useDocumentInfo, useField } from '@payloadcms/ui'
+import { useAuth, useDocumentInfo, useField } from '@payloadcms/ui'
+import AccountAuthorPicker from './AccountAuthorPicker'
 import { loadOwnAuthorProfile } from './AuthorProfileLink'
 
 // Creating/linking a profile does not rewrite any existing article. This
 // explicit action changes the native authors field; Payload retains ownership
 // of autosave, Save Draft / Publish, validation and document locking.
 export default function PostAuthorProfile() {
-  const { setValue } = useField<Array<string | number>>({ path: 'authors' })
+  const { user } = useAuth()
+  const { value, setValue } = useField<Array<string | number>>({ path: 'authors' })
   const { id } = useDocumentInfo()
   const currentID = useRef(id)
   currentID.current = id
+  const currentAuthors = useRef(value)
+  currentAuthors.current = value
   const requestID = useRef(0)
   const pending = useRef(false)
   const alive = useRef(true)
@@ -31,6 +35,7 @@ export default function PostAuthorProfile() {
     pending.current = true
     setBusy(true)
     setError('')
+    const sourceAuthors = JSON.stringify(currentAuthors.current ?? [])
     const sourceID = id
     const operation = ++requestID.current
     const sourceURL = window.location.href
@@ -38,6 +43,7 @@ export default function PostAuthorProfile() {
     try {
       const result = await loadOwnAuthorProfile()
       if (!stillCurrent()) return
+      if (sourceAuthors !== JSON.stringify(currentAuthors.current ?? [])) throw new Error('Author credits changed while loading. Review them and try again.')
       setValue([result.author.id])
       setProfile({ editURL: result.editURL, name: result.author.name })
     } catch (e) {
@@ -48,6 +54,8 @@ export default function PostAuthorProfile() {
     }
   }
   return <div style={{ marginBottom: '1rem' }}>
+    {user && ['admin', 'super_admin'].includes(user.role) && <AccountAuthorPicker />}
+
     <button type="button" className="btn btn--style-secondary btn--size-small" disabled={busy} onClick={setMe}>
       {busy ? 'Loading your profile…' : 'Set me as author'}
     </button>

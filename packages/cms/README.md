@@ -125,3 +125,28 @@ node --import tsx --test packages/cms/src/authors/*.test.ts packages/cms/src/pos
 DVNT_AUTHOR_TEST_DATABASE_URL=postgresql://dvnt_author_fixture:...@127.0.0.1:5432/dvnt_author_fixture \
   node scripts/test-author-profiles-integration.cjs
 ```
+
+### Real-account author picker and profile photos
+
+Editors can now choose a real staff account directly in **Add a real account as
+author**, even before it has an Authors record. The recorded creator is selected
+when available; otherwise new articles prefer the signed-in writer. Search,
+pagination and current profile photos help distinguish accounts. Opening or
+searching the picker is read-only. **Add account as author** provisions/reuses that
+account's author profile and appends it to the native byline without deleting
+other credits. Save Draft/Publish still applies the change. The separate **Set me
+as author** button is an explicit replacement. Moderators remain self-only;
+admins and super-admins may assign other real staff accounts.
+
+Historical articles are not silently attributed from guesses, names or seed
+profiles. Created by is a private creation/audit link, not an automatic rewrite
+of an old byline. Missing historical attribution needs an explicit selection.
+
+Linked author photos resolve the current app profile image on read through the
+existing staff email bridge. This is a read-only lookup with bounded database
+waits; no account roles or profile records are mutated during reads. An explicit
+removed app avatar clears the stale fallback; unavailable/ambiguous app identity
+falls back to a safe cached CMS image. The picker batches its image lookups.
+Private account/contact information is never returned by the choices endpoint.
+An explicitly selected editorial Authors.avatar upload still overrides the app
+photo on the public card; leave that upload empty to follow the app profile.
