@@ -1,3 +1,4 @@
+import { canCropMedia } from "@dvnt/app/lib/media/live-photo-original";
 import { getCaptionMetrics, validatePostCaption, MAX_CAPTION_LENGTH, MAX_CAPTION_RAW_LENGTH } from "@dvnt/app/lib/posts/post-caption";
 import {
   View,
@@ -845,7 +846,7 @@ function CreateScreenContent() {
                   </Pressable>
 
                   {/* Re-crop button for images */}
-                  {media.type === "image" && (
+                  {canCropMedia(media) && (
                     <Pressable
                       onPress={() => {
                         setPendingCrop([media], 0);

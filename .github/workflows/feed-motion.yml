@@ -16,6 +16,7 @@ on:
       - 'apps/mobile/lib/hooks/use-media-picker.ts'
       - 'packages/app/lib/posts/publish*'
       - 'packages/app/lib/media/live-photo*'
+      - 'packages/app/lib/media/native-live-photo-resources.ts'
       - 'packages/app/lib/media/web-upload-rate*'
       - 'packages/app/lib/server-upload.ts'
       - 'packages/app/lib/api/posts.ts'
@@ -24,6 +25,9 @@ on:
       - 'apps/mobile/supabase/migrations/*post*'
       - 'apps/mobile/supabase/functions/create-post/**'
       - 'packages/app/lib/hooks/use-media-upload.ts'
+      - 'packages/app/lib/hooks/use-publish-post.ts'
+      - 'packages/app/features/routes/screens/(protected)/(tabs)/create.tsx'
+      - 'packages/app/features/routes/screens/(protected)/crop-preview.tsx'
       - 'scripts/test-feed-motion*'
       - 'scripts/test-live-photo*'
       - 'scripts/test-browser-live-photo*'
@@ -59,6 +63,9 @@ jobs:
           node scripts/test-feed-motion-dom.cjs
           node scripts/test-live-photo-lifecycle.cjs
           node scripts/test-live-photo-picker.cjs
+          node --test packages/app/lib/media/live-photo-original.test.ts packages/app/lib/media/live-photo-resource-cache.test.ts
+          node scripts/test-live-photo-publish-original.cjs
+          node scripts/test-live-photo-crop-guard.cjs
           node scripts/test-browser-live-photo-import-dom.cjs
           node scripts/test-live-photo-roundtrip.cjs
           node scripts/test-live-photo-upload-rate.cjs

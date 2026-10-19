@@ -17,6 +17,7 @@ import {
 import { storage } from "@dvnt/app/lib/utils/storage";
 import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event";
 import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
+import { publishMediaFile } from "@dvnt/app/lib/media/live-photo-original";
 import { friendlyUploadError } from "@dvnt/app/lib/media/video-pick-policy";
 
 import { validatePostCaption } from "@dvnt/app/lib/posts/post-caption";
@@ -155,13 +156,7 @@ export function usePublishPost() {
     }
     if (!isText && !draft.selectedMedia.length) throw new Error("Please select a photo or video.");
     if (!isText && draft.selectedMedia.length > 10) throw new Error("You can share up to 10 photos or videos per post.");
-    const files: PublishMediaFile[] = isText ? [] : draft.selectedMedia.map((media) => ({
-      uri: media.editorOpened && media.editedUri ? media.editedUri : media.uri,
-      type: media.type as "image" | "video",
-      kind: media.kind,
-      mimeType: media.mimeType,
-      pairedVideoUri: media.pairedVideoUri,
-    }));
+    const files: PublishMediaFile[] = isText ? [] : draft.selectedMedia.map(publishMediaFile);
     const descriptor: PublishDescriptor = {
       operationId: `post-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`,
       postKind: isText ? "text" : "media",
