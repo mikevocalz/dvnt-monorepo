@@ -90,11 +90,23 @@ try {
   })
   await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
   origin = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`
+  let linkRaceID: number | undefined
+  let linkRaceArrivals = 0
+  let releaseLinkRace: () => void
+  const linkRaceGate = new Promise<void>(resolve => { releaseLinkRace = resolve })
   const config = await buildConfig({
     telemetry: false, secret: randomBytes(32).toString('hex'), serverURL: origin,
     admin: { user: 'admin-users' }, routes: { api: '/payload-api' }, csrf: [origin], cors: [origin],
     editor: lexicalEditor(), sharp,
-    collections: [AdminUsers, Authors, Posts, Media, Categories, {
+    collections: [AdminUsers, { ...Authors, hooks: { ...Authors.hooks, beforeChange: [
+      async (args: any) => {
+        if (args.operation === 'update' && args.originalDoc.id === linkRaceID) {
+          linkRaceArrivals += 1
+          if (linkRaceArrivals === 2) releaseLinkRace()
+          await linkRaceGate
+        }
+        return args.data
+      }, ...Authors.hooks!.beforeChange!] } }, Posts, Media, Categories, {
       // Posts has an event callout relationship. Keep its target valid without
       // importing the production Events collection's app-write hooks.
       slug: 'events', fields: [{ name: 'title', type: 'text' }],
@@ -242,6 +254,9 @@ try {
   assert.equal((await payload.find({ collection: 'authors', where: { user: { equals: other.user.id } }, depth: 0 })).totalDocs, 1)
   const otherPost = await other.browser.request(`/payload-api/posts/${published.id}`, 'PATCH', { title: 'Hijacked post' })
   assert.ok([401, 403, 404].includes(otherPost.status), JSON.stringify(otherPost))
+  const adminTransfer = await admin.browser.request(`/payload-api/authors/${ownerAuthorID}`, 'PATCH', { user: other.user.id })
+  assert.equal(adminTransfer.status, 400, 'Even editors cannot transfer established profile ownership')
+  assert.equal(id((await payload.findByID({ collection: 'authors', id: ownerAuthorID, depth: 0 })).user), owner.user.id)
   pass('collection REST APIs reject cross-owner edits, author relinking, author creation spoofing and post IDOR')
 
   await owner.browser.ok(`/payload-api/posts/${published.id}`, 'PATCH', { authors: [], createdBy: other.user.id, excerpt: 'Autosaved excerpt' })
@@ -275,6 +290,29 @@ try {
   assert.deepEqual(ids(persisted.authors), [ownerAuthorID])
   assert.equal(id(persisted.createdBy), owner.user.id)
   pass('legacy unlinked profiles remain editable by admins; editorial overrides survive autosave and explicit self-attribution works')
+
+  const firstLinkA = await staff('first-link-a', 'moderator')
+  const firstLinkB = await staff('first-link-b', 'moderator')
+  const racedLegacy = (await db.query(`insert into ${schema}.authors (name,slug,created_at,updated_at) values ($1,$2,now(),now()) returning id`,
+    ['First-link race fixture', 'first-link-race-fixture'])).rows[0]
+  linkRaceID = racedLegacy.id
+  const linking = await Promise.all([firstLinkA, firstLinkB].map(target =>
+    admin.browser.request(`/payload-api/authors/${racedLegacy.id}`, 'PATCH', { user: target.user.id })))
+  linkRaceID = undefined
+  assert.deepEqual(linking.map(result => result.status).sort(), [200, 409], 'Concurrent legacy claims must have exactly one winner')
+  const winner = linking[0].ok ? firstLinkA : firstLinkB
+  const linked = await payload.findByID({ collection: 'authors', id: racedLegacy.id, depth: 0 })
+  assert.equal(id(linked.user), winner.user.id)
+  assert.equal(id((await winner.browser.ok(profilePath, 'POST', {})).author), racedLegacy.id)
+  pass('concurrent first links lock and recheck the author row; ownership cannot transfer through stale originalDoc')
+
+  const emailNamed = await staff('email-fallback', 'moderator')
+  await payload.update({ collection: 'admin-users', id: emailNamed.user.id, data: { name: emailNamed.user.email } })
+  const privateNameProfile = await emailNamed.browser.ok(profilePath, 'POST', {})
+  assert.equal(privateNameProfile.author.name, 'Staff writer')
+  const publicPrivateName = await anonymous.ok(`/payload-api/authors/${privateNameProfile.author.id}`)
+  assert.ok(!JSON.stringify(publicPrivateName).includes(emailNamed.user.email))
+  pass('email-based legacy account names never become automatic public bylines')
 
   const untouchedLegacy = await payload.findByID({ collection: 'authors', id: legacy.id, depth: 0 })
   assert.equal(untouchedLegacy.user, null)

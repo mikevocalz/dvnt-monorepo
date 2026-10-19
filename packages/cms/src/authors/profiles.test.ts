@@ -6,20 +6,24 @@ import { ensureOwnAuthor, enforcePostAttribution, prepareAuthorProfile,
 import { Authors } from '../collections/Authors.ts'
 
 const accounts = pgSchema('fixture').table('admin_users', { id: serial('id') })
+const authors = pgSchema('fixture').table('authors', { id: serial('id'), user: serial('user_id') })
 function fixture(role = 'moderator', userID = 3) {
   const docs: any[] = []
   const calls: any[] = []
   const req: any = { user: { id: userID, role, collection: 'admin-users', name: 'Real writer', email: 'private@example.invalid' },
     transactionID: 'tx', headers: new Headers({ 'content-type': 'application/json' }), payload: {
       config: { routes: { admin: '/admin' } },
-      db: { tables: { admin_users: accounts }, sessions: { tx: { db: {} } }, execute: async (args: any) => { calls.push(['lock', args]); return { rows: [{ id: userID }] } } },
+      db: { tables: { admin_users: accounts, authors }, sessions: { tx: { db: {} } }, execute: async (args: any) => { calls.push(['lock', args]); return { rows: [{ id: userID, linkedUser: req.liveAuthorUser ?? req.currentAuthorUser }] } } },
       find: async (args: any) => { calls.push(['find', args]); return { docs: docs.filter(d => String(d.user) === String(args.where.user.equals)).sort((a,b) => a.id-b.id).slice(0,1) } },
       create: async (args: any) => { calls.push(['create', args]); const doc = { id: docs.length + 50, ...args.data }; docs.push(doc); return doc },
       findByID: async (args: any) => { calls.push(['account', args]); return { id: args.id, role: 'moderator', name: 'Linked writer', avatarUrl: 'https://example.invalid/avatar.jpg' } },
     } }
   return { req, docs, calls }
 }
-const hook = (fn: any, req: any, data: any, operation = 'create', originalDoc: any = {}) => fn({ req, data, operation, originalDoc })
+const hook = (fn: any, req: any, data: any, operation = 'create', originalDoc: any = {}) => {
+  req.currentAuthorUser = originalDoc.user
+  return fn({ req, data, operation, originalDoc: operation === 'update' ? { id: 50, ...originalDoc } : originalDoc })
+}
 
 test('identity requires a real authenticated CMS staff account, not an app/member ID or role alone', () => {
   assert.equal(staffAccount({ user: null } as any), null)
@@ -35,7 +39,7 @@ test('provisioning uses the account ID, locked transaction and existing link, ne
   assert.equal(author.user, 3)
   assert.equal(author.name, 'Real writer')
   assert.equal(author.email, undefined)
-  assert.match(author.slug!, /^writer-3-/)
+  assert.match(author.slug!, /^writer-[0-9a-f]{8}-/)
   assert.equal(calls[0][0], 'lock')
   for (const [operation, args] of calls) if (operation !== 'lock') assert.equal(args.req, req)
   assert.equal((await ensureOwnAuthor(req)).id, author.id)
@@ -87,6 +91,9 @@ test('profiles use the owner link and defaults; legacy rows survive and new dupl
   const legacy = await hook(prepareAuthorProfile, admin.req, { bio: 'Old record edited' }, 'update', { id: 1, user: null })
   assert.equal(legacy.user, undefined)
   await assert.rejects(() => hook(prepareAuthorProfile, admin.req, { user: null }, 'update', { user: 3 }), /cannot be removed/)
+  await assert.rejects(() => hook(prepareAuthorProfile, admin.req, { user: 11 }, 'update', { user: 3 }), /cannot be transferred/)
+  await assert.rejects(() => hook(prepareAuthorProfile, req, { profileUrl: 'javascript:alert(1)' }), /http/)
+  await assert.rejects(() => hook(prepareAuthorProfile, req, { socials: { website: 'data:text/html,unsafe' } }), /http/)
 })
 test('the own-profile endpoint ignores supplied identity and rejects anonymous/simple cross-site requests', async () => {
   const { req } = fixture()
@@ -105,4 +112,20 @@ test('public author reads cannot reveal the linked private account or contact em
     assert.equal(field.access.read({ req: { user: null } }), false)
     assert.equal(field.access.read({ req: fixture().req }), true)
   }
+})
+
+test('automatic public names never fall back to the private staff email', async () => {
+  const { req } = fixture()
+  req.user.name = ' PRIVATE@example.invalid '
+  const author = await ensureOwnAuthor(req)
+  assert.equal(author.name, 'Staff writer')
+  req.payload.findByID = async () => ({ id: 3, role: 'moderator', name: 'private@example.invalid', email: 'PRIVATE@example.invalid' })
+  const prepared = await hook(prepareAuthorProfile, req, { name: '' }, 'update', { id: author.id, user: 3 })
+  assert.equal(prepared.name, 'Staff writer')
+})
+
+test('a concurrent first legacy-profile link is detected from the locked current row', async () => {
+  const { req } = fixture('admin')
+  req.liveAuthorUser = 11
+  await assert.rejects(() => hook(prepareAuthorProfile, req, { user: 3 }, 'update', { id: 1, user: null }), /changed while you were editing/)
 })

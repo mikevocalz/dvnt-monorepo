@@ -108,10 +108,12 @@ never claimed by matching an author name, slug or email.
   fields. Profile links must use HTTP(S).
 
 No new columns, collection, unique index or migration is required. Provisioning
-and relinking serialize on the existing staff-account row in the same Payload
+and initial linking serialize on the existing staff-account row in the same Payload
 Postgres transaction. Every nested Local API call receives that request. If an
 account already has several historical profiles, the lowest author ID is reused;
-no profiles or article relationships are deleted or backfilled. New duplicate
+no profiles or article relationships are deleted or backfilled. Established
+account links cannot be transferred or removed, including by admins; change the
+article byline for editorial reassignment instead. New duplicate
 links are rejected through ordinary collection writes. Direct database writers
 must not bypass these hooks. Database transactions must remain enabled.
 

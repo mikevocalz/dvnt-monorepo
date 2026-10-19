@@ -13,6 +13,10 @@ on:
       - 'packages/cms/src/payload.config.ts'
       - 'apps/web/src/app/(payload)/**'
       - 'scripts/test-author-profiles-integration.cjs'
+      - 'scripts/test-author-profile-ui.cjs'
+      - 'scripts/test-blog-author-render.cjs'
+      - 'apps/web/src/lib/posts.ts'
+      - 'apps/web/src/app/(frontend)/posts/**'
       - 'scripts/fixtures/author-profiles/**'
       - '.github/workflows/blog-author-profiles.yml'
 permissions:
@@ -42,7 +46,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - name: Install pinned fixture dependencies
         run: |
@@ -54,3 +58,25 @@ jobs:
         env:
           DVNT_AUTHOR_TEST_DATABASE_URL: postgresql://dvnt_author_fixture:disposable-runner-fixture-only@127.0.0.1:5432/dvnt_author_fixture
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-author-profiles-integration.cjs
+      - name: Typecheck author contracts and controls
+        run: >-
+          pnpm exec tsc --noEmit --target ESNext --module ESNext --moduleResolution bundler
+          --lib ESNext,DOM --jsx react-jsx --strict --esModuleInterop --skipLibCheck
+          --allowImportingTsExtensions packages/cms/src/authors/*.test.ts
+          packages/cms/src/components/AuthorProfileLink.tsx packages/cms/src/components/PostAuthorProfile.tsx
+      - name: Author identity contracts
+        run: node --import tsx --test packages/cms/src/authors/*.test.ts
+      - name: Public author and contributor rendering
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-blog-author-render.cjs
+      - name: Install browser fixture engines
+        run: pnpm --filter web exec playwright install --with-deps chromium webkit
+      - name: Author controls browser coverage
+        env:
+          AUTHOR_PROFILE_OUTPUT_DIR: author-profile-evidence
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-author-profile-ui.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: author-profile-ui-evidence
+          path: author-profile-evidence
+          retention-days: 7

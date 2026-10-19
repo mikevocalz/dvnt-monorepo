@@ -25,13 +25,19 @@ export default function AuthorProfileLink() {
     pending.current = true
     setBusy(true)
     setError('')
+    const sourceURL = window.location.href
     try {
       const result = await loadOwnAuthorProfile()
-      if (!alive.current) return
+      if (!alive.current || window.location.href !== sourceURL) return
+      pending.current = false
+      setBusy(false)
       window.location.assign(result.editURL)
     } catch (e) {
-      if (!alive.current) return
+      if (!alive.current || window.location.href !== sourceURL) return
       setError(e instanceof Error ? e.message : 'Could not open your author profile.')
+      pending.current = false
+      if (alive.current) setBusy(false)
+    } finally {
       pending.current = false
       if (alive.current) setBusy(false)
     }

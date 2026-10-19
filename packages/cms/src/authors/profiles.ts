@@ -42,9 +42,25 @@ async function lockAccount(req: PayloadRequest, accountID: string | number) {
   const result = await db.execute({ db: tx, sql: sql`SELECT ${table.id} FROM ${table} WHERE ${table.id} = ${accountID} FOR UPDATE` })
   if (result.rows.length !== 1) throw new APIError('The linked staff account does not exist.', 400)
 }
+async function lockExistingAuthor(req: PayloadRequest, authorID: string | number) {
+  const db = req.payload.db as unknown as PostgresAdapter
+  const transactionID = await req.transactionID
+  const tx = transactionID == null ? undefined : db.sessions[transactionID]?.db
+  const table = db.tables.authors
+  if (!tx || !table) throw new APIError('Author profiles require an active database transaction.', 503)
+  const result = await db.execute({ db: tx,
+    sql: sql`SELECT ${table.user} AS "linkedUser" FROM ${table} WHERE ${table.id} = ${authorID} FOR UPDATE` })
+  if (result.rows.length !== 1) throw new APIError('This author profile no longer exists.', 404)
+  return relationshipID(result.rows[0].linkedUser)
+}
 async function linkedAuthors(req: PayloadRequest, accountID: string | number) {
   return req.payload.find({ collection: 'authors', where: { user: { equals: accountID } },
     sort: 'id', limit: 1, depth: 0, overrideAccess: true, req })
+}
+
+function publicAccountName(account: { name?: string | null; email?: string | null }) {
+  const name = account.name?.trim()
+  return name && name.toLowerCase() !== account.email?.trim().toLowerCase() ? name : 'Staff writer'
 }
 
 export async function ensureOwnAuthor(req: PayloadRequest) {
@@ -54,8 +70,8 @@ export async function ensureOwnAuthor(req: PayloadRequest) {
   const existing = (await linkedAuthors(req, user.id)).docs[0]
   if (existing) return existing
   return req.payload.create({ collection: 'authors', overrideAccess: true, req, depth: 0,
-    data: { user: user.id, name: user.name?.trim() || 'Staff writer',
-      slug: `writer-${user.id}-${randomUUID()}` } })
+    data: { user: user.id, name: publicAccountName(user),
+      slug: `writer-${randomUUID()}` } })
 }
 
 export const prepareAuthorProfile: CollectionBeforeChangeHook = async ({ data, operation, originalDoc, req }) => {
@@ -67,6 +83,13 @@ export const prepareAuthorProfile: CollectionBeforeChangeHook = async ({ data, o
     if (!valid) throw new APIError('Author links must be full http:// or https:// URLs.', 400)
   }
   const originalID = relationshipID(originalDoc?.user)
+  if (operation === 'update') {
+    // Payload loads originalDoc before hooks. Lock and recheck the current row
+    // so two editors cannot claim one legacy profile for different accounts.
+    const currentID = await lockExistingAuthor(req, originalDoc.id)
+    if (String(currentID ?? '') !== String(originalID ?? ''))
+      throw new APIError('This profile account changed while you were editing. Reload before saving.', 409)
+  }
   let accountID = relationshipID(data.user ?? originalDoc?.user)
   if (actor && !canEditBylines(req)) {
     if (operation === 'update' && !sameID(originalID, actor.id)) throw new APIError('You can only edit your own author profile.', 403)
@@ -86,6 +109,8 @@ export const prepareAuthorProfile: CollectionBeforeChangeHook = async ({ data, o
     return data
   }
   if (data.user === null && originalID != null) throw new APIError('An existing author account link cannot be removed.', 400)
+  if (originalID != null && !sameID(originalID, accountID))
+    throw new APIError('An established author account link cannot be transferred. Change the article byline instead.', 400)
   await lockAccount(req, accountID)
   if (operation === 'create' || !sameID(originalID, accountID)) {
     const existing = (await linkedAuthors(req, accountID)).docs[0]
@@ -97,7 +122,7 @@ export const prepareAuthorProfile: CollectionBeforeChangeHook = async ({ data, o
   if (!['super_admin', 'admin', 'moderator'].includes(account.role))
     throw new APIError('Choose an existing staff account.', 400)
   data.user = account.id
-  if (!String(data.name ?? originalDoc?.name ?? '').trim()) data.name = account.name?.trim() || 'Staff writer'
+  if (!String(data.name ?? originalDoc?.name ?? '').trim()) data.name = publicAccountName(account)
   // This is a fallback, not an editorial override. Never copy private email.
   data.avatarUrl = account.avatarUrl || null
   return data

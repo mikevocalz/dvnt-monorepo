@@ -37,7 +37,7 @@ export const Authors: CollectionConfig = {
       access: { create: authorEditorAccess, update: authorEditorAccess, read: authorStaffAccess },
       admin: {
         position: 'sidebar',
-        description: 'Your signed-in staff account is linked automatically. Editors can link another existing staff account.',
+        description: 'Your signed-in staff account is linked automatically. Editors can link an unclaimed profile. An established account link stays fixed.',
       },
     },
     { name: 'name', type: 'text', required: true, admin: { description: 'Defaults to the linked user; set to override (pen name / byline).' } },

@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs'
 import { URL } from 'node:url'
 import { fieldSchemasToFormState } from '@payloadcms/ui/forms/fieldSchemasToFormState'
 import { reduceFieldsToValues } from 'payload/shared'
+// Load the installed native reducer directly; the UI barrel imports browser CSS.
+const { fieldReducer } = await import(new URL('../../forms/Form/fieldReducer.js', import.meta.resolve('@payloadcms/ui')).href)
 import { Posts } from '../collections/Posts.ts'
 
 // Snapshot of the pre-layout collection's persisted schema. Presentation groups
@@ -135,4 +137,15 @@ test('existing create/publish hooks and slug formatting continue to use root doc
   assert.equal(published?.readTime, 1)
   assert.equal(field('slug').hooks.beforeValidate[0]({ data: { title: 'A New Story!' } }), 'a-new-story')
   assert.equal(field('slug').hooks.beforeValidate[0]({ value: 'My Chosen Slug', data: { title: 'Ignored' } }), 'my-chosen-slug')
+})
+
+test('native author relationship update serializes the explicit profile selection without changing creator or other fields', async () => {
+  const state = await readForm(fixture)
+  const next = fieldReducer(state, { type: 'UPDATE', path: 'authors', value: [99], valid: true })
+  const saved = reduceFieldsToValues(next, true) as any
+  assert.deepEqual(saved.authors, [99])
+  assert.equal(saved.createdBy, fixture.createdBy)
+  assert.deepEqual(saved.contributors, fixture.contributors)
+  assert.deepEqual(saved.content, fixture.content)
+  assert.equal(saved.authorProfileTools, undefined)
 })
