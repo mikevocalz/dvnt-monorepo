@@ -37,7 +37,7 @@ test('an expired Payload session is successful only after server confirms no adm
   assert.deepEqual(f.calls, ['clear', 'app'])
 })
 
-test('returned Better Auth errors and throws never look like successful logout', async () => {
+test('Better Auth failures preserve the local Payload cookie/session for retry', async () => {
   for (const signOut of [
     async () => ({ error: { message: 'unavailable' } }),
     async () => { throw new Error('offline') },
@@ -46,7 +46,7 @@ test('returned Better Auth errors and throws never look like successful logout',
     const f = fixture()
     const run = createAdminSignOut({ ...f.deps, betterAuthSignOut: signOut })
     await assert.rejects(run())
-    assert.deepEqual(f.calls, ['clear', 'payload'])
+    assert.deepEqual(f.calls, ['clear'])
   }
 })
 

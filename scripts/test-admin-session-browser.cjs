@@ -102,6 +102,8 @@ const boundaries = {
 
     reset({ failApp: true }); await enter(); await signOut(); await warning();
     assert.equal(state.app, true, 'fixture proves a failed app signout leaves the server session active');
+    assert.equal(state.cms, true, 'preserve the local session cookie until SSO removal is confirmed');
+    assert.equal(state.calls.filter(p => p === '/payload-api/admin-users/logout').length, 0);
     state.failApp = false;
     await page.getByRole('button', { name: 'Retry sign-out' }).click(); await login();
     console.log('PASS: Better Auth failure does not claim success; retry works');

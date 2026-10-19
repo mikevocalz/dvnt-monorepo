@@ -19,10 +19,24 @@ const dbURL = new URL(process.env.APP_DATABASE_URL!)
 assert.equal(dbURL.hostname, '127.0.0.1')
 assert.equal(dbURL.pathname, '/dvnt_admin_auth_fixture')
 const connect = net.Socket.prototype.connect
-net.Socket.prototype.connect = function (...args: any[]) {
-  const options = typeof args[0] === 'object' ? args[0] : { host: args[1] }
+function assertLocalConnection(args: any[]) {
+  // Node createConnection forwards normalized [options, callback] as arg0.
+  const first = Array.isArray(args[0]) ? args[0][0] : args[0]
+  assert.ok(typeof first === 'object' || typeof first === 'number' ||
+    (typeof first === 'string' && /^\d+$/.test(first)), 'Fixture forbids Unix socket paths')
+  const options = typeof first === 'object' ? first : { host: typeof args[1] === 'string' ? args[1] : 'localhost' }
+  assert.ok(options && !options.path, 'Fixture forbids Unix socket paths')
   const host = options.host ?? 'localhost'
   assert.ok(['127.0.0.1', 'localhost', '::1'].includes(host), 'Fixture forbids outbound sockets')
+}
+// Validate interception logic without making any of these connections.
+assert.throws(() => assertLocalConnection([[{ host: 'outside.invalid', port: 443 }]]), /outbound/)
+assert.throws(() => assertLocalConnection([{ host: 'outside.invalid', port: 443 }]), /outbound/)
+assert.throws(() => assertLocalConnection([443, 'outside.invalid']), /outbound/)
+assert.throws(() => assertLocalConnection([[{ path: '/tmp/forbidden.sock' }]]), /Unix socket/)
+assert.doesNotThrow(() => assertLocalConnection([[{ host: '127.0.0.1', port: 5432 }]]))
+net.Socket.prototype.connect = function (...args: any[]) {
+  assertLocalConnection(args)
   return connect.apply(this, args as any)
 } as any
 const realFetch = globalThis.fetch
@@ -70,8 +84,12 @@ try {
       schemaName: 'payload_fixture', push: true }),
   })
   payload = await getPayload({ config })
-  dispatch = request => new URL(request.url).pathname.startsWith('/api/auth/')
-    ? auth.handler(request) : handleEndpoints({ config, request })
+  let rejectAppSignOut = false
+  dispatch = request => {
+    const path = new URL(request.url).pathname
+    if (rejectAppSignOut && path === '/api/auth/sign-out') return Promise.resolve(Response.json({ message: 'Fixture sign-out outage' }, { status: 503 }))
+    return path.startsWith('/api/auth/') ? auth.handler(request) : handleEndpoints({ config, request })
+  }
   const password = 'fixture-only-' + randomBytes(16).toString('hex')
   await payload.create({ collection: 'admin-users', overrideAccess: true,
     data: { email: 'local-admin@example.invalid', password, name: 'Local fixture', role: 'admin' } })
@@ -85,7 +103,8 @@ try {
       const headers = new Headers(init?.headers)
       headers.set('origin', origin)
       if (jar.size) headers.set('cookie', cookie())
-      const response = await fetch(url, { ...init, headers, redirect: 'manual', cache: 'no-store' })
+      console.log(`CHECK HTTP ${init?.method || 'GET'} ${new URL(url).pathname}`)
+      const response = await fetch(url, { ...init, headers, redirect: 'manual', cache: 'no-store', signal: init?.signal ?? AbortSignal.timeout(15000) })
       for (const entry of response.headers.getSetCookie()) {
         const pair = entry.split(';', 1)[0]
         const index = pair.indexOf('=')
@@ -182,10 +201,33 @@ try {
   const dualReplay = browser(); dualReplay.jar.set('payload-token', oldDualPayloadCookie)
   assert.equal((await dualReplay.request('/payload-api/admin-users/me')).user, null, 'Dual-session logout must revoke the underlying local Payload session too')
   pass('dual Better Auth + local Payload sessions both revoke at their real server authorities')
+
+  const retryDual = await signup('Admin', 'retry-dual')
+  await retryDual.request('/payload-api/admin-users/login', { email: 'local-admin@example.invalid', password })
+  const retryPayloadToken = retryDual.jar.get('payload-token')!
+  rejectAppSignOut = true
+  await assert.rejects(retryDual.logout(), /sign-out could not be confirmed/)
+  assert.equal(retryDual.jar.get('payload-token'), retryPayloadToken, 'BA failure must preserve the local cookie needed to revoke its session')
+  rejectAppSignOut = false
+  await retryDual.logout()
+  const retryReplay = browser(); retryReplay.jar.set('payload-token', retryPayloadToken)
+  assert.equal((await retryReplay.request('/payload-api/admin-users/me')).user, null)
+  pass('dual-session Better Auth failure preserves local revocation capability; retry rejects the old cookie')
   console.log(`${results.length} real HTTP/PostgreSQL integration groups passed; no external accounts or database used`)
 } finally {
+  console.log('CLEANUP: fixture HTTP server')
+  server?.closeAllConnections()
   await new Promise<void>(resolve => server ? server.close(() => resolve()) : resolve())
+  // Payload canary's destroy() clears adapter metadata but does not close its
+  // pg pool; connectWithReconnect also retains a startup checkout. This fixture
+  // owns every connection, so close those clients before ending the pool.
+  const payloadPool = payload?.db.pool as (Pool & { _clients?: Array<{ end: () => Promise<void> }> }) | undefined
+  console.log('CLEANUP: fixture Payload pool')
   await payload?.destroy()
+  await Promise.all([...(payloadPool?._clients ?? [])].map(client => client.end()))
+  await payloadPool?.end()
+  console.log('CLEANUP: fixture app/auth pools')
   await (await appPool())?.end()
   await db.end()
+  console.log('CLEANUP: complete')
 }

@@ -23,7 +23,7 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dvnt-admin-auth-'));
       outfile: path.join(directory, 'integration.mjs'), bundle: true, platform: 'node', format: 'esm',
       packages: 'external', nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean) });
     const result = spawnSync(process.execPath, [path.join(directory, 'integration.mjs')], {
-      cwd: directory, stdio: 'inherit', timeout: 240000,
+      cwd: directory, stdio: 'inherit', timeout: 240000, killSignal: 'SIGKILL',
       env: { PATH: process.env.PATH, HOME: directory, NODE_ENV: 'development',
         APP_DATABASE_URL: connection, NEXT_TELEMETRY_DISABLED: '1', DO_NOT_TRACK: '1' },
     });
