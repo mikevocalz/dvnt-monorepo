@@ -204,3 +204,40 @@ test('media publish preserves inline hashtags beyond raw 2200 characters and kee
   assert.equal(sent[0].content, content);
   assert.deepEqual(people, { postId: '77', tags: placedTags });
 });
+
+test('Live Photo arrays retain original pairs and ordering across persisted upload and retry', async () => {
+  const { uploadLivePhotoPair } = await import('../media/live-photo-upload.ts');
+  const files = [0, 1, 2, 3].map((index) => ({
+    uri: `file:///original-${index}.heic`, type: 'image' as const,
+    kind: 'livePhoto', mimeType: 'image/heic', pairedVideoUri: `file:///original-${index}.mov`,
+  }));
+  let saved = draft({ files, uploaded: files.map(() => null) });
+  const actualUploads: string[] = [];
+  let failSecondMotion = true;
+  let published: PublishDescriptor['uploaded'] | undefined;
+  const { deps } = recorder({
+    persistMedia: async (file) => ({ ...file }),
+    uploadMedia: async (pending) => Promise.all(pending.map(async (file) => {
+      const result = await uploadLivePhotoPair(file, async (uri) => {
+        actualUploads.push(uri);
+        if (failSecondMotion && uri === files[1].pairedVideoUri) return { success: false, url: '' };
+        return { success: true, url: uri.replace('file:///', 'https://cdn.test/') };
+      });
+      return result.success ? result : { error: result.error };
+    })),
+    createPost: async (input) => { published = input.media; return { id: 673 }; },
+  });
+  await assert.rejects(createPublishTask(saved, 'owner-a', deps)(() => {}, next => { saved = next; }));
+  assert.equal(published, undefined, 'never publishes a flattened partial pair');
+  assert.equal(saved.uploaded[1], null);
+  assert.ok(saved.uploaded[0]?.livePhotoVideoUrl);
+  // Simulate process death: serialization must preserve both remaining input
+  // pairs and already uploaded outputs, not merely the image URLs.
+  saved = JSON.parse(JSON.stringify(saved));
+  failSecondMotion = false;
+  actualUploads.length = 0;
+  await createPublishTask(saved, 'owner-a', deps)(() => {}, next => { saved = next; });
+  assert.deepEqual(actualUploads, [files[1].uri, files[1].pairedVideoUri]);
+  assert.deepEqual(published?.map(media => media?.url), files.map(file => file.uri.replace('file:///', 'https://cdn.test/')));
+  assert.deepEqual(published?.map(media => media?.livePhotoVideoUrl), files.map(file => file.pairedVideoUri.replace('file:///', 'https://cdn.test/')));
+});

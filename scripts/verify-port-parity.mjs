@@ -260,6 +260,8 @@ const isRoute = (rel) => !NON_ROUTE.has(rel.split("/").pop());
 // convenience hook (same data, different surface). If the web file references
 // ANY listed equivalent, the native hook counts as covered.
 const EQUIVALENT_WIRING = {
+  // Native route/AppState gating corresponds to web viewport/document gating.
+  useFeedPlaybackEnabled: ["useFeedVideo"],
   useBookmarks: ["useBookmarkedPosts"],
   usePostsByIds: ["useBookmarkedPosts", "useTaggedPosts"],
   useBookmarkStore: ["useBookmarkedPosts", "useBookmarks"],
@@ -460,6 +462,16 @@ function resolveNativeSource(webRel) {
 // level deep and UNION their wiring into the screen's, so the verifier credits
 // wiring that lives in an imported component rather than only the screen file.
 function resolveFeatureImport(fromRel, spec) {
+  // Shared web UI components also own portable wiring (e.g. the extracted
+  // post carousel retains media-frame-store and the web playback lifecycle).
+  const component = spec.match(/^@dvnt\/app\/components\/(.+)$/);
+  if (component) {
+    const base = join(FEATURES_DIR, "..", "components", component[1]);
+    for (const suffix of base.endsWith(".web") ? [".tsx"] : [".web.tsx", ".tsx"]) {
+      if (existsSync(base + suffix)) return base + suffix;
+    }
+    return null;
+  }
   let target = null;
   const m = spec.match(/@dvnt\/app\/features\/(.+)$/);
   if (m) target = m[1];

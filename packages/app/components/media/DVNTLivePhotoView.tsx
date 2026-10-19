@@ -11,7 +11,7 @@
  *     not as pretty as a real Live Photo, but much better than a dead
  *     still image.
  *   - Final fallback if no paired video URL exists → still image.
- * Android / Web: Still image via expo-image.
+ * Android / Web: Muted paired-video fallback, or a still if no video exists.
  *
  * expo-live-photo requires a native build. The whole tree degrades
  * gracefully if the module isn't compiled into the current binary.
@@ -28,7 +28,7 @@
 import { View, ViewStyle, Platform } from "react-native";
 import { Image } from "expo-image";
 import type { ImageStyle } from "expo-image";
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from "react";
 import { DVNTAnimatedVideoView } from "./DVNTAnimatedVideoView";
 
 interface DVNTLivePhotoViewProps {
@@ -92,6 +92,16 @@ function LivePhotoAsset({
 }: DVNTLivePhotoViewProps) {
   const viewRef = useRef<any>(null);
   const isLoadedRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const playingRef = useRef(isPlaying);
+  useLayoutEffect(() => {
+    playingRef.current = isPlaying;
+  }, [isPlaying]);
+  // Changing playback must not reload the same native asset pair.
+  const source = useMemo(
+    () => ({ photoUri, pairedVideoUri: videoUri }),
+    [photoUri, videoUri],
+  );
   const pairKey = JSON.stringify([photoUri, videoUri]);
   const fellBackRef = useRef(brokenPairingCache.has(pairKey));
   // Dedicated render-nudge — flipping a ref alone doesn't re-render.
@@ -115,22 +125,25 @@ function LivePhotoAsset({
   // video is ready silently no-ops — that's what made autoplay look
   // broken in earlier builds.
   const startIfReady = useCallback(() => {
-    if (!viewRef.current || !isLoadedRef.current) return;
+    if (!isMountedRef.current || !viewRef.current || !isLoadedRef.current) return;
     try {
-      if (isPlaying) {
+      if (playingRef.current && !fellBackRef.current) {
         viewRef.current.startPlayback?.("full");
       } else {
         viewRef.current.stopPlayback?.();
       }
     } catch {}
-  }, [isPlaying]);
+  }, []);
 
   const handleLoadComplete = useCallback(() => {
+    if (!isMountedRef.current || fellBackRef.current) return;
     isLoadedRef.current = true;
     startIfReady();
   }, [startIfReady]);
 
   const handleLoadError = useCallback(() => {
+    if (!isMountedRef.current || fellBackRef.current) return;
+    try { viewRef.current?.stopPlayback?.(); } catch {}
     // PHLivePhoto couldn't pair photo + video (metadata stripped,
     // unsupported format, network hiccup, …). Remember this photo URI
     // so we skip native on remount, and re-render into the mp4 fallback
@@ -141,10 +154,20 @@ function LivePhotoAsset({
     bumpRender();
   }, [pairKey]);
 
-  // Re-drive playback when `isPlaying` flips (viewport-aware control).
   useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  // React runs all old playback cleanups before starting the next slide.
+  // Capture the native view: refs are cleared before unmount effect cleanup.
+  useEffect(() => {
+    const nativeView = viewRef.current;
     startIfReady();
-  }, [startIfReady]);
+    return () => {
+      try { nativeView?.stopPlayback?.(); } catch {}
+    };
+  }, [isPlaying, canRenderNativeLivePhoto, startIfReady]);
 
   if (canRenderNativeLivePhoto && LivePhotoView) {
     return (
@@ -153,13 +176,13 @@ function LivePhotoAsset({
           ref={viewRef}
           // Native asset shape is { photoUri, pairedVideoUri }. The old
           // `videoUri` prop name was silently ignored by the native view.
-          source={{ photoUri, pairedVideoUri: videoUri }}
+          source={source}
           style={{ width: "100%", height: "100%" }}
           contentFit={contentFit}
           isMuted={true}
           // Keep Apple's default tap-and-hold gesture so the user can
           // replay manually after the auto-startPlayback finishes.
-          useDefaultGestureRecognizer={true}
+          useDefaultGestureRecognizer={isPlaying}
           onLoadComplete={handleLoadComplete}
           onLoadError={handleLoadError}
           accessibilityLabel={accessibilityLabel}
