@@ -11,6 +11,8 @@ const fixture = {
     export const router={push:p=>state.navigations.push(p),replace:p=>state.navigations.push(p),back:()=>state.navigations.push('back')};
     export const createPost=async input=>{state.published.push(input);return {id:77}};
     export const uploadMultiple=async files=>{state.uploads.push(files);return files.map(file=>({success:true,type:file.type,url:'https://fixture.invalid/image.jpg'}))};`,
+  // App-assisted import has separate React/IndexedDB contracts; keep this caption harness offline.
+  './native-live-photo-handoff.web': `export const NativeLivePhotoHandoff=()=>null;`,
   'next/dynamic': `export default ()=>()=>null;`,
   'solito/navigation': `export {router as unused} from 'caption-fixture';import {router} from 'caption-fixture';export const useRouter=()=>router;export const useParams=()=>({id:'7'});`,
   'react-native': `export const Platform={OS:'web'};`,
@@ -110,7 +112,7 @@ window.runCaptionScenarios=async()=>{
   return 'PASS: mounted composer/editor, real publish queue, legacy migration and reload assertions';
 };`;
 (async () => {
-  const result = await esbuild.build({stdin:{contents:scenario,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfigRaw:{compilerOptions:{jsx:'react-jsx',jsxImportSource:'react'}},nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),define:{'process.env.NODE_ENV':'"test"'},plugins:[{name:'caption-boundaries',setup(build){
+  const result = await esbuild.build({stdin:{contents:scenario,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfigRaw:{compilerOptions:{jsx:'react-jsx',jsxImportSource:'react'}},nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),define:{'process.env.NODE_ENV':'"test"','process.env.NEXT_PUBLIC_ENABLE_NATIVE_LIVE_PHOTO_HANDOFF':'"false"'},plugins:[{name:'caption-boundaries',setup(build){
     build.onResolve({filter:/.*/},args=>{
       if(Object.hasOwn(fixture,args.path))return {path:args.path,namespace:'fixture'};
       if(args.path.endsWith('create-post-location.web'))return {path:'next/dynamic',namespace:'fixture'};

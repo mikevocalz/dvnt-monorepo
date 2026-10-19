@@ -169,7 +169,12 @@ export function usePublishPost() {
       placedTags: draft.placedTags.map((tag) => ({
         userId: tag.userId, x: tag.x, y: tag.y, mediaIndex: tag.mediaIndex,
       })),
-      uploaded: files.map(() => null),
+      uploaded: isText ? [] : draft.selectedMedia.map((media) => {
+        if (!media.handoffUpload) return null;
+        const { ownerId: uploadedOwner, ...uploaded } = media.handoffUpload;
+        if (uploadedOwner !== String(ownerId)) throw new Error("This Live Photo belongs to another account. Select it again.");
+        return uploaded;
+      }),
     };
     return postPublishQueue.enqueue(
       String(ownerId),

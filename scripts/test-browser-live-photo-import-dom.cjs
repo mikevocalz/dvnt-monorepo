@@ -28,6 +28,7 @@ const { build } = require('esbuild');
     export const camera = create(() => ({ result: null, clear: () => {} }));
   `;
   const mocks = {
+    './native-live-photo-handoff.web': `export const NativeLivePhotoHandoff = () => null;`,
     'next/dynamic': `export default () => () => null;`,
     'solito/navigation': `import {fixture} from 'composer-fixture'; export const useRouter = () => ({ back: () => fixture.routes.push('back'), push: route => fixture.routes.push(route), replace: route => fixture.routes.push(route) });`,
     '@dvnt/app/lib/stores/create-post-store': `export {store as useCreatePostStore} from 'composer-fixture';`,

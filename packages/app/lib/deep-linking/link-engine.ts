@@ -95,6 +95,14 @@ export function parseIncomingUrl(url: string): ParsedDeepLink | null {
       return null; // Root path, no deep link needed
     }
 
+    // Handoff IDs are routing identifiers, never credentials. Validate query
+    // values before substituting them into the native route.
+    if (path === "/live-photo-handoff") {
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuid.test(params.handoff || "") || !uuid.test(params.draft || "")) return null;
+      params = { handoff: params.handoff, draft: params.draft };
+    }
+
     // Match against route registry
     const match = matchRoute(path);
     const requiresAuth = match ? match.entry.auth === "auth-required" : true;
@@ -229,7 +237,7 @@ export function resolveNavigationTarget(
   }
 
   return {
-    path: buildRouterPath(match.entry.routerPath, match.params),
+    path: buildRouterPath(match.entry.routerPath, { ...parsed.params, ...match.params }).split("?")[0],
     params: { ...parsed.params, ...match.params },
     valid: true,
   };
