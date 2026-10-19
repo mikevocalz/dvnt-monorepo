@@ -89,7 +89,8 @@ export function useMediaPicker() {
     try {
       const allowMultiple = options?.allowsMultipleSelection ?? true;
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: options?.mediaTypes ?? ["images", "videos"],
+        // Request the paired resource too; images-only silently flattens Live Photos.
+        mediaTypes: options?.mediaTypes ?? ["images", "videos", "livePhotos"],
         allowsMultipleSelection: allowMultiple,
         quality: 1,
         // Hand over the asset as it is stored, without asking Photos to build

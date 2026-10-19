@@ -1,4 +1,5 @@
 import { useFeedVideo } from "@dvnt/app/components/feed/use-feed-video.web";
+import { resolveWebPostMedia } from "@dvnt/app/components/feed/web-post-media";
 import { PostUploadStatus } from "@dvnt/app/components/feed/post-upload-status.web";
 import { VerifiedAdmissionBanner } from "@dvnt/app/components/verified-admission-banner.web";
 /**
@@ -469,14 +470,7 @@ function MasonryCell({
     post.kind === "text" || (post.textSlides?.length ?? 0) > 0;
   const cover = coverFor(post);
   // Live Photos / animated videos auto-play (muted loop) in the grid, like mobile.
-  const liveVideoUrl =
-    media?.type === "livePhoto"
-      ? media.livePhotoVideoUrl
-      : media?.type === "animated_video"
-        ? media.url
-        : isVideo
-          ? media.url
-          : "";
+  const liveVideoUrl = media ? resolveWebPostMedia(media).videoUrl : undefined;
   const playback = useFeedVideo(liveVideoUrl);
   const {
     likes,

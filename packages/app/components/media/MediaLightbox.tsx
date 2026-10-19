@@ -13,7 +13,8 @@
  *     This avoids the ref-not-ready race that bit a previous attempt using
  *     the declarative BottomSheet + requestAnimationFrame(snapToIndex).
  *   - Horizontal paged ScrollView for multi-image / mixed-media posts.
- *   - expo-image for static photos, DVNTGifView for GIF items.
+ *   - Shared media renderer preserves GIF / animated-video / Live Photo pairs.
+ *   - Only the selected foreground page plays; the covered inline player pauses.
  *
  * Requirements:
  *   - <BottomSheetModalProvider> must be mounted somewhere above this in
@@ -33,6 +34,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -44,7 +46,6 @@ import {
   StyleSheet,
   View,
 } from "react-native";
-import { Image } from "expo-image";
 import { X } from "lucide-react-native";
 import {
   BottomSheetBackdrop,
@@ -52,11 +53,15 @@ import {
   BottomSheetView,
 } from "@gorhom/bottom-sheet";
 import type { BottomSheetBackdropProps } from "@gorhom/bottom-sheet";
-import { DVNTGifView } from "./DVNTGifView";
+import { DVNTMediaRenderer } from "./DVNTMediaRenderer";
+import { useFeedPlaybackEnabled } from "../feed/feed-inline-video";
+import type { MediaKind } from "@dvnt/app/lib/media/types";
 
 type LightboxMedia = {
   type?: "image" | "gif" | "livePhoto" | string;
   url: string;
+  livePhotoVideoUrl?: string;
+  thumbnail?: string;
 };
 
 interface LightboxContextValue {
@@ -69,7 +74,7 @@ const LightboxContext = createContext<LightboxContextValue | null>(null);
 interface LightboxProps {
   /** Galeria-compatible: string urls (treated as images). */
   urls?: string[];
-  /** Optional typed media items — preferred when the post has GIFs mixed in. */
+  /** Typed items preserve Live Photo pairs and animated media in the viewer. */
   media?: LightboxMedia[];
   /** Galeria-compat passthrough props (accepted but unused). */
   theme?: string;
@@ -78,6 +83,8 @@ interface LightboxProps {
   hideBlurOverlay?: boolean;
   hidePageIndicators?: boolean;
   children: React.ReactNode;
+  /** Pause the covered inline player until the modal is fully dismissed. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 // Single snap point: full screen. Static reference so the array identity
@@ -85,7 +92,7 @@ interface LightboxProps {
 // every new array, which can cause flicker on present).
 const SNAP_POINTS = ["100%"] as const;
 
-function LightboxProvider({ urls, media, children }: LightboxProps) {
+function LightboxProvider({ urls, media, children, onOpenChange }: LightboxProps) {
   const items: LightboxMedia[] = useMemo(() => {
     if (media && media.length) return media;
     return (urls ?? [])
@@ -96,18 +103,35 @@ function LightboxProvider({ urls, media, children }: LightboxProps) {
   const sheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [openIndex, setOpenIndex] = useState(0);
+  const [initialIndex, setInitialIndex] = useState(0);
+  const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPendingScroll = useCallback(() => {
+    if (scrollTimer.current !== null) clearTimeout(scrollTimer.current);
+    scrollTimer.current = null;
+  }, []);
+  useEffect(() => cancelPendingScroll, [cancelPendingScroll]);
+  const [isOpen, setIsOpen] = useState(false);
+  const playbackEnabled = useFeedPlaybackEnabled();
 
   const screenWidth = Dimensions.get("window").width;
   // ScrollView page height must be explicit pixels — using "100%" collapses
   // to 0 because horizontal ScrollView doesn't propagate percentage heights
   // from a flex-1 parent through to its content children.
   const screenHeight = Dimensions.get("window").height;
+  const initialOffset = useMemo(
+    () => ({ x: initialIndex * screenWidth, y: 0 }),
+    [initialIndex, screenWidth],
+  );
 
   const open = useCallback(
     (index: number) => {
       if (!items.length) return;
       const clamped = Math.max(0, Math.min(index, items.length - 1));
+      cancelPendingScroll();
+      setInitialIndex(clamped);
       setOpenIndex(clamped);
+      setIsOpen(true);
+      onOpenChange?.(true);
       // Present the modal sheet. ref is stable because the modal is
       // ALWAYS mounted (just hidden when not presented), so there is no
       // ref-not-ready race.
@@ -116,7 +140,8 @@ function LightboxProvider({ urls, media, children }: LightboxProps) {
       // mounted dimensions. requestAnimationFrame on its own is too early
       // when the sheet is opening for the first time — use a short timeout
       // that runs after the open animation has begun rendering the children.
-      setTimeout(() => {
+      scrollTimer.current = setTimeout(() => {
+        scrollTimer.current = null;
         scrollRef.current?.scrollTo({
           x: clamped * screenWidth,
           y: 0,
@@ -124,7 +149,7 @@ function LightboxProvider({ urls, media, children }: LightboxProps) {
         });
       }, 80);
     },
-    [items.length, screenWidth],
+    [items.length, screenWidth, onOpenChange, cancelPendingScroll],
   );
 
   const close = useCallback(() => {
@@ -156,6 +181,11 @@ function LightboxProvider({ urls, media, children }: LightboxProps) {
       */}
       <BottomSheetModal
         ref={sheetRef}
+        onDismiss={() => {
+          cancelPendingScroll();
+          setIsOpen(false);
+          onOpenChange?.(false);
+        }}
         snapPoints={SNAP_POINTS as unknown as string[]}
         enablePanDownToClose
         enableOverDrag={false}
@@ -178,6 +208,14 @@ function LightboxProvider({ urls, media, children }: LightboxProps) {
             ref={scrollRef}
             horizontal
             pagingEnabled
+            contentOffset={initialOffset}
+            onScroll={(event) => {
+              if (screenWidth <= 0) return;
+              setOpenIndex(Math.max(0, Math.min(items.length - 1, Math.round(
+                event.nativeEvent.contentOffset.x / screenWidth,
+              ))));
+            }}
+            scrollEventThrottle={16}
             showsHorizontalScrollIndicator={false}
             style={styles.scrollView}
             contentContainerStyle={styles.scrollContent}
@@ -190,24 +228,13 @@ function LightboxProvider({ urls, media, children }: LightboxProps) {
                   { width: screenWidth, height: screenHeight },
                 ]}
               >
-                {item.type === "gif" ? (
-                  <DVNTGifView
-                    uri={item.url}
-                    width={screenWidth}
-                    height={screenHeight}
-                    contentFit="contain"
-                  />
-                ) : (
-                  <Image
-                    source={{ uri: item.url }}
-                    style={{
-                      width: screenWidth,
-                      height: screenHeight,
-                    }}
-                    contentFit="contain"
-                    cachePolicy="memory-disk"
-                  />
-                )}
+                <DVNTMediaRenderer
+                  item={{ ...item, type: (item.type ?? "image") as MediaKind }}
+                  width={screenWidth}
+                  height={screenHeight}
+                  contentFit="contain"
+                  isPlaying={isOpen && playbackEnabled && i === openIndex}
+                />
               </View>
             ))}
           </ScrollView>

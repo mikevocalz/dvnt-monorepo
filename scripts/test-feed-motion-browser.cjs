@@ -64,7 +64,7 @@ const root = path.resolve(__dirname, '..');
     assert.deepEqual(errors,[]);
     // Ensure the actual feed route invokes the tested hook for ordinary videos.
     const home=fs.readFileSync(path.join(root,'packages/app/features/home/screen.web.tsx'),'utf8');
-    assert.match(home, /: isVideo\s*\? media.url/); assert.match(home,/ref=\{playback.ref\}/);
+    assert.match(home, /resolveWebPostMedia\(media\).videoUrl/); assert.match(home,/ref=\{playback.ref\}/);
     console.log('PASS: real MP4 time advances; scrolling, stories, background, source replacement and unmount work; user sound is exclusive. Autoplay rejection/retry is covered by controller tests.');
   } finally {await browser?.close();if(server)await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

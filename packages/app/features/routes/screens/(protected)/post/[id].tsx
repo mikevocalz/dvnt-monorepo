@@ -57,6 +57,9 @@ import {
 } from "@dvnt/app/lib/video-lifecycle";
 import { DVNTSeekBar } from "@dvnt/app/components/media/DVNTSeekBar";
 import { DVNTMediaRenderer } from "@dvnt/app/components/media/DVNTMediaRenderer";
+import { PostMediaCarousel } from "@dvnt/app/components/media/PostMediaCarousel";
+import { useFeedPlaybackEnabled } from "@dvnt/app/components/feed/feed-inline-video";
+import { isFeedCellVisible } from "@dvnt/app/components/feed/native-feed-playback";
 import {
   DVNTLiquidGlass,
   DVNTLiquidGlassIconButton,
@@ -396,7 +399,11 @@ function PostDetailActionBar({
  * Keeps useVideoPlayer out of the main component to prevent
  * creating (and tearing down) a native player for every image post.
  */
-function PostVideoPlayer({ postId, url }: { postId: string; url?: string }) {
+function PostVideoPlayer({ postId, url, playbackEnabled }: {
+  postId: string;
+  url?: string;
+  playbackEnabled: boolean;
+}) {
   const { width: screenWidth } = useWindowDimensions();
   const { isMountedRef, isSafeToOperate } = useVideoLifecycle(
     "PostDetail",
@@ -464,7 +471,7 @@ function PostVideoPlayer({ postId, url }: { postId: string; url?: string }) {
 
   useFocusEffect(
     useCallback(() => {
-      if (player && videoUrl && isSafeToOperate()) {
+      if (playbackEnabled && player && videoUrl && isSafeToOperate()) {
         safePlay(player, isMountedRef, "PostDetail");
         setIsPlaying(true);
       }
@@ -475,7 +482,7 @@ function PostVideoPlayer({ postId, url }: { postId: string; url?: string }) {
           setIsPlaying(false);
         }
       };
-    }, [player, videoUrl, isSafeToOperate, isMountedRef]),
+    }, [player, videoUrl, playbackEnabled, isSafeToOperate, isMountedRef]),
   );
 
   const handleSeek = useCallback(
@@ -819,135 +826,20 @@ const TextSlideDots = memo(function TextSlideDots({ count }: { count: number }) 
   );
 });
 
-type MediaItem = {
-  type?: string;
-  url?: string;
-  thumbnail?: string;
-  mimeType?: string;
-  livePhotoVideoUrl?: string;
-  updatedAt?: string | number;
-};
-
-const MediaSlide = memo(function MediaSlide({
-  medium,
-  galeriaIndex,
-  width,
-  height,
-}: {
-  medium: MediaItem;
-  galeriaIndex: number;
-  width: number;
-  height: number;
-}) {
-  const isValidUrl =
-    !!medium.url &&
-    (medium.url.startsWith("http://") || medium.url.startsWith("https://"));
-
-  return (
-    <View style={{ width, height }}>
-      {isValidUrl ? (
-        <Galeria.Image index={galeriaIndex >= 0 ? galeriaIndex : 0}>
-          {/*
-            isPlaying is intentionally `true` for every slide. Gating it
-            on `index === currentSlide` used to restart each GIF's native
-            decoder on every swipe, which is the #1 cause of flicker in
-            multi-GIF posts. expo-image's native GIF player is cheap when
-            the slide is scrolled off-screen (no raster work for offscreen
-            pixels), so there's no meaningful cost to leaving them on.
-          */}
-          <DVNTMediaRenderer
-            item={medium as any}
-            width={width}
-            height={height}
-            // Detail view slides: contain so every slide shows the
-            // complete frame from top to bottom. The carousel frame
-            // is a fixed 4:5 box; tall portraits used to lose heads
-            // and wide landscapes used to lose context to center-crop.
-            contentFit="contain"
-            isPlaying
-          />
-        </Galeria.Image>
-      ) : (
-        <View
-          style={{
-            width,
-            height,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-          className="bg-muted"
-        >
-          <Text className="text-muted-foreground text-xs">No image</Text>
-        </View>
-      )}
-    </View>
-  );
-});
-
-const MediaCarousel = memo(function MediaCarousel({
-  media,
-  imageUrls,
-  width,
-  height,
-  onSlideChange,
-}: {
-  media: MediaItem[];
-  imageUrls: string[];
-  width: number;
-  height: number;
-  onSlideChange: (index: number) => void;
-}) {
-  const urlToIndex = useMemo(() => {
-    const map = new Map<string, number>();
-    imageUrls.forEach((u, i) => map.set(u, i));
-    return map;
-  }, [imageUrls]);
-
-  const handleScroll = useCallback(
-    (event: any) => {
-      const slideIndex = Math.round(
-        event.nativeEvent.contentOffset.x / width,
-      );
-      onSlideChange(slideIndex);
-    },
-    [onSlideChange, width],
-  );
-
-  return (
-    <Galeria urls={imageUrls.length > 0 ? imageUrls : undefined}>
-      <ScrollView
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-      >
-        {media.map((medium, index) => {
-          const galeriaIndex = medium.url
-            ? urlToIndex.get(medium.url) ?? -1
-            : -1;
-          return (
-            <MediaSlide
-              // Stable key by URL preserves component identity (and the
-              // underlying GIF decoder state) across parent rerenders.
-              // Fallback to index only for items with no URL.
-              key={medium.url || `slot-${index}`}
-              medium={medium}
-              galeriaIndex={galeriaIndex}
-              width={width}
-              height={height}
-            />
-          );
-        })}
-      </ScrollView>
-      <PaginationDots count={media.length} />
-    </Galeria>
-  );
-});
-
 function PostDetailScreenContent() {
   // Live window width; the media below is sized from it.
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const routePlaybackEnabled = useFeedPlaybackEnabled();
+  const mediaViewport = useRef({ y: 0, height: 0, offset: 0, viewportHeight: 0 });
+  const [mediaVisible, setMediaVisible] = useState(true);
+  const [singleLightboxOpen, setSingleLightboxOpen] = useState(false);
+  const updateMediaVisibility = useCallback(() => {
+    const { y, height, offset, viewportHeight } = mediaViewport.current;
+    if (height > 0 && viewportHeight > 0) {
+      setMediaVisible(isFeedCellVisible(y - offset, height, 0, viewportHeight));
+    }
+  }, []);
+  const mediaPlaybackEnabled = routePlaybackEnabled && mediaVisible && !singleLightboxOpen;
   const aspectByUrl = useMediaFrameStore((st) => st.aspectByUrl);
   const setAspect = useMediaFrameStore((st) => st.setAspect);
   // The media is BOUNDED, not the whole screen.
@@ -1104,13 +996,17 @@ function PostDetailScreenContent() {
   // below) so the re-render is scoped to that leaf.
   const setCurrentSlide = usePostDetailScreenStore((s) => s.setCurrentSlide);
 
-  // Cleanup effect - reset all screen state on unmount
+  // A newly opened post starts on its first page, including its overlays.
   useEffect(() => {
+    setCurrentSlide(0);
+    setSingleLightboxOpen(false);
+    mediaViewport.current.offset = 0;
+    updateMediaVisibility();
     return () => {
       loopDetection.log("PostDetail", "unmount", { postId });
       resetPostDetailScreen();
     };
-  }, [postId, resetPostDetailScreen]);
+  }, [postId, resetPostDetailScreen, setCurrentSlide, updateMediaVisibility]);
 
 
   // NORMALIZATION: Create safePost with guaranteed non-null values
@@ -1324,14 +1220,16 @@ function PostDetailScreenContent() {
 
   // Signature-keyed stabilization. `safePost.media` gets a new array
   // reference on every React Query refetch even when the URLs haven't
-  // changed; that cascades into fresh references for imageUrls, the
+  // changed; that cascades into fresh references for the
   // <MediaCarousel /> props, and every slide's `medium` — which restarts
   // GIF decoders. Keying off a string signature preserves the array
   // identity across no-op refetches so downstream memos stay stable.
   const mediaSignature = useMemo(() => {
     if (!hasMedia) return "";
     return safePost.media
-      .map((m: any) => `${m?.type ?? ""}::${m?.url ?? ""}`)
+      .map((m: any) => JSON.stringify([
+        m?.type, m?.url, m?.livePhotoVideoUrl, m?.thumbnail, m?.mimeType, m?.updatedAt,
+      ]))
       .join("||");
   }, [hasMedia, safePost.media]);
 
@@ -1379,18 +1277,6 @@ function PostDetailScreenContent() {
     Math.round(portraitHeight * frameAspect),
   );
 
-  // Collect valid image URLs for Galeria full-screen viewer
-  const imageUrls = useMemo(() => {
-    if (!hasMedia || isVideo) return [];
-    return stableMedia
-      .filter(
-        (m: any) =>
-          m.type !== "video" &&
-          m.url &&
-          (m.url.startsWith("http://") || m.url.startsWith("https://")),
-      )
-      .map((m: any) => m.url);
-  }, [hasMedia, isVideo, stableMedia]);
   const isLiked = isPostLiked; // From usePostLikeState hook
   const isSaved = isBookmarked; // isBookmarked is already a boolean from useMemo
   const handleBookmarkPress = useCallback(() => {
@@ -1612,6 +1498,16 @@ function PostDetailScreenContent() {
           sizes off `mediaWidth` — a child measuring the window inside this box
           is what made the image overflow it before. */}
       <ScrollView
+        key={postId}
+        onLayout={(event) => {
+          mediaViewport.current.viewportHeight = event.nativeEvent.layout.height;
+          updateMediaVisibility();
+        }}
+        onScroll={(event) => {
+          mediaViewport.current.offset = event.nativeEvent.contentOffset.y;
+          updateMediaVisibility();
+        }}
+        scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{
           width: "100%",
@@ -1650,6 +1546,11 @@ function PostDetailScreenContent() {
 
           {/* Media - CRITICAL: Always render to maintain stable hook count */}
           <View
+            onLayout={(event) => {
+              mediaViewport.current.y = event.nativeEvent.layout.y;
+              mediaViewport.current.height = event.nativeEvent.layout.height;
+              updateMediaVisibility();
+            }}
             style={{
               display: hasMedia ? "flex" : "none",
               width: frameWidth,
@@ -1672,6 +1573,7 @@ function PostDetailScreenContent() {
               <SafeMediaWrapper width={frameWidth} height={portraitHeight}>
                 <PostVideoPlayer
                   postId={postId}
+                  playbackEnabled={mediaPlaybackEnabled}
                   url={isVideo ? safePost.media?.[0]?.url : ""}
                 />
               </SafeMediaWrapper>
@@ -1690,20 +1592,26 @@ function PostDetailScreenContent() {
               <ZoomTarget>
               <SafeMediaWrapper width={frameWidth} height={portraitHeight}>
                 {hasMultipleMedia ? (
-                  <MediaCarousel
-                    media={stableMedia as MediaItem[]}
-                    imageUrls={imageUrls}
+                  <PostMediaCarousel
+                    key={postId}
+                    media={stableMedia}
                     width={frameWidth}
                     height={portraitHeight}
                     onSlideChange={setCurrentSlide}
-                  />
+                    isPlaying={mediaPlaybackEnabled}
+                  >
+                    <PaginationDots count={stableMedia.length} />
+                  </PostMediaCarousel>
                 ) : stableMedia[0]?.url &&
                   (stableMedia[0].url.startsWith("http://") ||
                     stableMedia[0].url.startsWith("https://")) ? (
                   // Single media item — use DVNTMediaRenderer to handle
                   // gif / livePhoto / image. Galeria is kept around the
                   // single image for parity with the carousel lightbox.
-                  <Galeria urls={imageUrls.length > 0 ? imageUrls : undefined}>
+                  <Galeria
+                    media={stableMedia}
+                    onOpenChange={setSingleLightboxOpen}
+                  >
                     <Galeria.Image index={0}>
                       <DVNTMediaRenderer
                         item={stableMedia[0] as any}
@@ -1716,7 +1624,7 @@ function PostDetailScreenContent() {
                         // mismatch letterboxes cleanly on black.
                         contentFit="contain"
                         showBadge={true}
-                        isPlaying={true}
+                        isPlaying={mediaPlaybackEnabled}
                       />
                     </Galeria.Image>
                   </Galeria>

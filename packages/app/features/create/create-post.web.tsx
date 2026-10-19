@@ -57,7 +57,14 @@ import { useCreatePostUIStore } from "./create-post-ui-store";
 import { readVideoDurationSec } from "@dvnt/app/lib/media/video-duration.web";
 import { validateVideoPick, videoLimitsLabel } from "@dvnt/app/lib/media/video-pick-policy";
 
-const MAX_PHOTOS = 10;
+import { LivePhotoPairPicker } from "./live-photo-pair-picker.web";
+import {
+  captureBrowserMediaCommit,
+  MAX_BROWSER_POST_MEDIA,
+  releaseBrowserMediaAsset,
+} from "./browser-live-photo-import";
+
+const MAX_PHOTOS = MAX_BROWSER_POST_MEDIA;
 const MAX_ANIMATED_VIDEO_DURATION = 15; // seconds
 
 // Same three numbers `(tabs)/create.tsx` passes, so a tablet browser and a
@@ -82,6 +89,12 @@ const CreatePostLocation = dynamic(
 export function CreatePostScreen() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
+  const mounted = useRef(true);
+  const filePickVersion = useRef(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; filePickVersion.current += 1; };
+  }, []);
 
   // Preview tiles scale with the window instead of being frozen at two across —
   // the same call the native composer makes, so the two surfaces show the same
@@ -166,71 +179,76 @@ export function CreatePostScreen() {
 
   // ---- Media intake (file input → object-URL MediaAssets) ----
 
+  const beginMediaAdd = () => {
+    const operation = filePickVersion.current;
+    return captureBrowserMediaCommit(
+      useCreatePostStore.getState,
+      () => mounted.current && !submittingRef.current && operation === filePickVersion.current,
+    );
+  };
+
   const onPickFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
     const files = Array.from(input.files ?? []);
-    if (files.length === 0) return;
-    const remaining = MAX_PHOTOS - selectedMedia.length;
+    input.value = "";
+    if (files.length === 0 || submittingRef.current) return;
+    const operation = ++filePickVersion.current;
+    const commit = beginMediaAdd();
+    const remaining = MAX_PHOTOS - useCreatePostStore.getState().selectedMedia.length;
     if (remaining <= 0) {
       showToast("warning", "Photo limit", `Maximum ${MAX_PHOTOS} photos per post.`);
-      input.value = "";
       return;
     }
 
     const next: MediaAsset[] = [];
-    for (const file of files) {
-      const isVideo = file.type.startsWith("video/");
-      const isImage = file.type.startsWith("image/");
-      if (!isVideo && !isImage) continue;
-      let durationSec: number | null = null;
-      if (isVideo) {
-        // Same limits media-upload enforces, checked before a byte is sent.
-        // The browser uploads the file as picked, so size counts here.
-        durationSec = await readVideoDurationSec(file);
-        const check = validateVideoPick({
-          kind: "post-video",
-          mimeType: file.type,
-          fileName: file.name,
-          sizeBytes: file.size,
-          durationSec,
+    try {
+      for (const file of files) {
+        if (next.length >= remaining) {
+          showToast("warning", "Photo limit reached", `You can add up to ${MAX_PHOTOS} media items per post.`);
+          break;
+        }
+        const isVideo = file.type.startsWith("video/");
+        const isImage = file.type.startsWith("image/");
+        if (!isVideo && !isImage) continue;
+        let durationSec: number | null = null;
+        if (isVideo) {
+          durationSec = await readVideoDurationSec(file);
+          if (!mounted.current || operation !== filePickVersion.current) break;
+          const check = validateVideoPick({
+            kind: "post-video", mimeType: file.type, fileName: file.name,
+            sizeBytes: file.size, durationSec,
+          });
+          if (!check.ok) { showToast("error", check.title, check.message); continue; }
+        }
+        const uri = URL.createObjectURL(file);
+        const kind: MediaKind = isVideo ? "video" : file.type === "image/gif" ? "gif" : "image";
+        next.push({
+          id: `media-${crypto.randomUUID()}`, uri, type: isVideo ? "video" : "image", kind,
+          mimeType: file.type || undefined, fileName: file.name, fileSize: file.size,
+          ...(durationSec != null ? { duration: durationSec } : {}),
         });
-        if (!check.ok) {
-          showToast("error", check.title, check.message);
-          continue;
+      }
+      if (next.length > 0 && (operation !== filePickVersion.current || !commit(next))) {
+        next.forEach(releaseBrowserMediaAsset);
+        if (mounted.current && operation === filePickVersion.current && !submittingRef.current) {
+          showToast("warning", "Selection changed", "Your post changed while those files were checked. Please select them again.");
         }
       }
-      if (!isVideo && next.length >= remaining) {
-        showToast("warning", "Photo limit reached", `You can add up to ${MAX_PHOTOS} photos per post.`);
-        break;
-      }
-      const uri = URL.createObjectURL(file);
-      const kind: MediaKind = isVideo
-        ? "video"
-        : file.type === "image/gif"
-          ? "gif"
-          : "image";
-      next.push({
-        id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`,
-        uri,
-        type: isVideo ? "video" : "image",
-        kind,
-        mimeType: file.type || undefined,
-        ...(durationSec != null ? { duration: durationSec } : {}),
-      });
+    } catch {
+      next.forEach(releaseBrowserMediaAsset);
+      if (mounted.current && operation === filePickVersion.current) showToast("error", "Could not read media", "Choose your files again and retry.");
     }
-
-    if (next.length > 0) {
-      // Read the store again: the duration reads above are async.
-      setSelectedMedia([...useCreatePostStore.getState().selectedMedia, ...next]);
-    }
-    input.value = "";
   };
 
   const handleRemoveMedia = (id: string) => {
+    if (submittingRef.current) return;
+    const removed = selectedMedia.find(m => m.id === id);
     setSelectedMedia(selectedMedia.filter((m) => m.id !== id));
+    if (removed) releaseBrowserMediaAsset(removed);
   };
 
   const moveMedia = (index: number, dir: -1 | 1) => {
+    if (submittingRef.current) return;
     const target = index + dir;
     if (target < 0 || target >= selectedMedia.length) return;
     const reordered = [...selectedMedia];
@@ -240,10 +258,11 @@ export function CreatePostScreen() {
   };
 
   const handleSetPostKind = (nextKind: "media" | "text") => {
-    if (nextKind === postKind) return;
+    if (nextKind === postKind || submittingRef.current) return;
+    filePickVersion.current += 1;
     setPostKind(nextKind);
     if (nextKind === "text") {
-      if (selectedMedia.length > 0) setSelectedMedia([]);
+      if (selectedMedia.length > 0) { setSelectedMedia([]); selectedMedia.forEach(releaseBrowserMediaAsset); }
       if (isNSFW) setIsNSFW(false);
     }
   };
@@ -261,6 +280,7 @@ export function CreatePostScreen() {
 
   const submitPost = async () => {
     if (submittingRef.current) return;
+    filePickVersion.current += 1;
     submittingRef.current = true;
     ui.setIsSubmitLocked(true);
     try {
@@ -298,7 +318,7 @@ export function CreatePostScreen() {
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
-        <button onClick={() => router.back()} className="text-white/80 active:opacity-60" aria-label="Close">
+        <button onClick={() => { filePickVersion.current += 1; router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
           <X size={22} />
         </button>
         <h1 className="text-[17px] font-semibold">New Post</h1>
@@ -328,6 +348,7 @@ export function CreatePostScreen() {
                   if (option.key === "event") {
                     // Web parity with mobile: Event tab navigates out to the
                     // dedicated events flow rather than setting postKind.
+                    filePickVersion.current += 1;
                     router.push("/feed/events/create");
                     return;
                   }
@@ -408,17 +429,24 @@ export function CreatePostScreen() {
         {!isTextPost && selectedMedia.length === 0 ? (
           <div className="mt-3 flex">
             <button
+              aria-describedby="live-photo-upload-help"
               onClick={() => fileRef.current?.click()}
+              disabled={busy}
               className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-500 py-3.5 font-semibold text-white"
             >
               <ImagePlus size={20} />
-              Add Photos
+              Add Photos or Videos
             </button>
           </div>
         ) : null}
 
         {!isTextPost && canAddMore ? (
           <p className="mt-2 text-xs text-white/45">{videoLimitsLabel("post-video")}</p>
+        ) : null}
+
+        {!isTextPost ? (
+          <LivePhotoPairPicker disabled={busy || !canAddMore} selectionIdentity={selectedMedia}
+            draftIdentity={textSlides} beginAdd={beginMediaAdd} />
         ) : null}
 
         <CreatePostLocation />
@@ -568,12 +596,17 @@ export function CreatePostScreen() {
                 key={media.id}
                 className="relative aspect-[4/5] overflow-hidden rounded-2xl bg-[#111]"
               >
-                {media.type === "video" ? (
-                  <video src={media.uri} muted loop playsInline className="h-full w-full object-cover" />
+                {media.kind === "livePhoto" && media.pairedVideoUri ? (
+                  <video src={media.pairedVideoUri} poster={media.uri} controls muted loop playsInline preload="metadata"
+                    aria-label={`Live Photo ${index + 1} motion preview`} className="h-full w-full object-cover" />
+                ) : media.type === "video" ? (
+                  <video src={media.uri} controls muted loop playsInline className="h-full w-full object-cover" />
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={media.uri} alt="" className="h-full w-full object-cover" />
                 )}
+
+                {media.kind === "livePhoto" ? <span className="pointer-events-none absolute left-10 top-2 rounded-md bg-black/70 px-2 py-1 text-[10px] font-semibold">LIVE</span> : null}
 
                 <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md bg-black/70 text-xs font-semibold text-white">
                   {index + 1}
@@ -581,6 +614,7 @@ export function CreatePostScreen() {
 
                 <button
                   onClick={() => handleRemoveMedia(media.id)}
+                  disabled={busy}
                   className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/90 text-white"
                   aria-label="Remove"
                 >
@@ -590,7 +624,7 @@ export function CreatePostScreen() {
                 <div className="absolute bottom-2 right-2 flex gap-1.5">
                   <button
                     onClick={() => moveMedia(index, -1)}
-                    disabled={index === 0}
+                    disabled={busy || index === 0}
                     className="flex h-7 w-7 items-center justify-center rounded-lg bg-black/70 text-white disabled:opacity-30"
                     aria-label="Move up"
                   >
@@ -598,7 +632,7 @@ export function CreatePostScreen() {
                   </button>
                   <button
                     onClick={() => moveMedia(index, 1)}
-                    disabled={index === selectedMedia.length - 1}
+                    disabled={busy || index === selectedMedia.length - 1}
                     className="flex h-7 w-7 items-center justify-center rounded-lg bg-black/70 text-white disabled:opacity-30"
                     aria-label="Move down"
                   >
@@ -610,7 +644,9 @@ export function CreatePostScreen() {
 
             {canAddMore ? (
               <button
+                aria-describedby="live-photo-upload-help"
                 onClick={() => fileRef.current?.click()}
+                disabled={busy}
                 className="flex aspect-[4/5] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-white/20 bg-[#111] text-white/40"
               >
                 <Plus size={32} />

@@ -14,7 +14,6 @@ import {
   MessageCircle,
   Bookmark,
   Send,
-  Play,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -35,8 +34,6 @@ import { usePostLikers } from "@dvnt/app/lib/hooks/use-post-likers";
 import { useBookmarkStore } from "@dvnt/app/lib/stores/bookmark-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
-import { useCarouselStore } from "@dvnt/app/lib/stores/carousel-store";
-import { useMediaFrameStore } from "@dvnt/app/lib/stores/media-frame-store";
 import { usePostTagsUIStore } from "@dvnt/app/lib/stores/post-tags-store";
 import { useContentTranslation } from "@dvnt/app/lib/stores/translation-store";
 import { shouldShowTranslateButton } from "@dvnt/app/lib/utils/language-detection";
@@ -46,21 +43,17 @@ import {
   useLikesSheet,
 } from "@dvnt/app/lib/stores/post-detail-ui-store";
 import { ThreadedComment } from "@dvnt/app/features/comments";
-import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
 import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog, Drawer } from "@dvnt/ui";
 import { postsApi } from "@dvnt/app/lib/api/posts";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import { TextPostSurface } from "./ui/TextPostSurface";
-import { CAROUSEL_DOT_COLORS } from "@dvnt/app/components/feed/feed-media-mode";
+import { PostMediaCarousel } from "@dvnt/app/components/feed/post-media-carousel.web";
 import { ownsContent } from "@dvnt/app/lib/profile/same-user";
-
-const VIDEO_URL_RE = /post-video|\.mp4(\?|$)|\.mov(\?|$)|\.m3u8(\?|$)|\.webm(\?|$)/i;
 
 export function PostDetailScreen() {
   const params = useParams();
   const router = useRouter();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const id = String((params as any)?.id ?? "");
   const { data: post, isLoading } = usePost(id);
   const { data: comments } = useComments(id);
@@ -126,12 +119,6 @@ export function PostDetailScreen() {
     staleTime: 60_000,
     gcTime: 10 * 60 * 1000,
   });
-
-  // Reset the carousel to the first slide when opening a different post.
-  const setCarouselIndex = useCarouselStore((s) => s.setIndex);
-  useEffect(() => {
-    setCarouselIndex(0);
-  }, [id, setCarouselIndex]);
 
   // Clear transient menu/dialog/sheet flags when leaving the screen.
   useEffect(() => () => resetPostDetailUI(), [id, resetPostDetailUI]);
@@ -244,7 +231,7 @@ export function PostDetailScreen() {
             />
           </div>
         ) : (
-          <MediaCarousel media={media} caption={post.caption ?? ""} />
+          <PostMediaCarousel key={post.id} media={media} caption={post.caption ?? ""} />
         )}
 
         <div className="flex items-center gap-5 px-4 py-3">
@@ -577,126 +564,6 @@ function LikesSheet({
   );
 }
 
-type Medium = { type?: string; url: string; thumbnail?: string };
-
-function MediaCarousel({
-  media,
-  caption,
-}: {
-  media: Medium[];
-  caption: string;
-}) {
-  const index = useCarouselStore((s) => s.index);
-  const setIndex = useCarouselStore((s) => s.setIndex);
-  const openAt = useLightboxStore((s) => s.openAt);
-  // Natural aspect per URL, cached in the shared store exactly as native does:
-  // the shape belongs to the picture, not to this mount, so reopening a post
-  // draws the right frame on the FIRST paint instead of re-measuring. (Zustand,
-  // never useState — the cache is shared with the native screen's store.)
-  const aspectByUrl = useMediaFrameStore((s) => s.aspectByUrl);
-  const setAspect = useMediaFrameStore((s) => s.setAspect);
-  const multiple = media.length > 1;
-  const items = media.map((m) => ({
-    type: m.type,
-    url: m.url,
-    poster: m.thumbnail,
-  }));
-
-  return (
-    <div className="relative bg-black">
-      <div
-        className="flex overflow-x-auto snap-x snap-mandatory no-scrollbar"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          setIndex(Math.round(el.scrollLeft / Math.max(1, el.clientWidth)));
-        }}
-      >
-        {media.map((m, i) => {
-          const isVid = m.type === "video" || VIDEO_URL_RE.test(m.url);
-          return (
-            <button
-              key={i}
-              onClick={() => openAt(items, i)}
-              className="snap-center shrink-0 w-full relative cursor-zoom-in"
-            >
-              {isVid ? (
-                <>
-                  <video
-                    src={m.url}
-                    poster={m.thumbnail}
-                    muted
-                    playsInline
-                    className="w-full max-h-[78vh] object-contain bg-black pointer-events-none"
-                  />
-                  <span className="absolute inset-0 flex items-center justify-center">
-                    <span className="w-14 h-14 rounded-2xl bg-black/55 backdrop-blur flex items-center justify-center">
-                      <Play size={26} color="#fff" fill="#fff" />
-                    </span>
-                  </span>
-                </>
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={m.thumbnail || m.url}
-                  alt={caption}
-                  // ponytail: measured from the image the browser already
-                  // decoded (`onLoad`), not a second probe request — so the
-                  // first paint of a cold post is still 4:5 for one frame.
-                  onLoad={(e) => {
-                    const { naturalWidth: w, naturalHeight: h } =
-                      e.currentTarget;
-                    if (h > 0) setAspect(m.thumbnail || m.url, w / h);
-                  }}
-                  className={
-                    multiple
-                      ? "w-full max-h-[78vh] object-contain bg-black"
-                      : "mx-auto block h-auto w-auto max-w-full max-h-[62vh] object-contain bg-black"
-                  }
-                  style={
-                    multiple
-                      ? undefined
-                      : {
-                          aspectRatio: String(
-                            aspectByUrl[m.thumbnail || m.url] ?? 4 / 5,
-                          ),
-                        }
-                  }
-                />
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {multiple ? (
-        <>
-          {/* Slide counter (top-right) + pagination dots (bottom) — like mobile. */}
-          <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full bg-black/55 text-white text-xs font-medium">
-            {Math.min(index + 1, media.length)}/{media.length}
-          </div>
-          <div className="absolute inset-x-0 bottom-3 flex justify-center gap-1.5 pointer-events-none">
-            {media.map((_, i) => (
-              <span
-                key={i}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === index ? "w-4" : "w-1.5 bg-white/45"
-                }`}
-                style={
-                  i === index
-                    ? {
-                        backgroundColor:
-                          CAROUSEL_DOT_COLORS[i % CAROUSEL_DOT_COLORS.length],
-                      }
-                    : undefined
-                }
-              />
-            ))}
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
-}
 
 function CommentComposer({ postId }: { postId: string }) {
   const open = useCommentDraftStore((s) => s.open);

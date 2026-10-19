@@ -1,6 +1,12 @@
 import { create } from "zustand";
 
-export type LightboxItem = { type?: string; url: string; poster?: string };
+export type LightboxItem = {
+  type?: string;
+  url: string;
+  poster?: string;
+  livePhotoVideoUrl?: string;
+  mimeType?: string;
+};
 
 /**
  * Fullscreen media lightbox (web). Opened from event photos + post media; one

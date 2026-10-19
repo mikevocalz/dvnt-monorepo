@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { X, ChevronLeft, ChevronRight } from "lucide-react";
 import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
+import { useFeedVideo } from "./feed/use-feed-video.web";
+import { resolveWebPostMedia } from "./feed/web-post-media";
 
-const VIDEO_RE = /post-video|flyer-video|\.(mp4|mov|webm)(\?|$)/i;
+const subscribeToMount = () => () => {};
+const clientMounted = () => true;
+const serverMounted = () => false;
 
 /**
  * Fullscreen media lightbox (web). Mount once per screen; it reads the shared
@@ -26,8 +30,7 @@ export function Lightbox() {
   const prev = useLightboxStore((s) => s.prev);
 
   // Portal target only exists on the client; gate the portal until mounted.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(subscribeToMount, clientMounted, serverMounted);
 
   useEffect(() => {
     if (!open) return;
@@ -48,7 +51,7 @@ export function Lightbox() {
   if (!mounted || !open || items.length === 0) return null;
   const item = items[Math.min(index, items.length - 1)];
   if (!item) return null;
-  const isVideo = item.type === "video" || VIDEO_RE.test(item.url);
+  const { videoUrl, posterUrl } = resolveWebPostMedia({ ...item, thumbnail: item.poster });
   const multi = items.length > 1;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
@@ -87,17 +90,8 @@ export function Lightbox() {
         </span>
       ) : null}
 
-      {isVideo ? (
-        <video
-          key={item.url}
-          src={item.url}
-          poster={item.poster}
-          controls
-          autoPlay
-          playsInline
-          onClick={stop}
-          className="max-w-[100vw] max-h-dvh bg-black"
-        />
+      {videoUrl ? (
+        <LightboxVideo key={videoUrl} source={videoUrl} poster={posterUrl} loop={item.type === "livePhoto" || item.type === "animated_video"} />
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -136,5 +130,23 @@ export function Lightbox() {
       ) : null}
     </div>,
     document.body,
+  );
+}
+
+function LightboxVideo({ source, poster, loop }: { source: string; poster?: string; loop: boolean }) {
+  // This is the foreground player; opening it suspends the feed/carousel below.
+  const { ref, muted } = useFeedVideo(source, { pauseForLightbox: false });
+  return (
+    <video
+      ref={ref}
+      src={source}
+      poster={poster}
+      controls
+      muted={muted}
+      loop={loop}
+      playsInline
+      onClick={(e) => e.stopPropagation()}
+      className="max-w-[100vw] max-h-dvh bg-black"
+    />
   );
 }

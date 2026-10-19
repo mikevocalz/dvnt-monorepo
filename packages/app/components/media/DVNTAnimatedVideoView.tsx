@@ -5,7 +5,7 @@
  */
 import { View, ViewStyle } from "react-native";
 import { VideoView, useVideoPlayer } from "expo-video";
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useState, type ComponentProps } from "react";
 
 interface DVNTAnimatedVideoViewProps {
   uri: string;
@@ -18,24 +18,22 @@ interface DVNTAnimatedVideoViewProps {
   muted?: boolean;
 }
 
-export function DVNTAnimatedVideoView({
+export function DVNTAnimatedVideoView(props: DVNTAnimatedVideoViewProps) {
+  // Feed cells can be recycled without unmounting. A new source must not
+  // inherit the previous source's loaded latch or native player.
+  return <AnimatedVideoAsset key={props.uri} {...props} />;
+}
+
+function AnimatedVideoAsset({
   uri,
   width,
   height,
   style,
   contentFit = "cover",
+  accessibilityLabel,
   isPlaying = true,
   muted = true,
 }: DVNTAnimatedVideoViewProps) {
-  const isMountedRef = useRef(true);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
   // Don't build the asset until this view is actually meant to play.
   //
   // `useVideoPlayer` constructs an AVPlayer and an AVURLAsset, and
@@ -73,6 +71,9 @@ export function DVNTAnimatedVideoView({
         player.pause();
       }
     } catch {}
+    return () => {
+      try { player.pause(); } catch {}
+    };
   }, [isPlaying, player]);
 
   return (
@@ -88,6 +89,7 @@ export function DVNTAnimatedVideoView({
         style={{ width: "100%", height: "100%" }}
         contentFit={contentFit}
         nativeControls={false}
+        accessibilityLabel={accessibilityLabel}
       />
     </View>
   );
