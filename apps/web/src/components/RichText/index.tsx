@@ -7,7 +7,7 @@ import {
   type JSXConvertersFunction,
   LinkJSXConverter,
 } from '@payloadcms/richtext-lexical/react'
-import type { DefaultNodeTypes } from '@payloadcms/richtext-lexical'
+import YouTubeEmbed from '@dvnt/cms/components/YouTubeEmbed'
 
 const internalDocToHref = ({ linkNode }: any) => {
   const rel = linkNode.fields?.doc?.relationTo
@@ -23,10 +23,15 @@ const internalDocToHref = ({ linkNode }: any) => {
   }
 }
 
-const jsxConverters: JSXConvertersFunction<DefaultNodeTypes> = ({ defaultConverters }) => ({
-  ...defaultConverters,
-  ...LinkJSXConverter({ internalDocToHref }),
-})
+const jsxConverters: JSXConvertersFunction = ({ defaultConverters }) => {
+  const converters = { ...defaultConverters, ...LinkJSXConverter({ internalDocToHref }) }
+  converters.blocks = {
+    ...defaultConverters.blocks,
+    youtube: ({ node }: { node: { fields: Record<string, unknown> } }) => <YouTubeEmbed {...node.fields} />,
+    videoEmbed: ({ node }: { node: { fields: Record<string, unknown> } }) => <YouTubeEmbed {...node.fields} />,
+  }
+  return converters
+}
 
 export function RichText({ data }: { data: any }) {
   if (!data) return null

@@ -15,6 +15,8 @@ import {
 import { canModerate } from '../access/roles'
 import { slugField } from '../fields/slug'
 import { enforcePostAttribution, authorEditorAccess } from '../authors/profiles'
+import { YouTubeBlock } from '../blocks/YouTube'
+import { postHTMLConverters } from '../posts/youtube-html'
 
 const BLOG_ORIGIN = process.env.BLOG_ORIGIN ?? 'https://blog.dvntapp.live'
 
@@ -291,7 +293,7 @@ export const Posts: CollectionConfig = {
     ]),
 
     // ─── Rich content ────────────────────────────────────────────────────
-    postSection('Article content', 'Write the full story and insert galleries, videos, quotes, FAQs and other content blocks.', [
+    postSection('Article content', 'Write the full story. Type /youtube on a new line to insert a YouTube video, or choose it from the block menu.', [
       {
         name: 'content',
         type: 'richText',
@@ -308,6 +310,7 @@ export const Posts: CollectionConfig = {
               blocks: [
                 PullQuoteBlock,
                 ImageGalleryBlock,
+                YouTubeBlock,
                 VideoEmbedBlock,
                 StatBlockItem,
                 EventCalloutBlock,
@@ -324,7 +327,7 @@ export const Posts: CollectionConfig = {
           ],
         }),
       },
-      lexicalHTMLField({ htmlFieldName: 'contentHtml', lexicalFieldName: 'content', storeInDB: true }),
+      lexicalHTMLField({ htmlFieldName: 'contentHtml', lexicalFieldName: 'content', storeInDB: true, converters: postHTMLConverters }),
 
     ]),
 

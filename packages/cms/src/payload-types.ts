@@ -62,16 +62,17 @@ export type SupportedTimezones =
   | 'Pacific/Fiji';
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "LexicalNodes_2E087C4B".
+ * via the `definition` "LexicalNodes_D1E4A535".
  */
-export type LexicalNodes_2E087C4B =
+export type LexicalNodes_D1E4A535 =
   | SerializedTextNode
   | SerializedTabNode
   | SerializedLineBreakNode
-  | SerializedParagraphNode<LexicalNodes_2E087C4B>
+  | SerializedParagraphNode<LexicalNodes_D1E4A535>
   | SerializedBlockNode<
       | PullQuote
       | ImageGallery
+      | YouTubeBlock
       | VideoEmbed
       | StatBlock
       | EventCallout
@@ -86,10 +87,10 @@ export type LexicalNodes_2E087C4B =
     >
   | SerializedHorizontalRuleNode
   | SerializedUploadNode<'media', LexicalUploadFields_7C90EEAC>
-  | SerializedAutoLinkNode<LexicalNodes_2E087C4B, LexicalLinkFields>
-  | SerializedLinkNode<LexicalNodes_2E087C4B, LexicalLinkFields>
-  | SerializedHeadingNode<LexicalNodes_2E087C4B, 'h1' | 'h2' | 'h3' | 'h4'>
-  | SerializedQuoteNode<LexicalNodes_2E087C4B>
+  | SerializedAutoLinkNode<LexicalNodes_D1E4A535, LexicalLinkFields>
+  | SerializedLinkNode<LexicalNodes_D1E4A535, LexicalLinkFields>
+  | SerializedHeadingNode<LexicalNodes_D1E4A535, 'h1' | 'h2' | 'h3' | 'h4'>
+  | SerializedQuoteNode<LexicalNodes_D1E4A535>
   | SerializedRelationshipNode<
       | 'admin-users'
       | 'members'
@@ -108,8 +109,8 @@ export type LexicalNodes_2E087C4B =
       | 'payload-preferences'
       | 'payload-migrations'
     >
-  | SerializedListNode<LexicalNodes_2E087C4B>
-  | SerializedListItemNode<LexicalNodes_2E087C4B>;
+  | SerializedListNode<LexicalNodes_D1E4A535>
+  | SerializedListItemNode<LexicalNodes_D1E4A535>;
 
 export interface Config {
   auth: {
@@ -365,7 +366,7 @@ export interface Comment {
   createdAt: string;
 }
 /**
- * Blog articles shown on dvntapp.live/posts.
+ * Edit the entire blog article below: story, media, credits, discovery and SEO. Save Draft or Publish applies to this whole page.
  *
  * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "posts".
@@ -391,7 +392,7 @@ export interface Post {
    */
   heroVideoUrl?: string | null;
   heroCaption?: string | null;
-  content: LexicalRichText<LexicalNodes_2E087C4B>;
+  content: LexicalRichText<LexicalNodes_D1E4A535>;
   contentHtml?: string | null;
   categories?: (number | Category)[] | null;
   tags?:
@@ -1290,6 +1291,24 @@ export interface ImageGallery {
       }[]
     | null;
   layout?: ('grid' | 'masonry' | 'carousel' | 'fullWidth') | null;
+  blockName?: string | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "YouTubeBlock".
+ */
+export interface YouTubeBlock {
+  id: string;
+  blockType: 'youtube';
+  /**
+   * Paste a full YouTube watch, youtu.be, or Shorts URL. Playback starts only when a reader presses play.
+   */
+  url: string;
+  /**
+   * Describe the video for readers using screen readers. Defaults to “YouTube video player”.
+   */
+  title?: string | null;
+  caption?: string | null;
   blockName?: string | null;
 }
 /**
