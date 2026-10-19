@@ -37,7 +37,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const description = post.seo?.description ?? post.meta?.description ?? post.excerpt
   const image = post.seo?.ogImage ? mediaUrl(post.seo.ogImage, 'og')
     : post.meta?.image?.url ?? post.heroImage ? mediaUrl(post.heroImage!, 'og') : post.coverImage?.url
-  const url = `https://blog.dvntapp.live/posts/${post.slug}`
+  const url = `https://dvntapp.live/posts/${post.slug}`
   return {
     title,
     description,
@@ -77,7 +77,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   const heroSrc = post.heroImage ? mediaUrl(post.heroImage, 'full') : (post.coverImage?.url ?? null)
   const cat = post.categories?.[0]
   const toc = extractToc(post.content)
-  const articleUrl = `https://blog.dvntapp.live/posts/${post.slug}`
+  const articleUrl = `https://dvntapp.live/posts/${post.slug}`
 
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -92,7 +92,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
     breadcrumb: {
       '@type': 'BreadcrumbList',
       itemListElement: [
-        { '@type': 'ListItem', position: 1, name: 'The Blog', item: 'https://blog.dvntapp.live/posts' },
+        { '@type': 'ListItem', position: 1, name: 'The Blog', item: 'https://dvntapp.live/posts' },
         { '@type': 'ListItem', position: 2, name: post.title, item: articleUrl },
       ],
     },

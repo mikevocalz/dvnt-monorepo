@@ -37,13 +37,13 @@ const boundaries = new Map([
   ['solito/image', `export const SolitoImage=props=><img {...props}/>;`],
   ['@dvnt/app/components/logo', `export default function Logo(){return <span>DVNT</span>}`],
   ['@dvnt/app/components/ui/html', `export {Header,Nav} from '@expo/html-elements';`],
-  ['@/lib/posts', `export const getPostBySlug=async()=>({id:'fixture-post',slug:'fixture',title:'Long article focus fixture',excerpt:'Synthetic article; no live data.',authors:[],categories:[],content:{root:{children:[{type:'heading',tag:'h2',children:[{text:'First section'}]}]}}});export const getLatestPosts=async()=>[];export const getAllSlugs=async()=>['fixture'];export const mediaUrl=()=>'';export const formatByline=()=>'';export const formatDate=()=>'';export const formatDateShort=()=>'';`],
+  ['@/lib/posts', `export const getPostBySlug=async(slug)=>({id:'fixture-post',slug,seo:slug==='fixture-syndicated'?{canonicalUrl:'https://publisher.example/articles/syndicated'}:undefined,title:'Long article focus fixture',excerpt:'Synthetic article; no live data.',authors:[],categories:[],content:{root:{children:[{type:'heading',tag:'h2',children:[{text:'First section'}]}]}}});export const getLatestPosts=async()=>[];export const getPublishedPosts=async()=>[];export const getFeaturedPost=async()=>null;export const getEditorsPicks=async()=>[];export const getTrending=async()=>[];export const getCategories=async()=>[];export const getAllSlugs=async()=>['fixture'];export const mediaUrl=()=>'';export const formatByline=()=>'';export const formatDate=()=>'';export const formatDateShort=()=>'';`],
   ['@/lib/comments', `export const getCommentsForPost=async()=>[{id:'existing-comment',body:'Existing comment',createdAt:'2026-10-19T00:00:00Z',authorMember:{id:'1',username:'fixture'},children:[]}];export const buildTree=comments=>comments;`],
   ['@/components/RichText', `export function RichText(){return <><h2>First section</h2>{Array.from({length:35},(_,i)=><p key={i}>Paragraph {i+1}: A long article keeps the actual comment composer below the fold so a focus-driven jump or remount is observable. All content here is a synthetic local fixture.</p>)}</>}`],
 ]);
 async function build() {
   const bundle = await load('esbuild').build({
-    stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import PostPage from './apps/web/src/app/(frontend)/posts/[slug]/page';import {AppShell} from './packages/app/components/app-shell.web';(async()=>{const page=await PostPage({params:Promise.resolve({slug:'fixture'})});createRoot(document.getElementById('root')).render(<AppShell>{page}</AppShell>);})();`, resolveDir: ROOT, loader: 'tsx' },
+    stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import PostPage,{generateMetadata} from './apps/web/src/app/(frontend)/posts/[slug]/page';import {metadata as indexMetadata} from './apps/web/src/app/(frontend)/posts/page';import {AppShell} from './packages/app/components/app-shell.web';(async()=>{window.__blogFixtureMetadata={article:await generateMetadata({params:Promise.resolve({slug:'fixture'})}),syndicated:await generateMetadata({params:Promise.resolve({slug:'fixture-syndicated'})}),index:indexMetadata};const page=await PostPage({params:Promise.resolve({slug:'fixture'})});createRoot(document.getElementById('root')).render(<AppShell>{page}</AppShell>);})();`, resolveDir: ROOT, loader: 'tsx' },
     bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
     jsxImportSource: 'react', tsconfigRaw: { compilerOptions: { jsx: 'react-jsx', jsxImportSource: 'react' } },
     define: { 'process.env.NODE_ENV': '"production"', __DEV__: 'false' },
@@ -62,6 +62,13 @@ async function build() {
 async function runCase(browser, name, viewport, isMobile, origin) {
   const context = await browser.newContext({ viewport, isMobile, hasTouch: isMobile });
   const page = await context.newPage();
+  // Exercise real share handlers without clipboard permissions or any external
+  // post/navigation: only record their intended destinations inside the fixture.
+  await page.addInitScript(() => {
+    window.__copiedUrls = []; window.__openedUrls = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async url => { window.__copiedUrls.push(url); } } });
+    window.open = url => { window.__openedUrls.push(url); return null; };
+  });
   const errors = [], requests = [];
   let status = 200, pending = null;
   page.on('pageerror', error => errors.push(String(error)));
@@ -110,6 +117,16 @@ async function runCase(browser, name, viewport, isMobile, origin) {
     await page.goto(`${origin}/posts/fixture`);
     const input = page.getByPlaceholder('Add a comment…');
     await input.waitFor();
+    const publicArticleUrl = 'https://dvntapp.live/posts/fixture';
+    const metadata = await page.evaluate(() => window.__blogFixtureMetadata);
+    assert.equal(metadata.article.alternates.canonical, publicArticleUrl, 'default canonical uses the working public origin');
+    assert.equal(metadata.article.openGraph.url, publicArticleUrl, 'Open Graph shares the same public URL');
+    assert.equal(metadata.index.alternates.canonical, 'https://dvntapp.live/posts', 'index canonical points to the actual blog route');
+    assert.equal(metadata.syndicated.alternates.canonical, 'https://publisher.example/articles/syndicated', 'editor-supplied canonical override remains intact');
+    const structuredData = await page.locator('script[type="application/ld+json"]').evaluate(el => JSON.parse(el.textContent));
+    assert.equal(structuredData.mainEntityOfPage, publicArticleUrl);
+    assert.equal(structuredData.breadcrumb.itemListElement[0].item, 'https://dvntapp.live/posts');
+    assert.equal(structuredData.breadcrumb.itemListElement[1].item, publicArticleUrl);
     await center(input);
     await keepBelowFold('before focus');
     const before = await metrics();
@@ -201,7 +218,7 @@ async function runCase(browser, name, viewport, isMobile, origin) {
         const heading = document.getElementById('first-section');
         return heading && Math.abs(heading.getBoundingClientRect().top - 100) <= 18;
       });
-      // Read after both native smooth scroll and the 0.65s reveal settle.
+      // Read after both native smooth scroll and the 0.7s reveal settle.
       await page.waitForTimeout(750);
       toc = await page.locator('#first-section').evaluate(el => ({ top: el.getBoundingClientRect().top, bottom: el.getBoundingClientRect().bottom, y: scrollY, transform: getComputedStyle(el).transform, height: innerHeight }));
       assert.ok(Math.abs(toc.top - 100) <= 18 && toc.bottom <= toc.height, `TOC must settle on visible heading: ${JSON.stringify(toc)}`);
@@ -213,12 +230,20 @@ async function runCase(browser, name, viewport, isMobile, origin) {
     }
     assert.equal(page.url(), articleUrl, 'TOC scrolling does not navigate away');
     assert.equal(await input.inputValue(), 'Repeat 2', 'TOC does not discard the comment draft');
+    await press(page.getByRole('button', { name: 'Copy link', exact: true }).filter({ visible: true }));
+    assert.deepEqual(await page.evaluate(() => window.__copiedUrls), [publicArticleUrl], 'Copy link uses the reachable apex article');
+    await press(page.getByRole('button', { name: 'Share on X', exact: true }).filter({ visible: true }));
+    const shareUrl = new URL(await page.evaluate(() => window.__openedUrls[0]));
+    assert.equal(shareUrl.origin, 'https://x.com');
+    assert.equal(shareUrl.pathname, '/intent/tweet');
+    assert.equal(shareUrl.searchParams.get('url'), publicArticleUrl, 'social share uses the same article URL');
+    assert.equal(page.url(), articleUrl, 'share controls preserve the current article');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     assert.equal((await metrics()).scrollBehavior, 'auto', 'reduced motion remains respected');
     assert.deepEqual(errors, [], 'no error-boundary-triggering render errors');
     const result = { name, baseline, before, focused, toc, after: await metrics(), requests: requests.map(r => ({ method: r.method, parentId: r.body.parentId })), physicalIOSKeyboardTested: false };
     fs.writeFileSync(path.join(out, `${name}-${baseline ? 'baseline' : 'result'}.json`), JSON.stringify(result, null, 2));
-    console.log(`PASS ${name}: ${baseline ? 'pre-fix 14px/smooth focus conditions recorded' : '16px/native focus scrolling'}, auth/guest, multiline, keyboard geometry, submit/reject/reply/edit, repeat focus, reduced motion`);
+    console.log(`PASS ${name}: ${baseline ? 'pre-fix 14px/smooth focus conditions recorded' : '16px/native focus scrolling'}, auth/guest, multiline, keyboard geometry, submit/reject/reply/edit, repeat focus, TOC, public share/canonical URLs, reduced motion`);
   } finally { await context.close(); }
 }
 (async () => {
