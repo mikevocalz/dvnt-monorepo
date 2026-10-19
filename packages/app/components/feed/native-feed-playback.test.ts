@@ -142,8 +142,16 @@ import { runInNewContext } from "node:vm";
 import { feedAudio } from "./native-feed-playback.ts";
 const require = createRequire(import.meta.url);
 
-test("inline component pauses on background/blur, resumes, unmutes and cleans up", () => {
-  const ts = require("typescript");
+test("inline component pauses on background/blur, resumes, unmutes and cleans up", (t) => {
+  let ts: any;
+  try { ts = require("typescript"); }
+  catch (error) {
+    // Existing dependency-free feed gates run before installing tools. The
+    // dedicated feed-motion CI installs TypeScript and requires this test.
+    if (process.env.REQUIRE_FEED_COMPONENT_TEST === "1") throw error;
+    t.skip("TypeScript is installed by the dedicated feed-motion integration job");
+    return;
+  }
   const source = readFileSync(
     new URL("./feed-inline-video.tsx", import.meta.url),
     "utf8",

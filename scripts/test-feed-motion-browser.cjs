@@ -19,13 +19,13 @@ const root = path.resolve(__dirname, '..');
       import React from 'react'; import { createRoot } from 'react-dom/client';
       import { useFeedVideo } from './packages/app/components/feed/use-feed-video.web';
       import { useStoryViewerStore } from './packages/app/lib/stores/story-viewer-store';
-      function Tile({ id }) { const p = useFeedVideo('/clip.mp4'); return <div><video id={id} ref={p.ref} src="/clip.mp4" muted={p.muted} loop playsInline width="120" height="120"/><button id={id+'-sound'} onClick={p.toggleSound}>Sound</button>{p.blocked && <button onClick={p.play}>Play</button>}</div>; }
-      function App() { return <><Tile id="first"/><Tile id="second"/><button id="story" onClick={()=>useStoryViewerStore.setState({open:true})}>Story</button><button id="close" onClick={()=>useStoryViewerStore.setState({open:false})}>Close</button><div style={{height:2000}}/></>; }
+      function Tile({ id, src='/clip.mp4' }) { const p = useFeedVideo(src); return <div><video id={id} ref={p.ref} src={src} muted={p.muted} loop playsInline width="120" height="120"/><button id={id+'-sound'} onClick={p.toggleSound}>Sound</button>{p.blocked && <button onClick={p.play}>Play</button>}</div>; }
+      function App() { const [src,setSrc]=React.useState("/clip.mp4"); window.replaceSource=()=>setSrc("/clip.mp4?replacement=1"); return <><Tile id="first" src={src}/><Tile id="second"/><button id="story" onClick={()=>useStoryViewerStore.setState({open:true})}>Story</button><button id="close" onClick={()=>useStoryViewerStore.setState({open:false})}>Close</button><div style={{height:2000}}/></>; }
       window.root = createRoot(document.getElementById('root')); window.root.render(<App/>);
-    `, resolveDir: root, loader: 'tsx' }, bundle:true, outfile:path.join(dir,'app.js'), platform:'browser', jsx:'automatic', alias: { '@dvnt/app':path.join(root,'packages/app') }, define: { 'process.env.NODE_ENV':'"test"' } });
+    `, resolveDir: root, loader: 'tsx' }, bundle:true, outfile:path.join(dir,'app.js'), platform:'browser', jsx:'automatic', nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean), alias: { '@dvnt/app':path.join(root,'packages/app') }, define: { 'process.env.NODE_ENV':'"test"' } });
     server = http.createServer((req,res)=>{
       if(req.url==='/app.js') {res.setHeader('Content-Type','application/javascript');res.end(fs.readFileSync(path.join(dir,'app.js')));}
-      else if(req.url==='/clip.mp4') {res.setHeader('Content-Type','video/mp4');res.end(fs.readFileSync(path.join(dir,'clip.mp4')));}
+      else if(req.url.startsWith('/clip.mp4')) {res.setHeader('Content-Type','video/mp4');res.end(fs.readFileSync(path.join(dir,'clip.mp4')));}
       else res.end('<html><body><div id="root"></div><script src="/app.js"></script></body></html>');
     });
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -37,6 +37,9 @@ const root = path.resolve(__dirname, '..');
     assert.ok(await page.locator('#first').evaluate(v=>!v.paused && v.muted));
     await page.click('#first-sound'); assert.equal(await page.locator('#first').evaluate(v=>v.muted),false);
     await page.click('#second-sound'); assert.equal(await page.locator('#first').evaluate(v=>v.muted),true); assert.equal(await page.locator('#second').evaluate(v=>v.muted),false);
+    await page.evaluate(()=>window.replaceSource());
+    await page.waitForFunction(()=>document.querySelector('#first').src.includes('replacement') && document.querySelector('#first').currentTime>0.2);
+    assert.equal(await page.locator('#first').evaluate(v=>v.muted),true);
     await page.click('#story'); await page.waitForFunction(()=>[...document.querySelectorAll('video')].every(v=>v.paused));
     await page.click('#close'); await page.waitForFunction(()=>[...document.querySelectorAll('video')].every(v=>!v.paused));
     await page.evaluate(()=>window.scrollTo(0,1200)); await page.waitForFunction(()=>[...document.querySelectorAll('video')].every(v=>v.paused));

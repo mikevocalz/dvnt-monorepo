@@ -5,7 +5,7 @@ const path=require('node:path');
 const Module=require('node:module');
 const ts=require('typescript');
 (async()=>{
- const {Window}=await import('happy-dom');const window=new Window();
+ const {Window}=await import(require.resolve('happy-dom'));const window=new Window();
  Object.assign(global,{window,document:window.document,IS_REACT_ACT_ENVIRONMENT:true});
  const React=require('react'),{createRoot}=require('react-dom/client');
  let currentNative,starts=0;

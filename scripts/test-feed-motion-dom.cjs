@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { build } = require('esbuild');
 (async()=>{
-  const { Window } = await import('happy-dom');
+  const { Window } = await import(require.resolve('happy-dom'));
   const window = new Window();
   Object.assign(global,{window,document:window.document,HTMLElement:window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true});
   const observers=[];
@@ -26,7 +26,7 @@ const { build } = require('esbuild');
       function Tile({src}){const p=useFeedVideo(src);return <><video ref={p.ref} src={src} muted={p.muted}/><button onClick={p.toggleSound}>sound</button></>}
       export {act,useStoryViewerStore};
       export function mount(node){const root=createRoot(node);return {render:(src)=>root.render(<Tile src={src}/>),unmount:()=>root.unmount()}}
-    `,resolveDir:root,loader:'tsx'},bundle:true,platform:'node',format:'cjs',outfile:path.join(dir,'hook.cjs'),jsx:'automatic',alias:{'@dvnt/app':path.join(root,'packages/app')}});
+    `,resolveDir:root,loader:'tsx'},bundle:true,nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),platform:'node',format:'cjs',outfile:path.join(dir,'hook.cjs'),jsx:'automatic',alias:{'@dvnt/app':path.join(root,'packages/app')}});
     const {act,mount,useStoryViewerStore}=require(path.join(dir,'hook.cjs'));
     const node=document.createElement('div');document.body.append(node);
     const app=mount(node);await act(async()=>app.render('first.mp4'));

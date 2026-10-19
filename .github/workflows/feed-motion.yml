@@ -1,0 +1,44 @@
+name: Feed media motion
+on:
+  pull_request:
+    paths:
+      - 'packages/app/components/feed/**'
+      - 'packages/app/components/media/**'
+      - 'packages/app/components/story-viewer-overlay.web.tsx'
+      - 'packages/app/features/home/screen.web.tsx'
+      - 'packages/app/lib/media/live-photo-upload*'
+      - 'packages/app/lib/hooks/use-media-upload.ts'
+      - 'scripts/test-feed-motion*'
+      - 'scripts/test-live-photo-lifecycle.cjs'
+      - '.github/workflows/feed-motion.yml'
+permissions:
+  contents: read
+jobs:
+  real-feed-playback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated media test dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/feed-motion" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.0.11
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          node "$RUNNER_TEMP/feed-motion/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Playback policy, native component lifecycle and paired upload
+        env:
+          NODE_PATH: ${{ runner.temp }}/feed-motion/node_modules
+          REQUIRE_FEED_COMPONENT_TEST: '1'
+        run: |
+          node --test packages/app/components/feed/native-feed-playback.test.ts packages/app/components/feed/web-video-playback.test.ts packages/app/lib/media/live-photo-upload.test.ts
+          node scripts/test-feed-motion-dom.cjs
+          node scripts/test-live-photo-lifecycle.cjs
+      - name: Real Chromium decoding, sound, scroll, source replacement and pause
+        env:
+          NODE_PATH: ${{ runner.temp }}/feed-motion/node_modules
+        run: node scripts/test-feed-motion-browser.cjs
