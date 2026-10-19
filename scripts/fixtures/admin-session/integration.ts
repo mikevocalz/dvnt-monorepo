@@ -220,11 +220,15 @@ try {
   await new Promise<void>(resolve => server ? server.close(() => resolve()) : resolve())
   // Payload canary's destroy() clears adapter metadata but does not close its
   // pg pool; connectWithReconnect also retains a startup checkout. This fixture
-  // owns every connection, so close those clients before ending the pool.
-  const payloadPool = payload?.db.pool as (Pool & { _clients?: Array<{ end: () => Promise<void> }> }) | undefined
+  // owns every connection, so release retained checkouts before ending the pool.
+  const payloadPool = payload?.db.pool as (Pool & {
+    _clients?: Array<{ release: () => void }>
+    _idle?: Array<{ client: unknown }>
+  }) | undefined
   console.log('CLEANUP: fixture Payload pool')
   await payload?.destroy()
-  await Promise.all([...(payloadPool?._clients ?? [])].map(client => client.end()))
+  const idle = new Set(payloadPool?._idle?.map(item => item.client))
+  for (const client of payloadPool?._clients ?? []) if (!idle.has(client)) client.release()
   await payloadPool?.end()
   console.log('CLEANUP: fixture app/auth pools')
   await (await appPool())?.end()
