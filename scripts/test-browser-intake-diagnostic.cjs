@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const html = fs.readFileSync('scripts/diagnostics/browser-live-photo-intake.html', 'utf8');
+assert.equal(fs.readFileSync('apps/web/public/diagnostics/browser-live-photo-intake.html', 'utf8'), html, 'preview page must exactly match reviewed standalone diagnostic');
 const code = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const output = { textContent: '' };
 const clear = { addEventListener(type, fn) { this.handler = fn; } };

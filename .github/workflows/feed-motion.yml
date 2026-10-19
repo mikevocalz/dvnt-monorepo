@@ -33,6 +33,7 @@ on:
       - 'scripts/test-browser-live-photo*'
       - 'scripts/test-browser-intake-diagnostic.cjs'
       - 'scripts/diagnostics/**'
+      - 'apps/web/public/diagnostics/browser-live-photo-intake.html'
       - 'scripts/fixtures/live-photo-roundtrip/**'
       - 'scripts/test-native-post-carousel.cjs'
       - 'scripts/test-web-live-photo-carousel*'

@@ -1,6 +1,6 @@
 # Browser Live Photo intake diagnostic
 
-`browser-live-photo-intake.html` is a standalone investigation tool, not a DVNT app route or upload workaround. Open it in a browser or serve this directory with a local static server. It is intentionally not wired into deployment. Use the same original Photos item for each of the three file-input `accept` variants.
+`browser-live-photo-intake.html` is a standalone investigation tool, not a DVNT app route or upload workaround. Open it in a browser or serve this directory with a local static server. An identical copy is included at `apps/web/public/diagnostics/browser-live-photo-intake.html` for this draft branch's preview only. Do not merge or deploy this investigation page to production. The preview must retain existing deployment protection; this change does not alter access settings. Use the same original Photos item for each of the three file-input `accept` variants.
 
 The report records the actual files exposed to JavaScript, before page-side canvas/image manipulation. It cannot exclude Photos or browser conversion before JavaScript receives those files. It does not upload, persist, render, or extract the user's files. A restrictive Content Security Policy blocks network requests. File names and raw metadata values are not reported. Clear results to remove the report from the page; closing the page releases its in-memory data.
 
