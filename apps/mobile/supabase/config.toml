@@ -581,3 +581,7 @@ verify_jwt = false
 # Distance bands only; Better Auth session is validated inside the function.
 [functions.member-proximity]
 verify_jwt = false
+
+# Better Auth verified inside; service-only handoff RPC enforces ownership.
+[functions.live-photo-handoff]
+verify_jwt = false

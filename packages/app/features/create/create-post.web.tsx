@@ -52,6 +52,7 @@ import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
 import type { TextPostThemeKey } from "@dvnt/app/lib/types";
 import { useCreatePostUIStore } from "./create-post-ui-store";
 
+import { NativeLivePhotoHandoff } from "./native-live-photo-handoff.web";
 import { BrowserMediaPicker } from "./browser-media-picker.web";
 import { captureBrowserMediaReplacement, releaseUnselectedBrowserMedia } from "./browser-media-intake";
 import {
@@ -82,6 +83,11 @@ const CreatePostLocation = dynamic(
 
 export function CreatePostScreen() {
   const router = useRouter();
+  const handoffPendingRef = useRef(false);
+  const [handoffPending, setHandoffPending] = useState(false);
+  const onHandoffPendingChange = useCallback((pending: boolean) => {
+    handoffPendingRef.current = pending; setHandoffPending(pending);
+  }, []);
   const pendingMediaRef = useRef(false);
   const [pendingMedia, setPendingMedia] = useState(false);
   const onPendingMediaChange = useCallback((pending: boolean) => {
@@ -209,7 +215,7 @@ export function CreatePostScreen() {
   const submitPost = async () => {
     if (submittingRef.current) return;
     // A ref closes the same-event/verification-delay race before React rerenders.
-    if (pendingMediaRef.current) {
+    if (pendingMediaRef.current || handoffPendingRef.current) {
       showToast("warning", "Media is still being checked", "Wait for the selected files or motion to finish, or cancel checking before sharing.");
       return;
     }
@@ -261,7 +267,7 @@ export function CreatePostScreen() {
         <h1 className="text-[17px] font-semibold">New Post</h1>
         <button
           onClick={handlePost}
-          disabled={!isValid || busy || pendingMedia}
+          disabled={!isValid || busy || pendingMedia || handoffPending}
           className="rounded-xl px-4 py-2 text-[15px] font-bold bg-cyan-500 text-white disabled:bg-white/8 disabled:text-white/30"
         >
           {busy ? "Posting…" : "Share"}
@@ -364,6 +370,10 @@ export function CreatePostScreen() {
         {!isTextPost ? (
           <BrowserMediaPicker selectedMedia={selectedMedia} draftIdentity={textSlides} disabled={busy}
             beginUpdate={beginMediaUpdate} onPendingChange={onPendingMediaChange} columns={mediaColumns} />
+        ) : null}
+
+        {!isTextPost && process.env.NEXT_PUBLIC_ENABLE_NATIVE_LIVE_PHOTO_HANDOFF === "true" ? (
+          <NativeLivePhotoHandoff disabled={busy || pendingMedia} onPendingChange={onHandoffPendingChange} />
         ) : null}
 
         <CreatePostLocation />

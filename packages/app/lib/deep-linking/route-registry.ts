@@ -37,6 +37,13 @@ const tokenSchema = z.object({ token: z.string().min(1) });
 // Order matters: more specific patterns first
 
 export const ROUTE_REGISTRY: RouteEntry[] = [
+  {
+    urlPattern: "/live-photo-handoff",
+    routerPath: "/(protected)/live-photo-handoff?handoff=:handoff&draft=:draft",
+    auth: "auth-required",
+    // Query UUIDs are validated by the link engine and destination screen.
+    label: "Live Photo handoff",
+  },
   // ── Auth routes (public) ───────────────────────────────────────────
   {
     urlPattern: "/auth/reset",

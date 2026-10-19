@@ -666,6 +666,26 @@ Deno.serve(async (req) => {
     return errorResponse(`Failed to save media record: ${insertError.message}`);
   }
 
+  // Public media rows historically allowed client inserts. Only this service-only
+  // receipt establishes authenticated uploader provenance for native handoffs.
+  // Snapshot server-generated values, not fields returned from a mutable row.
+  const { error: receiptError } = await supabase
+    .from("live_photo_upload_receipts")
+    .insert({
+      media_id: insertedMedia.id,
+      owner_auth_id: userId,
+      object_key: key,
+      url: publicUrl,
+      mime_type: mime,
+      media_type: isVideoKind(kind) ? "video" : "image",
+    });
+  if (receiptError) {
+    console.error("[media-upload] Upload receipt unavailable", receiptError.code);
+    // Never report success without provenance. Preserve the object/row for
+    // investigation rather than risk deleting a concurrently referenced object.
+    return errorResponse("Unable to confirm media upload. Please retry.");
+  }
+
   // Return success using existing schema column names
   console.log(
     `[media-upload] Success: ${insertedMedia.id} -> ${insertedMedia.url}`,

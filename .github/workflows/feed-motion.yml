@@ -36,6 +36,13 @@ on:
       - 'apps/web/public/diagnostics/browser-live-photo-intake.html'
       - 'scripts/fixtures/live-photo-roundtrip/**'
       - 'scripts/test-native-post-carousel.cjs'
+      - 'scripts/test-native-live-photo-handoff.cjs'
+      - 'scripts/test-web-live-photo-handoff.cjs'
+      - 'packages/app/features/live-photo-handoff/**'
+      - 'packages/app/lib/api/live-photo-handoff.ts'
+      - 'apps/mobile/supabase/functions/live-photo-handoff/**'
+      - 'apps/mobile/supabase/functions/_shared/live-photo-handoff*'
+      - 'apps/mobile/supabase/migrations/*live_photo_handoff*'
       - 'scripts/test-web-live-photo-carousel*'
       - '.github/workflows/feed-motion.yml'
 permissions:
@@ -53,7 +60,7 @@ jobs:
           node-version: '24'
       - name: Install isolated media test dependencies
         run: |
-          npm install --prefix "$RUNNER_TEMP/feed-motion" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.0.11 lucide-react@1.30.0 @electric-sql/pglite@0.3.15 @supabase/supabase-js@2.112.2
+          npm install --prefix "$RUNNER_TEMP/feed-motion" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.0.11 fake-indexeddb@6.2.6 lucide-react@1.30.0 @electric-sql/pglite@0.3.15 @supabase/supabase-js@2.112.2
           npm install --prefix "$RUNNER_TEMP/image-manipulator" --legacy-peer-deps --ignore-scripts --no-audit --no-fund --no-save expo-image-manipulator@57.0.18
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg
@@ -77,6 +84,10 @@ jobs:
           node scripts/test-live-photo-upload-rate.cjs
           node --test packages/app/features/create/browser-live-photo-import.test.ts packages/app/features/create/browser-media-intake.test.ts packages/app/lib/media/web-upload-rate.test.ts
           node scripts/test-native-post-carousel.cjs
+          node scripts/test-native-live-photo-handoff.cjs
+          node scripts/test-web-live-photo-handoff.cjs
+          node --test packages/app/features/create/live-photo-handoff-draft.test.ts
+          node --max-old-space-size=256 --wasm-lazy-compilation --liftoff-only apps/mobile/supabase/functions/_shared/live-photo-handoff.test.cjs
           node scripts/test-web-live-photo-carousel-dom.cjs
           node --test packages/app/lib/posts/publish-queue.test.ts
       - name: Real Chrome decoding, sound, scroll, source replacement and pause

@@ -31,6 +31,8 @@ export interface UploadProgress {
 }
 
 export interface ServerUploadResult {
+  /** Persisted upload row, used for owner-validated handoffs. */
+  mediaId?: number;
   success: boolean;
   url: string;
   path: string;
@@ -319,6 +321,7 @@ async function uploadToServerImpl(
           return {
             success: true,
             url: body.media.url,
+            mediaId: body.media.id,
             path: body.media.key || "",
             filename: body.media.key?.split("/").pop() || filename,
           };
@@ -443,7 +446,7 @@ async function uploadToServerImpl(
     const uploadResult = await withUploadTimeout(uploadTask.uploadAsync(), () => uploadTask.cancelAsync());
     if (!uploadResult) throw new Error("Upload cancelled. Please try again.");
 
-    let body: { ok?: boolean; error?: string; media?: { url: string; key?: string } };
+    let body: { ok?: boolean; error?: string; media?: { id?: number; url: string; key?: string } };
     try { body = JSON.parse(uploadResult.body); }
     catch { throw new Error(`Upload failed (HTTP ${uploadResult.status}). Please try again.`); }
 
@@ -453,6 +456,7 @@ async function uploadToServerImpl(
       return {
         success: true,
         url: body.media.url,
+        mediaId: body.media.id,
         path: body.media.key || "",
         filename: body.media.key?.split("/").pop() || "",
       };
