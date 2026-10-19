@@ -51,6 +51,7 @@ test("latest reconciliation separates fresh observations from historical evidenc
   assert.match(tracker, /1,946 queued DMs/);
   assert.match(tracker, /26 MERGED CODE \/ 31 PARTIAL \/ 5 OPEN \/ 3 SUPERSEDED/);
   assert.match(tracker, /open and unmerged/);
+  assert.ok(tracker.includes("pull/128) (admin sign-out and session recovery)"));
   assert.match(tracker, /Security\/incident review for #135 is not signed off/);
   for (const pr of [123,124,125,126,127,128,129,130,131,132,133,134,135]) {
     assert.ok(tracker.includes(`https://github.com/mikevocalz/dvnt-monorepo/pull/${pr}`), `Missing PR #${pr}`);

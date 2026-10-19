@@ -31,7 +31,7 @@ Observed October 19, 2026 at 17:22 UTC through the connected DVNT Supabase proje
 | [#131](https://github.com/mikevocalz/dvnt-monorepo/pull/131), [#134](https://github.com/mikevocalz/dvnt-monorepo/pull/134) | Linked author profiles and real staff picker/photos merged | Does not automatically assign historical bylines or complete labeled editorial profiles under C04 |
 | [#132](https://github.com/mikevocalz/dvnt-monorepo/pull/132) | Feed video/Live Photo motion merged; real Chromium decoding covered in CI | Mocked native bridge coverage is not iOS/Android decoder acceptance; P06 remains PARTIAL |
 
-[#128](https://github.com/mikevocalz/dvnt-monorepo/pull/128) (Lynk session stability) and [#135](https://github.com/mikevocalz/dvnt-monorepo/pull/135) (author version-schema repair) remain **open and unmerged** at this snapshot. Their work is tracked separately, not counted as merged here. The separately reported live schema repair and successful author-profile save do not establish broad editorial acceptance or all historical bylines. Security/incident review for #135 is not signed off by this tracker.
+[#128](https://github.com/mikevocalz/dvnt-monorepo/pull/128) (admin sign-out and session recovery) and [#135](https://github.com/mikevocalz/dvnt-monorepo/pull/135) (author version-schema repair) remain **open and unmerged** at this snapshot. Their work is tracked separately, not counted as merged here. The separately reported live schema repair and successful author-profile save do not establish broad editorial acceptance or all historical bylines. Security/incident review for #135 is not signed off by this tracker.
 
 ### Concrete remaining scope
 
