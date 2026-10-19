@@ -22,6 +22,9 @@ on:
       - 'apps/mobile/supabase/migrations/*post*'
       - 'apps/mobile/supabase/functions/create-post/**'
       - 'packages/app/lib/hooks/use-media-upload.ts'
+      - 'packages/app/lib/hooks/use-publish-post.ts'
+      - 'packages/app/features/routes/screens/(protected)/(tabs)/create.tsx'
+      - 'packages/app/features/routes/screens/(protected)/crop-preview.tsx'
       - 'scripts/test-feed-motion*'
       - 'scripts/test-live-photo*'
       - 'scripts/test-browser-live-photo*'
@@ -57,6 +60,9 @@ jobs:
           node scripts/test-feed-motion-dom.cjs
           node scripts/test-live-photo-lifecycle.cjs
           node scripts/test-live-photo-picker.cjs
+          node --test packages/app/lib/media/live-photo-original.test.ts
+          node scripts/test-live-photo-publish-original.cjs
+          node scripts/test-live-photo-crop-guard.cjs
           node scripts/test-browser-live-photo-import-dom.cjs
           node scripts/test-live-photo-roundtrip.cjs
           node --test packages/app/features/create/browser-live-photo-import.test.ts

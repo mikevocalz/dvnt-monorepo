@@ -1,3 +1,4 @@
+import { canCropMedia } from "@dvnt/app/lib/media/live-photo-original";
 /**
  * Crop & Preview Screen
  *
@@ -125,7 +126,7 @@ function CropPreviewScreenContent() {
       return;
     }
 
-    const images = pending.media.filter((m) => m.type === "image");
+    const images = pending.media.filter(canCropMedia);
     if (images.length === 0) {
       router.back();
       return;
