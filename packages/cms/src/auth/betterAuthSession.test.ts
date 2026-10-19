@@ -28,3 +28,14 @@ test('missing/malformed cookie does not query, and DB failure is not treated as 
   assert.equal(await readBetterAuthSession(null, fail, now), null)
   await assert.rejects(readBetterAuthSession('better-auth.session_token=fixture.sig', fail, now), /database unavailable/)
 })
+test('missing app database configuration with a cookie is unavailable, not expired', async () => {
+  const original = process.env.APP_DATABASE_URL
+  delete process.env.APP_DATABASE_URL
+  try {
+    assert.equal(await readBetterAuthSession(null), null)
+    await assert.rejects(readBetterAuthSession('better-auth.session_token=fixture.sig'), /validation is unavailable/)
+  } finally {
+    if (original === undefined) delete process.env.APP_DATABASE_URL
+    else process.env.APP_DATABASE_URL = original
+  }
+})

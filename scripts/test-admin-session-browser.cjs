@@ -113,10 +113,14 @@ const boundaries = {
     console.log('PASS: Payload partial failure is detected by fresh server verification');
 
     for (const sessions of [{ app: true, cms: false }, { app: false, cms: false }, { app: false, cms: true }]) {
-      reset(sessions); await page.goto(origin + '/admin/logout'); await login();
+      reset(sessions); await page.goto(origin + '/admin/logout');
+      await page.getByRole('heading', { name: 'Sign out of DVNT?' }).waitFor();
+      assert.deepEqual(state.calls, [], 'a direct or cross-site route visit cannot trigger logout');
+      assert.equal(state.app, sessions.app); assert.equal(state.cms, sessions.cms);
+      await page.getByRole('button', { name: 'Sign out of DVNT', exact: true }).click(); await login();
       assert.equal(state.app, false); assert.equal(state.cms, false);
     }
-    console.log('PASS: Payload sidebar logout handles SSO, expired and local-only sessions');
+    console.log('PASS: Payload logout requires confirmation and handles SSO, expired and local-only sessions');
     assert.deepEqual(unexpected, []); assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

@@ -11,7 +11,9 @@ session manipulation is included. Editorial schema/editor repair is separate.
   verifies `/payload-api/admin-users/me` returns exactly `user: null` before a
   full navigation to shared sign-in. Partial failures retain a warning and
   retry action, not a successful sign-out message. Repeated clicks/StrictMode
-  share one in-flight operation. `/admin/logout` uses the same flow.
+  share one in-flight operation, with stale effect callbacks cancelled before
+  navigation. `/admin/logout` requires an explicit confirmation click before
+  using the same flow; a direct/cross-site GET cannot end shared sessions.
 - Middleware cookie checks are only a routing optimization. The server admin
   page authenticates with Payload, preserving valid legacy sessions. When no
   CMS user exists, read-only Better Auth session validation distinguishes
@@ -21,7 +23,8 @@ session manipulation is included. Editorial schema/editor repair is separate.
   CMS authorization remain subject to Payload's existing denial/fallback;
   they are not automatically bounced between two login systems. Roles and
   collection permissions are unchanged. Backend validation failure is an
-  error, not evidence that a session expired.
+  error, not evidence that a session expired. Missing app database configuration
+  is also treated as unavailable validation when a shared-session cookie exists.
 
 ## Verification
 

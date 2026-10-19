@@ -27,7 +27,7 @@ type FindSession = (token: string) => Promise<Session | undefined>
 
 async function findSession(token: string): Promise<Session | undefined> {
   const p = await appPool()
-  if (!p) return undefined
+  if (!p) throw new Error('App session validation is unavailable')
   const result = await p.query(
     `select "userId", "expiresAt" from public.session where token = $1 order by "createdAt" desc limit 1`,
     [token],

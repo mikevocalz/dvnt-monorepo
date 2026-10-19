@@ -66,7 +66,7 @@ function Gate() {
     return () => { active = false }
   }, [])
 
-  if (state === 'signing-out') return <AdminSignOut />
+  if (state === 'signing-out') return <AdminSignOut autoStart />
   if (state === 'loading')
     return <div className="dv-center"><span style={{ color: 'var(--dim)' }}>Loading…</span></div>
   if (state === 'out') return <Login />
