@@ -1,78 +1,87 @@
-/**
- * usePostLikers — TanStack Query hook for fetching users who liked a post.
- *
- * Query Key: ['postLikers', postId]
- * Only fetches when enabled (sheet is open).
- *
- * Prefetch: Call prefetchPostLikers before opening LikesSheet to avoid waterfall.
- */
-
+/** Shared, viewer-scoped likes pagination for native and web. */
 import {
-  useQuery,
+  infiniteQueryOptions,
+  useInfiniteQuery,
   useQueryClient,
+  type InfiniteData,
   type QueryClient,
 } from "@tanstack/react-query";
 import { useCallback } from "react";
-import { likesApi, type PostLiker } from "@dvnt/app/lib/api/likes";
+import {
+  likesApi,
+  type PostLiker,
+  type PostLikersCursor,
+  type PostLikersPage,
+} from "@dvnt/app/lib/api/likes";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { assertLikesConsistent } from "@dvnt/app/lib/invariants/likesConsistency";
 import { postLikersKeys, likeStateKeys } from "@dvnt/app/lib/query-keys";
 export { postLikersKeys };
 
-
-export function usePostLikers(postId: string | undefined, enabled: boolean) {
-  const queryClient = useQueryClient();
-  const viewerId = useAuthStore((s) => s.user?.id) || "";
-
-  return useQuery<PostLiker[]>({
-    queryKey: postLikersKeys.forPost(postId || ""),
-    queryFn: async () => {
-      const result = await likesApi.getPostLikers(postId!);
-
-      // Sync authoritative likesCount from DB into likeState cache
-      // This fixes count/sheet mismatch when likes_count drifted
-      if (viewerId && postId && result.likesCount != null) {
-        const likeKey = likeStateKeys.forPost(viewerId, postId);
-        const cachedState = queryClient.getQueryData<{ likes: number }>(
-          likeKey,
-        );
-
-        // DEV: Assert card count == sheet count (same authority)
-        if (cachedState) {
-          assertLikesConsistent(postId, cachedState.likes, result.likesCount);
-        }
-
-        queryClient.setQueryData(likeKey, (old: any) => {
-          if (!old) return old;
-          return { ...old, likes: result.likesCount };
-        });
+function postLikersOptions(queryClient: QueryClient, postId: string, viewerId: string, pageSize: number) {
+  return infiniteQueryOptions({
+    queryKey: postLikersKeys.forViewer(postId, viewerId, pageSize),
+    initialPageParam: null as PostLikersCursor | null,
+    queryFn: async ({ pageParam }) => {
+      if (useAuthStore.getState().user?.id !== viewerId) {
+        throw new Error("Session changed while loading likes");
+      }
+      const likeKey = likeStateKeys.forPost(viewerId, postId);
+      const previous = queryClient.getQueryData<{ likes: number; hasLiked: boolean }>(likeKey);
+      const mutationWasPending = queryClient.isMutating({ mutationKey: ["likePost", postId] }) > 0;
+      const result = await likesApi.getPostLikers(postId, { cursor: pageParam, limit: pageSize });
+      // A late response from a previous session must not repopulate its caches
+      // after sign-out, nor publish another account's request into this key.
+      if (useAuthStore.getState().user?.id !== viewerId) {
+        throw new Error("Session changed while loading likes");
       }
 
-      return result.likers;
+      // Do not overwrite a newer optimistic toggle while this read was in flight.
+      // Prefetch and mounted queries share this path and exactly the same shape.
+      if (
+        viewerId && previous && !mutationWasPending && Number.isFinite(result.likesCount) &&
+        queryClient.getQueryData(likeKey) === previous &&
+        !queryClient.isMutating({ mutationKey: ["likePost", postId] })
+      ) {
+        queryClient.setQueryData(likeKey, { ...previous, likes: result.likesCount });
+      }
+      return result;
     },
-    enabled: !!postId && enabled,
-    staleTime: 0, // Always fresh when sheet opens — count must match list
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    staleTime: 10 * 1000,
     gcTime: 5 * 60 * 1000,
   });
 }
 
-/** Prefetch likers before opening sheet — eliminates waterfall. Fire-and-forget. */
-export function prefetchPostLikers(
-  queryClient: QueryClient,
-  postId: string,
-): void {
-  if (!postId) return;
-  queryClient.prefetchQuery({
-    queryKey: postLikersKeys.forPost(postId),
-    queryFn: () => likesApi.getPostLikers(postId),
+// Stable selector preserves the existing native hook's array API. Rows can
+// overlap if a post changes while paging; each user must still appear only once.
+function selectLikers(data: InfiniteData<PostLikersPage>): PostLiker[] {
+  const seen = new Set<number>();
+  return data.pages.flatMap((page) => page.likers.filter((liker) => {
+    if (seen.has(liker.userId)) return false;
+    seen.add(liker.userId);
+    return true;
+  }));
+}
+
+// Native keeps its existing 500-row initial list. Web opts into smaller pages.
+export function usePostLikers(postId: string | undefined, enabled: boolean, pageSize = 500) {
+  const queryClient = useQueryClient();
+  const viewerId = useAuthStore((s) => s.user?.id) || "";
+  return useInfiniteQuery({
+    ...postLikersOptions(queryClient, postId || "", viewerId, pageSize),
+    select: selectLikers,
+    enabled: !!postId && !!viewerId && enabled,
   });
 }
 
-/** Hook that returns prefetch fn for use in Pressable onPress */
-export function usePrefetchPostLikers() {
+/** Fire-and-forget prefetch uses the identical infinite-page cache contract. */
+export function prefetchPostLikers(queryClient: QueryClient, postId: string, pageSize = 500): void {
+  const viewerId = useAuthStore.getState().user?.id || "";
+  if (!postId || !viewerId) return;
+  void queryClient.prefetchInfiniteQuery(postLikersOptions(queryClient, postId, viewerId, pageSize));
+}
+
+export function usePrefetchPostLikers(pageSize = 500) {
   const queryClient = useQueryClient();
-  return useCallback(
-    (postId: string) => prefetchPostLikers(queryClient, postId),
-    [queryClient],
-  );
+  return useCallback((postId: string) => prefetchPostLikers(queryClient, postId, pageSize), [queryClient, pageSize]);
 }

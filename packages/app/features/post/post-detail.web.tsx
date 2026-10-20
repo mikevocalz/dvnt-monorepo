@@ -5,7 +5,7 @@
  * the SHARED data (usePost / useComments / useCreateComment → react-query).
  * Raw semantic tags + Tailwind; threaded comments + composer (draft in Zustand).
  */
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -19,6 +19,7 @@ import {
   Trash2,
   Flag,
   Languages,
+  ImagePlus,
 } from "lucide-react";
 import { UserAvatar } from "@dvnt/app/components/ui/avatar";
 import { usePost, useDeletePost } from "@dvnt/app/lib/hooks/use-posts";
@@ -30,7 +31,6 @@ import {
   useBookmarks,
 } from "@dvnt/app/lib/hooks/use-bookmarks";
 import { usePostTags } from "@dvnt/app/lib/hooks/use-post-tags";
-import { usePostLikers } from "@dvnt/app/lib/hooks/use-post-likers";
 import { useBookmarkStore } from "@dvnt/app/lib/stores/bookmark-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
@@ -50,6 +50,12 @@ import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import { TextPostSurface } from "./ui/TextPostSurface";
 import { PostMediaCarousel } from "@dvnt/app/components/feed/post-media-carousel.web";
 import { ownsContent } from "@dvnt/app/lib/profile/same-user";
+import { LikesSheet } from "@dvnt/app/features/posts/likes/LikesSheet.web";
+import { useWebPostShareStore } from "@dvnt/app/lib/stores/web-post-share-store";
+import { sharedPostContext } from "@dvnt/app/lib/posts/share-post";
+import { useSharePostToStory } from "@dvnt/app/lib/hooks/use-share-post-to-story";
+const ShareToInboxSheet = lazy(() => import("@dvnt/app/components/share-to-inbox-sheet.web").then((m) => ({ default: m.ShareToInboxSheet })));
+
 
 export function PostDetailScreen() {
   const params = useParams();
@@ -60,6 +66,10 @@ export function PostDetailScreen() {
   const setReplyTo = useCommentDraftStore((s) => s.setReplyTo);
   const openComposer = useCommentDraftStore((s) => s.openComposer);
   const currentUser = useAuthStore((s) => s.user);
+  const openShare = useWebPostShareStore((s) => s.open);
+  const closeShare = useWebPostShareStore((s) => s.close);
+  const sharingPost = useWebPostShareStore((s) => s.post);
+  const shareToStory = useSharePostToStory();
   // Functional like + bookmark (writes authenticate via the same-origin proxy).
   const {
     likes,
@@ -95,6 +105,7 @@ export function PostDetailScreen() {
   // Who-liked sheet (web mirror of native LikesSheetController).
   const {
     open: openLikesSheet,
+    close: closeLikesSheet,
     prefetch: prefetchLikesSheet,
     activePostId: likesSheetPostId,
   } = useLikesSheet();
@@ -121,7 +132,7 @@ export function PostDetailScreen() {
   });
 
   // Clear transient menu/dialog/sheet flags when leaving the screen.
-  useEffect(() => () => resetPostDetailUI(), [id, resetPostDetailUI]);
+  useEffect(() => () => { resetPostDetailUI(); closeShare(); }, [id, resetPostDetailUI, closeShare]);
 
   // By id, not username. This compared handles, so the moment a member renamed
   // themselves the cached post still carried the old one, the comparison
@@ -236,7 +247,7 @@ export function PostDetailScreen() {
 
         <div className="flex items-center gap-5 px-4 py-3">
           <div className="flex items-center gap-1.5 text-[15px]">
-            <button onClick={toggleLike} aria-label="Like">
+            <button onClick={toggleLike} aria-label={hasLiked ? "Unlike" : "Like"} aria-pressed={hasLiked}>
               <Heart
                 size={22}
                 color={hasLiked ? "#ef4444" : "#fff"}
@@ -249,8 +260,7 @@ export function PostDetailScreen() {
               onFocus={() => prefetchLikesSheet(id)}
               onClick={() => openLikesSheet(id)}
               className="hover:underline"
-              aria-label="View likes"
-              disabled={likes === 0}
+              aria-label={`View ${likes} ${likes === 1 ? "like" : "likes"}`}
             >
               {likes}
             </button>
@@ -262,6 +272,9 @@ export function PostDetailScreen() {
           >
             <MessageCircle size={22} color="#fff" />
             {commentCount}
+          </button>
+          <button type="button" onClick={() => openShare(sharedPostContext(post))} aria-label="Reshare post">
+            <Send size={22} color="#fff" />
           </button>
           <button
             onClick={() => toggleBookmark.mutate({ postId: id, isBookmarked })}
@@ -382,6 +395,9 @@ export function PostDetailScreen() {
           >
             <Send size={18} color="#fff" /> Share
           </button>
+          <button type="button" disabled={shareToStory.isPending} onClick={() => shareToStory.share(post, () => setShowMenu(false))} className="flex items-center gap-3 py-3 text-left text-[15px] text-white disabled:opacity-50">
+            <ImagePlus size={18} /> {shareToStory.isPending ? "Sharing…" : "Share to Story"}
+          </button>
           {isOwner ? (
             <button
               onClick={() => {
@@ -464,8 +480,10 @@ export function PostDetailScreen() {
       {/* Who-liked sheet — opened by tapping the like count. */}
       <LikesSheet
         postId={likesSheetPostId}
+        onClose={closeLikesSheet}
         onProfilePress={(username) => router.push(`/feed/${username}`)}
       />
+      {sharingPost ? <Suspense fallback={null}><ShareToInboxSheet /></Suspense> : null}
     </main>
   );
 }
@@ -492,78 +510,6 @@ async function sharePostLink(postId: string, caption: string) {
     // user cancelled / unsupported — no-op
   }
 }
-
-/**
- * LikesSheet — web "who liked" sheet rendered as a kit Drawer. Opened by
- * tapping the like count via useLikesSheet(); the list is fetched with the
- * same usePostLikers query native uses, enabled only while the sheet is open.
- */
-function LikesSheet({
-  postId,
-  onProfilePress,
-}: {
-  postId: string | null;
-  onProfilePress: (username: string) => void;
-}) {
-  const closeLikesSheet = usePostDetailUIStore((s) => s.closeLikesSheet);
-  const open = !!postId;
-  const { data: likers = [], isLoading } = usePostLikers(
-    postId ?? undefined,
-    open,
-  );
-
-  return (
-    <Drawer
-      open={open}
-      onClose={closeLikesSheet}
-      side="bottom"
-      title="Likes"
-    >
-      {isLoading ? (
-        <p className="py-8 text-center text-sm text-white/40">Loading…</p>
-      ) : likers.length === 0 ? (
-        <p className="py-8 text-center text-sm text-white/40">No likes yet.</p>
-      ) : (
-        <div className="flex max-h-[60vh] flex-col gap-1 overflow-y-auto">
-          {likers.map((liker) => (
-            <button
-              key={liker.userId}
-              onClick={() => {
-                closeLikesSheet();
-                onProfilePress(liker.username);
-              }}
-              className="flex items-center gap-3 rounded-xl px-1 py-2 text-left hover:bg-white/5"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={liker.avatar}
-                alt=""
-                className="h-10 w-10 rounded-xl object-cover bg-white/10"
-              />
-              <div className="flex flex-col leading-tight">
-                <span className="text-[15px] font-semibold">
-                  @{liker.username}
-                </span>
-                {liker.displayName ? (
-                  <span className="text-xs text-white/45">
-                    {liker.displayName}
-                  </span>
-                ) : null}
-              </div>
-              <Heart
-                size={16}
-                color="#ef4444"
-                fill="#ef4444"
-                className="ml-auto"
-              />
-            </button>
-          ))}
-        </div>
-      )}
-    </Drawer>
-  );
-}
-
 
 function CommentComposer({ postId }: { postId: string }) {
   const open = useCommentDraftStore((s) => s.open);

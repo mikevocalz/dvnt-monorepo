@@ -344,6 +344,9 @@ async function webCases(browser,url) {
         const sizes=await dimensions(tiles);
         if(publishers===2) {
           assert.ok(Math.abs(sizes[0].width-sizes[1].width)<=1&&Math.abs(sizes[0].height-sizes[1].height)<=1,c.name+': duo tiles must be equal-sized');
+          const stacked=[...sizes].sort((a,b)=>a.y-b.y);
+          assert.ok(stacked[0].bottom<=stacked[1].y,c.name+': two-person videos must stack vertically at every width, never side by side');
+          assert.ok(Math.abs(stacked[0].x-stacked[1].x)<=1,c.name+': stacked videos align horizontally');
         }
         for(let index=0;index<publishers;index++) {
           await tiles.nth(index).scrollIntoViewIfNeeded();await tick(page);
@@ -644,6 +647,22 @@ async function groupStageCase(browser,url) {
     await evidence(page,'web-'+c.name+'-initial');
     const count=await page.evaluate(()=>window.fixture.attachments.length);
     assert.ok(count>=19,'real remote canvas refs must be mounted before checking media stability');
+    const gallery=page.locator('[data-stage-scroll]');
+    const pageCount=Number(await gallery.getAttribute('data-stage-pages'));
+    assert.ok(pageCount>1,'large rooms use multiple guest pages');
+    assert.equal(await gallery.evaluate(el=>getComputedStyle(el).overflowX),'auto','the gallery pages horizontally');
+    assert.equal(await gallery.evaluate(el=>getComputedStyle(el).overflowY),'hidden','the guest gallery is not a vertical feed');
+    const hiddenGuestButton=page.locator('[data-guest-page="1"] button').first();
+    await hiddenGuestButton.evaluate(el=>el.focus());
+    assert.equal(await hiddenGuestButton.evaluate(el=>el===document.activeElement),false,'inactive gallery pages are inert to keyboard focus');
+    await page.getByRole('button',{name:'Next guest page',exact:true}).click();await tick(page);
+    assert.equal(await gallery.getAttribute('data-stage-page'),'1','next page advances the guest gallery');
+    const [galleryBox]=await dimensions(gallery);
+    const [fixedHost]=await dimensions(page.locator('[data-stage-card][data-focused="true"]'));
+    assert.ok(fixedHost.x>=galleryBox.x-1&&fixedHost.right<=galleryBox.right+1,'the host stays horizontally fixed while guest pages move');
+    await gallery.focus();await page.keyboard.press('ArrowLeft');await tick(page);
+    assert.equal(await gallery.getAttribute('data-stage-page'),'0','keyboard can return to the first guest page');
+    assert.equal(await page.evaluate(()=>window.fixture.attachments.length),count,'guest paging keeps every media canvas mounted');
     const lastCard=page.locator('[data-stage-card="publisher-19"]');
     const last=page.getByRole('button',{name:'Focus Participant 19',exact:true});
     await lastCard.scrollIntoViewIfNeeded();await tick(page);
@@ -675,6 +694,16 @@ async function groupStageCase(browser,url) {
     await assertFullyVisibleCard(page.locator('[data-stage-card="local"][data-focused="true"]'),c.name+' fallback focus after departure');
     await page.evaluate(()=>window.fixture.configure({publishers:20}));await tick(page);
     assert.equal(await page.locator('[data-tile]').count(),20,'new participant joins without duplicates');
+    // Leave from the last guest page all the way back to a two-person call.
+    // The survivor remains mounted and the gallery must not retain blank pages.
+    await gallery.evaluate(el=>{el.scrollLeft=el.scrollWidth;el.dispatchEvent(new Event('scroll'))});await tick(page);
+    await page.evaluate(()=>window.fixture.configure({publishers:2,listeners:0}));await tick(page);
+    assert.equal(await gallery.getAttribute('data-stage-pages'),'1');
+    assert.equal(await gallery.getAttribute('data-stage-page'),'0');
+    assert.equal(await gallery.evaluate(el=>el.scrollLeft),0,'departed final pages reset the scroll offset');
+    const duo=await dimensions(page.locator('[data-stage-card]'));
+    assert.ok(duo[0].bottom<=duo[1].y,'group-to-duo transition restores the vertical stack');
+    await page.evaluate(()=>window.fixture.configure({publishers:20,listeners:12}));await tick(page);
     // A separate default-view capture avoids presenting the intentional
     // roster-browsing scroll position as the room's initial composition.
     await page.locator('[data-room-content]').evaluate(el=>{el.scrollTop=0});await tick(page);

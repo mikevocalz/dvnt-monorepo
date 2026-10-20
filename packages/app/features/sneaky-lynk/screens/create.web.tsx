@@ -432,7 +432,7 @@ export function SneakyLynkCreateScreen() {
         />
 
         {/* App-only toggle — the only ENFORCED capture protection. Everything
-            the web room does (blackout, watermark, shortcut blocking) is
+            the web room does (blackout, shortcut blocking) is
             deterrence; an app-only room simply never mints a peer token for a
             browser. */}
         <ToggleRow

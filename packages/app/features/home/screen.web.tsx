@@ -31,7 +31,7 @@ import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
 import { CardLink } from "@dvnt/app/components/ui/card-link.web";
 import { useScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
-import { Heart, Bookmark, Play, Grid3x3, Plus } from "lucide-react";
+import { Heart, Bookmark, Play, Grid3x3, Plus, Send } from "lucide-react";
 import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
 import { useEvents } from "@dvnt/app/lib/hooks/use-events";
 // Event cards rendered in the feed on mobile and never on web, because this
@@ -79,8 +79,15 @@ import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 // Subpath, not the features/post barrel: that barrel also exports ImageTagger,
 // which pulls react-native-keyboard-controller, expo-image, lucide-react-native,
 // @legendapp/motion, expo-haptics and @tanstack/react-pacer at module scope.
+// eslint-disable-next-line no-restricted-imports -- Web feed needs this render-only leaf; the native post barrel loads camera/keyboard modules on first paint.
 import { TextPostSurface } from "@dvnt/app/features/post/ui/TextPostSurface";
 import type { Post } from "@dvnt/app/lib/types";
+import { useLikesSheet } from "@dvnt/app/lib/stores/post-detail-ui-store";
+import { useWebPostShareStore } from "@dvnt/app/lib/stores/web-post-share-store";
+import { sharedPostContext } from "@dvnt/app/lib/posts/share-post";
+const LikesSheet = lazy(() => import("@dvnt/app/features/posts/likes/LikesSheet.web").then((m) => ({ default: m.LikesSheet })));
+const ShareToInboxSheet = lazy(() => import("@dvnt/app/components/share-to-inbox-sheet.web").then((m) => ({ default: m.ShareToInboxSheet })));
+
 
 const GAP = 10;
 const MAX_W = 1320;
@@ -176,6 +183,11 @@ function formatCount(n: number): string {
 }
 
 export function HomeScreen() {
+  const router = useRouter();
+  const { activePostId: likesPostId, close: closeLikes } = useLikesSheet();
+  const sharePost = useWebPostShareStore((s) => s.post);
+  const closeShare = useWebPostShareStore((s) => s.close);
+  useEffect(() => () => { closeLikes(); closeShare(); }, [closeLikes, closeShare]);
   const { width: winW } = useWindowDimensions();
   const feedMode = useAppStore((s) => s.feedMode);
   const {
@@ -450,6 +462,8 @@ export function HomeScreen() {
       </div>
       <Suspense fallback={null}>
         <StoryViewerOverlay />
+        {likesPostId ? <LikesSheet postId={likesPostId} onClose={closeLikes} onProfilePress={(username) => router.push(`/feed/${username}`)} /> : null}
+        {sharePost ? <ShareToInboxSheet /> : null}
       </Suspense>
     </div>
   );
@@ -485,6 +499,8 @@ function MasonryCell({
   const bookmarkedPosts = useBookmarkStore((s) => s.bookmarkedPosts);
   const isBookmarked = bookmarkedPosts.includes(post.id);
   const toggleBookmark = useToggleBookmark();
+  const { open: openLikes, prefetch: prefetchLikes } = useLikesSheet();
+  const openShare = useWebPostShareStore((s) => s.open);
 
   // Text posts mirror the mobile TextPostSurface: themed gradient + the
   // resolved preview text (from textSlides, caption fallback).
@@ -596,21 +612,20 @@ function MasonryCell({
       ) : null}
 
       {/* Actions layer: a sibling of the link, laid over its bottom edge.
-          Always visible on touch (no hover); on desktop it reveals on hover or
-          when keyboard focus is anywhere in the tile. The layer itself ignores
+          Counts and actions stay visible on touch and desktop. The layer itself ignores
           the pointer so a click on the gradient or the timestamp still opens
           the post; only the buttons take clicks. */}
-      <div className="absolute inset-x-0 bottom-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition-opacity duration-150 pointer-events-none">
+      <div className="absolute inset-x-0 bottom-0 pointer-events-none">
         <span
           aria-hidden
           className="absolute inset-x-0 bottom-0 h-16 bg-linear-to-t from-black/70 to-transparent"
         />
-        <div className="relative flex items-center gap-1 px-1">
+        <div className="relative flex items-center justify-between px-1">
           <button
             type="button"
             onClick={toggleLike}
-            className="pointer-events-auto flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-lg px-2 text-white text-xs font-medium focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
-            aria-label="Like"
+            className="pointer-events-auto flex min-h-11 min-w-8 items-center justify-center gap-1 rounded-lg px-2 text-white text-xs font-medium focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
+            aria-label={hasLiked ? "Unlike" : "Like"}
             aria-pressed={hasLiked}
           >
             <Heart
@@ -618,14 +633,19 @@ function MasonryCell({
               color={hasLiked ? "#ef4444" : "#fff"}
               fill={hasLiked ? "#ef4444" : "transparent"}
             />
-            {likes > 0 ? formatCount(likes) : ""}
+          </button>
+          <button type="button" onClick={() => openLikes(post.id)} onMouseEnter={() => prefetchLikes(post.id)} onFocus={() => prefetchLikes(post.id)} aria-label={`View ${likes} ${likes === 1 ? "like" : "likes"}`} className="pointer-events-auto min-h-11 min-w-6 text-white text-xs font-medium hover:underline">
+            {formatCount(likes)}
+          </button>
+          <button type="button" onClick={() => openShare(sharedPostContext(post))} aria-label="Reshare post" className="pointer-events-auto flex min-h-11 min-w-8 items-center justify-center rounded-lg text-white focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">
+            <Send size={14} />
           </button>
           <button
             type="button"
             onClick={() =>
               toggleBookmark.mutate({ postId: post.id, isBookmarked })
             }
-            className="pointer-events-auto flex min-h-11 min-w-11 items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
+            className="pointer-events-auto flex min-h-11 min-w-8 items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
             aria-label="Bookmark"
             aria-pressed={isBookmarked}
           >
@@ -635,7 +655,7 @@ function MasonryCell({
               fill={isBookmarked ? "#3FDCFF" : "transparent"}
             />
           </button>
-          <span className="ml-auto pr-2 text-white/85 text-[11px]">
+          <span className="absolute bottom-11 right-2 text-white/85 text-[11px]">
             {post.timeAgo || ""}
           </span>
         </div>

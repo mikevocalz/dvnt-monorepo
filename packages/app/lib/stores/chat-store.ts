@@ -789,7 +789,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendSharedPost: async (conversationId, post) => {
     const user = useAuthStore.getState().user;
-    if (!user) return;
+    if (!user) throw new Error("Sign in to share a post");
 
     // Optimistic local message
     const optimisticMsg: Message = {
@@ -814,6 +814,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       await messagesApiClient.sendMessage({
         conversationId,
+        expectedViewerId: user.id,
         content: `Shared a post by @${post.authorUsername}`,
         metadata: {
           type: "shared_post",
@@ -836,6 +837,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ),
         },
       }));
+      throw error;
     }
   },
 

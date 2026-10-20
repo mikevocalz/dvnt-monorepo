@@ -39,7 +39,6 @@ import { assertFirstPostPublishable } from "@dvnt/app/lib/posts/first-post-event
 import { useFirstPostOfferStore } from "@dvnt/app/lib/stores/first-post-offer-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
-  TEXT_POST_THEMES,
   TEXT_POST_MAX_LENGTH,
   TEXT_POST_MAX_SLIDES,
 } from "@dvnt/app/lib/posts/text-post";
@@ -49,7 +48,6 @@ import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
 // a `resize` listener instead of react-native's `useWindowDimensions`, feeding
 // the same `resolveResponsiveGrid` the native composer calls.
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid";
-import type { TextPostThemeKey } from "@dvnt/app/lib/types";
 import { useCreatePostUIStore } from "./create-post-ui-store";
 
 import { NativeLivePhotoHandoff } from "./native-live-photo-handoff.web";
@@ -130,8 +128,6 @@ export function CreatePostScreen() {
     removeTag,
     postKind,
     setPostKind,
-    textTheme,
-    setTextTheme,
     reset,
   } = useCreatePostStore();
 
@@ -319,54 +315,6 @@ export function CreatePostScreen() {
           })}
         </div>
 
-        {/* Text cards retain their existing separate tag/layout workflow. */}
-        {isTextPost ? <div className="mt-4">
-          <div className="flex items-center gap-2">
-            <div className="flex flex-1 items-center gap-1.5 rounded-xl border border-white/15 bg-[#111] px-3 h-11">
-              <Hash size={16} className="text-[#8A40CF]" strokeWidth={2.5} />
-              <input
-                value={ui.tagInput}
-                onChange={(e) => ui.setTagInput(e.target.value.replace(/\s/g, ""))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddTag();
-                  }
-                }}
-                placeholder="Add tag"
-                autoCapitalize="none"
-                autoCorrect="off"
-                className="flex-1 bg-transparent text-[15px] text-white placeholder:text-white/40 outline-none"
-              />
-            </div>
-            <button
-              onClick={handleAddTag}
-              className={`h-11 rounded-xl px-4 text-sm font-semibold text-white ${
-                ui.tagInput.trim() ? "bg-[#8A40CF]" : "bg-white/15"
-              }`}
-            >
-              Add
-            </button>
-          </div>
-          {tags.length > 0 ? (
-            <div className="mt-2.5 flex flex-wrap gap-1.5">
-              {tags.map((tag) => (
-                <button
-                  key={tag}
-                  onClick={() => removeTag(tag)}
-                  className="flex items-center gap-1 rounded-lg border border-[#8A40CF]/25 bg-[#8A40CF]/12 px-2.5 py-1.5"
-                >
-                  <Hash size={11} className="text-[#8A40CF]" strokeWidth={2.5} />
-                  <span className="text-[13px] font-semibold text-[#8A40CF]">{tag}</span>
-                  <X size={12} className="text-[#8A40CF]" />
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        : null}
-
         {!isTextPost ? (
           <BrowserMediaPicker selectedMedia={selectedMedia} draftIdentity={textSlides} disabled={busy}
             beginUpdate={beginMediaUpdate} onPendingChange={onPendingMediaChange} columns={mediaColumns} />
@@ -381,29 +329,6 @@ export function CreatePostScreen() {
         {/* Text-post composer */}
         {isTextPost ? (
           <div className="mt-4">
-            {/* Theme picker */}
-            <div className="flex flex-wrap gap-2">
-              {(Object.keys(TEXT_POST_THEMES) as TextPostThemeKey[]).map((key) => {
-                const t = TEXT_POST_THEMES[key];
-                const isActive = key === textTheme;
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setTextTheme(key)}
-                    className={`h-9 rounded-xl px-3 text-[13px] font-semibold border ${
-                      isActive ? "text-white" : "text-white/80"
-                    }`}
-                    style={{
-                      backgroundImage: `linear-gradient(150deg, ${t.gradient.join(", ")})`,
-                      borderColor: isActive ? t.accent : "rgba(255,255,255,0.12)",
-                    }}
-                  >
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
-
             {/* Slide tabs + add/remove */}
             <div className="mt-3 flex items-center justify-between">
               <span className="text-[15px] font-bold text-white">
@@ -452,7 +377,7 @@ export function CreatePostScreen() {
             </div>
 
             {/* Plain editor — matches the mobile composer (white text on the dark
-                screen, no themed box; the selected theme styles the PUBLISHED
+                screen, no themed box; DVNT branding styles the published
                 card, shown in the feed/detail, not the input). */}
             <textarea
               value={activeTextSlide?.content ?? ""}
@@ -471,6 +396,54 @@ export function CreatePostScreen() {
             >
               {activeTextSlide?.content.length ?? 0}/{TEXT_POST_MAX_LENGTH}
             </p>
+          </div>
+        ) : null}
+
+        {/* Text-card tags belong directly below the text, not above the editor. */}
+        {isTextPost ? (
+          <div className="mt-4">
+            <div className="flex items-center gap-2">
+              <div className="flex flex-1 items-center gap-1.5 rounded-xl border border-white/15 bg-[#111] px-3 h-11">
+                <Hash size={16} className="text-[#8A40CF]" strokeWidth={2.5} />
+                <input
+                  value={ui.tagInput}
+                  onChange={(e) => ui.setTagInput(e.target.value.replace(/\s/g, ""))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddTag();
+                    }
+                  }}
+                  placeholder="Add tag"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  className="flex-1 bg-transparent text-[15px] text-white placeholder:text-white/40 outline-none"
+                />
+              </div>
+              <button
+                onClick={handleAddTag}
+                className={`h-11 rounded-xl px-4 text-sm font-semibold text-white ${
+                  ui.tagInput.trim() ? "bg-[#8A40CF]" : "bg-white/15"
+                }`}
+              >
+                Add
+              </button>
+            </div>
+            {tags.length > 0 ? (
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {tags.map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => removeTag(tag)}
+                    className="flex items-center gap-1 rounded-lg border border-[#8A40CF]/25 bg-[#8A40CF]/12 px-2.5 py-1.5"
+                  >
+                    <Hash size={11} className="text-[#8A40CF]" strokeWidth={2.5} />
+                    <span className="text-[13px] font-semibold text-[#8A40CF]">{tag}</span>
+                    <X size={12} className="text-[#8A40CF]" />
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

@@ -39,6 +39,7 @@ const scenario = `import React,{act} from 'react';import {createRoot} from 'reac
 import {CreatePostScreen} from './packages/app/features/create/create-post.web';
 import {EditPostScreen} from './packages/app/features/post/edit-post.web';
 import {useCreatePostStore} from '@dvnt/app/lib/stores/create-post-store';
+import {DEFAULT_TEXT_POST_THEME,TEXT_POST_THEMES} from '@dvnt/app/lib/posts/text-post';
 import {useEditPostStore} from './packages/app/features/post/edit-post-store';
 import {state} from 'caption-fixture';
 import {clearUserDataFromStorage,registerUserDataReset} from '@dvnt/app/lib/utils/storage';
@@ -58,6 +59,12 @@ window.runCaptionScenarios=async()=>{
   check(store.getState().caption==='', 'malformed caption and tags do not break migration');
   await restore(1,{caption:null,tags:null});
   check(store.getState().caption===''&&store.getState().tags.length===0,'malformed current draft is sanitized');
+  check(store.getState().textTheme===DEFAULT_TEXT_POST_THEME,'fresh and malformed drafts use DVNT branding');
+  for(const textTheme of Object.keys(TEXT_POST_THEMES)){
+    await restore(1,{postKind:'text',textTheme,caption:'Saved caption',tags:['music'],textSlides:[{id:'saved',order:0,content:'Saved text'}]});
+    check(store.getState().textTheme==='deviant','saved new-post draft uses DVNT branding, not '+textTheme);
+    check(store.getState().textSlides[0].content==='Saved text'&&store.getState().caption==='Saved caption'&&store.getState().tags[0]==='music','theme migration preserves draft content');
+  }
   await restore(0,{caption:'Hello #Café',tags:['CAFÉ','東京']});
   check(store.getState().caption==='Hello #Café\\n#東京','legacy media tags migrate once, case-insensitively');
   check(store.getState().tags.length===0,'migrated media tags clear');
@@ -68,10 +75,13 @@ window.runCaptionScenarios=async()=>{
   check(store.getState().tags[0]==='music','legacy text-card tags are preserved');
   await flush(()=>root.render(<CreatePostScreen/>));
   check(!!document.querySelector('input[placeholder="Add tag"]'),'text-card tag input stays available');
+  check(!!(document.querySelector('textarea').compareDocumentPosition(document.querySelector('input[placeholder="Add tag"]'))&Node.DOCUMENT_POSITION_FOLLOWING),'Add tags is below the text-only caption');
+  check(Object.values(TEXT_POST_THEMES).every(theme=>!button(theme.label)),'no theme/color choices remain in text creation');
   await flush(()=>store.getState().setPostKind('media'));
   await flush(()=>store.persist.rehydrate());
   await flush(()=>store.getState().setPostKind('text'));
   check(store.getState().tags[0]==='music','text tags survive mode round trip and reload');
+  check(store.getState().textTheme==='deviant','mode round trip and reload retain DVNT branding');
   await flush(()=>{store.getState().setPostKind('media');store.getState().setSelectedMedia(media)});
   check(!document.querySelector('input[placeholder="Add tag"]'),'media only has inline caption tags');
   check(document.querySelector('textarea').maxLength===8000,'hashtags can exceed the prose input ceiling');
@@ -91,6 +101,20 @@ window.runCaptionScenarios=async()=>{
   check(state.published[0].content===caption,'actual publish hook keeps inline caption without text-card tags');
   check(state.uploads.length===1,'real queue still uploads the selected media once');
   check(store.getState().caption==='','successful publication resets draft');
+  check(store.getState().textTheme==='deviant','reset keeps the new-post branded default');
+  await flush(()=>{store.getState().setPostKind('text');store.getState().updateTextSlide(0,'A branded text post')});
+  await flush(()=>{const input=document.querySelector('input[placeholder="Add tag"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'DVNT');input.dispatchEvent(new Event('input',{bubbles:true}))});
+  await flush(()=>button('Add').click());
+  check(store.getState().tags[0]==='dvnt','moved Add tags controls still update the draft');
+  await flush(()=>button('dvnt').click());
+  check(store.getState().tags.length===0,'moved tag chips still remove tags');
+  await flush(()=>{store.getState().addTag('community');button('New Slide').click()});
+  await setInput('Second branded slide');
+  await flush(()=>button('Share').click());
+  check(state.published.length===2,'text creation still publishes through the real queue');
+  check(state.published[1].kind==='text'&&state.published[1].textTheme==='deviant','text publication submits DVNT branding');
+  check(JSON.stringify(state.published[1].slides)===JSON.stringify(['A branded text post','Second branded slide\\n#community']),'slides and tags survive branded text publication');
+  check(state.uploads.length===1,'text publication does not upload media');
   await flush(()=>{useEditPostStore.getState().reset();root.render(<EditPostScreen/>)});
   check(document.querySelector('textarea').value==='Old #caption','edit reopens stored inline hashtags');
   await setInput(caption);
@@ -109,7 +133,7 @@ window.runCaptionScenarios=async()=>{
   check(store.getState().caption==='', 'sign-out clears in-memory caption');
   check(localStorage.getItem('create-post-storage')===null,'sign-out removes persisted draft');
   await flush(()=>root.unmount());
-  return 'PASS: mounted composer/editor, real publish queue, legacy migration and reload assertions';
+  return 'PASS: mounted composer/editor, branded text defaults and publication, tags below text, real publish queue, legacy migration and reload assertions';
 };`;
 (async () => {
   const result = await esbuild.build({stdin:{contents:scenario,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfigRaw:{compilerOptions:{jsx:'react-jsx',jsxImportSource:'react'}},nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),define:{'process.env.NODE_ENV':'"test"','process.env.NEXT_PUBLIC_ENABLE_NATIVE_LIVE_PHOTO_HANDOFF':'"false"'},plugins:[{name:'caption-boundaries',setup(build){

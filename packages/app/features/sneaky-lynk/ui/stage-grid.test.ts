@@ -7,9 +7,7 @@ import { stageColumns, stageGridClass } from "./stage-grid.ts";
 const PHONE = 390;
 const LAPTOP = 1280;
 
-test("nobody is enlarged just for being the host — tiles are uniform", () => {
-  // The regression this file exists for: a 5-person room used to be 1 big + 4
-  // small. Uniform means one class for the whole grid, so there is no "large".
+test("fallback multi-person grids keep responsive columns", () => {
   assert.equal(stageGridClass(5), "grid-cols-2 sm:grid-cols-3");
 });
 
@@ -36,9 +34,9 @@ test("solo, one-to-one, and group calls have explicit modes", async () => {
   for (const count of [3, 4, 6, 12]) assert.equal(stageMode(count), "group");
 });
 
-test("two-person rooms split on desktop but stack on phones", () => {
+test("two-person web rooms stack on desktop as well as phones", () => {
   assert.equal(stageGridClass(1), "grid-cols-1");
-  assert.equal(stageGridClass(2), "grid-cols-1 sm:grid-cols-2");
+  assert.equal(stageGridClass(2), "grid-cols-1");
   assert.equal(stageColumns(2, PHONE), 1);
-  assert.equal(stageColumns(2, LAPTOP), 2);
+  assert.equal(stageColumns(2, LAPTOP), 1);
 });

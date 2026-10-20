@@ -359,13 +359,17 @@ export const storiesApi = {
       storyOverlays?: StoryOverlay[];
     }>;
     visibility?: "public" | "close_friends";
+    /** Prevent a deferred share from crossing an account switch. */
+    expectedViewerId?: string;
   }) {
     try {
       console.log("[Stories] createStory");
 
       console.log("[Stories] createStory via Edge Function");
 
+      if (storyData.expectedViewerId && getCurrentUserId() !== storyData.expectedViewerId) throw new Error("Account changed");
       const token = await requireBetterAuthToken();
+      if (storyData.expectedViewerId && getCurrentUserId() !== storyData.expectedViewerId) throw new Error("Account changed");
       const visibility = storyData.visibility || "public";
 
       if (!storyData.items || storyData.items.length === 0) {

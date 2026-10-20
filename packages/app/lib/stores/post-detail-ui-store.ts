@@ -67,7 +67,7 @@ export function useLikesSheet() {
   const open = usePostDetailUIStore((s) => s.openLikesSheet);
   const close = usePostDetailUIStore((s) => s.closeLikesSheet);
   const activePostId = usePostDetailUIStore((s) => s.likesSheetPostId);
-  const prefetchLikers = usePrefetchPostLikers();
+  const prefetchLikers = usePrefetchPostLikers(50);
 
   const prefetch = useCallback(
     (postId: string) => prefetchLikers(postId),
