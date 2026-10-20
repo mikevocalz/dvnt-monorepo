@@ -4,12 +4,13 @@ import { uploadToServer } from '../../../packages/app/lib/server-upload';
 import { createPublishTask } from '../../../packages/app/lib/posts/publish-task';
 import { postsApi } from '../../../packages/app/lib/api/posts';
 import { resolveWebPostMedia } from '../../../packages/app/components/feed/web-post-media';
+import type { MediaFile, MediaUploadResult } from '../../../packages/app/lib/hooks/use-media-upload';
 import type { PublishDescriptor, PublishMediaFile } from '../../../packages/app/lib/posts/publish-descriptor';
 
 export { createBrowserLivePhotoAsset, resolveWebPostMedia };
 // Browser fixture mounts the actual production hook. Node contract keeps its
 // transport-only adapter because it deliberately has no DOM/media decoder.
-let videoUploader: ((files: PublishMediaFile[]) => Promise<any[]>) | undefined;
+let videoUploader: ((files: MediaFile[]) => Promise<MediaUploadResult[]>) | undefined;
 export function setVideoUploader(upload: typeof videoUploader) { videoUploader = upload; }
 export const state: { descriptor?: PublishDescriptor; created?: Awaited<ReturnType<typeof postsApi.createPost>> } = {};
 export function prepare(files: PublishMediaFile[], operationId: string) {
@@ -25,8 +26,8 @@ export async function publish() {
   await createPublishTask(state.descriptor, 'fixture-owner', {
     currentOwnerId: () => 'fixture-owner', persistMedia: async file => file,
     uploadMedia: async files => Promise.all(files.map(async file => {
-      if (file.type === 'video' && videoUploader) {
-        const [result] = await videoUploader([file]);
+      if (file.type === 'video' && file.kind === 'video' && videoUploader) {
+        const [result] = await videoUploader([{ ...file, kind: 'video' }]);
         return result?.success ? result : { error: result?.error || 'Video upload failed' };
       }
       if (file.kind === 'livePhoto') {
