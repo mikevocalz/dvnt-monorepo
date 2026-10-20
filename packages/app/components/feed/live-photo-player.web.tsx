@@ -20,6 +20,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
+import { useStoryViewerStore } from "@dvnt/app/lib/stores/story-viewer-store";
 
 /** A press shorter than this is a tap (open the post), not a hold. */
 const HOLD_MS = 350;
@@ -37,9 +39,15 @@ function subscribeReducedMotion(onChange: () => void) {
 }
 const reducedMotionNow = () => window.matchMedia(REDUCED_MOTION).matches;
 
+/** One Live Photo clip plays at a time on the page; starting one stops this. */
+let stopCurrent: (() => void) | null = null;
+
 export type LivePhotoController = ReturnType<typeof useLivePhoto>;
 
-export function useLivePhoto(videoUrl: string | undefined, { active = true }: { active?: boolean } = {}) {
+export function useLivePhoto(
+  videoUrl: string | undefined,
+  { active = true, pauseForLightbox = true }: { active?: boolean; pauseForLightbox?: boolean } = {},
+) {
   const enabled = !!videoUrl;
   const videoRef = useRef<HTMLVideoElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -54,6 +62,10 @@ export function useLivePhoto(videoUrl: string | undefined, { active = true }: { 
   const wantsPlay = useRef(false);
   /** Bumped by every start/stop; a play() promise from an older request is ignored. */
   const request = useRef(0);
+  /** A half-visible neighbouring carousel slide must never start. */
+  const activeRef = useRef(active);
+  /** The mouse is over this Live Photo, so becoming the selected slide plays it. */
+  const hovered = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [failedUrl, setFailedUrl] = useState<string>();
   const failed = enabled && failedUrl === videoUrl;
@@ -71,14 +83,34 @@ export function useLivePhoto(videoUrl: string | undefined, { active = true }: { 
     if (video && video.preload !== "auto") video.preload = "auto";
   }, []);
 
+  const stop = useCallback(() => {
+    request.current += 1;
+    window.clearTimeout(holdTimer.current);
+    holdTimer.current = undefined;
+    wantsPlay.current = false;
+    if (stopCurrent === stop) stopCurrent = null;
+    const video = videoRef.current;
+    if (video && !video.paused) video.pause();
+    setPlaying(false);
+  }, []);
+
   const start = useCallback(() => {
     const video = videoRef.current;
-    if (!video || failed) return;
+    if (!video || failed || !activeRef.current) return;
+    // A backgrounded tab, the story viewer, or (for feed media) the lightbox
+    // owns the screen: nothing underneath may start.
+    if (document.hidden || useStoryViewerStore.getState().open) return;
+    if (pauseForLightbox && useLightboxStore.getState().open) return;
+    if (stopCurrent && stopCurrent !== stop) stopCurrent();
+    stopCurrent = stop;
     const token = ++request.current;
     wantsPlay.current = true;
     video.preload = "auto";
     video.currentTime = 0;
-    video.play().catch((error: unknown) => {
+    video.play().then(() => {
+      // Resolved after a newer stop/start: this clip is outgoing, keep it still.
+      if (token !== request.current && !wantsPlay.current) video.pause();
+    }, (error: unknown) => {
       // A newer start/stop owns the element now, and pause() before play()
       // settles rejects with AbortError: neither is a failure of this request.
       if (token !== request.current) return;
@@ -86,21 +118,15 @@ export function useLivePhoto(videoUrl: string | undefined, { active = true }: { 
       wantsPlay.current = false;
       setPlaying(false);
     });
-  }, [failed]);
-
-  const stop = useCallback(() => {
-    request.current += 1;
-    window.clearTimeout(holdTimer.current);
-    holdTimer.current = undefined;
-    wantsPlay.current = false;
-    const video = videoRef.current;
-    if (video && !video.paused) video.pause();
-    setPlaying(false);
-  }, []);
+  }, [failed, pauseForLightbox, stop]);
 
   useEffect(() => {
+    activeRef.current = active;
     if (!active) stop();
-  }, [active, stop]);
+    else if (hovered.current && !reducedMotion) start();
+    // Only a selection change re-evaluates; hover changes call start/stop directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // Media events, plus a non-passive touchend: after a hold that played,
   // cancelling the touchend stops the browser from synthesising the click, so
@@ -110,6 +136,7 @@ export function useLivePhoto(videoUrl: string | undefined, { active = true }: { 
     const video = videoRef.current;
     const surface = surfaceRef.current;
     const onPlaying = () => {
+      if (!wantsPlay.current) video?.pause();
       setPlaying(wantsPlay.current);
       if (wantsPlay.current && holding.current) playedThisHold.current = true;
     };
@@ -127,14 +154,33 @@ export function useLivePhoto(videoUrl: string | undefined, { active = true }: { 
     video?.addEventListener("ended", onEnded);
     video?.addEventListener("error", onError);
     surface?.addEventListener("touchend", onTouchEnd, { passive: false });
+    const onVisibility = () => {
+      if (document.hidden) stop();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    const unsubscribeStory = useStoryViewerStore.subscribe((state) => {
+      if (state.open) stop();
+    });
+    const unsubscribeLightbox = pauseForLightbox
+      ? useLightboxStore.subscribe((state) => {
+          if (state.open) stop();
+        })
+      : noop;
     return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      unsubscribeStory();
+      unsubscribeLightbox();
+      // Unmount or a replaced clip: never leave the outgoing element running.
+      // On unmount React has already cleared videoRef, so pause the captured one.
+      stop();
+      if (video && !video.paused) video.pause();
       video?.removeEventListener("playing", onPlaying);
       video?.removeEventListener("ended", onEnded);
       video?.removeEventListener("error", onError);
       surface?.removeEventListener("touchend", onTouchEnd);
       window.clearTimeout(holdTimer.current);
     };
-  }, [enabled, videoUrl, stop]);
+  }, [enabled, videoUrl, pauseForLightbox, stop]);
 
   const cancelHold = () => {
     window.clearTimeout(holdTimer.current);
@@ -146,11 +192,14 @@ export function useLivePhoto(videoUrl: string | undefined, { active = true }: { 
   const containerProps = {
     onPointerEnter: (e: React.PointerEvent) => {
       if (e.pointerType !== "mouse") return;
+      hovered.current = true;
       prime();
       if (!reducedMotion) start();
     },
     onPointerLeave: (e: React.PointerEvent) => {
-      if (e.pointerType === "mouse") stop();
+      if (e.pointerType !== "mouse") return;
+      hovered.current = false;
+      stop();
     },
   };
 
@@ -231,6 +280,7 @@ export function LivePhotoMedia({
       {live.videoUrl && !live.failed ? (
         <video
           ref={live.videoRef}
+          data-live-photo-motion
           src={live.videoUrl}
           muted
           playsInline

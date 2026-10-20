@@ -155,7 +155,8 @@ function LightboxVideo({ source, poster, loop }: { source: string; poster?: stri
 }
 
 function LightboxLivePhoto({ still, motion }: { still: string; motion: string }) {
-  const live = useLivePhoto(motion);
+  // This is the foreground player: the open lightbox must not pause it.
+  const live = useLivePhoto(motion, { pauseForLightbox: false });
   return (
     <div
       {...live.containerProps}
