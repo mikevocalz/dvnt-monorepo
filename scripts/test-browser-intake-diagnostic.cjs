@@ -1,40 +1,61 @@
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
-const html = fs.readFileSync('scripts/diagnostics/browser-live-photo-intake.html', 'utf8');
-assert.equal(fs.readFileSync('apps/web/public/diagnostics/browser-live-photo-intake.html', 'utf8'), html, 'preview page must exactly match reviewed standalone diagnostic');
-const code = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-const output = { textContent: '' };
-const clear = { addEventListener(type, fn) { this.handler = fn; } };
-const input = { dataset: { mode: 'test' }, files: [], addEventListener(type, fn) { this.handler = fn; } };
-const sandbox = { TextDecoder, Uint8Array, DataView, document: {
-  querySelector: selector => selector === '#output' ? output : clear,
-  querySelectorAll: () => [input],
-}};
-vm.createContext(sandbox); vm.runInContext(code, sandbox);
-const box = (kind, payload = Buffer.alloc(0)) => { const b = Buffer.alloc(8); b.writeUInt32BE(8 + payload.length); b.write(kind, 4); return Buffer.concat([b, payload]); };
-const file = (bytes, type) => ({ size: bytes.length, type, arrayBuffer: async () => Uint8Array.from(bytes).buffer });
-(async () => {
- const jpeg = Buffer.concat([Buffer.from([255,216]), Buffer.from('com.apple.quicktime.content.identifier'), Buffer.from([255,217])]);
- const still = await sandbox.inspect(file(jpeg, 'image/jpeg'), 1);
- assert.equal(still.container, 'JPEG'); assert.equal(still.appleIdentifierMarkerPresent, true); assert.equal(still.movieContainerCandidate, false);
- const movie = Buffer.concat([box('ftyp', Buffer.from('qt  ')), box('mdat', Buffer.from([1,2])), box('moov')]);
- assert.equal((await sandbox.inspect(file(movie,'video/quicktime'),2)).movieContainerCandidate,true);
- const heic = Buffer.concat([box('ftyp',Buffer.from('heic')),box('meta'),box('mdat')]);
- assert.equal((await sandbox.inspect(file(heic,'image/heic'),3)).movieContainerCandidate,false);
- const malformed = Buffer.from(movie); malformed.writeUInt32BE(0xffffffff);
- assert.equal((await sandbox.inspect(file(malformed,'video/quicktime'),4)).movieContainerCandidate,false);
- let read=false; const large=await sandbox.inspect({size:33*1024*1024,type:'image/jpeg',arrayBuffer(){read=true;}},5);
- assert.equal(read,false); assert.match(large.inspection,/Skipped/);
- const privateValue = 'PRIVATE-IDENTIFIER-DO-NOT-REPORT';
- const named = file(Buffer.concat([jpeg, Buffer.from(privateValue)]), 'image/jpeg'); named.name = 'PRIVATE-FILENAME.jpg';
- input.files = [named, file(movie, 'video/quicktime')]; await input.handler();
- const report = JSON.parse(output.textContent)[0];
- assert.equal(report.applePairVerification, 'Not performed'); assert.equal(report.selectedFileCount, 2);
- assert.ok(!output.textContent.includes(privateValue)); assert.ok(!output.textContent.includes(named.name));
- let release; input.files = [{ size: 3, type: 'image/jpeg', arrayBuffer: () => new Promise(resolve => { release = resolve; }) }];
- const pending = input.handler(); clear.handler(); release(Uint8Array.from([255,216,255]).buffer); await pending;
- assert.equal(output.textContent, 'Results cleared.');
- assert.ok(html.includes("connect-src 'none'")); assert.ok(!/\bfetch\s*\(|XMLHttpRequest|sendBeacon|toDataURL|toBlob/.test(code));
- console.log('PASS: original-only bounded diagnostic, still identifiers not motion, valid container candidate, HEIC not movie, malformed lengths, size cap, no network or conversion');
-})().catch(error=>{console.error(error);process.exit(1)});
+const assert=require('node:assert/strict');
+const fs=require('node:fs');const vm=require('node:vm');
+const html=fs.readFileSync('scripts/diagnostics/browser-live-photo-intake.html','utf8');
+assert.equal(fs.readFileSync('apps/web/public/diagnostics/browser-live-photo-intake.html','utf8'),html);
+const code=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const element=()=>({textContent:'',events:{},addEventListener(t,f){this.events[t]=f;}});
+const els={'#output':element(),'#clear':element(),'#unavailable':element(),'#browser':element()};
+const input=Object.assign(element(),{dataset:{mode:'test'},files:[]});
+let pendingReader;
+class Reader{
+ readAsArrayBuffer(file){pendingReader=this;if(file.pending)return;if(file.fail){this.onerror();return;}this.result=Uint8Array.from(file.bytes).buffer;this.onload();}
+ abort(){this.onabort();}
+}
+let time=0;
+const sandbox={Uint8Array,DataView,Set,FileReader:Reader,performance:{now:()=>time},navigator:{userAgent:'Version/18.0 Safari'},setTimeout,document:{querySelector:s=>els[s],querySelectorAll:()=>[input]}};
+vm.createContext(sandbox);vm.runInContext(code,sandbox);
+const box=(kind,payload=Buffer.alloc(0))=>{const b=Buffer.alloc(8);b.writeUInt32BE(8+payload.length);b.write(kind,4);return Buffer.concat([b,payload]);};
+const seg=(m,data)=>{const b=Buffer.from([255,m,0,0]);b.writeUInt16BE(data.length+2,2);return Buffer.concat([b,data]);};
+const jpeg=(...segments)=>Buffer.concat([Buffer.from([255,216]),...segments,seg(192,Buffer.from([8,0,1,0,1,1,1,17,0])),seg(218,Buffer.from([1,1,0,0,63,0])),Buffer.from([1]),Buffer.from([255,217])]);
+const handler=Buffer.alloc(24);handler.write('vide',8);
+const movie=Buffer.concat([box('ftyp',Buffer.from('qt  \0\0\0\0')),box('moov',box('trak',box('mdia',box('hdlr',handler)))),box('mdat',Buffer.from([1,2]))]);
+const file=(bytes,type='image/jpeg')=>({bytes,size:bytes.length,type,name:'PRIVATE-FILE.jpg'});
+const inspect=bytes=>sandbox.analyze(Uint8Array.from(bytes));
+(async()=>{
+ const still=inspect(jpeg(seg(225,Buffer.from('com.apple.quicktime.content.identifier PRIVATE-IDENTIFIER'))));
+ assert.equal(still.container,'JPEG');assert.equal(still.movieContainerCandidate,false);assert.equal(still.structuralInspectionComplete,true);
+ const m=inspect(movie);assert.equal(m.movieContainerCandidate,true);assert.equal(m.videoHandlerCount,1);
+ const prefix=inspect(Buffer.concat([box('free'),movie]));assert.equal(prefix.videoHandlerCount,1);assert.equal(prefix.validMovieCandidateCount,1);
+ assert.equal(inspect(box('ABCD')).structuralInspectionComplete,false);
+ for(const n of [0,4,9])assert.equal(inspect(box('ftyp',Buffer.alloc(n))).structuralInspectionComplete,false);
+ assert.equal(inspect(Buffer.concat([box('ftyp',Buffer.alloc(8)),box('uuid',Buffer.alloc(15))])).structuralInspectionComplete,false);
+ assert.equal(inspect(box('moov',box('trak',box('mdia',box('hdlr',Buffer.alloc(12)))))).structuralInspectionComplete,false);
+ const nestedPrefix=inspect(Buffer.concat([jpeg(),box('free'),movie]));assert.equal(nestedPrefix.videoHandlerCount,1);assert.equal(nestedPrefix.validMovieCandidateCount,1);
+ sandbox.performance.now=()=>{time+=4000;return time;};assert.equal(inspect(movie).byteScanComplete,false);sandbox.performance.now=()=>time;
+ const embedded=inspect(Buffer.concat([jpeg(),movie]));assert.equal(embedded.movieContainerCandidate,true);assert.equal(embedded.jpeg.trailingByteCount,movie.length);
+ assert.equal(inspect(Buffer.concat([jpeg(),Buffer.from('fake ftyp moov mdat')])).movieContainerCandidate,false);
+ const xmp=inspect(jpeg(seg(225,Buffer.from('http://ns.adobe.com/xap/1.0/\0PRIVATE')),seg(225,Buffer.from('http://ns.adobe.com/xmp/extension/\0PRIVATE')),seg(226,Buffer.from('MPF\0PRIVATE')),seg(235,Buffer.from('JPPRIVATE'))));
+ for(const key of ['xmp','extendedXmp','mpf','jumbf'])assert.equal(xmp.jpeg.metadataPresence[key],true,key);
+ assert.equal(xmp.semanticInspectionComplete,false);assert.ok(!JSON.stringify(xmp).includes('PRIVATE'));
+ const entropy=jpeg().subarray();const entropyBytes=Buffer.concat([entropy.subarray(0,entropy.length-2),Buffer.from([1,255,0,2,255,208,3,255,217])]);assert.equal(inspect(entropyBytes).structuralInspectionComplete,true);
+ for(const bad of [Buffer.from([255,216]),Buffer.from([255,216,255,225,0,1]),Buffer.from([255,216,255,225,0,20]),Buffer.from([255,216,255,218,0,2,1,255])])assert.equal(inspect(bad).structuralInspectionComplete,false);
+ const malformed=Buffer.from(movie);malformed.writeUInt32BE(0xffffffff);assert.equal(inspect(malformed).movieContainerCandidate,false);
+ const extended=Buffer.alloc(16);extended.writeUInt32BE(1);extended.write('ftyp',4);extended.writeUInt32BE(0xffffffff,8);assert.equal(inspect(extended).structuralInspectionComplete,false);
+ assert.equal(inspect(Buffer.concat([box('ftyp',Buffer.from('heic\0\0\0\0')),box('meta'),box('mdat')])).movieContainerCandidate,false);
+ assert.equal(inspect(Buffer.from('random')).structuralInspectionComplete,false);
+ assert.equal(inspect(Buffer.concat(Array.from({length:4100},()=>box('free')))).structuralInspectionComplete,false);
+ let deep=box('hdlr',handler);for(let i=0;i<18;i++)deep=box('moov',deep);assert.equal(inspect(deep).structuralInspectionComplete,false);
+ const many=inspect(Buffer.concat(Array.from({length:65},()=>box('ftyp'))));assert.equal(many.byteScanComplete,true);assert.equal(many.structuralInspectionComplete,false);
+ const large=await sandbox.inspect({size:33*1024*1024,type:'image/jpeg'},1);assert.match(large.inspection,/Skipped/);
+ input.files=[file(jpeg()),file(movie,'video/quicktime')];await input.events.change();
+ let result=JSON.parse(els['#output'].textContent);assert.equal(result.reports[0].files.length,2);assert.ok(!els['#output'].textContent.includes('PRIVATE-FILE'));
+ input.files=Array.from({length:6},()=>file(jpeg()));await input.events.change();result=JSON.parse(els['#output'].textContent);assert.equal(result.reports[1].skippedFileCount,2);
+ input.files=[{size:3,type:'image/jpeg',pending:true}];const pending=input.events.change();els['#clear'].events.click();await pending;assert.equal(els['#output'].textContent,'Results cleared.');
+ input.files=[{size:3,type:'image/jpeg',pending:true}];const old=input.events.change();input.files=[file(movie)];await input.events.change();await old;assert.equal(JSON.parse(els['#output'].textContent).reports.length,1);
+ input.events.cancel();assert.match(els['#output'].textContent,/Picker cancelled/);
+ input.events.click();els['#unavailable'].events.click();assert.match(els['#output'].textContent,/unavailable/);
+ input.files=[{size:3,type:'image/jpeg',fail:true}];await input.events.change();assert.match(els['#output'].textContent,/Read failed/);
+ for(let i=0;i<10;i++)input.events.cancel();assert.equal(JSON.parse(els['#output'].textContent).reports.length,8);
+ assert.ok(html.includes('accept="video/*"'));assert.ok(html.includes("connect-src 'none'"));assert.ok(!/\bfetch\s*\(|XMLHttpRequest|sendBeacon|toDataURL|toBlob/.test(code));
+ console.log('PASS: structural-v2 synthetic format, malformed, bounds, privacy and cancellation tests');
+})().catch(e=>{console.error(e);process.exit(1)});
