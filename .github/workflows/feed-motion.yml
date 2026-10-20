@@ -31,7 +31,7 @@ on:
       - 'scripts/test-feed-motion*'
       - 'scripts/test-live-photo*'
       - 'scripts/test-browser-live-photo*'
-      - 'scripts/test-browser-intake-diagnostic.cjs'
+      - 'scripts/test-browser-intake*.cjs'
       - 'scripts/diagnostics/**'
       - 'apps/web/public/diagnostics/browser-live-photo-intake.html'
       - 'scripts/fixtures/live-photo-roundtrip/**'
@@ -95,6 +95,7 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/feed-motion/node_modules:${{ runner.temp }}/image-manipulator/node_modules
           FEED_BROWSER_CHANNEL: chrome
         run: |
+          node scripts/test-browser-intake-playback-browser.cjs
           node scripts/test-feed-motion-browser.cjs
           node scripts/test-web-live-photo-carousel-browser.cjs
           node scripts/test-live-photo-roundtrip-browser.cjs

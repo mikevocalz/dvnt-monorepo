@@ -3,16 +3,16 @@ const fs=require('node:fs');const vm=require('node:vm');
 const html=fs.readFileSync('scripts/diagnostics/browser-live-photo-intake.html','utf8');
 assert.equal(fs.readFileSync('apps/web/public/diagnostics/browser-live-photo-intake.html','utf8'),html);
 const code=html.match(/<script>([\s\S]*?)<\/script>/)[1];
-const element=()=>({textContent:'',events:{},addEventListener(t,f){this.events[t]=f;}});
-const els={'#output':element(),'#clear':element(),'#unavailable':element(),'#browser':element()};
+const element=()=>({textContent:'',events:{},children:[],style:{},paused:false,seeking:false,currentTime:0,addEventListener(t,f){this.events[t]=f;},append(c){this.children.push(c);},replaceChildren(...c){this.children=c;},pause(){this.paused=true;},load(){},removeAttribute(){},play(){return Promise.resolve();}});
+const els={'#output':element(),'#clear':element(),'#unavailable':element(),'#browser':element(),'#play-options':element(),'#player':element(),'#play-status':element()};
 const input=Object.assign(element(),{dataset:{mode:'test'},files:[]});
 let pendingReader;
 class Reader{
  readAsArrayBuffer(file){pendingReader=this;if(file.pending)return;if(file.fail){this.onerror();return;}this.result=Uint8Array.from(file.bytes).buffer;this.onload();}
  abort(){this.onabort();}
 }
-let time=0;
-const sandbox={Uint8Array,DataView,Set,FileReader:Reader,performance:{now:()=>time},navigator:{userAgent:'Version/18.0 Safari'},setTimeout,document:{querySelector:s=>els[s],querySelectorAll:()=>[input]}};
+let time=0;const revoked=[];let created=0;const windowEvents={};
+const sandbox={URL:{createObjectURL:()=> 'blob:local-'+(++created),revokeObjectURL:u=>revoked.push(u)},window:{addEventListener:(t,f)=>windowEvents[t]=f},Uint8Array,DataView,Set,FileReader:Reader,performance:{now:()=>time},navigator:{userAgent:'Version/18.0 Safari'},setTimeout,document:{createElement:()=>element(),querySelector:s=>els[s],querySelectorAll:()=>[input]}};
 vm.createContext(sandbox);vm.runInContext(code,sandbox);
 const box=(kind,payload=Buffer.alloc(0))=>{const b=Buffer.alloc(8);b.writeUInt32BE(8+payload.length);b.write(kind,4);return Buffer.concat([b,payload]);};
 const seg=(m,data)=>{const b=Buffer.from([255,m,0,0]);b.writeUInt16BE(data.length+2,2);return Buffer.concat([b,data]);};
@@ -49,6 +49,16 @@ const inspect=bytes=>sandbox.analyze(Uint8Array.from(bytes));
  const large=await sandbox.inspect({size:33*1024*1024,type:'image/jpeg'},1);assert.match(large.inspection,/Skipped/);
  input.files=[file(jpeg()),file(movie,'video/quicktime')];await input.events.change();
  let result=JSON.parse(els['#output'].textContent);assert.equal(result.reports[0].files.length,2);assert.ok(!els['#output'].textContent.includes('PRIVATE-FILE'));
+ assert.equal(created,0,'No blob or playback before explicit tap');
+ assert.equal(els['#play-options'].children.length,1);els['#play-options'].children[0].events.click();
+ const video=els['#player'].children[0];assert.equal(created,1);assert.equal(video.src,'blob:local-1');
+ video.duration=2.3;video.videoWidth=100;video.videoHeight=80;video.events.loadedmetadata();video.events.playing();video.currentTime=.5;video.events.timeupdate();
+ let playback=JSON.parse(els['#output'].textContent).reports[0].files[1].localPlayback;assert.equal(playback.timeAdvanced,true);assert.equal(playback.width,100);assert.equal(playback.durationSeconds,2.3);
+ video.events.pause();assert.equal(JSON.parse(els['#output'].textContent).reports[0].files[1].localPlayback.state,'Paused');
+ video.error={code:3,message:'PRIVATE-ERROR'};video.events.error();assert.ok(!els['#output'].textContent.includes('PRIVATE-ERROR'));video.events.ended();
+ els['#play-options'].children[0].events.click();assert.deepEqual(revoked,['blob:local-1']);
+ const stale=els['#player'].children[0];els['#clear'].events.click();const cleared=els['#output'].textContent;stale.events.error();video.events.timeupdate();assert.equal(els['#output'].textContent,cleared);assert.deepEqual(revoked,['blob:local-1','blob:local-2']);
+ input.files=[file(movie,'video/quicktime')];await input.events.change();els['#play-options'].children[0].events.click();windowEvents.pagehide();assert.equal(revoked.length,3);assert.equal(els['#player'].children.length,0);
  input.files=Array.from({length:6},()=>file(jpeg()));await input.events.change();result=JSON.parse(els['#output'].textContent);assert.equal(result.reports[1].skippedFileCount,2);
  input.files=[{size:3,type:'image/jpeg',pending:true}];const pending=input.events.change();els['#clear'].events.click();await pending;assert.equal(els['#output'].textContent,'Results cleared.');
  input.files=[{size:3,type:'image/jpeg',pending:true}];const old=input.events.change();input.files=[file(movie)];await input.events.change();await old;assert.equal(JSON.parse(els['#output'].textContent).reports.length,1);
@@ -56,6 +66,6 @@ const inspect=bytes=>sandbox.analyze(Uint8Array.from(bytes));
  input.events.click();els['#unavailable'].events.click();assert.match(els['#output'].textContent,/unavailable/);
  input.files=[{size:3,type:'image/jpeg',fail:true}];await input.events.change();assert.match(els['#output'].textContent,/Read failed/);
  for(let i=0;i<10;i++)input.events.cancel();assert.equal(JSON.parse(els['#output'].textContent).reports.length,8);
- assert.ok(html.includes('accept="video/*"'));assert.ok(html.includes("connect-src 'none'"));assert.ok(!/\bfetch\s*\(|XMLHttpRequest|sendBeacon|toDataURL|toBlob/.test(code));
- console.log('PASS: structural-v2 synthetic format, malformed, bounds, privacy and cancellation tests');
+ assert.ok(html.includes('accept="video/*"'));assert.ok(html.includes("connect-src 'none'"));assert.ok(html.includes("media-src blob:"));assert.ok(html.includes("form-action 'none'"));assert.ok(!html.includes('autoplay')); assert.ok(!/\bfetch\s*\(|XMLHttpRequest|sendBeacon|toDataURL|toBlob/.test(code));
+ console.log('PASS: playback-v3 synthetic format, malformed, bounds, privacy and cancellation tests');
 })().catch(e=>{console.error(e);process.exit(1)});
