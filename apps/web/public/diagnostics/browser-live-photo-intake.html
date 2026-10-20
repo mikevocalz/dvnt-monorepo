@@ -3,12 +3,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow, noarchive">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; media-src 'none'; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; media-src blob:; form-action 'none'; base-uri 'none'">
 <title>Browser-supplied photo intake diagnostic</title>
 <style>body{font:16px system-ui;max-width:48rem;margin:2rem auto;padding:0 1rem}button{font:inherit;margin:.5rem;padding:.5rem}pre{white-space:pre-wrap;overflow-wrap:anywhere}label{display:block;margin:1.5rem 0}small{display:block}</style>
-<p>Diagnostic version: structural-v2</p>
+<p>Diagnostic version: playback-v3</p>
 <h1>Browser-supplied photo intake</h1>
-<p>Select the same Live Photo once with each option below. This page inspects the files the browser provides, before any page-side image conversion. Photos or the browser may already have changed the representation. Nothing is uploaded, displayed, or saved automatically. File names and raw metadata values are omitted from the report.</p>
+<p>Select the same Live Photo once with each option below. This page inspects the files the browser provides, before any page-side image conversion. Photos or the browser may already have changed the representation. Nothing is uploaded or saved. A selected movie is displayed only after you tap its local Play button. File names, identifiers and private metadata text are omitted. Optional playback reports duration and dimensions.</p>
 <p>A photo identifier is not a video. Two supplied files are not automatically a verified Apple pair. No detected video is not proof that the original photo in your Photos library has no motion.</p>
 <label>1. DVNT explicit formats <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/gif,video/mp4,video/quicktime,video/mov,.jpg,.jpeg,.png,.webp,.heic,.gif,.mov,.mp4,.m4v" data-mode="dvnt-explicit"></label>
 <label>2. Image formats <input type="file" multiple accept="image/*" data-mode="image-wildcard"></label>
@@ -16,8 +16,9 @@
 <label>4. Video only <input type="file" multiple accept="video/*" data-mode="video-only"></label>
 <p>Use the same original Live Photo in Safari and Chrome on your phone. If it is not selectable in a picker, tap the button below instead of selecting a different video.</p>
 <p id="browser"></p><button id="unavailable">Live Photo unavailable in last opened picker</button>
-<small>Reading is bounded to 32 MiB per file. Larger files are reported without inspecting their bytes. At most 4 files per selection, 8 reports, 4096 structural boxes/segments, 16 nesting levels, 64 candidate offsets and 3 seconds of parsing per file. Complete byte scanning is not complete semantic decoding. This diagnostic does not invoke PhotoKit, request a second resource, decode motion, or verify matching Apple resource identifiers.</small>
+<small>Reading is bounded to 32 MiB per file. Larger files are reported without inspecting their bytes. At most 4 files per selection, 8 reports, 4096 structural boxes/segments, 16 nesting levels, 64 candidate offsets and 3 seconds of parsing per file. Complete byte scanning is not complete semantic decoding. This diagnostic does not invoke PhotoKit, request a second resource, verify matching Apple resource identifiers. Optional local playback tests browser decoding, not whether it is the same motion as your Photos item.</small>
 <button id="clear">Clear results</button>
+<section id="preview"><div id="play-options"></div><div id="player"></div><p id="play-status" aria-live="polite">No local playback requested.</p></section>
 <pre id="output" aria-live="polite">No selection yet.</pre>
 <script>
 'use strict';
@@ -25,6 +26,38 @@ const LIMIT=32*1024*1024;
 const output=document.querySelector('#output');
 let generation=0, activeReader=null, lastMode='none';
 const reports=[];
+let activeVideo=null, objectUrl=null, playbackGeneration=0, activeEvidence=null;
+const options=document.querySelector('#play-options'), player=document.querySelector('#player'), playStatus=document.querySelector('#play-status');
+function stopPlayback(){
+ if(activeEvidence){activeEvidence.state='Stopped or replaced';activeEvidence=null;render();}
+ playbackGeneration++;
+ if(activeVideo){activeVideo.pause();activeVideo.removeAttribute('src');activeVideo.load();activeVideo=null;}
+ if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null;}
+ player.replaceChildren();playStatus.textContent='No local playback requested.';
+}
+function clearPlayback(){stopPlayback();options.replaceChildren();}
+function offerPlayback(file,item,token){
+ if(file.size>LIMIT||item.container!=='ISO BMFF'||!item.structuralInspectionComplete||!item.movieContainerCandidate||item.videoHandlerCount<1)return;
+ const button=document.createElement('button');button.textContent='Play file '+item.index+' locally';
+ button.addEventListener('click',()=>{
+  if(token!==generation)return;stopPlayback();const playbackToken=playbackGeneration;
+  const video=document.createElement('video');activeVideo=video;video.controls=true;video.playsInline=true;video.preload='metadata';video.style.maxWidth='100%';
+  const evidence={state:'Play requested',durationSeconds:null,width:null,height:null,maxPlaybackTimeSeconds:0,timeAdvanced:false,errorCode:null,samePhotosMotion:'Not verified; user must compare with the original Photos item'};item.localPlayback=evidence;activeEvidence=evidence;
+  const current=()=>token===generation&&playbackToken===playbackGeneration&&activeVideo===video;
+  const update=()=>{if(!current())return;playStatus.textContent='Local playback: '+evidence.state+'. Compare the visible motion with the original Live Photo in Photos. Timing or successful decoding alone does not prove matching motion.';render();};
+  let previousTime=null;
+  video.addEventListener('loadedmetadata',()=>{if(!current())return;evidence.durationSeconds=Number.isFinite(video.duration)?video.duration:null;evidence.width=video.videoWidth;evidence.height=video.videoHeight;update();});
+  video.addEventListener('playing',()=>{if(!current())return;evidence.state='Playing';previousTime=video.currentTime;update();});
+  video.addEventListener('seeking',()=>{previousTime=null;});
+  video.addEventListener('timeupdate',()=>{if(!current())return;const t=video.currentTime;if(Number.isFinite(t)){evidence.maxPlaybackTimeSeconds=Math.max(evidence.maxPlaybackTimeSeconds,t);if(!video.paused&&!video.seeking&&previousTime!==null&&t>previousTime)evidence.timeAdvanced=true;previousTime=video.seeking?null:t;}update();});
+  video.addEventListener('pause',()=>{if(!current())return;evidence.state=video.ended?'Ended':'Paused';previousTime=null;update();});
+  video.addEventListener('ended',()=>{if(!current())return;evidence.state='Ended';update();});
+  video.addEventListener('error',()=>{if(!current())return;evidence.state='Decode/load error';evidence.errorCode=video.error?video.error.code:null;update();});
+  try{objectUrl=URL.createObjectURL(file);video.src=objectUrl;player.replaceChildren(video);update();const promise=video.play();if(promise)promise.catch(()=>{if(!current())return;evidence.state='Play failed or blocked; try the video controls';update();});}
+  catch{if(current()){stopPlayback();evidence.state='Local preview unavailable';playStatus.textContent='Local preview unavailable. Nothing uploaded.';render();}}
+ });options.append(button);
+}
+window.addEventListener('pagehide',()=>{cancel();});
 const hint=navigator.userAgent.match(/(?:CriOS|FxiOS|EdgiOS|Chrome|Version)\/[\d.]+/g);
 document.querySelector('#browser').textContent='Browser/version hint: '+(hint?hint.join(', '):'Unknown')+'. Also note the browser app you opened; this hint does not verify its engine.';
 function ascii(b,p,n){return String.fromCharCode(...b.subarray(p,p+n));}
@@ -32,7 +65,7 @@ function analyze(bytes){
  const started=performance.now();let structures=0;
  const check=()=>{if(++structures>4096||performance.now()-started>3000)throw Error('Structural/time limit reached');};
  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
- const report={container:'Unsupported',byteScanComplete:false,structuralInspectionComplete:false,semanticInspectionComplete:false,movieContainerCandidate:false,videoHandlerCount:0,limitations:['No media decoding or Apple pair verification','Opaque payloads and unknown metadata are not semantically decoded']};
+ const report={container:'Unsupported',byteScanComplete:false,structuralInspectionComplete:false,semanticInspectionComplete:false,movieContainerCandidate:false,videoHandlerCount:0,limitations:['Structural inspection does not decode media; optional playback is reported separately. No Apple pair verification','Opaque payloads and unknown metadata are not semantically decoded']};
  const allowed=new Set(['ftyp','moov','mdat','trak','mdia','hdlr','meta','uuid','free','skip','wide','stbl','minf','dinf','edts','udta','mvhd','tkhd','mdhd']);
  function bmff(start,end,depth=0,path=[]){
   if(depth>16)throw Error('Nesting limit reached');
@@ -138,8 +171,8 @@ async function inspect(file,index){
  if(file.size>LIMIT)return {...base,byteScanComplete:false,structuralInspectionComplete:false,inspection:'Skipped: exceeds 32 MiB cap'};
  return {...base,...analyze(await read(file))};
 }
-function render(){output.textContent=JSON.stringify({version:'structural-v2',reports},null,2);}
-function cancel(){generation++;if(activeReader){activeReader.abort();activeReader=null;}}
+function render(){output.textContent=JSON.stringify({version:'playback-v3',reports},null,2);}
+function cancel(){generation++;clearPlayback();if(activeReader){activeReader.abort();activeReader=null;}}
 function append(report){if(reports.length===8)reports.shift();reports.push(report);render();}
 for(const input of document.querySelectorAll('input')){
  input.addEventListener('click',()=>{lastMode=input.dataset.mode;});
@@ -154,6 +187,7 @@ for(const input of document.querySelectorAll('input')){
    }
    if(token!==generation)return;
    append({mode:input.dataset.mode,selectedFileCount:selected.length,skippedFileCount:Math.max(0,selected.length-4),files:items,applePairVerification:'Not performed'});
+   items.forEach((item,i)=>offerPlayback(selected[i],item,token));
   }catch{if(token===generation)append({mode:input.dataset.mode,outcome:'Read failed or cancelled; inspection incomplete. Nothing uploaded.'});}
  });
 }
