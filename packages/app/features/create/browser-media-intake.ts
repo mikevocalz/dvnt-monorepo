@@ -3,6 +3,7 @@ import { sizeLimitForKind } from "../../lib/media/upload-policy.ts";
 import { validateVideoPick } from "../../lib/media/video-pick-policy.ts";
 import { browserFileMime } from "../../lib/media/browser-file-mime.ts";
 import { readAppleContentId } from "../../lib/media/apple-content-id.ts";
+import { locateMotionPhotoVideo } from "../../lib/media/motion-photo.ts";
 import {
   MAX_BROWSER_POST_MEDIA,
   readPlayableLivePhotoSource,
@@ -28,6 +29,27 @@ export interface BrowserPairedMedia extends MediaAsset {
   appleContentId?: string;
 }
 
+type MotionPhoto = { still: Blob; motion: File; duration: number };
+// Largest file that can still hold a postable still plus a postable clip.
+const MAX_MOTION_PHOTO_BYTES = sizeLimitForKind("post-image") + sizeLimitForKind("post-video");
+const MOTION_PHOTO_MIMES = ["image/jpeg", "image/heic", "image/heif"];
+
+/** An Android Motion Photo's embedded MP4, split from its still. Null means "post it as a plain photo". */
+async function readMotionPhoto(file: File, mime: string, readDuration: (file: File) => Promise<number | null>): Promise<MotionPhoto | null> {
+  try {
+    const found = await locateMotionPhotoVideo(file);
+    if (!found) return null;
+    const motion = new File([file.slice(found.videoStart, found.videoEnd)], `${file.name.replace(/\.[^.]*$/, "")}.mp4`, { type: "video/mp4" });
+    const input = { kind: "post-video", mimeType: motion.type, fileName: motion.name, sizeBytes: motion.size };
+    if (!validateVideoPick(input).ok) return null;
+    const duration = await readDuration(motion);
+    if (duration == null || !Number.isFinite(duration) || duration <= 0 || !validateVideoPick({ ...input, durationSec: duration }).ok) return null;
+    return { still: file.slice(0, found.stillEnd, mime), motion, duration };
+  } catch {
+    return null;
+  }
+}
+
 export async function readBrowserMediaFiles(
   files: readonly File[],
   options: {
@@ -48,6 +70,7 @@ export async function readBrowserMediaFiles(
       }
       if (file.size === 0) { errors.push(`${file.name}: this file is empty.`); continue; }
       let duration: number | null = null;
+      let motionPhoto: MotionPhoto | null = null;
       if (video) {
         const formatCheck = validateVideoPick({ kind: "post-video", mimeType: mime, fileName: file.name, sizeBytes: file.size });
         if (!formatCheck.ok) { errors.push(`${file.name}: ${formatCheck.message}`); continue; }
@@ -58,12 +81,35 @@ export async function readBrowserMediaFiles(
         }
         const check = validateVideoPick({ kind: "post-video", mimeType: mime, fileName: file.name, sizeBytes: file.size, durationSec: duration });
         if (!check.ok) { errors.push(`${file.name}: ${check.message}`); continue; }
-      } else if (file.size > sizeLimitForKind("post-image")) {
-        errors.push(`${file.name}: photos can be up to ${Math.round(sizeLimitForKind("post-image") / (1024 * 1024))}MB.`); continue;
+      } else {
+        if (MOTION_PHOTO_MIMES.includes(mime) && file.size <= MAX_MOTION_PHOTO_BYTES) {
+          motionPhoto = await readMotionPhoto(file, mime, options.readDuration ?? readPlayableLivePhotoDuration);
+          if (options.isCurrent && !options.isCurrent()) break;
+        }
+        // The photo limit applies to the still a Motion Photo uploads, not to the still plus its clip.
+        if ((motionPhoto?.still.size ?? file.size) > sizeLimitForKind("post-image")) {
+          errors.push(`${file.name}: photos can be up to ${Math.round(sizeLimitForKind("post-image") / (1024 * 1024))}MB.`); continue;
+        }
       }
       const contentId = mime === "image/gif" ? null
         : await (options.readContentId ?? readAppleContentId)(file, video ? "motion" : "still");
       if (options.isCurrent && !options.isCurrent()) break;
+      if (motionPhoto) {
+        // One file holds both halves, so this pair is read from the file's own bytes, never by name.
+        const uri = URL.createObjectURL(motionPhoto.still);
+        let motionUri: string;
+        try { motionUri = URL.createObjectURL(motionPhoto.motion); } catch (error) { URL.revokeObjectURL(uri); throw error; }
+        const still: BrowserPairedMedia = {
+          ...(contentId ? { appleContentId: contentId } : {}),
+          id: `media-${crypto.randomUUID()}`, uri, originalUri: uri, type: "image", kind: "image",
+          mimeType: mime, fileName: file.name, fileSize: motionPhoto.still.size,
+        };
+        assets.push(pairOf(still, {
+          id: `media-${crypto.randomUUID()}`, uri: motionUri, originalUri: motionUri, type: "video", kind: "video",
+          mimeType: motionPhoto.motion.type, fileName: motionPhoto.motion.name, fileSize: motionPhoto.motion.size, duration: motionPhoto.duration,
+        }));
+        continue;
+      }
       // MIME-only wrapping preserves every original byte. Never pair by name.
       const uri = URL.createObjectURL(file.type === mime ? file : file.slice(0, file.size, mime));
       assets.push({
