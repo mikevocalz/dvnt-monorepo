@@ -31,6 +31,7 @@ on:
       - "scripts/verify-event-consolidation.mjs"
       - "scripts/verify-cart-addon-followups.mjs"
       - "scripts/verify-event-financials-addons.mjs"
+      - "scripts/test-free-rsvp-financials.cjs"
       - "scripts/verify-call-capacity.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
@@ -55,6 +56,7 @@ on:
       - "scripts/verify-event-consolidation.mjs"
       - "scripts/verify-cart-addon-followups.mjs"
       - "scripts/verify-event-financials-addons.mjs"
+      - "scripts/test-free-rsvp-financials.cjs"
       - "scripts/verify-call-capacity.mjs"
 
 jobs:
@@ -283,3 +285,9 @@ jobs:
       - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: node scripts/verify-event-financials-addons.mjs
+      - name: Free RSVP financials and cached-summary repair
+        run: |
+          set -euo pipefail
+          sudo systemctl start postgresql
+          sudo -u postgres createdb dvnt_free_rsvp_financials
+          node scripts/test-free-rsvp-financials.cjs --sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_free_rsvp_financials
