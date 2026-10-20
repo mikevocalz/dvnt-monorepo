@@ -1,5 +1,6 @@
 import { useFeedVideo } from "@dvnt/app/components/feed/use-feed-video.web";
-import { resolveWebPostMedia } from "@dvnt/app/components/feed/web-post-media";
+import { isWebLivePhoto, resolveWebPostMedia } from "@dvnt/app/components/feed/web-post-media";
+import { LivePhotoBadge, LivePhotoMedia, useLivePhoto } from "@dvnt/app/components/feed/live-photo-player.web";
 import { PostUploadStatus } from "@dvnt/app/components/feed/post-upload-status.web";
 import { VerifiedAdmissionBanner } from "@dvnt/app/components/verified-admission-banner.web";
 /**
@@ -469,9 +470,13 @@ function MasonryCell({
   const isText =
     post.kind === "text" || (post.textSlides?.length ?? 0) > 0;
   const cover = coverFor(post);
-  // Live Photos / animated videos auto-play (muted loop) in the grid, like mobile.
-  const liveVideoUrl = media ? resolveWebPostMedia(media).videoUrl : undefined;
+  const motionUrl = media ? resolveWebPostMedia(media).videoUrl : undefined;
+  // Live Photos sit still with a LIVE badge and move on hover or press-and-hold,
+  // as on iOS. Videos and animated videos auto-play (muted loop), like mobile.
+  const isLivePhoto = !!media && isWebLivePhoto(media);
+  const liveVideoUrl = isLivePhoto ? undefined : motionUrl;
   const playback = useFeedVideo(liveVideoUrl);
+  const live = useLivePhoto(isLivePhoto && cover ? motionUrl : undefined);
   const {
     likes,
     hasLiked,
@@ -496,7 +501,10 @@ function MasonryCell({
     // stop it: liking a post started a navigation progress bar. A button inside
     // a link is also invalid interactive nesting. Keep controls OUT of the link;
     // no-control-inside-link.test.ts enforces it.
-    <div className="group relative overflow-hidden rounded-2xl bg-white/5">
+    <div
+      {...(isLivePhoto ? live.containerProps : null)}
+      className="group relative overflow-hidden rounded-2xl bg-white/5"
+    >
       {/* A post tile goes somewhere, so it is a link. It was `role="button"` with
           no tabIndex and no key handler: focusable by nothing, operable by
           nothing, and announced as a button it could never be. */}
@@ -514,8 +522,20 @@ function MasonryCell({
             variant="grid"
             style={{ minHeight: fallbackHeight, height: fallbackHeight }}
           />
+        ) : isLivePhoto && cover ? (
+          <LivePhotoMedia live={live}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={cover}
+              alt={post.caption ?? ""}
+              loading="lazy"
+              draggable={false}
+              className="block w-full object-cover"
+              style={{ height: fallbackHeight }}
+            />
+          </LivePhotoMedia>
         ) : liveVideoUrl ? (
-          // Live Photo / animated video — auto-playing muted loop.
+          // Video / animated video — auto-playing muted loop.
           <video
             ref={playback.ref}
             data-feed-motion
@@ -559,6 +579,8 @@ function MasonryCell({
           </span>
         ) : null}
       </CardLink>
+
+      {isLivePhoto && cover ? <LivePhotoBadge live={live} className="absolute top-1 left-1" /> : null}
 
       {liveVideoUrl && (isVideo || playback.blocked) ? (
         <div className="absolute top-2 left-2 flex gap-2">

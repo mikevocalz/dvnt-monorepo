@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Actual carousel + lightbox with real MP4 decoding in Chromium. Use
+// Actual carousel + lightbox Live Photos with real MP4 decoding in Chromium:
+// still first, hover or press-and-hold plays, release returns to the still. Use
 // --build-only when the execution sandbox cannot launch browsers; that only
 // validates fixture bundling, NOT browser playback.
 const assert = require('node:assert/strict');
@@ -43,48 +44,118 @@ const { chromium } = require('playwright');
         [data-post-media-carousel]{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;width:360px}
         [data-post-media-carousel]>div{flex:none;width:100%;scroll-snap-align:center}
         [data-post-media-carousel] button{display:block;width:100%;border:0;padding:0;background:black}
-        [data-post-motion]{display:block;width:360px;height:360px;pointer-events:none}
+        [data-post-media-carousel] img{display:block;width:360px;height:360px}[data-live-photo]{position:relative}[data-live-photo-motion]{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}button[aria-label="Live Photo"]{position:absolute;top:0;left:0}
         [role=dialog]{position:fixed;inset:0;z-index:2000;background:black;display:flex;align-items:center;justify-content:center}
-        [role=dialog] video{width:320px;height:320px}[role=dialog] button{position:relative;z-index:1}
+        [role=dialog] img{width:320px;height:320px;display:block}[role=dialog] button{position:relative;z-index:1}
       </style></head><body><div id="root"></div><script src="/app.js"></script></body></html>`);
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const browserChoice = process.env.FEED_BROWSER_CHANNEL ? { channel: process.env.FEED_BROWSER_CHANNEL } : fs.existsSync('/usr/bin/chromium') ? { executablePath: '/usr/bin/chromium' } : {};
     browser = await chromium.launch({ headless: true, ...browserChoice, args: ['--no-sandbox'] });
-    const page = await browser.newPage({ viewport: { width: 400, height: 700 } });
+    const context = await browser.newContext({ viewport: { width: 400, height: 700 }, hasTouch: true });
+    const page = await context.newPage();
+    const cdp = await context.newCDPSession(page);
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    const active = index => page.waitForFunction(index => {
-      const videos = [...document.querySelectorAll('[data-post-motion]')];
+    await page.waitForFunction(() => document.querySelectorAll('[data-live-photo-motion]').length === 4);
+    await page.evaluate(() => document.querySelectorAll('[data-live-photo-motion]').forEach(v => v.addEventListener('playing', () => { v.dataset.everPlayed = '1'; })));
+    const clips = '[data-post-media-carousel] [data-live-photo-motion]';
+    // index -1: every carousel clip paused. Otherwise only `index` advances on a real clock.
+    const active = index => page.waitForFunction(({ index, clips }) => {
+      const videos = [...document.querySelectorAll(clips)];
       return videos.length === 4 && videos.every((v, i) => i === index ? !v.paused && v.currentTime > 0.1 : v.paused);
-    }, index);
+    }, { index, clips });
     const swipe = index => page.evaluate(index => {
       const el = document.querySelector('[data-post-media-carousel]'); el.scrollTo({ left: index * el.clientWidth });
     }, index);
-    await active(0);
-    assert.ok(await page.locator('[data-post-motion]').evaluateAll(videos => videos.every(v => v.muted && v.playsInline && v.loop)));
-    for (const index of [1, 2, 3, 0]) { await swipe(index); await active(index); }
-    await swipe(1); await active(1);
-    await page.locator('[data-post-media-carousel] button[aria-label="Open media"]').nth(1).click();
-    await page.waitForFunction(() => {
-      const overlay = document.querySelector('[role=dialog] video');
-      return overlay && !overlay.paused && overlay.currentTime > 0.1 && [...document.querySelectorAll('[data-post-motion]')].every(v => v.paused);
-    });
-    await page.evaluate(() => window.closeLightbox()); await active(1);
-    await page.evaluate(() => window.scrollTo(0, 1200)); await active(-1);
-    const pausedTime = await page.locator('[data-post-motion]').nth(1).evaluate(v => v.currentTime);
+    const slideCenter = async () => {
+      const box = await page.locator('[data-post-media-carousel]').boundingBox();
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    };
+    const away = () => page.mouse.move(395, 695);
+    const touch = async (point, ms) => {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+      await page.waitForTimeout(ms);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
+    const lightboxOpen = () => page.evaluate(() => !!document.querySelector('[role=dialog]'));
+    const everPlayed = () => page.locator(clips).evaluateAll(v => v.map(x => !!x.dataset.everPlayed));
+
+    // Visible and decodable, yet nothing autoplays.
+    await page.waitForTimeout(1200);
+    assert.deepEqual(await everPlayed(), [false, false, false, false], 'nothing autoplays when visible');
+    assert.ok(await page.locator(clips).evaluateAll(videos => videos.every(v => v.muted && v.playsInline && !v.loop && !v.autoplay)));
+    assert.equal(await page.locator('button[aria-label="Live Photo"]').count(), 4);
+
+    // Hover plays the selected slide on a real clock; leaving pauses it.
+    for (const index of [0, 1, 2, 3, 0]) {
+      await away(); await swipe(index); await active(-1);
+      const p = await slideCenter(); await page.mouse.move(p.x, p.y); await active(index);
+    }
+    await away(); await active(-1);
+    const pausedTime = await page.locator(clips).nth(0).evaluate(v => v.currentTime);
     await page.waitForTimeout(250);
-    assert.equal(await page.locator('[data-post-motion]').nth(1).evaluate(v => v.currentTime), pausedTime);
-    await page.evaluate(() => window.scrollTo(0, 0)); await active(1);
-    // Headless tabs do not really background: use the Page Visibility API event
-    // with explicit synthetic visibility, while media decoding remains real.
+    assert.equal(await page.locator(clips).nth(0).evaluate(v => v.currentTime), pausedTime, 'a paused clip stays still');
+    let p = await slideCenter(); await page.mouse.move(p.x, p.y); await active(0);
+    assert.ok(await page.locator(clips).nth(0).evaluate(v => v.currentTime < 1.5), 'a new hover replays from the start');
+
+    // Swiping away from the playing slide pauses it.
+    await swipe(1); await active(-1);
+    // Rapid hover in/out ends at the still.
+    for (let i = 0; i < 5; i++) { await page.mouse.move(p.x, p.y); await page.waitForTimeout(30 + i * 20); await away(); await page.waitForTimeout(20); }
+    await page.waitForTimeout(800); await active(-1);
+
+    // Background tab pauses (synthetic Page Visibility; decoding stays real).
+    await page.mouse.move(p.x, p.y); await active(1);
     await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); }); await active(-1);
-    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); }); await active(1);
-    await page.evaluate(() => window.changePost()); await active(0);
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
+    await away(); await active(-1);
+
+    // Touch: a quick tap opens the lightbox without playing.
+    await page.evaluate(() => document.querySelectorAll('[data-live-photo-motion]').forEach(v => delete v.dataset.everPlayed));
+    p = await slideCenter();
+    await touch(p, 100);
+    await page.waitForFunction(() => !!document.querySelector('[role=dialog]'));
+    assert.deepEqual(await everPlayed(), [false, false, false, false], 'a quick tap does not play');
+    const overlay = '[role=dialog] [data-live-photo-motion]';
+    assert.equal(await page.locator(overlay).getAttribute('src'), '/clip.mp4?slide=1', 'the lightbox shows the tapped slide\'s clip');
+    await page.waitForTimeout(800);
+    assert.ok(await page.locator(overlay).evaluate(v => v.paused && v.currentTime === 0), 'the lightbox Live Photo does not autoplay');
+    // Holding the lightbox Live Photo plays it; release returns to the still.
+    const ob = await page.locator('[role=dialog] [data-live-photo]').boundingBox();
+    const op = { x: ob.x + ob.width / 2, y: ob.y + ob.height / 2 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [op] });
+    await page.waitForFunction(sel => { const v = document.querySelector(sel); return v && !v.paused && v.currentTime > 0.1; }, overlay);
+    assert.ok(await page.locator(clips).evaluateAll(v => v.every(x => x.paused)), 'nothing underneath plays');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForFunction(sel => document.querySelector(sel).paused, overlay);
+    assert.equal(await lightboxOpen(), true, 'releasing the hold does not close the lightbox');
+    await page.evaluate(() => window.closeLightbox());
+    await active(-1);
+
+    // Touch: a 250ms tap still opens; a 1.5s hold plays and its release does not open.
+    await touch(p, 250);
+    await page.waitForFunction(() => !!document.querySelector('[role=dialog]'));
+    assert.deepEqual(await everPlayed(), [false, false, false, false], 'a slow tap does not play');
+    await page.evaluate(() => window.closeLightbox());
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [p] });
+    await active(1);
+    await page.waitForTimeout(1000);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await active(-1);
+    await page.waitForTimeout(300);
+    assert.equal(await lightboxOpen(), false, 'releasing a hold that played does not open the lightbox');
+
+    // New post resets; unmount leaves nothing playing.
+    await page.evaluate(() => window.changePost());
+    await page.waitForFunction(() => document.querySelectorAll('[data-live-photo-motion]').length === 4);
+    await page.waitForTimeout(600);
+    assert.ok(await page.locator(clips).evaluateAll(v => v.every(x => x.paused)));
+    p = await slideCenter(); await page.mouse.move(p.x, p.y); await active(0);
     await page.evaluate(() => { window.detached = [...document.querySelectorAll('video')]; window.root.unmount(); });
     assert.ok(await page.evaluate(() => window.detached.every(v => v.paused)));
     assert.deepEqual(errors, []);
-    console.log('PASS actual web carousel + real MP4 clocks: first autoplay, all swipe directions, offscreen/background, lightbox handoff, post reset, unmount, muted inline loop.');
+    console.log('PASS actual web carousel Live Photos with real MP4 clocks: no autoplay, hover plays the selected slide from 0 and leave pauses, swipe-away pause, rapid hover, background pause, quick and slow taps open without playing, lightbox right clip with no autoplay and hold-to-play, 1.5s hold plays and release does not open, post reset, unmount.');
   } finally {
     await browser?.close(); if (server) await new Promise(resolve => server.close(resolve));
     fs.rmSync(dir, { recursive: true, force: true });

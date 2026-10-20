@@ -4,8 +4,9 @@ import { useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { X, ChevronLeft, ChevronRight } from "lucide-react";
 import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
+import { LivePhotoBadge, LivePhotoMedia, useLivePhoto } from "./feed/live-photo-player.web";
 import { useFeedVideo } from "./feed/use-feed-video.web";
-import { resolveWebPostMedia } from "./feed/web-post-media";
+import { isWebLivePhoto, resolveWebPostMedia } from "./feed/web-post-media";
 
 const subscribeToMount = () => () => {};
 const clientMounted = () => true;
@@ -90,7 +91,9 @@ export function Lightbox() {
         </span>
       ) : null}
 
-      {videoUrl ? (
+      {videoUrl && isWebLivePhoto(item) ? (
+        <LightboxLivePhoto key={videoUrl} still={posterUrl || item.url} motion={videoUrl} />
+      ) : videoUrl ? (
         <LightboxVideo key={videoUrl} source={videoUrl} poster={posterUrl} loop={item.type === "livePhoto" || item.type === "animated_video"} />
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
@@ -148,5 +151,23 @@ function LightboxVideo({ source, poster, loop }: { source: string; poster?: stri
       onClick={(e) => e.stopPropagation()}
       className="max-w-[100vw] max-h-dvh bg-black"
     />
+  );
+}
+
+function LightboxLivePhoto({ still, motion }: { still: string; motion: string }) {
+  // This is the foreground player: the open lightbox must not pause it.
+  const live = useLivePhoto(motion, { pauseForLightbox: false });
+  return (
+    <div
+      {...live.containerProps}
+      onClick={(e) => e.stopPropagation()}
+      className="relative"
+    >
+      <LivePhotoMedia live={live} fit="contain">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={still} alt="" className="block max-w-[100vw] max-h-dvh object-contain" />
+      </LivePhotoMedia>
+      <LivePhotoBadge live={live} className="absolute top-2 left-2" />
+    </div>
   );
 }

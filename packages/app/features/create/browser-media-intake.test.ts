@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { MediaAsset } from "../../lib/hooks/use-media-picker";
-import { readBrowserMediaFiles, associateBrowserMedia, separateBrowserMedia, mergeByAppleContentId, captureBrowserMediaReplacement, releaseUnselectedBrowserMedia } from "./browser-media-intake.ts";
+import { readBrowserMediaFiles, type BrowserPairedMedia, associateBrowserMedia, separateBrowserMedia, mergeByAppleContentId, captureBrowserMediaReplacement, releaseUnselectedBrowserMedia } from "./browser-media-intake.ts";
 import { sizeLimitForKind } from "../../lib/media/upload-policy.ts";
 
 const image = (name = "IMG_1234.jpg", type = "image/jpeg") => new File([new Uint8Array([255, 216, 0, 1, 2, 3])], name, { type });
@@ -110,6 +110,68 @@ test("twenty original files can become ten explicit pairs; separating cannot exc
   releaseUnselectedBrowserMedia([selected[0]], selected.slice(1));
   const split = separateBrowserMedia(selected.slice(1), selected[1].id);
   assert.ok(split.ok); if (split.ok) { assert.equal(split.media.length, 10); releaseUnselectedBrowserMedia(split.media, []); }
+});
+
+// A Pixel-layout Motion Photo: JPEG with XMP directory, MP4 appended at the end.
+const motionPhoto = (name = "PXL_20240716_MP.jpg", stillPad = 0, videoPad = 0) => {
+  const enc = (...parts: (string | number[] | Uint8Array)[]) => Uint8Array.from(parts.flatMap(p => typeof p === "string" ? [...p].map(c => c.charCodeAt(0)) : [...p]));
+  const u32 = (n: number) => [n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const box = (type: string, body: Uint8Array) => enc(u32(8 + body.length), type, body);
+  const mp4 = enc(box("ftyp", enc("isom", u32(0))), box("mdat", new Uint8Array(6 + videoPad)), box("moov", enc(u32(0))));
+  const xmp = enc("http://ns.adobe.com/xap/1.0/\0", `<x:xmpmeta GCamera:MotionPhoto="1"><Container:Item Item:Semantic="Primary"/><Container:Item Item:Semantic="MotionPhoto" Item:Length="${mp4.length}"/></x:xmpmeta>`);
+  const head = enc([0xff, 0xd8, 0xff, 0xe1, (xmp.length + 2) >> 8, (xmp.length + 2) & 255], xmp), eoi = Uint8Array.of(0xff, 0xd9);
+  return { file: new File([head, new Uint8Array(stillPad), eoi, mp4], name, { type: "image/jpeg" }), still: enc(head, eoi), mp4 };
+};
+
+test("an Android Motion Photo becomes one separable Live Photo pair that owns both blob URLs", async () => {
+  const { file, still, mp4 } = motionPhoto();
+  const read: string[] = [];
+  const { assets, errors } = await readBrowserMediaFiles([file], { readDuration: async f => { read.push(`${f.name}:${f.type}`); return 2.5; } });
+  assert.deepEqual(errors, []); assert.deepEqual(read, ["PXL_20240716_MP.mp4:video/mp4"]);
+  const [pair] = assets as BrowserPairedMedia[];
+  assert.equal(assets.length, 1); assert.equal(pair.kind, "livePhoto"); assert.equal(pair.type, "image"); assert.equal(pair.duration, 2.5);
+  assert.equal(pair.fileSize, still.length); assert.equal(pair.pairedVideoUri, pair.browserPair?.motion.uri);
+  const stillBlob = await (await fetch(pair.uri)).blob(), motionBlob = await (await fetch(pair.pairedVideoUri!)).blob();
+  assert.equal(stillBlob.type, "image/jpeg"); assert.deepEqual(new Uint8Array(await stillBlob.arrayBuffer()), still);
+  assert.equal(motionBlob.type, "video/mp4"); assert.deepEqual(new Uint8Array(await motionBlob.arrayBuffer()), mp4);
+  const split = separateBrowserMedia(assets, pair.id); assert.ok(split.ok); if (!split.ok) return;
+  assert.deepEqual(names(split.media), ["PXL_20240716_MP.jpg:image", "PXL_20240716_MP.mp4:video"]);
+  releaseUnselectedBrowserMedia(assets, split.media);
+  assert.equal((await fetch(pair.pairedVideoUri!)).ok, true, "split halves keep the URLs");
+  releaseUnselectedBrowserMedia(split.media, []);
+  await assert.rejects(fetch(pair.uri)); await assert.rejects(fetch(pair.pairedVideoUri!));
+});
+
+test("a Motion Photo whose motion cannot be used still posts as a plain photo; the still alone meets the photo limit", async () => {
+  for (const duration of [null, 0, 61]) {
+    const { file } = motionPhoto();
+    const { assets, errors } = await readBrowserMediaFiles([file], { readDuration: async () => duration });
+    assert.deepEqual(errors, []); assert.deepEqual(names(assets), ["PXL_20240716_MP.jpg:image"]);
+    assert.equal(assets[0].fileSize, file.size, "fallback keeps every original byte");
+    releaseUnselectedBrowserMedia(assets, []);
+  }
+  const big = motionPhoto("big.jpg", 9 * 1024 * 1024, 2 * 1024 * 1024).file;
+  assert.ok(big.size > sizeLimitForKind("post-image"));
+  const ok = await readFiles([big]); assert.deepEqual(ok.errors, []); assert.equal(ok.assets[0].kind, "livePhoto");
+  releaseUnselectedBrowserMedia(ok.assets, []);
+  const tooBigStill = motionPhoto("huge.jpg", 11 * 1024 * 1024).file;
+  const refused = await readFiles([tooBigStill]); assert.equal(refused.assets.length, 0); assert.equal(refused.errors.length, 1);
+});
+
+test("only JPEG/HEIC are probed for motion; a failed second blob URL revokes the first", async () => {
+  const { file } = motionPhoto();
+  const png = new File([file], "renamed.png", { type: "image/png" });
+  let probed = 0;
+  const { assets } = await readBrowserMediaFiles([png], { readDuration: async () => { probed++; return 2; } });
+  assert.equal(probed, 0); assert.deepEqual(names(assets), ["renamed.png:image"]);
+  releaseUnselectedBrowserMedia(assets, []);
+  const create = URL.createObjectURL, revoke = URL.revokeObjectURL, created: string[] = [], revoked: string[] = [];
+  URL.createObjectURL = (blob: Blob) => { if (blob.type === "video/mp4") throw new Error("quota"); const uri = create(blob); created.push(uri); return uri; };
+  URL.revokeObjectURL = (uri: string) => { revoked.push(uri); revoke(uri); };
+  try {
+    await assert.rejects(readFiles([file]), /quota/);
+  } finally { URL.createObjectURL = create; URL.revokeObjectURL = revoke; }
+  assert.equal(created.length, 1); assert.deepEqual(revoked, created);
 });
 
 test("review commits are atomic against draft changes, cancellation and >20 raw files", () => {

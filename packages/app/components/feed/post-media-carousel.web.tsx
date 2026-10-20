@@ -3,8 +3,9 @@ import { useCarouselStore } from "@dvnt/app/lib/stores/carousel-store";
 import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
 import { useMediaFrameStore } from "@dvnt/app/lib/stores/media-frame-store";
 import { CAROUSEL_DOT_COLORS } from "./feed-media-mode";
+import { LivePhotoBadge, LivePhotoMedia, useLivePhoto } from "./live-photo-player.web";
 import { useFeedVideo } from "./use-feed-video.web";
-import { resolveWebPostMedia, type WebPostMedium } from "./web-post-media";
+import { isWebLivePhoto, resolveWebPostMedia, type WebPostMedium } from "./web-post-media";
 
 export function PostMediaCarousel({
   media,
@@ -77,14 +78,37 @@ function PostMediaSlide({
   open: () => void;
 }) {
   const { videoUrl, posterUrl } = resolveWebPostMedia(medium);
-  const { ref, muted, blocked, play } = useFeedVideo(videoUrl, { active });
+  // A Live Photo is a still that moves on hover/hold, never an autoplay loop.
+  const livePhoto = isWebLivePhoto(medium);
+  const { ref, muted, blocked, play } = useFeedVideo(livePhoto ? undefined : videoUrl, { active });
+  const live = useLivePhoto(livePhoto ? videoUrl : undefined, { active });
   const aspect = useMediaFrameStore((s) => s.aspectByUrl[posterUrl ?? medium.url]);
   const setAspect = useMediaFrameStore((s) => s.setAspect);
+  const still = (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={posterUrl || medium.url}
+      alt={caption}
+      onLoad={(e) => {
+        const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+        if (h > 0) setAspect(posterUrl || medium.url, w / h);
+      }}
+      className={multiple
+        ? "w-full max-h-[78vh] object-contain bg-black"
+        : "mx-auto block h-auto w-auto max-w-full max-h-[62vh] object-contain bg-black"}
+      style={multiple ? undefined : { aspectRatio: String(aspect ?? 4 / 5) }}
+    />
+  );
 
   return (
-    <div className="snap-center shrink-0 w-full relative">
+    <div
+      {...(livePhoto ? live.containerProps : null)}
+      className="snap-center shrink-0 w-full relative"
+    >
       <button type="button" onClick={open} aria-label="Open media" className="block w-full cursor-zoom-in">
-        {videoUrl ? (
+        {livePhoto ? (
+          <LivePhotoMedia live={live} fit="contain">{still}</LivePhotoMedia>
+        ) : videoUrl ? (
           <video
             ref={ref}
             data-post-motion
@@ -97,21 +121,10 @@ function PostMediaSlide({
             className="w-full max-h-[78vh] object-contain bg-black pointer-events-none"
           />
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={posterUrl || medium.url}
-            alt={caption}
-            onLoad={(e) => {
-              const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
-              if (h > 0) setAspect(posterUrl || medium.url, w / h);
-            }}
-            className={multiple
-              ? "w-full max-h-[78vh] object-contain bg-black"
-              : "mx-auto block h-auto w-auto max-w-full max-h-[62vh] object-contain bg-black"}
-            style={multiple ? undefined : { aspectRatio: String(aspect ?? 4 / 5) }}
-          />
+          still
         )}
       </button>
+      {livePhoto ? <LivePhotoBadge live={live} className="absolute top-2 left-2" /> : null}
       {active && blocked ? (
         <button type="button" onClick={play} aria-label="Play video" className="absolute top-3 left-3 min-h-11 rounded-lg bg-black/70 px-3 text-white">
           Play

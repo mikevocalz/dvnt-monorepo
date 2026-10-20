@@ -1,6 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveWebPostMedia } from "./web-post-media.ts";
+import { isWebLivePhoto, resolveWebPostMedia } from "./web-post-media.ts";
+
+test("a Live Photo is a still with a paired clip, whatever the row's type says", () => {
+  assert.equal(isWebLivePhoto({ type: "livePhoto", url: "still.jpg", livePhotoVideoUrl: "motion.mov" }), true);
+  assert.equal(isWebLivePhoto({ type: "image", url: "still.jpg", livePhotoVideoUrl: "motion.mov" }), true);
+  assert.equal(isWebLivePhoto({ type: "livePhoto", url: "still.jpg" }), false, "no clip: an honest still");
+  assert.equal(isWebLivePhoto({ type: "livePhoto", url: "still.jpg", livePhotoVideoUrl: "  " }), false);
+  assert.equal(isWebLivePhoto({ type: "video", url: "clip.mp4", livePhotoVideoUrl: "motion.mov" }), false);
+  assert.equal(isWebLivePhoto({ url: "post-video/a.mov", livePhotoVideoUrl: "motion.mov" }), false);
+});
 
 test("Live Photo motion uses its paired clip, never the JPG still", () => {
   assert.deepEqual(resolveWebPostMedia({
