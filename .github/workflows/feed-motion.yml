@@ -19,6 +19,8 @@ on:
       - 'packages/app/lib/media/native-live-photo-resources.ts'
       - 'packages/app/lib/media/web-upload-rate*'
       - 'packages/app/lib/server-upload.ts'
+      - 'packages/app/lib/video-compression.web.ts'
+      - 'packages/app/lib/video-thumbnail.web.ts'
       - 'packages/app/lib/api/posts.ts'
       - 'packages/app/features/create/*live-photo*'
       - 'packages/app/features/create/browser-media*'
@@ -99,4 +101,5 @@ jobs:
           node scripts/test-feed-motion-browser.cjs
           node scripts/test-web-live-photo-carousel-browser.cjs
           node scripts/test-live-photo-roundtrip-browser.cjs
+          node scripts/test-live-photo-roundtrip-browser.cjs --motion-only
           node scripts/test-browser-live-photo-original-boundary.cjs

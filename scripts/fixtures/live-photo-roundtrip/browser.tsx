@@ -1,4 +1,5 @@
 import React from 'react';
+import { useMediaUpload } from '../../../packages/app/lib/hooks/use-media-upload';
 import { createRoot } from 'react-dom/client';
 import { BrowserMediaPicker } from '../../../packages/app/features/create/browser-media-picker.web';
 import { captureBrowserMediaReplacement } from '../../../packages/app/features/create/browser-media-intake';
@@ -42,8 +43,16 @@ async function publish() {
     status = error instanceof Error ? error.message : String(error);
   } finally { inFlight = false; render(); }
 }
+// Only the fixture shell is synthetic: the video branch uses the production
+// upload hook, web metadata validation, original pass-through and thumbnail.
+function VideoUploadBoundary() {
+  const upload = useMediaUpload({ folder: 'posts' });
+  client.setVideoUploader(upload.uploadMultiple);
+  return null;
+}
 function render() {
   root.render(<>
+    <VideoUploadBoundary />
     {!post ? <>
       <BrowserMediaPicker selectedMedia={selection.selectedMedia} draftIdentity={selection.textSlides} disabled={inFlight}
         beginUpdate={() => captureBrowserMediaReplacement(() => selection, () => !inFlight)}

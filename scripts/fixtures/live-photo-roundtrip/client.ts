@@ -7,6 +7,10 @@ import { resolveWebPostMedia } from '../../../packages/app/components/feed/web-p
 import type { PublishDescriptor, PublishMediaFile } from '../../../packages/app/lib/posts/publish-descriptor';
 
 export { createBrowserLivePhotoAsset, resolveWebPostMedia };
+// Browser fixture mounts the actual production hook. Node contract keeps its
+// transport-only adapter because it deliberately has no DOM/media decoder.
+let videoUploader: ((files: PublishMediaFile[]) => Promise<any[]>) | undefined;
+export function setVideoUploader(upload: typeof videoUploader) { videoUploader = upload; }
 export const state: { descriptor?: PublishDescriptor; created?: Awaited<ReturnType<typeof postsApi.createPost>> } = {};
 export function prepare(files: PublishMediaFile[], operationId: string) {
   state.created = undefined;
@@ -21,6 +25,10 @@ export async function publish() {
   await createPublishTask(state.descriptor, 'fixture-owner', {
     currentOwnerId: () => 'fixture-owner', persistMedia: async file => file,
     uploadMedia: async files => Promise.all(files.map(async file => {
+      if (file.type === 'video' && videoUploader) {
+        const [result] = await videoUploader([file]);
+        return result?.success ? result : { error: result?.error || 'Video upload failed' };
+      }
       if (file.kind === 'livePhoto') {
         const result = await uploadLivePhotoPair(file, uri => uploadToServer(uri, 'posts'));
         if (!result.success) return { error: result.error };
