@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ImagePlus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ImageIcon, ImagePlus, Trash2 } from "lucide-react";
 import type { MediaAsset } from "../../lib/hooks/use-media-picker";
 import { videoLimitsLabel } from "../../lib/media/video-pick-policy";
 import { MAX_BROWSER_POST_MEDIA } from "./browser-live-photo-import";
@@ -24,6 +24,22 @@ interface Props {
   /** Synchronous event notification: the parent's submit guard must use a ref. */
   onPendingChange: (pending: boolean) => void;
   columns?: number;
+}
+
+/**
+ * Chrome and Firefox can't decode HEIC, so a HEIC still shows a broken image.
+ * The original bytes still upload untouched; this only replaces the preview.
+ */
+function StillPreview({ src, name }: { src: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <div role="img" aria-label={name} className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[#161616] px-3 text-center text-xs text-white/55">
+      <ImageIcon size={28} aria-hidden />
+      <span>This browser can&apos;t preview this photo. It will upload and show normally.</span>
+    </div>;
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={name} onError={() => setFailed(true)} className="h-full w-full object-cover" />;
 }
 
 /** One file entry for ordinary media and user-associated Live Photo originals. */
@@ -156,8 +172,7 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
           <div className="relative aspect-[4/5]">
             {motionURI ? <video src={motionURI} poster={media.kind === "livePhoto" ? media.uri : undefined} controls muted loop playsInline preload="metadata"
               aria-label={`${media.kind === "livePhoto" ? "Live Photo" : "Video"} ${index + 1} motion preview`} className="h-full w-full object-cover" /> :
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={media.uri} alt={name} className="h-full w-full object-cover" />}
+              <StillPreview src={media.uri} name={name} />}
             <div className="absolute left-2 right-2 top-2 flex items-center justify-between gap-2">
               <button type="button" onClick={() => remove(media.id)} disabled={disabled} aria-label={`Remove ${name}`} className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/90 text-white disabled:opacity-30"><Trash2 size={14} /></button>
               {media.kind === "livePhoto" ? <span className="pointer-events-none rounded-md bg-black/70 px-2 py-1 text-[10px] font-semibold">LIVE</span> : null}
