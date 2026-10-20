@@ -2,6 +2,7 @@ import type { MediaAsset } from "../../lib/hooks/use-media-picker";
 import { sizeLimitForKind } from "../../lib/media/upload-policy.ts";
 import { validateVideoPick } from "../../lib/media/video-pick-policy.ts";
 import { browserFileMime } from "../../lib/media/browser-file-mime.ts";
+import { readAppleContentId } from "../../lib/media/apple-content-id.ts";
 import {
   MAX_BROWSER_POST_MEDIA,
   readPlayableLivePhotoSource,
@@ -21,15 +22,21 @@ const EXTENSION_MIMES: Record<string, string> = {
 const fileMime = (file: File) => browserFileMime(file, EXTENSION_MIMES);
 
 export interface BrowserPairedMedia extends MediaAsset {
-  /** Reversible user choice only; not an assertion of Apple embedded pairing IDs. */
+  /** Reversible: the pair card can be split back into its two originals. */
   browserPair?: { still: MediaAsset; motion: MediaAsset };
+  /** Apple's Live Photo content identifier, read from the file's own metadata. */
+  appleContentId?: string;
 }
 
 export async function readBrowserMediaFiles(
   files: readonly File[],
-  options: { readDuration?: (file: File) => Promise<number | null>; isCurrent?: () => boolean } = {},
-): Promise<{ assets: MediaAsset[]; errors: string[] }> {
-  const assets: MediaAsset[] = [];
+  options: {
+    readDuration?: (file: File) => Promise<number | null>;
+    readContentId?: (file: Blob, kind: "still" | "motion") => Promise<string | null>;
+    isCurrent?: () => boolean;
+  } = {},
+): Promise<{ assets: BrowserPairedMedia[]; errors: string[] }> {
+  const assets: BrowserPairedMedia[] = [];
   const errors: string[] = [];
   try {
     for (const file of files) {
@@ -54,9 +61,13 @@ export async function readBrowserMediaFiles(
       } else if (file.size > sizeLimitForKind("post-image")) {
         errors.push(`${file.name}: photos can be up to ${Math.round(sizeLimitForKind("post-image") / (1024 * 1024))}MB.`); continue;
       }
+      const contentId = mime === "image/gif" ? null
+        : await (options.readContentId ?? readAppleContentId)(file, video ? "motion" : "still");
+      if (options.isCurrent && !options.isCurrent()) break;
       // MIME-only wrapping preserves every original byte. Never pair by name.
       const uri = URL.createObjectURL(file.type === mime ? file : file.slice(0, file.size, mime));
       assets.push({
+        ...(contentId ? { appleContentId: contentId } : {}),
         id: `media-${crypto.randomUUID()}`, uri, originalUri: uri,
         type: video ? "video" : "image", kind: video ? "video" : mime === "image/gif" ? "gif" : "image",
         mimeType: mime, fileName: file.name, fileSize: file.size,
@@ -95,11 +106,65 @@ export async function associateBrowserMedia(
   return { ok: true, media: selected.filter(item => item.id !== motionId).map(item => item.id === stillId ? pair : item) };
 }
 
+type Buckets = Map<string, { stills: BrowserPairedMedia[]; motions: BrowserPairedMedia[] }>;
+function bucket(media: readonly BrowserPairedMedia[]): Buckets {
+  const out: Buckets = new Map();
+  for (const item of media) {
+    if (!item.appleContentId || item.browserPair) continue;
+    const entry = out.get(item.appleContentId) ?? { stills: [], motions: [] };
+    if (item.kind === "image") entry.stills.push(item);
+    else if (item.type === "video" && item.kind === "video") entry.motions.push(item);
+    out.set(item.appleContentId, entry);
+  }
+  return out;
+}
+const pairOf = (still: BrowserPairedMedia, motion: BrowserPairedMedia): BrowserPairedMedia => ({
+  ...still, type: "image", kind: "livePhoto", pairedVideoUri: motion.uri, duration: motion.duration,
+  browserPair: { still, motion },
+});
+
+/**
+ * Merges newly read files into the draft, pairing a still and a motion clip
+ * only when both carry the same Apple content identifier, one of each.
+ * A complete incoming pair replaces loose halves of the same photo already in
+ * the draft (the still a Photos sidebar pick sends on its own), and is dropped
+ * if the draft already holds that Live Photo. Anything ambiguous stays separate.
+ * `removed` lists draft items replaced here; their URLs are the caller's to release.
+ */
+export function mergeByAppleContentId(
+  existing: readonly BrowserPairedMedia[], incoming: readonly BrowserPairedMedia[],
+): { media: BrowserPairedMedia[]; removed: BrowserPairedMedia[] } {
+  const heldPairs = new Set(existing.flatMap(item => item.browserPair && item.appleContentId ? [item.appleContentId] : []));
+  const draftLoose = bucket(existing);
+  const pairs = new Map<string, BrowserPairedMedia>();
+  const drop = new Set<string>();
+  for (const [id, { stills, motions }] of bucket(incoming)) {
+    const loose = draftLoose.get(id) ?? { stills: [], motions: [] };
+    if (stills.length === 1 && motions.length === 1) {
+      if (heldPairs.has(id)) { drop.add(stills[0].id); drop.add(motions[0].id); continue; }
+      pairs.set(stills[0].id, pairOf(stills[0], motions[0])); drop.add(motions[0].id);
+      for (const item of [...loose.stills, ...loose.motions]) drop.add(item.id);
+    } else if (stills.length + motions.length === 1 && loose.stills.length + loose.motions.length === 1) {
+      // One half arrives now, the other is already waiting in the draft.
+      const still = stills[0] ?? loose.stills[0], motion = motions[0] ?? loose.motions[0];
+      if (!still || !motion) continue;
+      pairs.set(still.id, pairOf(still, motion)); drop.add(motion.id);
+    }
+  }
+  const all = [...existing, ...incoming];
+  return {
+    media: all.filter(item => !drop.has(item.id)).map(item => pairs.get(item.id) ?? item),
+    removed: existing.filter(item => drop.has(item.id) && !pairs.has(item.id)),
+  };
+}
+
 export function separateBrowserMedia(selected: readonly MediaAsset[], id: string): AssociationResult {
   const pair = selected.find(item => item.id === id) as BrowserPairedMedia | undefined;
   if (!pair?.browserPair) return { ok: false, message: "This pair cannot be separated here. Remove it and choose its original files again." };
   if (selected.length >= MAX_BROWSER_POST_MEDIA) return { ok: false, message: `Remove another item before separating this pair. A post can contain up to ${MAX_BROWSER_POST_MEDIA} items.` };
-  return { ok: true, media: selected.flatMap(item => item.id === id ? [pair.browserPair!.still, pair.browserPair!.motion] : [item]) };
+  // A split is the user's choice; dropping the identifier keeps later picks from re-pairing them.
+  const unpaired = ({ appleContentId: _, ...item }: BrowserPairedMedia): MediaAsset => item;
+  return { ok: true, media: selected.flatMap(item => item.id === id ? [unpaired(pair.browserPair!.still), unpaired(pair.browserPair!.motion)] : [item]) };
 }
 
 function assetURLs(asset: BrowserPairedMedia): string[] {

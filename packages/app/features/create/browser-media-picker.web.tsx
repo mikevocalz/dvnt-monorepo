@@ -9,6 +9,7 @@ import {
   associateBrowserMedia,
   BROWSER_MEDIA_ACCEPT,
   MAX_BROWSER_REVIEW_FILES,
+  mergeByAppleContentId,
   readBrowserMediaFiles,
   releaseUnselectedBrowserMedia,
   separateBrowserMedia,
@@ -64,9 +65,15 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
       if (result.errors.length) {
         releaseUnselectedBrowserMedia(result.assets, original);
         setError(`These files were not added. Your existing items are unchanged.\n${result.errors.join("\n")}`);
-      } else if (result.assets.length && !commit([...original, ...result.assets])) {
-        releaseUnselectedBrowserMedia(result.assets, original);
-        setError("Your draft changed while these files were checked. Please choose them again.");
+      } else if (result.assets.length) {
+        const merged = mergeByAppleContentId(original, result.assets);
+        if (commit(merged.media)) {
+          // Duplicates of a Live Photo already in the draft, and loose halves it replaced.
+          releaseUnselectedBrowserMedia([...result.assets, ...merged.removed], merged.media);
+        } else {
+          releaseUnselectedBrowserMedia(result.assets, original);
+          setError("Your draft changed while these files were checked. Please choose them again.");
+        }
       }
     } catch {
       if (operation === version.current) setError("Could not read those files. Your existing items are unchanged; choose the files again to retry.");
@@ -126,7 +133,7 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     </button>
     <p className="mt-2 text-xs text-white/45">{videoLimitsLabel("post-video")}. Up to {MAX_BROWSER_POST_MEDIA} items per post.</p>
     <p id="browser-media-help" className="mt-2 text-xs leading-5 text-white/60">
-      Browser photo selection may include only a still. Live Photos also need their motion file. Select the photo and MOV or MP4 together, then choose its matching motion below. Names alone never pair files.
+      To post a Live Photo from a Mac, open Photos and choose File &gt; Export &gt; Export Unmodified Original. Add both files it saves (the photo and the MOV) and they pair automatically. The Photos list in this file picker sends the still without its motion.
     </p>
     {selectedMedia.length > MAX_BROWSER_POST_MEDIA ? <p role="alert" className="mt-2 text-sm text-amber-200">
       {selectedMedia.length} files are in review. Pair matching photo and motion files, or remove items, to reach {MAX_BROWSER_POST_MEDIA} or fewer before sharing.
