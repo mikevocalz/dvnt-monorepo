@@ -41,7 +41,7 @@ export interface InvokeEdgeResult<T> {
  * `context` is the underlying Response. Best-effort: a network error has no
  * context at all.
  */
-async function describeFunctionError(
+export async function describeFunctionError(
   error: any,
 ): Promise<{ message: string; status?: number }> {
   const res: Response | undefined = error?.context;

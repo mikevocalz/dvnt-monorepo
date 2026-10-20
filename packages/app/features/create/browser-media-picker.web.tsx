@@ -180,6 +180,9 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     beginUpdate()(next);
   };
   const clips = selectedMedia.filter(media => media.type === "video" && media.kind === "video");
+  // iPadOS reports a Mac user agent; touch points tell them apart.
+  const onIOS = typeof navigator !== "undefined" &&
+    (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
   // Stills that carry Apple's Live Photo ID but arrived without their motion clip.
   const stillsMissingMotion = selectedMedia.filter(media => media.kind === "image" && (media as BrowserPairedMedia).appleContentId);
 
@@ -191,10 +194,14 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     </button>
     <p className="mt-2 text-xs text-white/45">{videoLimitsLabel("post-video")}. Up to {MAX_BROWSER_POST_MEDIA} items per post.</p>
     <p id="browser-media-help" className="mt-2 text-xs leading-5 text-white/60">
-      To post a Live Photo from a Mac, open Photos and choose File &gt; Export &gt; Export Unmodified Original. Add both files it saves (the photo and the MOV) and they pair automatically. The Photos list in this file picker sends the still without its motion.
+      {onIOS
+        ? "On iPhone and iPad, browsers receive only the still of a Live Photo, so it posts as a photo."
+        : "To post a Live Photo from a Mac, open Photos and choose File > Export > Export Unmodified Original. Add both files it saves (the photo and the MOV) and they pair automatically. The Photos list in this file picker sends the still without its motion."}
     </p>
     {stillsMissingMotion.length ? <p role="status" className="mt-2 text-sm text-amber-200" data-live-photo-missing-motion>
-      {stillsMissingMotion.length === 1 ? `${stillsMissingMotion[0].fileName || "This photo"} is a Live Photo, but` : `${stillsMissingMotion.length} of these photos are Live Photos, but`} your computer sent only the still, so it will post without motion. To keep the motion, open Photos, choose File &gt; Export &gt; Export Unmodified Original, and add both files it saves.
+      {stillsMissingMotion.length === 1 ? `${stillsMissingMotion[0].fileName || "This photo"} is a Live Photo, but` : `${stillsMissingMotion.length} of these photos are Live Photos, but`} {onIOS
+        ? "this browser received only the still, so it will post as a photo."
+        : "your computer sent only the still, so it will post without motion. To keep the motion, open Photos, choose File > Export > Export Unmodified Original, and add both files it saves."}
     </p> : null}
     {selectedMedia.length > MAX_BROWSER_POST_MEDIA ? <p role="alert" className="mt-2 text-sm text-amber-200">
       {selectedMedia.length} files are in review. Pair matching photo and motion files, or remove items, to reach {MAX_BROWSER_POST_MEDIA} or fewer before sharing.
