@@ -79,6 +79,7 @@ import { SharedPostBubble } from "@dvnt/app/components/chat/shared-post-bubble";
 import { AddMemberDialog } from "./add-member.web";
 import { StoryReplyBubble } from "@dvnt/app/components/chat/story-reply-bubble";
 import { EventShareBubble } from "@dvnt/app/components/chat/event-share-bubble";
+import { browserFileMime, typedBrowserFile } from "@dvnt/app/lib/media/browser-file-mime";
 
 const ACCENT = "#3FDCFF";
 
@@ -1141,10 +1142,10 @@ export function ChatScreen() {
       const list: MediaAttachment[] = [];
       for (let i = 0; i < Math.min(files.length, 4); i++) {
         const f = files[i];
-        const isVideo = f.type.startsWith("video");
+        const isVideo = browserFileMime(f).startsWith("video");
         list.push({
           type: isVideo ? "video" : "image",
-          uri: URL.createObjectURL(f),
+          uri: URL.createObjectURL(typedBrowserFile(f)),
         });
       }
       if (list.length > 0) setPendingMedia(list);

@@ -93,6 +93,7 @@ import {
   sortPromoTemplates,
   type EventFormErrors,
 } from "@dvnt/app/features/events/create/event-form";
+import { browserFileMime, typedBrowserFile } from "@dvnt/app/lib/media/browser-file-mime";
 
 function Section({
   title,
@@ -742,9 +743,9 @@ export function CreateEventScreen() {
   const onImageFlyerPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) return;
+    if (!browserFileMime(file).startsWith("image/")) return;
     flyerPreparation.cancel();
-    const url = URL.createObjectURL(file);
+    const url = URL.createObjectURL(typedBrowserFile(file));
     if (s.flyerMediaType === "video" && s.flyerImage) {
       // Video is in the primary slot — this image becomes the fallback.
       s.setFlyerFallbackImage(url);
@@ -1081,7 +1082,7 @@ export function CreateEventScreen() {
                         const files = e.target.files;
                         if (!files || files.length === 0) return;
                         const urls = Array.from(files).map((f) =>
-                          URL.createObjectURL(f),
+                          URL.createObjectURL(typedBrowserFile(f)),
                         );
                         s.setEventImages([...s.eventImages, ...urls]);
                         e.currentTarget.value = "";

@@ -1,6 +1,7 @@
 import type { MediaAsset } from "../../lib/hooks/use-media-picker";
 import { sizeLimitForKind } from "../../lib/media/upload-policy.ts";
 import { validateVideoPick } from "../../lib/media/video-pick-policy.ts";
+import { browserFileMime } from "../../lib/media/browser-file-mime.ts";
 import {
   MAX_BROWSER_POST_MEDIA,
   readPlayableLivePhotoSource,
@@ -17,7 +18,7 @@ const EXTENSION_MIMES: Record<string, string> = {
   jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", heic: "image/heic", gif: "image/gif",
   mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime",
 };
-const fileMime = (file: File) => file.type.trim().toLowerCase() || EXTENSION_MIMES[file.name.split(".").pop()?.toLowerCase() ?? ""] || "";
+const fileMime = (file: File) => browserFileMime(file, EXTENSION_MIMES);
 
 export interface BrowserPairedMedia extends MediaAsset {
   /** Reversible user choice only; not an assertion of Apple embedded pairing IDs. */

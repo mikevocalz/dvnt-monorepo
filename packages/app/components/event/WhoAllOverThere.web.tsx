@@ -16,6 +16,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
+import { browserFileMime } from "@dvnt/app/lib/media/browser-file-mime";
 
 const THUMB = 80;
 // Matches the media-upload edge fn's MAX_VIDEO_DURATION_SEC — keep in sync.
@@ -78,7 +79,7 @@ async function uploadMomentMedia(file: File | Blob, isVideo: boolean): Promise<s
   if (!token) throw new Error("Sign in to post a moment.");
   const fd = new FormData();
   const name = file instanceof File ? file.name : isVideo ? "moment.mp4" : "moment.jpg";
-  const mime = file.type || (isVideo ? "video/mp4" : "image/jpeg");
+  const mime = (file instanceof File ? browserFileMime(file) : file.type) || (isVideo ? "video/mp4" : "image/jpeg");
   fd.append("file", file, name);
   fd.append("kind", isVideo ? "event-moment-video" : "event-moment-photo");
   fd.append("mime", mime);
@@ -301,8 +302,8 @@ export function WhoAllOverThere({
     async (file: File | undefined) => {
       if (!file) return;
       setError(null);
-      const isVideo = file.type.startsWith("video/");
-      const isImage = file.type.startsWith("image/");
+      const isVideo = browserFileMime(file).startsWith("video/");
+      const isImage = browserFileMime(file).startsWith("image/");
       if (!isVideo && !isImage) {
         setError("Pick a photo or video.");
         return;

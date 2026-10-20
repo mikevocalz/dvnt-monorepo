@@ -13,6 +13,7 @@ import { beginUpload, settleUpload } from "@dvnt/app/lib/media/upload-watchdog-s
 
 import { folderToKind, sizeLimitForKind, uploadPercentage, withUploadTimeout } from "@dvnt/app/lib/media/upload-policy";
 import { scheduleWebUpload } from "@dvnt/app/lib/media/web-upload-rate";
+import { isGenericMime } from "@dvnt/app/lib/media/browser-file-mime";
 
 const FileSystem = LegacyFileSystem;
 
@@ -247,7 +248,9 @@ async function uploadToServerImpl(
         const resp = await fetch(uri);
         if (!resp.ok) throw new Error(`Could not read selected media (${resp.status})`);
         const blob = await resp.blob();
-        const mime = blob.type || opts?.mimeType || getMimeFromUri(uri);
+        // A generic blob type ("application/octet-stream") is no answer; the
+        // function only accepts named types, so fall through to the caller's.
+        const mime = (!isGenericMime(blob.type) && blob.type) || (!isGenericMime(opts?.mimeType) && opts?.mimeType) || getMimeFromUri(uri);
         const kind = folderToKind(folder, mime);
         // Refuse over-cap BEFORE sending — see KIND_SIZE_LIMITS.
         if (blob.size > sizeLimitForKind(kind)) {

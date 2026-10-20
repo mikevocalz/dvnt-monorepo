@@ -80,6 +80,7 @@ import {
   saleWindowLabel,
   saleWindowLocalToInstant,
 } from "@dvnt/app/lib/events/sale-window";
+import { browserFileMime, typedBrowserFile } from "@dvnt/app/lib/media/browser-file-mime";
 
 const inputCls =
   "w-full bg-white/[0.05] border border-white/12 rounded-xl px-3 h-11 text-[15px] text-white placeholder:text-white/40 outline-none focus:border-[#3FDCFF]/60";
@@ -556,7 +557,7 @@ export function EventEditScreen() {
   const onCoverPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
-    const urls = files.map((f) => URL.createObjectURL(f));
+    const urls = files.map((f) => URL.createObjectURL(typedBrowserFile(f)));
     s.setEventImages((prev) => [...prev, ...urls]);
   };
 
@@ -582,10 +583,10 @@ export function EventEditScreen() {
         if (!result) return;
         prepared = result;
       } else {
-        if (!file.type.startsWith("image/")) return;
+        if (!browserFileMime(file).startsWith("image/")) return;
         flyerPreparation.cancel();
       }
-      const url = URL.createObjectURL(prepared);
+      const url = URL.createObjectURL(typedBrowserFile(prepared));
       const current = useEventEditStore.getState();
       if (isVideo) {
         if (current.flyerImage && current.flyerMediaType === "image" && !current.flyerFallbackImage) {

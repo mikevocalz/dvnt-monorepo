@@ -29,6 +29,16 @@ test("empty OS MIME uses approved extensions for format only; HEIF and corrupt/o
   }
 });
 
+test("a generic octet-stream MIME falls back to the extension and the upload blob carries the real type", async () => {
+  const result = await readFiles([image("IMG_0001.HEIC", "application/octet-stream"), video("IMG_0001.MOV", "application/octet-stream")]);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.assets.map(item => item.mimeType), ["image/heic", "video/quicktime"]);
+  assert.deepEqual(await Promise.all(result.assets.map(async item => (await (await fetch(item.uri)).blob()).type)), ["image/heic", "video/quicktime"]);
+  releaseUnselectedBrowserMedia(result.assets, []);
+  const unknown = await readFiles([image("notes.txt", "application/octet-stream")]);
+  assert.equal(unknown.assets.length, 0); assert.equal(unknown.errors.length, 1);
+});
+
 test("explicit association preserves chosen identities and disassociation restores both without revocation", async () => {
   const { assets } = await readFiles([image(), image(), video()]);
   const pair = await associateBrowserMedia(assets, assets[1].id, assets[2].id, readDuration);
