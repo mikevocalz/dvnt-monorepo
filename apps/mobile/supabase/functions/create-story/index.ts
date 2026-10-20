@@ -8,6 +8,7 @@ import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { cleanMetadata, str } from "../_shared/overlay-sanitize.ts";
+import { validateStoryShare } from "../_shared/story-share.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,8 +42,11 @@ function errorResponse(
 }
 
 interface CreateStoryBody {
-  mediaUrl: string;
-  mediaType: "image" | "video";
+  mediaUrl?: string;
+  mediaType?: "image" | "video";
+  sharedSource?: { type: "post" | "event"; id: string };
+  operationId?: string;
+  expectedViewerId?: string;
   visibility?: "public" | "followers" | "close_friends";
   duration?: number;
   mediaKey?: string;
@@ -139,6 +143,34 @@ Deno.serve(async (req) => {
       body = await req.json();
     } catch {
       return errorResponse("validation_error", "Invalid JSON body");
+    }
+
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return errorResponse("validation_error", "Body must be an object");
+    }
+
+    // Share publication has one transaction: source, attribution, story and DM.
+    // Never reuse the upload path or trust a client-supplied author/media URL.
+    if (body.sharedSource !== undefined) {
+      const validation = validateStoryShare(body as unknown as Record<string, unknown>);
+      if (!validation.ok) return errorResponse(validation.code, validation.message);
+      const input = validation.value;
+      const { data, error } = await supabaseAdmin.rpc("publish_story_share", {
+        p_auth_id: authUserId,
+        p_operation_id: input.operationId,
+        p_source_type: input.sharedSource.type,
+        p_source_id: input.sharedSource.id,
+        p_visibility: input.visibility,
+        p_expected_viewer_id: input.expectedViewerId ?? null,
+      });
+      if (error) {
+        console.error("[Edge:create-story] Atomic share publication failed:", error.code);
+        return errorResponse("internal_error", "Could not publish the story. Retry with the same operation.");
+      }
+      if (!data?.ok) {
+        return errorResponse(data?.code || "internal_error", data?.message || "Could not publish the story");
+      }
+      return jsonResponse({ ok: true, data: { story: data.story, notification: data.notification } });
     }
 
     const {

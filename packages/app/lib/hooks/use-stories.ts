@@ -10,6 +10,7 @@ import {
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import type { Story, StoryOverlay } from "@dvnt/app/lib/types";
 import { STALE_TIMES, GC_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
+import { parseStorySharedSource, storySourceText } from "../stories/shared-source";
 
 // Query keys
 export const storyKeys = {
@@ -103,6 +104,11 @@ export function useCreateStory() {
       // Get current user for optimistic update
       const currentUser = useAuthStore.getState().user;
       if (newStoryData.expectedViewerId && currentUser?.id !== newStoryData.expectedViewerId) throw new Error("Account changed");
+      if (newStoryData.isCurrent && !newStoryData.isCurrent()) throw new Error("Share cancelled");
+
+      // A share's media and author are resolved atomically by the server. Do
+      // not invent an optimistic source author or show a ghost published card.
+      if (newStoryData.sharedSource) return undefined;
 
       // Snapshot previous data
       const previousData = queryClient.getQueryData<Story[]>(storyKeys.list());
@@ -136,6 +142,7 @@ export function useCreateStory() {
     },
     onError: (_err, variables, context) => {
       if (variables.expectedViewerId && useAuthStore.getState().user?.id !== variables.expectedViewerId) return;
+      if (variables.sharedSource) return;
       // Rollback on error
       if (context?.previousData) {
         queryClient.setQueryData(storyKeys.list(), context.previousData);
@@ -148,6 +155,41 @@ export function useCreateStory() {
     onSuccess: async (createdStory, variables) => {
       const currentUser = useAuthStore.getState().user;
       if (variables.expectedViewerId && currentUser?.id !== variables.expectedViewerId) return;
+      if (variables.isCurrent && !variables.isCurrent()) return;
+
+      if (variables.sharedSource) {
+        const sharedSource = parseStorySharedSource(createdStory.sharedSource);
+        const nextStory = buildStoryGroup(currentUser, {
+          id: String(createdStory.id),
+          authorId: createdStory.authorId,
+          author: createdStory.author,
+        }, [{
+          type: !createdStory.mediaUrl && sharedSource ? "text" : createdStory.mediaType === "video" ? "video" : "image",
+          url: createdStory.mediaUrl || undefined,
+          thumbnail: createdStory.thumbnailUrl || undefined,
+          ...(!createdStory.mediaUrl && sharedSource ? {
+            text: storySourceText(sharedSource),
+            textColor: "#FFFFFF",
+            backgroundColor: "#1A0A2E",
+          } : {}),
+        }], variables.visibility);
+        const item = {
+          ...nextStory.items![0],
+          id: String(createdStory.id),
+          sharedSource,
+        };
+        nextStory.items = [item];
+        queryClient.setQueryData<Story[]>(storyKeys.list(), (old) => {
+          const owner = (old ?? []).find((story) => story.userId === nextStory.userId);
+          if (!owner) return [nextStory, ...(old ?? [])];
+          return old!.map((story) => story === owner ? {
+            ...story,
+            items: [...(story.items ?? []).filter((existing) => existing.id !== item.id), item],
+          } : story);
+        });
+        await queryClient.invalidateQueries({ queryKey: storyKeys.list() });
+        return;
+      }
 
       queryClient.setQueryData<Story[]>(storyKeys.list(), (old) => {
         const nextStory = buildStoryGroup(

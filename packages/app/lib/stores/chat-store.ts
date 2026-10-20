@@ -11,6 +11,7 @@
  * CRITICAL: Do not call clearConversation() from useEffect cleanup - causes infinite loops
  */
 import { create } from "zustand";
+import { parseStoryShareContext, type StoryShareContext } from "@dvnt/app/lib/messages/story-share";
 import { messagesApi as messagesApiClient } from "@dvnt/app/lib/api/messages-impl";
 import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -115,6 +116,7 @@ export interface Message {
   storyReply?: StoryReplyContext;
   sharedPost?: SharedPostContext;
   eventShare?: EventShareContext;
+  storyShare?: StoryShareContext;
   reactions?: MessageReaction[];
   status?: MessageStatus;
   clientMessageId?: string;
@@ -261,6 +263,10 @@ function areMessagesEqual(a: Message[], b: Message[]): boolean {
       message.sharedPost?.caption === other.sharedPost?.caption &&
       message.sharedPost?.mediaUrl === other.sharedPost?.mediaUrl &&
       message.sharedPost?.mediaType === other.sharedPost?.mediaType &&
+      message.storyShare?.storyId === other.storyShare?.storyId &&
+      message.storyShare?.sourceId === other.storyShare?.sourceId &&
+      message.storyShare?.sourceType === other.storyShare?.sourceType &&
+      message.storyShare?.sourceTitle === other.storyShare?.sourceTitle &&
       areMediaArraysEqual(message.media, other.media) &&
       areReactionsEqual(message.reactions, other.reactions)
     );
@@ -402,6 +408,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   }))
                 : meta?.mediaUrl &&
                     meta.type !== "shared_post" &&
+                    meta.type !== "story_share" &&
                     meta.type !== "story_reply"
                   ? [
                       {
@@ -414,6 +421,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           storyReply,
           sharedPost,
           eventShare,
+          storyShare: parseStoryShareContext(meta),
           reactions: (() => {
             const r = meta?.reactions;
             return Array.isArray(r) ? r : [];

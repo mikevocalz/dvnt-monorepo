@@ -61,7 +61,7 @@ import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { feedColumnCount } from "@dvnt/app/lib/stores/feed-layout-preference";
 import {
   useStoryViewerStore,
-  type StoryViewerGroup,
+  toStoryViewerGroup,
 } from "@dvnt/app/lib/stores/story-viewer-store";
 // Lazy, because this overlay renders nothing until someone opens a story, and
 // statically importing it put a large subtree on /feed's First Load JS: it
@@ -87,7 +87,6 @@ import { useWebPostShareStore } from "@dvnt/app/lib/stores/web-post-share-store"
 import { sharedPostContext } from "@dvnt/app/lib/posts/share-post";
 const LikesSheet = lazy(() => import("@dvnt/app/features/posts/likes/LikesSheet.web").then((m) => ({ default: m.LikesSheet })));
 const ShareToInboxSheet = lazy(() => import("@dvnt/app/components/share-to-inbox-sheet.web").then((m) => ({ default: m.ShareToInboxSheet })));
-
 
 const GAP = 10;
 const MAX_W = 1320;
@@ -262,7 +261,6 @@ export function HomeScreen() {
   const eventCardHeight = useCallback((width: number, event: Event) =>
     eventHeights[feedEventCardMeasurementKey(String(event.id), width)] ?? feedEventCardHeight(width),
   [eventHeights]);
-
 
   // Post sizes remain deterministic. Event media has a fixed aspect; only its
   // natural metadata height is measured, then shared by both spanning columns.
@@ -664,21 +662,6 @@ function MasonryCell({
   );
 }
 
-// Flatten a story group's segments to the viewer's {type,url} shape (image/video;
-// gif → image; text/url-less segments dropped — they need a dedicated renderer).
-function toViewerGroup(s: any): StoryViewerGroup {
-  const segments = (s.items ?? [])
-    .filter((it: any) => typeof it.url === "string" && it.url)
-    .map((it: any) => ({
-      type: (it.type === "video" ? "video" : "image") as "image" | "video",
-      url: it.url as string,
-      duration: it.duration as number | undefined,
-      storyOverlays: it.storyOverlays,
-      animatedGifOverlays: it.animatedGifOverlays,
-    }));
-  return { id: String(s.id ?? s.username), userId: s.userId == null ? undefined : String(s.userId), username: s.username, avatar: s.avatar, segments };
-}
-
 /* The tile shows the STORY'S media (first frame), not the avatar —
    thumbnail if present, else the image URL, else a first-frame
    <video> for videos; avatar only as a last-resort fallback. A
@@ -700,6 +683,11 @@ function StoryTileMedia({ s }: { s: any }) {
           preload="metadata"
           className="w-full h-full object-cover"
         />
+      ) : first?.sharedSource ? (
+        <span className="flex h-full flex-col justify-center bg-gradient-to-br from-[#1A0A2E] via-[#8A40CF] to-[#34A2DF] p-2 text-white">
+          <span className="line-clamp-4 text-[10px] font-semibold">{first.sharedSource.title || first.sharedSource.caption || "Shared post"}</span>
+          <span className="mt-2 text-[8px] font-bold tracking-widest">DVNT</span>
+        </span>
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -730,7 +718,7 @@ function StoriesRow() {
   const others = (stories ?? []).filter((s) => !s.isYou);
   // Pre-build the viewer groups (only those with playable segments).
   const groups = [...(mine ? [mine] : []), ...others]
-    .map(toViewerGroup)
+    .map(toStoryViewerGroup)
     .filter((g) => g.segments.length > 0);
   const openStory = (storyId: string) => {
     const idx = groups.findIndex((g) => g.id === String(storyId));

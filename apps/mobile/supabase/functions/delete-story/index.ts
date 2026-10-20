@@ -122,7 +122,7 @@ Deno.serve(async (req) => {
     // Verify ownership — author_id stores the Better Auth UUID (authUserId)
     const { data: story } = await supabaseAdmin
       .from("stories")
-      .select("author_id, media_id, thumbnail_id")
+      .select("author_id, media_id, thumbnail_id, shared_source")
       .eq("id", storyId)
       .single();
     if (!story || String(story.author_id) !== String(authUserId))
@@ -170,7 +170,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    const storageKeys = (mediaRows || [])
+    // Shared stories borrow the canonical source URLs. Their duplicated media
+    // rows are disposable; the original post/event CDN objects are not ours.
+    const storageKeys = (story.shared_source ? [] : mediaRows || [])
       .map((row: any) => deriveStorageKey(row.filename, row.url))
       .filter((value): value is string => !!value);
 

@@ -27,6 +27,7 @@ import {
 } from "@dvnt/app/lib/stories/story-message";
 import { isSameUser } from "@dvnt/app/lib/profile/same-user";
 import { storyProfilePath } from "@dvnt/app/lib/profile/story-profile-path";
+import { StorySharedSourceCard } from "./story-shared-source.web";
 
 /**
  * Full-screen story viewer overlay (web) — pops over the ENTIRE app at the top
@@ -360,6 +361,21 @@ export function StoryViewerOverlay() {
           height={size.h}
           paused={composerFocused || showViewers || confirmingDelete}
         />
+
+        {segment?.sharedSource ? (
+          <StorySharedSourceCard
+            source={segment.sharedSource}
+            isSourceCard={segment.isSourceCard}
+            profilePath={segment.sharedSource.author.profileUnavailable ? null : storyProfilePath({
+              userId: segment.sharedSource.author.id,
+              username: segment.sharedSource.author.username,
+            }, viewer, "web")}
+            onNavigate={(path) => {
+              closeForNavigation();
+              router.push(path);
+            }}
+          />
+        ) : null}
 
         {/* Story overlays for the current segment — the SAME shared renderer the
             create preview uses. WS-4 stickers are tappable here (deep-link per

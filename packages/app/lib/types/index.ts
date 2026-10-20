@@ -66,6 +66,15 @@ export type Post = {
 
 export type StoryItemType = "image" | "gif" | "video" | "livePhoto" | "text";
 
+/** Server-resolved, persisted attribution. Never supplied by the sharing client. */
+export type StorySharedSource = {
+  type: "post" | "event";
+  id: string;
+  author: { id: string; username: string; name: string; avatar: string; profileUnavailable?: boolean };
+  title?: string;
+  caption?: string;
+};
+
 export type StoryAnimatedGifOverlay = {
   id: string;
   url: string;
@@ -172,6 +181,7 @@ export type StoryOverlay =
     };
 
 export type StoryItem = {
+  sharedSource?: StorySharedSource;
   url?: string;
   thumbnail?: string;
   type: StoryItemType;
@@ -202,6 +212,7 @@ export type Story = {
   hasCloseFriendsStory?: boolean;
   stories?: StoryItem[];
   items?: Array<{
+    sharedSource?: StorySharedSource;
     id?: string;
     type: StoryItemType;
     url?: string;

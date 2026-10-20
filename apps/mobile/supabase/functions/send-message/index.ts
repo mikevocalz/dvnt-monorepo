@@ -5,6 +5,7 @@ import { watchNotificationFields, watchNotificationImage } from "../_shared/watc
  */
 
 import { canonicalJSON } from "./idempotency.ts";
+import { hasReservedStoryShareMetadata } from "../_shared/story-share.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
@@ -104,6 +105,9 @@ Deno.serve(async (req) => {
     }
 
     const { conversationId, content, mediaUrl, mediaItems, metadata, operationId } = body;
+    if (hasReservedStoryShareMetadata(metadata)) {
+      return errorResponse("forbidden", "Story share notifications are created only when a story is published");
+    }
     if (operationId !== undefined && (typeof operationId !== "string" ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operationId))) {
       return errorResponse("validation_error", "operationId must be a UUID");
