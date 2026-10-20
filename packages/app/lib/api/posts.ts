@@ -20,6 +20,7 @@ interface CreatePostResponse {
 const PAGE_SIZE = 10;
 
 import { suppressedFeedAuthors } from "./feed-suppression";
+import { describeFunctionError } from "@dvnt/app/lib/api/function-error";
 
 interface TextSlidesFunctionResponse {
   ok: boolean;
@@ -818,8 +819,9 @@ export const postsApi = {
         });
 
       if (error) {
-        console.error("[Posts] Edge Function error:", error);
-        throw new Error(error.message || "Failed to create post");
+        const detail = await describeFunctionError(error);
+        console.error("[Posts] Edge Function error:", detail.status, detail.message);
+        throw new Error(detail.message || "Failed to create post");
       }
 
       if (!response?.ok || !response?.data?.post) {
