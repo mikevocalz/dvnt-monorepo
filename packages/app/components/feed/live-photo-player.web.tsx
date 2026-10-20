@@ -1,9 +1,16 @@
 "use client";
 
 /**
- * Live Photo playback for web, matching iOS: the still shows with a LIVE
- * badge; hovering (mouse) or pressing and holding (touch) plays the paired clip
- * muted from the start, and letting go returns to the still.
+ * Live Photo playback for web. The still shows with a LIVE badge, and the
+ * paired clip plays muted on its own while the photo is at least 60% in view,
+ * looping until it scrolls away, the slide is swiped away, the tab hides, or
+ * the story viewer or lightbox covers it. Hover (mouse), press-and-hold (touch,
+ * pen) and the badge (keyboard) still play it on demand. Reduced motion turns
+ * autoplay and hover off; a deliberate hold or key press still plays.
+ *
+ * One Live Photo clip plays at a time on the page. Among the ones eligible to
+ * autoplay, the one that most recently came into view wins, and when it leaves
+ * the next eligible one starts.
  *
  * Why not Apple's LivePhotosKit JS: it downloads `videoSrc` with an
  * XMLHttpRequest (arraybuffer) to parse the QuickTime metadata, so the clip
@@ -27,6 +34,10 @@ import { useStoryViewerStore } from "@dvnt/app/lib/stores/story-viewer-store";
 const HOLD_MS = 350;
 /** Moving further than this before the hold fires means a scroll, not a hold. */
 const HOLD_SLOP_PX = 8;
+/** How much of the photo must be on screen before its clip autoplays. */
+const AUTOPLAY_RATIO = 0.6;
+/** Clips this close to the viewport start buffering; the rest of a long grid does not. */
+const PRELOAD_MARGIN = "300px";
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 const noop = () => {};
 const subscribeNothing = () => noop;
@@ -39,14 +50,54 @@ function subscribeReducedMotion(onChange: () => void) {
 }
 const reducedMotionNow = () => window.matchMedia(REDUCED_MOTION).matches;
 
-/** One Live Photo clip plays at a time on the page; starting one stops this. */
-let stopCurrent: (() => void) | null = null;
+type Mode = "idle" | "auto" | "manual";
+interface Player {
+  mode: Mode;
+  /** When this came into view (IntersectionObserver time); the newest eligible one autoplays. */
+  enteredAt: number;
+  element(): Element | null;
+  eligible(): boolean;
+  play(mode: "auto" | "manual"): void;
+  halt(): void;
+}
+
+/** Every mounted Live Photo. */
+const players = new Set<Player>();
+/** The one clip playing (or starting) on the page. */
+let current: Player | null = null;
+
+/**
+ * Later entry wins. Photos that entered in the same observer delivery tie, and
+ * the delivery order is not document order, so the earlier one in the
+ * document (top of the grid) wins the tie.
+ */
+function newer(a: Player, b: Player) {
+  if (a.enteredAt !== b.enteredAt) return a.enteredAt > b.enteredAt;
+  const ea = a.element();
+  const eb = b.element();
+  return !!ea && !!eb && !!(ea.compareDocumentPosition(eb) & Node.DOCUMENT_POSITION_FOLLOWING);
+}
+
+/** Hand autoplay to the newest eligible Live Photo. A manual play keeps the screen until it ends. */
+function reconcile() {
+  if (current?.mode === "manual") return;
+  let best: Player | null = null;
+  for (const player of players) {
+    if (player.eligible() && (!best || newer(player, best))) best = player;
+  }
+  if (current && current !== best) current.halt();
+  if (best && current !== best) best.play("auto");
+}
 
 export type LivePhotoController = ReturnType<typeof useLivePhoto>;
 
 export function useLivePhoto(
   videoUrl: string | undefined,
-  { active = true, pauseForLightbox = true }: { active?: boolean; pauseForLightbox?: boolean } = {},
+  {
+    active = true,
+    pauseForLightbox = true,
+    autoplay = true,
+  }: { active?: boolean; pauseForLightbox?: boolean; autoplay?: boolean } = {},
 ) {
   const enabled = !!videoUrl;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -60,90 +111,156 @@ export function useLivePhoto(
   /** The next click on the surface belongs to a hold release: swallow it. */
   const suppressClick = useRef(false);
   const wantsPlay = useRef(false);
-  /** Bumped by every start/stop; a play() promise from an older request is ignored. */
+  /** Bumped by every play/halt; a play() promise from an older request is ignored. */
   const request = useRef(0);
   /** A half-visible neighbouring carousel slide must never start. */
   const activeRef = useRef(active);
   /** The mouse is over this Live Photo, so becoming the selected slide plays it. */
   const hovered = useRef(false);
+  const inView = useRef(false);
+  /** The browser refused an unprompted play(); wait for a gesture before autoplaying again. */
+  const autoBlocked = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [failedUrl, setFailedUrl] = useState<string>();
   const failed = enabled && failedUrl === videoUrl;
-  // Hover is incidental, so reduced motion turns it off. A deliberate hold or
-  // a key press on the badge still plays, as it does on iOS. Cells and slides
-  // that are not Live Photos never subscribe.
+  // Cells and slides that are not Live Photos never subscribe.
   const reducedMotion = useSyncExternalStore(
     enabled ? subscribeReducedMotion : subscribeNothing,
     enabled ? reducedMotionNow : notReduced,
     notReduced,
   );
+  const settings = useRef({ enabled, failed, autoplay, pauseForLightbox, reducedMotion });
+
+  /** Nothing else owns the screen: tab visible, slide selected, no story or (feed) lightbox. */
+  const sessionAllows = useCallback(() => {
+    const { enabled, failed, pauseForLightbox } = settings.current;
+    if (!enabled || failed || !activeRef.current || document.hidden) return false;
+    if (useStoryViewerStore.getState().open) return false;
+    return !(pauseForLightbox && useLightboxStore.getState().open);
+  }, []);
+
+  const playerRef = useRef<Player | null>(null);
+  if (!playerRef.current) {
+    const player: Player = {
+      mode: "idle",
+      enteredAt: 0,
+      element: () => surfaceRef.current,
+      eligible: () => {
+        const { autoplay, reducedMotion } = settings.current;
+        return autoplay && !reducedMotion && !autoBlocked.current && inView.current && sessionAllows();
+      },
+      play: (mode) => {
+        const video = videoRef.current;
+        if (!video || !sessionAllows()) return;
+        if (current && current !== player) current.halt();
+        current = player;
+        player.mode = mode;
+        // Already playing or starting (autoplay, then a hover): keep going.
+        if (wantsPlay.current) return;
+        const token = ++request.current;
+        wantsPlay.current = true;
+        video.preload = "auto";
+        video.currentTime = 0;
+        video.play().then(() => {
+          // Resolved after a newer halt/play: this clip is outgoing, keep it still.
+          if (token !== request.current && !wantsPlay.current) video.pause();
+        }, (error: unknown) => {
+          // A newer play/halt owns the element now, and pause() before play()
+          // settles rejects with AbortError: neither is a failure of this request.
+          if (token !== request.current) return;
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          if (player.mode === "auto") autoBlocked.current = true;
+          wantsPlay.current = false;
+          player.mode = "idle";
+          if (current === player) current = null;
+          setPlaying(false);
+        });
+      },
+      halt: () => {
+        request.current += 1;
+        window.clearTimeout(holdTimer.current);
+        holdTimer.current = undefined;
+        wantsPlay.current = false;
+        player.mode = "idle";
+        if (current === player) current = null;
+        const video = videoRef.current;
+        if (video && !video.paused) video.pause();
+        setPlaying(false);
+      },
+    };
+    playerRef.current = player;
+  }
+  const player = playerRef.current;
 
   const prime = useCallback(() => {
     const video = videoRef.current;
     if (video && video.preload !== "auto") video.preload = "auto";
   }, []);
 
+  /** Play on demand: hover, hold, badge. */
+  const start = useCallback(() => {
+    if (!sessionAllows()) return;
+    autoBlocked.current = false;
+    player.play("manual");
+  }, [player, sessionAllows]);
+
+  /** End an on-demand play. If this clip is still the one that should autoplay, it keeps looping. */
   const stop = useCallback(() => {
-    request.current += 1;
     window.clearTimeout(holdTimer.current);
     holdTimer.current = undefined;
-    wantsPlay.current = false;
-    if (stopCurrent === stop) stopCurrent = null;
-    const video = videoRef.current;
-    if (video && !video.paused) video.pause();
-    setPlaying(false);
-  }, []);
+    if (player.mode !== "manual") return;
+    player.mode = "auto";
+    if (!player.eligible()) player.halt();
+    reconcile();
+  }, [player]);
 
-  const start = useCallback(() => {
-    const video = videoRef.current;
-    if (!video || failed || !activeRef.current) return;
-    // A backgrounded tab, the story viewer, or (for feed media) the lightbox
-    // owns the screen: nothing underneath may start.
-    if (document.hidden || useStoryViewerStore.getState().open) return;
-    if (pauseForLightbox && useLightboxStore.getState().open) return;
-    if (stopCurrent && stopCurrent !== stop) stopCurrent();
-    stopCurrent = stop;
-    const token = ++request.current;
-    wantsPlay.current = true;
-    video.preload = "auto";
-    video.currentTime = 0;
-    video.play().then(() => {
-      // Resolved after a newer stop/start: this clip is outgoing, keep it still.
-      if (token !== request.current && !wantsPlay.current) video.pause();
-    }, (error: unknown) => {
-      // A newer start/stop owns the element now, and pause() before play()
-      // settles rejects with AbortError: neither is a failure of this request.
-      if (token !== request.current) return;
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      wantsPlay.current = false;
-      setPlaying(false);
-    });
-  }, [failed, pauseForLightbox, stop]);
+  useEffect(() => {
+    settings.current = { enabled, failed, autoplay, pauseForLightbox, reducedMotion };
+    if (wantsPlay.current && !sessionAllows()) player.halt();
+    if (wantsPlay.current && player.mode === "auto" && !player.eligible()) player.halt();
+    reconcile();
+  }, [enabled, failed, autoplay, pauseForLightbox, reducedMotion, player, sessionAllows]);
 
   useEffect(() => {
     activeRef.current = active;
-    if (!active) stop();
-    else if (hovered.current && !reducedMotion) start();
+    if (!active) {
+      if (wantsPlay.current) player.halt();
+      reconcile();
+    } else if (hovered.current && !settings.current.reducedMotion) start();
+    else reconcile();
     // Only a selection change re-evaluates; hover changes call start/stop directly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
-  // Media events, plus a non-passive touchend: after a hold that played,
-  // cancelling the touchend stops the browser from synthesising the click, so
-  // letting go neither follows the post link nor opens the lightbox.
+  // Registration, viewport tracking, media events, session pauses, plus a
+  // non-passive touchend: after a hold that played, cancelling the touchend
+  // stops the browser from synthesising the click, so letting go neither
+  // follows the post link nor opens the lightbox.
   useEffect(() => {
     if (!enabled) return;
     const video = videoRef.current;
     const surface = surfaceRef.current;
+    players.add(player);
     const onPlaying = () => {
       if (!wantsPlay.current) video?.pause();
       setPlaying(wantsPlay.current);
       if (wantsPlay.current && holding.current) playedThisHold.current = true;
     };
-    const onEnded = () => stop();
+    // Loops while it stays eligible; a hold or hover that outlasts the clip replays it.
+    const onEnded = () => {
+      const next = player.eligible() ? "auto" : holding.current || hovered.current ? "manual" : null;
+      if (next && sessionAllows()) {
+        wantsPlay.current = false;
+        player.play(next);
+      } else {
+        player.halt();
+        reconcile();
+      }
+    };
     const onError = () => {
       setFailedUrl(videoUrl);
-      stop();
+      player.halt();
+      reconcile();
     };
     const onTouchEnd = (e: TouchEvent) => {
       if (!suppressClick.current) return;
@@ -154,33 +271,53 @@ export function useLivePhoto(
     video?.addEventListener("ended", onEnded);
     video?.addEventListener("error", onError);
     surface?.addEventListener("touchend", onTouchEnd, { passive: false });
-    const onVisibility = () => {
-      if (document.hidden) stop();
+    const onSession = () => {
+      if (wantsPlay.current && !sessionAllows()) player.halt();
+      reconcile();
     };
-    document.addEventListener("visibilitychange", onVisibility);
-    const unsubscribeStory = useStoryViewerStore.subscribe((state) => {
-      if (state.open) stop();
-    });
-    const unsubscribeLightbox = pauseForLightbox
-      ? useLightboxStore.subscribe((state) => {
-          if (state.open) stop();
-        })
-      : noop;
+    document.addEventListener("visibilitychange", onSession);
+    const unsubscribeStory = useStoryViewerStore.subscribe(onSession);
+    const unsubscribeLightbox = pauseForLightbox ? useLightboxStore.subscribe(onSession) : noop;
+    let viewObserver: IntersectionObserver | undefined;
+    let nearObserver: IntersectionObserver | undefined;
+    if (surface && typeof IntersectionObserver !== "undefined") {
+      viewObserver = new IntersectionObserver(([entry]) => {
+        const visible = !!entry && entry.isIntersecting && entry.intersectionRatio >= AUTOPLAY_RATIO;
+        if (visible === inView.current) return;
+        inView.current = visible;
+        if (visible) player.enteredAt = entry.time ?? performance.now();
+        else if (wantsPlay.current && player.mode === "auto") player.halt();
+        reconcile();
+      }, { threshold: [0, AUTOPLAY_RATIO] });
+      viewObserver.observe(surface);
+      nearObserver = new IntersectionObserver(([entry]) => {
+        if (entry?.isIntersecting) {
+          prime();
+          nearObserver?.disconnect();
+        }
+      }, { rootMargin: PRELOAD_MARGIN });
+      nearObserver.observe(surface);
+    }
     return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
+      viewObserver?.disconnect();
+      nearObserver?.disconnect();
+      players.delete(player);
+      inView.current = false;
+      document.removeEventListener("visibilitychange", onSession);
       unsubscribeStory();
       unsubscribeLightbox();
       // Unmount or a replaced clip: never leave the outgoing element running.
       // On unmount React has already cleared videoRef, so pause the captured one.
-      stop();
+      player.halt();
       if (video && !video.paused) video.pause();
       video?.removeEventListener("playing", onPlaying);
       video?.removeEventListener("ended", onEnded);
       video?.removeEventListener("error", onError);
       surface?.removeEventListener("touchend", onTouchEnd);
       window.clearTimeout(holdTimer.current);
+      reconcile();
     };
-  }, [enabled, videoUrl, pauseForLightbox, stop]);
+  }, [enabled, videoUrl, pauseForLightbox, player, prime, sessionAllows]);
 
   const cancelHold = () => {
     window.clearTimeout(holdTimer.current);
@@ -216,7 +353,10 @@ export function useLivePhoto(
       holdTimer.current = window.setTimeout(() => {
         holdTimer.current = undefined;
         holding.current = true;
+        // Holding a clip that is already autoplaying is still a hold that played.
+        const alreadyPlaying = wantsPlay.current && !!videoRef.current && !videoRef.current.paused;
         start();
+        if (alreadyPlaying && wantsPlay.current) playedThisHold.current = true;
       }, HOLD_MS);
     },
     onPointerMove: (e: React.PointerEvent) => {
@@ -233,7 +373,7 @@ export function useLivePhoto(
       playedThisHold.current = false;
       stop();
     },
-    // A scroll or carousel swipe takes the pointer: stop, never play mid-pan.
+    // A scroll or carousel swipe takes the pointer: end the hold, never start mid-pan.
     onPointerCancel: (e: React.PointerEvent) => {
       if (e.pointerType === "mouse") return;
       cancelHold();
@@ -255,7 +395,8 @@ export function useLivePhoto(
     },
   };
 
-  return { videoUrl, videoRef, surfaceRef, containerProps, surfaceProps, playing, failed, prime, start, stop };
+  const isManual = () => player.mode === "manual";
+  return { videoUrl, videoRef, surfaceRef, containerProps, surfaceProps, playing, failed, prime, start, stop, isManual };
 }
 
 /** The still (passed as children) with the clip laid over it, same fit. */
@@ -326,7 +467,7 @@ export function LivePhotoBadge({ live, className = "" }: { live: LivePhotoContro
         e.stopPropagation();
         // Keyboard activation (detail 0) is handled by the key handlers.
         if (e.detail === 0) return;
-        if (live.playing) live.stop();
+        if (live.isManual()) live.stop();
         else live.start();
       }}
       className={`group/live flex min-h-11 min-w-11 items-start justify-start p-1.5 rounded-full focus-visible:outline-none ${className}`}

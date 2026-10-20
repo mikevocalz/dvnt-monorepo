@@ -179,9 +179,9 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     assert.equal(rows[4].type, 'video'); assert.equal(rows[4].live_photo_video_url, null);
     assert.equal(harness.state.objects.get(new URL(rows[3].url).pathname).sha256, digest(fs.readFileSync(originals[0].still)));
     assert.equal(harness.state.objects.get(new URL(rows[4].url).pathname).sha256, digest(fs.readFileSync(originals[2].motion)));
-    // Live Photo slides (0-2) are stills that play their decoded pair only on
-    // hover; the ordinary video (slide 4) autoplays when selected.
-    const livePhotoSlides = [0, 1, 2];
+    // Live Photo slides (0-2) autoplay their decoded pair when selected and in
+    // view; the still image (slide 3) leaves everything paused; the ordinary
+    // video (slide 4) autoplays when selected.
     const active = index => page.waitForFunction(index => {
       const clips = [...document.querySelectorAll('[data-post-media-carousel] [data-live-photo-motion]')];
       const autoplay = [...document.querySelectorAll('[data-post-motion]')];
@@ -191,23 +191,17 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
         (index === 4 ? running(autoplay[0]) : autoplay[0].paused);
     }, index);
     const away = () => page.mouse.move(415, 895);
-    const hoverSlide = async () => {
-      const box = await page.locator('[data-post-media-carousel]').boundingBox();
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    };
-    await page.waitForTimeout(1000); await active(-1);
+    await away(); await active(0);
     assert.equal(await page.locator('[data-post-media-carousel] button[aria-label="Live Photo"]').count(), 3, 'each saved pair shows a LIVE badge');
     await page.reload(); // No in-memory upload, object URL, or optimistic cache survives.
     await page.waitForFunction(() => document.querySelectorAll('[data-post-media-carousel] [data-live-photo-motion]').length === 3);
-    await page.waitForTimeout(1000); await active(-1);
+    await away(); await active(0);
     assert.ok(harness.state.reads.length >= 2, 'fresh page must fetch persisted rows again');
     assert.deepEqual(await page.evaluate(() => window.fixture.getPost().media.map(m => ({ type: m.type, url: m.url, video: m.livePhotoVideoUrl ?? null }))), rows.map((row, index) => ({ type: index < 3 ? 'livePhoto' : row.type, url: row.url, video: row.live_photo_video_url })));
     assert.deepEqual(await page.locator('[data-post-media-carousel] [data-live-photo-motion]').evaluateAll(v => v.map(x => x.getAttribute('src'))), rows.slice(0, 3).map(row => row.live_photo_video_url));
-    for (const index of [0, 1, 2, 3, 4, 0]) {
-      await away();
+    for (const index of [1, 2, 3, 4, 0]) {
       await page.evaluate(index => { const carousel = document.querySelector('[data-post-media-carousel]'); carousel.scrollTo({ left: index * carousel.clientWidth }); }, index);
-      await active(index === 4 ? 4 : -1);
-      if (livePhotoSlides.includes(index)) { await hoverSlide(); await active(index); await away(); await active(-1); }
+      await active(index === 3 ? -1 : index);
     }
     assert.ok(await page.locator('[data-post-media-carousel] [data-live-photo-motion]').evaluateAll(videos => videos.every(v => v.muted && !v.loop && v.playsInline)));
     assert.ok(await page.locator('[data-post-motion]').evaluateAll(videos => videos.every(v => v.muted && v.loop && v.playsInline)));
@@ -215,16 +209,11 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     const overlay = '[role=dialog] [data-live-photo-motion]';
     await page.waitForSelector(overlay, { state: 'attached' });
     assert.equal(await page.locator(overlay).getAttribute('src'), rows[0].live_photo_video_url);
-    await page.waitForTimeout(800);
-    assert.ok(await page.locator(overlay).evaluate(v => v.paused && v.currentTime === 0), 'the lightbox Live Photo does not autoplay');
-    const still = await page.locator('[role=dialog] [data-live-photo]').boundingBox();
-    await page.mouse.move(still.x + still.width / 2, still.y + still.height / 2);
     await page.waitForFunction(sel => { const v = document.querySelector(sel); return !v.paused && v.currentTime > 0.1 && v.videoWidth > 0; }, overlay);
-    assert.ok(await page.locator('[data-post-media-carousel] video').evaluateAll(v => v.every(x => x.paused)), 'nothing underneath plays');
-    await away();
-    await page.evaluate(() => window.fixture.closeLightbox()); await active(-1);
+    assert.ok(await page.locator('[data-post-media-carousel] video').evaluateAll(v => v.every(x => x.paused)), 'nothing underneath plays while the lightbox Live Photo autoplays');
+    await page.evaluate(() => window.fixture.closeLightbox()); await active(0);
     assert.deepEqual(errors, []); assert.deepEqual(routeErrors, []);
-    console.log('PASS one actual media picker: ordinary files never falsely LIVE, explicit ambiguous association/disassociation, decoded pairs, mixed original multipart upload, edge+PostgreSQL persistence, reload, Live Photo carousel/lightbox (still first, hover plays the decoded pair, ordinary video autoplays) and retry without a partial post.');
+    console.log('PASS one actual media picker: ordinary files never falsely LIVE, explicit ambiguous association/disassociation, decoded pairs, mixed original multipart upload, edge+PostgreSQL persistence, reload, Live Photo carousel/lightbox (selected decoded pair autoplays, still image pauses all, ordinary video autoplays) and retry without a partial post.');
   } finally {
     await browser?.close();
     if (server?.listening) await new Promise(resolve => server.close(resolve));
