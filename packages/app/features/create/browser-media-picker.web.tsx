@@ -26,20 +26,60 @@ interface Props {
   columns?: number;
 }
 
+const isHeic = (mime?: string) => mime === "image/heic" || mime === "image/heif";
+
 /**
- * Chrome and Firefox can't decode HEIC, so a HEIC still shows a broken image.
- * The original bytes still upload untouched; this only replaces the preview.
+ * Chrome and Firefox can't decode HEIC, so the card would show a broken image.
+ * Decode a preview copy with libheif (loaded only when needed). The original
+ * HEIC bytes are what upload; this only affects the card.
  */
-function StillPreview({ src, name }: { src: string; name: string }) {
+function useStillPreview(src: string, mime?: string): { url: string | null; failed: boolean; onError: () => void } {
+  const [decoded, setDecoded] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  if (failed) {
+  const [needsDecode, setNeedsDecode] = useState(false);
+  useEffect(() => {
+    if (!needsDecode) return;
+    let cancelled = false, url: string | null = null;
+    (async () => {
+      try {
+        const { heicTo } = await import("heic-to/next");
+        const blob = await heicTo({ blob: await (await fetch(src)).blob(), type: "image/jpeg", quality: 0.7 });
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setDecoded(url);
+      } catch { if (!cancelled) setFailed(true); }
+    })();
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
+  }, [needsDecode, src]);
+  return {
+    url: decoded ?? (needsDecode ? null : src),
+    failed,
+    onError: () => (isHeic(mime) && !needsDecode ? setNeedsDecode(true) : setFailed(true)),
+  };
+}
+
+function StillPreview({ src, mime, name }: { src: string; mime?: string; name: string }) {
+  const preview = useStillPreview(src, mime);
+  if (preview.failed) {
     return <div role="img" aria-label={name} className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[#161616] px-3 text-center text-xs text-white/55">
       <ImageIcon size={28} aria-hidden />
       <span>This browser can&apos;t preview this photo. It will upload and show normally.</span>
     </div>;
   }
+  if (!preview.url) return <div role="img" aria-label={name} aria-busy className="h-full w-full animate-pulse bg-[#161616]" />;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={src} alt={name} onError={() => setFailed(true)} className="h-full w-full object-cover" />;
+  return <img src={preview.url} alt={name} onError={preview.onError} className="h-full w-full object-cover" />;
+}
+
+/** A Live Photo's HEIC poster has the same problem; probe it through an img. */
+function LivePreview({ media, motionURI, label }: { media: MediaAsset; motionURI: string; label: string }) {
+  const poster = useStillPreview(media.uri, media.mimeType);
+  return <>
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    {poster.url && poster.url === media.uri ? <img src={media.uri} alt="" hidden onError={poster.onError} /> : null}
+    <video src={motionURI} poster={poster.url ?? undefined} controls muted loop playsInline preload="metadata"
+      aria-label={label} className="h-full w-full object-cover" />
+  </>;
 }
 
 /** One file entry for ordinary media and user-associated Live Photo originals. */
@@ -170,9 +210,10 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
         const name = media.fileName || `photo ${index + 1}`;
         return <div key={media.id} className="min-w-0 overflow-hidden rounded-2xl bg-[#111]" data-browser-media-id={media.id} data-browser-media-kind={media.kind}>
           <div className="relative aspect-[4/5]">
-            {motionURI ? <video src={motionURI} poster={media.kind === "livePhoto" ? media.uri : undefined} controls muted loop playsInline preload="metadata"
-              aria-label={`${media.kind === "livePhoto" ? "Live Photo" : "Video"} ${index + 1} motion preview`} className="h-full w-full object-cover" /> :
-              <StillPreview src={media.uri} name={name} />}
+            {media.kind === "livePhoto" && motionURI ? <LivePreview media={media} motionURI={motionURI} label={`Live Photo ${index + 1} motion preview`} /> :
+              motionURI ? <video src={motionURI} controls muted loop playsInline preload="metadata"
+                aria-label={`Video ${index + 1} motion preview`} className="h-full w-full object-cover" /> :
+              <StillPreview src={media.uri} mime={media.mimeType} name={name} />}
             <div className="absolute left-2 right-2 top-2 flex items-center justify-between gap-2">
               <button type="button" onClick={() => remove(media.id)} disabled={disabled} aria-label={`Remove ${name}`} className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/90 text-white disabled:opacity-30"><Trash2 size={14} /></button>
               {media.kind === "livePhoto" ? <span className="pointer-events-none rounded-md bg-black/70 px-2 py-1 text-[10px] font-semibold">LIVE</span> : null}
