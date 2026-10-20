@@ -17,9 +17,10 @@ function load(relative, adapters = {}) {
   },mod,mod.exports); return mod.exports;
 }
 const policy = load('packages/app/lib/media/upload-policy.ts');
+const fileMime = load('packages/app/lib/media/browser-file-mime.ts');
 const videoPolicy = load('packages/app/lib/media/video-pick-policy.ts', {'./upload-policy.ts':policy});
-const liveImport = load('packages/app/features/create/browser-live-photo-import.ts', {'../../lib/media/upload-policy.ts':policy,'../../lib/media/video-pick-policy.ts':videoPolicy});
-const intake = load('packages/app/features/create/browser-media-intake.ts', {'../../lib/media/upload-policy.ts':policy,'../../lib/media/video-pick-policy.ts':videoPolicy,'./browser-live-photo-import.ts':liveImport});
+const liveImport = load('packages/app/features/create/browser-live-photo-import.ts', {'../../lib/media/upload-policy.ts':policy,'../../lib/media/video-pick-policy.ts':videoPolicy,'../../lib/media/browser-file-mime.ts':fileMime});
+const intake = load('packages/app/features/create/browser-media-intake.ts', {'../../lib/media/upload-policy.ts':policy,'../../lib/media/video-pick-policy.ts':videoPolicy,'../../lib/media/browser-file-mime.ts':fileMime,'./browser-live-photo-import.ts':liveImport});
 const calls = [], sent = [], urls = [];
 const blobURL = (bytes, type) => { const uri = URL.createObjectURL(new Blob([bytes],{type})); urls.push(uri); return uri; };
 const functions = new FunctionsClient('https://fixture.invalid/functions/v1', {customFetch: async (url, init) => {
@@ -36,6 +37,7 @@ const uploader = load('packages/app/lib/server-upload.ts', {
   '@dvnt/app/lib/supabase/client':{supabase:{functions}},
   '@dvnt/app/lib/media/upload-watchdog-store':{beginUpload:()=>1,settleUpload:()=>{}},
   '@dvnt/app/lib/media/upload-policy':policy,
+  '@dvnt/app/lib/media/browser-file-mime':fileMime,
   '@dvnt/app/lib/media/web-upload-rate':load('packages/app/lib/media/web-upload-rate.ts'),
 });
 const derivative = Buffer.from('synthetic JPEG derivative, not original metadata or motion');
@@ -44,6 +46,7 @@ const unexpected = () => { throw Error('Unrelated media branch'); };
 const {useMediaUpload} = load('packages/app/lib/hooks/use-media-upload.ts', {
   react:{useState:value=>[value,()=>{}],useCallback:fn=>fn}, 'react-native':{Platform:{OS:'web'}},
   '@dvnt/app/lib/media/upload-policy':policy,
+  '@dvnt/app/lib/media/browser-file-mime':fileMime,
   '@dvnt/app/lib/media/live-photo-upload':load('packages/app/lib/media/live-photo-upload.ts'),
   '@dvnt/app/lib/media/single-image-upload':{uploadSingleImage:unexpected},
   '@dvnt/app/lib/media/image-fit-deps':{imageFitDeps:{}},

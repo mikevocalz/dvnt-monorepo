@@ -1,6 +1,7 @@
 import type { MediaAsset } from "../../lib/hooks/use-media-picker";
 import { sizeLimitForKind } from "../../lib/media/upload-policy.ts";
 import { validateVideoPick } from "../../lib/media/video-pick-policy.ts";
+import { browserFileMime } from "../../lib/media/browser-file-mime.ts";
 
 export const MAX_BROWSER_POST_MEDIA = 10;
 export const LIVE_PHOTO_STILL_ACCEPT = "image/jpeg,image/png,image/webp,image/heic,.jpg,.jpeg,.png,.webp,.heic";
@@ -12,9 +13,7 @@ const EXTENSION_MIMES: Record<string, string> = {
   mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime",
 };
 
-function fileMime(file: File): string {
-  return file.type.trim().toLowerCase() || EXTENSION_MIMES[file.name.split(".").pop()?.toLowerCase() ?? ""] || "";
-}
+const fileMime = (file: File) => browserFileMime(file, EXTENSION_MIMES);
 
 /** Adding MIME metadata never changes or re-encodes the original file bytes. */
 function typedOriginal(file: File, mime: string): Blob {

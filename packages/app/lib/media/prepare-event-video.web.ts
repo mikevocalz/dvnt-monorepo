@@ -9,6 +9,7 @@ import {
   type EventVideoMetadata,
 } from "./event-video-preparation.ts";
 import type { Conversion, Input } from "mediabunny";
+import { browserFileMime, isGenericMime } from "./browser-file-mime";
 
 const UNSUPPORTED = "This browser can't prepare this video. Try a browser with H.264 video encoding support, or export an MP4 under 50MB.";
 
@@ -35,7 +36,8 @@ async function metadataFor(input: Input): Promise<EventVideoMetadata> {
 export async function prepareEventVideoFile(file: File, options: PreparationOptions = {}): Promise<File> {
   const { signal, onProgress } = options;
   signal?.throwIfAborted();
-  const check = validateVideoPick({ kind: "event-video", mimeType: file.type,
+  const mime = browserFileMime(file);
+  const check = validateVideoPick({ kind: "event-video", mimeType: mime,
     fileName: file.name, sizeBytes: file.size, canReencode: true });
   if (!check.ok) throw new Error(check.message);
   if (file.size === 0) throw new Error("This video file is empty. Choose another MP4 or MOV.");
@@ -46,12 +48,12 @@ export async function prepareEventVideoFile(file: File, options: PreparationOpti
   if (file.size <= sizeLimitForKind("event-video")) {
     const durationSec = await readVideoDurationSec(file);
     signal?.throwIfAborted();
-    const durationCheck = validateVideoPick({ kind: "event-video", mimeType: file.type,
+    const durationCheck = validateVideoPick({ kind: "event-video", mimeType: mime,
       fileName: file.name, durationSec, sizeBytes: file.size });
     if (!durationCheck.ok) throw new Error(durationCheck.message);
     // Some pickers omit MIME despite a known .mp4/.mov extension. Keep the
     // bytes, but label the Blob so the uploader cannot mistake it for a JPEG.
-    return file.type ? file : new File([file], file.name, {
+    return !isGenericMime(file.type) ? file : new File([file], file.name, {
       type: /\.(mov|qt)$/i.test(file.name) ? "video/quicktime" : "video/mp4",
       lastModified: file.lastModified,
     });

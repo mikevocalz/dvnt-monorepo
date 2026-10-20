@@ -58,6 +58,7 @@ function setup() {
     '@dvnt/app/lib/supabase/client': { supabase: { functions } },
     '@dvnt/app/lib/media/upload-watchdog-store': { beginUpload: () => 1, settleUpload: () => {} },
     '@dvnt/app/lib/media/upload-policy': load('packages/app/lib/media/upload-policy.ts'),
+    '@dvnt/app/lib/media/browser-file-mime': load('packages/app/lib/media/browser-file-mime.ts'),
     '@dvnt/app/lib/media/web-upload-rate': { scheduleWebUpload },
   });
   return { state, uploadToServer };

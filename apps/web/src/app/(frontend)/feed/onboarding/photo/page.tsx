@@ -8,6 +8,7 @@ import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { updateProfile, syncAuthUser } from "@dvnt/app/lib/api/privileged";
 import { invalidateProfileCompletion } from "@dvnt/app/lib/profile/profile-completion-invalidation";
 import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
+import { browserFileMime, typedBrowserFile } from "@dvnt/app/lib/media/browser-file-mime";
 
 export default function NewMemberPhotoPage() {
   const router = useRouter();
@@ -35,12 +36,12 @@ export default function NewMemberPhotoPage() {
   const onFile = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
+    if (!browserFileMime(file).startsWith("image/")) {
       setError("Choose a JPEG, PNG, or another supported image.");
       return;
     }
     setError(null);
-    setPreview(URL.createObjectURL(file));
+    setPreview(URL.createObjectURL(typedBrowserFile(file)));
   };
 
   const savePhoto = async () => {

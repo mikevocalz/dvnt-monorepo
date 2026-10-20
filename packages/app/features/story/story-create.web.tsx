@@ -59,6 +59,7 @@ import {
   type EditorToolMode,
   STORY_CANVAS_BOX,
 } from "./story-editor.web";
+import { browserFileMime, typedBrowserFile } from "@dvnt/app/lib/media/browser-file-mime";
 
 const MAX_STORY_ITEMS = 4;
 
@@ -486,15 +487,16 @@ export function StoryCreateScreen() {
       }
 
       const next: MediaAsset[] = files.slice(0, room).map((file) => {
-        const isVideo = file.type.startsWith("video/");
-        const uri = URL.createObjectURL(file);
+        const mime = browserFileMime(file);
+        const isVideo = mime.startsWith("video/");
+        const uri = URL.createObjectURL(typedBrowserFile(file));
         const type: "image" | "video" = isVideo ? "video" : "image";
         return {
           id: `${uri}-${file.name}`,
           uri,
           type,
-          kind: detectMediaKind(type, file.type, file.name),
-          mimeType: file.type,
+          kind: detectMediaKind(type, mime, file.name),
+          mimeType: mime,
           fileSize: file.size,
         };
       });
