@@ -13,11 +13,34 @@ const { build } = require('esbuild');
 const { chromium } = require('playwright');
 const { createHarness, clientAdapters, root, digest } = require('./fixtures/live-photo-roundtrip/harness.cjs');
 
+// Unused image encoding/native fallback dependencies are fail-fast adapters.
+// The scoped MOV branch runs the real web validation, preparation and thumbnail.
+function browserVideoAdapters() {
+  const unused = {
+    'expo-image-manipulator': "export const SaveFormat={JPEG:'jpeg'}; export const manipulateAsync=()=>{throw Error('Unexpected image encoding in video roundtrip')};",
+    '@dvnt/app/lib/media/image-fit-deps': 'export const imageFitDeps={};',
+    '@dvnt/app/lib/media/image-processor': 'export const generateBlurPlaceholder=()=>{throw Error("Unexpected image processing")};',
+    '@dvnt/app/lib/media/getVideoThumbnail': 'export const getVideoThumbnail=async()=>{throw Error("Unexpected native thumbnail fallback; web preview must succeed")};',
+  };
+  return { name: 'browser-video-production-path', setup(build) {
+    build.onResolve({ filter: /.*/ }, args => {
+      if (unused[args.path]) return {path:args.path, namespace:'video-unused'};
+      if (['@dvnt/app/lib/video-compression', '@dvnt/app/lib/video-thumbnail'].includes(args.path)) {
+        return {path:path.join(root, args.path.replace('@dvnt/app/', 'packages/app/') + '.web.ts')};
+      }
+    });
+    build.onLoad({ filter: /.*/, namespace: 'video-unused' }, args => ({contents:unused[args.path], loader:'js', resolveDir:root}));
+  }};
+}
+
 (async () => {
+  // Synthetic MOVs exercise browser-returned motion as video, not an Apple pair.
+  // This does not reproduce the physical iOS Photos picker.
+  const motionOnly = process.argv.includes('--motion-only');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'live-photo-roundtrip-browser-'));
   let harness, browser, server;
   try {
-    await build({ entryPoints: [path.join(__dirname, 'fixtures/live-photo-roundtrip/browser.tsx')], bundle: true, outfile: path.join(directory, 'app.js'), platform: 'browser', jsx: 'automatic', plugins: [clientAdapters()], alias: { '@dvnt/app': path.join(root, 'packages/app') }, nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean), define: { 'process.env.NODE_ENV': '"test"', 'process.env': '{}' } });
+    await build({ entryPoints: [path.join(__dirname, 'fixtures/live-photo-roundtrip/browser.tsx')], bundle: true, outfile: path.join(directory, 'app.js'), platform: 'browser', jsx: 'automatic', plugins: [browserVideoAdapters(), clientAdapters()], alias: { '@dvnt/app': path.join(root, 'packages/app') }, nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean), define: { 'process.env.NODE_ENV': '"test"', 'process.env': '{}' } });
     if (process.argv.includes('--build-only')) {
       console.log('PASS unified media selector/upload/read/carousel browser fixture bundles (build-only; HTTP, SQL and video playback not executed).'); return;
     }
@@ -30,6 +53,11 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
       execFileSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=96x96:rate=12', '-vf', `hue=h=${index * 90}`, '-t', '3', '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-metadata', `comment=synthetic-pair-${index}`, motion]);
       originals.push({ still, motion });
     }
+    const motionOriginals = motionOnly ? originals.map((pair, index) => {
+      const mov = path.join(directory, `BROWSER_${index}.mov`);
+      execFileSync('ffmpeg', ['-loglevel', 'error', '-i', pair.motion, '-c', 'copy', '-f', 'mov', mov]);
+      return mov;
+    }) : [];
     harness = await createHarness();
     const routeErrors = [];
     server = http.createServer(async (req, res) => {
@@ -145,17 +173,19 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     // Select a whole mixed array once, then attach motion inline. File names
     // alone never create LIVE badges, including three unique equal stems.
     await picker.setInputFiles([
-      ...originals.flatMap(pair => [
+      ...originals.flatMap((pair, index) => motionOnly ? [
+        filePayload(motionOriginals[index], path.basename(motionOriginals[index]), 'video/quicktime'),
+      ] : [
         filePayload(pair.still, path.basename(pair.still), 'image/jpeg'),
         filePayload(pair.motion, path.basename(pair.motion), 'video/mp4'),
       ]),
       filePayload(originals[0].still, 'ordinary-still.jpg', 'image/jpeg'),
       filePayload(originals[2].motion, 'ordinary-video.mp4', 'video/mp4'),
     ]);
-    await settled(8);
+    await settled(motionOnly ? 5 : 8);
     assert.ok((await selection()).every(asset => asset.kind !== 'livePhoto'));
-    for (let index = 0; index < originals.length; index++) await associate(`IMG_${index}.jpg`, `IMG_${index}.mp4`, 7 - index);
-    assert.deepEqual((await selection()).map(asset => asset.kind), ['livePhoto', 'livePhoto', 'livePhoto', 'image', 'video']);
+    if (!motionOnly) for (let index = 0; index < originals.length; index++) await associate(`IMG_${index}.jpg`, `IMG_${index}.mp4`, 7 - index);
+    assert.deepEqual((await selection()).map(asset => asset.kind), [...(motionOnly ? ['video', 'video', 'video'] : ['livePhoto', 'livePhoto', 'livePhoto']), 'image', 'video']);
     harness.state.failMotion = true;
     await page.locator('[data-publish]').click();
     await page.waitForFunction(() => document.querySelector('[data-status]')?.textContent.includes('motion upload failure'));
@@ -170,13 +200,28 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     const rows = (await harness.db.query('SELECT * FROM posts_media ORDER BY _order')).rows;
     for (let index = 0; index < originals.length; index++) {
       assert.equal(rows[index]._order, index);
-      assert.equal(harness.state.objects.get(new URL(rows[index].url).pathname).sha256, digest(fs.readFileSync(originals[index].still)));
-      assert.equal(harness.state.objects.get(new URL(rows[index].live_photo_video_url).pathname).sha256, digest(fs.readFileSync(originals[index].motion)));
+      if (motionOnly) {
+        assert.equal(rows[index].type, 'video');
+        assert.equal(rows[index].mime_type, 'video/quicktime');
+        assert.equal(rows[index].live_photo_video_url, null, 'MOV intake must not invent Apple pair identity');
+        const uploaded = harness.state.objects.get(new URL(rows[index].url).pathname);
+        assert.equal(uploaded.sha256, digest(fs.readFileSync(motionOriginals[index])), 'original MOV bytes survive without JPEG compression');
+        assert.equal(uploaded.mime, 'video/quicktime');
+      } else {
+        assert.equal(harness.state.objects.get(new URL(rows[index].url).pathname).sha256, digest(fs.readFileSync(originals[index].still)));
+        assert.equal(harness.state.objects.get(new URL(rows[index].live_photo_video_url).pathname).sha256, digest(fs.readFileSync(originals[index].motion)));
+      }
     }
     assert.equal(rows[3].type, 'image'); assert.equal(rows[3].live_photo_video_url, null);
     assert.equal(rows[4].type, 'video'); assert.equal(rows[4].live_photo_video_url, null);
     assert.equal(harness.state.objects.get(new URL(rows[3].url).pathname).sha256, digest(fs.readFileSync(originals[0].still)));
     assert.equal(harness.state.objects.get(new URL(rows[4].url).pathname).sha256, digest(fs.readFileSync(originals[2].motion)));
+    for (const row of rows.filter(row => row.type === 'video')) {
+      assert.ok(row.thumbnail, 'production web thumbnail must be persisted');
+      const poster = harness.state.objects.get(new URL(row.thumbnail).pathname);
+      assert.equal(poster?.mime, 'image/jpeg');
+      assert.ok(poster.bytes.length > 0, 'generated video poster is nonempty, not an original Apple key photo');
+    }
     const active = index => page.waitForFunction(index => {
       const videos = [...document.querySelectorAll('[data-post-motion]')];
       const videoSlides = [0, 1, 2, 4];
@@ -186,7 +231,7 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     await page.reload(); // No in-memory upload, object URL, or optimistic cache survives.
     await active(0);
     assert.ok(harness.state.reads.length >= 2, 'fresh page must fetch persisted rows again');
-    assert.deepEqual(await page.evaluate(() => window.fixture.getPost().media.map(m => ({ type: m.type, url: m.url, video: m.livePhotoVideoUrl ?? null }))), rows.map((row, index) => ({ type: index < 3 ? 'livePhoto' : row.type, url: row.url, video: row.live_photo_video_url })));
+    assert.deepEqual(await page.evaluate(() => window.fixture.getPost().media.map(m => ({ type: m.type, url: m.url, video: m.livePhotoVideoUrl ?? null }))), rows.map((row, index) => ({ type: !motionOnly && index < 3 ? 'livePhoto' : row.type, url: row.url, video: row.live_photo_video_url })));
     for (const index of [1, 2, 3, 4, 0]) {
       await page.evaluate(index => { const carousel = document.querySelector('[data-post-media-carousel]'); carousel.scrollTo({ left: index * carousel.clientWidth }); }, index);
       await active(index);
@@ -196,7 +241,7 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
     await page.waitForFunction(() => { const video = document.querySelector('[role=dialog] video'); return video && !video.paused && video.currentTime > 0.1 && [...document.querySelectorAll('[data-post-motion]')].every(v => v.paused); });
     await page.evaluate(() => window.fixture.closeLightbox()); await active(0);
     assert.deepEqual(errors, []); assert.deepEqual(routeErrors, []);
-    console.log('PASS one actual media picker: ordinary files never falsely LIVE, explicit ambiguous association/disassociation, decoded pairs, mixed original multipart upload, edge+PostgreSQL persistence, reload, selected-only carousel/lightbox and retry without a partial post.');
+    console.log(motionOnly ? 'PASS synthetic browser-returned MOV array: original QuickTime bytes, no false Live Photo labels, upload failure/retry, actual handler+SQL+reload, first/current-only decoded playback. Physical iOS picker not simulated; production video upload hook/preparation/thumbnail exercised; identity/storage and unused image/fallback dependencies isolated.' : 'PASS one actual media picker: ordinary files never falsely LIVE, explicit ambiguous association/disassociation, decoded pairs, mixed original multipart upload, edge+PostgreSQL persistence, reload, selected-only carousel/lightbox and retry without a partial post.');
   } finally {
     await browser?.close();
     if (server?.listening) await new Promise(resolve => server.close(resolve));
