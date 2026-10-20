@@ -1,16 +1,15 @@
-# Browser Live Photo intake diagnostic
+# Browser Live Photo intake diagnostic (structural-v2)
 
-`browser-live-photo-intake.html` is a standalone investigation tool, not a DVNT app route or upload workaround. Open it in a browser or serve this directory with a local static server. An identical copy is included at `apps/web/public/diagnostics/browser-live-photo-intake.html` for this draft branch's preview only. Do not merge or deploy this investigation page to production. The preview must retain existing deployment protection; this change does not alter access settings. Use the same original Photos item for each of the three file-input `accept` variants.
+This standalone, local-only investigation page is mirrored byte-for-byte at `/diagnostics/browser-live-photo-intake.html`. It is a diagnostic, not a Live Photo upload fix or workaround. No mobile release, handoff enablement, backend or schema changes are included.
 
-The report records the actual files exposed to JavaScript, before page-side canvas/image manipulation. It cannot exclude Photos or browser conversion before JavaScript receives those files. It does not upload, persist, render, or extract the user's files. A restrictive Content Security Policy blocks network requests. File names and raw metadata values are not reported. Clear results to remove the report from the page; closing the page releases its in-memory data.
+Select the same original Photos item in Safari and Chrome using each of the four input variants (explicit formats, images, unrestricted, video only). If that original is unavailable in a picker, record that with the unavailable button rather than selecting a different asset. Browser/version display is a user-agent hint, not engine verification.
 
-## Interpretation
+## Coverage and interpretation
 
-- File count, declared MIME, and byte count establish what the browser handed the page, not what Photos holds internally.
-- A valid top-level `moov` + `mdat` structure is a **movie container candidate**, not proof that a decoder can play it or that it belongs to another file.
-- An Apple content-identifier marker in a still is **not** a companion video. This tool does not parse/expose the identifier value or claim a verified Apple pair.
-- HEIC is also an ISO BMFF container. `ftyp` or `mdat` alone must not be called motion.
-- No detected movie container is not proof that a file has no embedded payload: the diagnostic does not fully parse every container, Apple's MakerNote, or JPEG trailing data. In particular, it cannot recover a PhotoKit resource the browser never supplies.
-- Files over 32 MiB are not read. No product-size-limit change is implied.
+The page reads the entire browser-supplied file up to 32 MiB, scans for bounded BMFF candidate offsets, walks JPEG segments and entropy-coded marker boundaries through EOI, and inspects trailing data. It checks basic SOF/SOS component layouts, but does not decode the JPEG. XMP, extended XMP, MPF and JUMBF presence is reported without raw values. These metadata formats are not semantically decoded or reassembled, and their references are not resolved. Unknown APP payloads are opaque.
 
-Run the synthetic safety/structure checks with `node scripts/test-browser-intake-diagnostic.cjs`. These tests do not substitute for a physical iPhone Safari/Photos selection or live playback. No user media is included in fixtures.
+BMFF boxes use bounded 32/64-bit lengths, recursive known container walking and exact `moov/trak/mdia/hdlr` ancestry for `vide` handlers. Unknown boxes and media payloads remain opaque. Valid movie box structure and a video handler are evidence for further investigation, not decoded motion or a verified Live Photo pair. Overlapping candidate scans are deduplicated by movie/handler offsets. A valid still container cannot establish absence of embedded motion. Unsupported or malformed structures are reported as incomplete, never as proof of no motion.
+
+Limits: 32 MiB per file, 4 files per selection, 8 retained reports, 4096 structural entries across candidate checks, 16 nesting levels, first 64 ftyp candidate offsets and 3 seconds of synchronous parsing per file (checked periodically). Limits can make inspection incomplete. File reading is asynchronous and abortable; parsing is synchronous but bounded. Clear, picker cancellation and newer selections invalidate stale reads. No whole-file text conversion, image conversion, upload, automatic saving, metadata value disclosure or filename disclosure occurs. CSP blocks network, images and media; no external dependencies or analytics are present.
+
+Run `node scripts/test-browser-intake-diagnostic.cjs`. Fixtures are synthetic only. Passing tests do not substitute for a physical phone picker test. No real-user files are committed.

@@ -6,73 +6,157 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; media-src 'none'; form-action 'none'; base-uri 'none'">
 <title>Browser-supplied photo intake diagnostic</title>
 <style>body{font:16px system-ui;max-width:48rem;margin:2rem auto;padding:0 1rem}button{font:inherit;margin:.5rem;padding:.5rem}pre{white-space:pre-wrap;overflow-wrap:anywhere}label{display:block;margin:1.5rem 0}small{display:block}</style>
+<p>Diagnostic version: structural-v2</p>
 <h1>Browser-supplied photo intake</h1>
 <p>Select the same Live Photo once with each option below. This page inspects the files the browser provides, before any page-side image conversion. Photos or the browser may already have changed the representation. Nothing is uploaded, displayed, or saved automatically. File names and raw metadata values are omitted from the report.</p>
 <p>A photo identifier is not a video. Two supplied files are not automatically a verified Apple pair. No detected video is not proof that the original photo in your Photos library has no motion.</p>
 <label>1. DVNT explicit formats <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/gif,video/mp4,video/quicktime,video/mov,.jpg,.jpeg,.png,.webp,.heic,.gif,.mov,.mp4,.m4v" data-mode="dvnt-explicit"></label>
 <label>2. Image formats <input type="file" multiple accept="image/*" data-mode="image-wildcard"></label>
 <label>3. Any file <input type="file" multiple data-mode="unrestricted"></label>
-<small>Reading is bounded to 32 MiB per file. Larger files are reported without inspecting their bytes. This diagnostic does not invoke PhotoKit, request a second resource, decode motion, or verify matching Apple resource identifiers.</small>
+<label>4. Video only <input type="file" multiple accept="video/*" data-mode="video-only"></label>
+<p>Use the same original Live Photo in Safari and Chrome on your phone. If it is not selectable in a picker, tap the button below instead of selecting a different video.</p>
+<p id="browser"></p><button id="unavailable">Live Photo unavailable in last opened picker</button>
+<small>Reading is bounded to 32 MiB per file. Larger files are reported without inspecting their bytes. At most 4 files per selection, 8 reports, 4096 structural boxes/segments, 16 nesting levels, 64 candidate offsets and 3 seconds of parsing per file. Complete byte scanning is not complete semantic decoding. This diagnostic does not invoke PhotoKit, request a second resource, decode motion, or verify matching Apple resource identifiers.</small>
 <button id="clear">Clear results</button>
 <pre id="output" aria-live="polite">No selection yet.</pre>
 <script>
 'use strict';
-const LIMIT = 32 * 1024 * 1024;
-const output = document.querySelector('#output');
-let generation = 0;
-const reports = [];
-function ascii(bytes, start, length) { return String.fromCharCode(...bytes.subarray(start, start + length)); }
-function boxes(bytes, start = 0) {
-  const found = [];
-  let offset = start;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  while (offset + 8 <= bytes.length && found.length < 10000) {
-    let size = view.getUint32(offset); let header = 8;
-    const type = ascii(bytes, offset + 4, 4);
-    if (!/^[\x20-\x7e]{4}$/.test(type)) break;
-    if (size === 1) {
-      if (offset + 16 > bytes.length) break;
-      const hi = view.getUint32(offset + 8); const lo = view.getUint32(offset + 12);
-      size = hi * 4294967296 + lo; header = 16;
-    } else if (size === 0) size = bytes.length - offset;
-    if (!Number.isSafeInteger(size) || size < header || size > bytes.length - offset) break;
-    found.push(type); offset += size;
+const LIMIT=32*1024*1024;
+const output=document.querySelector('#output');
+let generation=0, activeReader=null, lastMode='none';
+const reports=[];
+const hint=navigator.userAgent.match(/(?:CriOS|FxiOS|EdgiOS|Chrome|Version)\/[\d.]+/g);
+document.querySelector('#browser').textContent='Browser/version hint: '+(hint?hint.join(', '):'Unknown')+'. Also note the browser app you opened; this hint does not verify its engine.';
+function ascii(b,p,n){return String.fromCharCode(...b.subarray(p,p+n));}
+function analyze(bytes){
+ const started=performance.now();let structures=0;
+ const check=()=>{if(++structures>4096||performance.now()-started>3000)throw Error('Structural/time limit reached');};
+ const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+ const report={container:'Unsupported',byteScanComplete:false,structuralInspectionComplete:false,semanticInspectionComplete:false,movieContainerCandidate:false,videoHandlerCount:0,limitations:['No media decoding or Apple pair verification','Opaque payloads and unknown metadata are not semantically decoded']};
+ const allowed=new Set(['ftyp','moov','mdat','trak','mdia','hdlr','meta','uuid','free','skip','wide','stbl','minf','dinf','edts','udta','mvhd','tkhd','mdhd']);
+ function bmff(start,end,depth=0,path=[]){
+  if(depth>16)throw Error('Nesting limit reached');
+  let p=start,count=0;const video=new Set(),movies=new Set(),kinds=new Set();
+  while(p<end){
+   check();if(end-p<8)return {complete:false,video,kinds,movies};
+   let size=view.getUint32(p),header=8;const kind=ascii(bytes,p+4,4);
+   if(size===1){if(end-p<16)return {complete:false,video,kinds,movies};size=view.getUint32(p+8)*4294967296+view.getUint32(p+12);header=16;}
+   if(size===0)size=end-p;
+   if(!Number.isSafeInteger(size)||size<header||size>end-p||!/^[\x20-\x7e]{4}$/.test(kind))return {complete:false,video,kinds,movies};
+   if((kind==='ftyp'&&(size-header<8||(size-header)%4!==0))||(kind==='uuid'&&size-header<16)||(kind==='hdlr'&&size-header<24))return {complete:false,video,kinds,movies};
+   count++;kinds.add(allowed.has(kind)?kind:'unknown');if(kind==='moov')movies.add(p);
+   if(['moov','trak','mdia','minf','stbl','edts','dinf'].includes(kind)){
+    const child=bmff(p+header,p+size,depth+1,[...path,kind]);for(const v of child.video)video.add(v);
+    if(!child.complete)return {complete:false,video,kinds,movies};
+   }
+   if(kind==='hdlr'&&path.join('/')==='moov/trak/mdia'&&size>=header+12&&ascii(bytes,p+header+8,4)==='vide')video.add(p);
+   p+=size;
   }
-  return { types: found, fullyParsed: offset === bytes.length && found.length > 0 };
-}
-async function inspect(file, index) {
-  const report = { index, declaredMime: file.type || '(empty)', byteLength: file.size };
-  if (file.size > LIMIT) return { ...report, inspection: 'Skipped: exceeds 32 MiB inspection cap' };
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const top = boxes(bytes);
-  report.container = bytes[0] === 255 && bytes[1] === 216 ? 'JPEG' : top.types.includes('ftyp') ? 'ISO BMFF (image or video)' : 'Other';
-  report.topLevelBoxes = top.types;
-  report.completeTopLevelParse = top.fullyParsed;
-  report.movieContainerCandidate = top.fullyParsed && top.types.includes('moov') && top.types.includes('mdat');
-  // Strings are only presence signals, never extracted values or proof of a pair.
-  const text = new TextDecoder('latin1').decode(bytes);
-  report.appleIdentifierMarkerPresent = text.includes('com.apple.quicktime.content.identifier');
-  report.embeddedMotionMarkerPresent = /(?:GCamera:MicroVideo|Camera:MotionPhoto|MotionPhoto_Data)/.test(text);
-  report.interpretation = report.movieContainerCandidate
-    ? 'Movie container structure present; decoding and pair identity are NOT verified'
-    : 'No movie container detected by this bounded structural check; not proof that Photos has no companion';
-  return report;
-}
-for (const input of document.querySelectorAll('input')) input.addEventListener('change', async () => {
-  const token = generation;
-  const files = Array.from(input.files || []); input.value = '';
-  output.textContent = 'Inspecting browser-supplied files locally…';
-  try {
-    const items = [];
-    for (const [index, file] of files.entries()) {
-      if (token !== generation) return;
-      items.push(await inspect(file, index + 1));
+  return {complete:count>0,video,kinds,movies};
+ }
+ try{
+  const candidates=[];let signatureCount=0;
+  // Full-byte scan nominates offsets only. A string match never proves video.
+  for(let i=0;i+8<=bytes.length;i++){
+   if((i&65535)===0&&performance.now()-started>3000)throw Error('Byte-scan time limit reached');
+   if(bytes[i+4]===102&&ascii(bytes,i+4,4)==='ftyp'){signatureCount++;if(candidates.length<64)candidates.push(i);}
+  }
+  report.byteScanComplete=true;report.bmffSignatureCount=signatureCount;
+  if(signatureCount>64)report.limitations.push('Candidate validation capped at first 64 offsets');
+  const jpeg=bytes[0]===255&&bytes[1]===216;let trailer=-1;
+  if(jpeg){
+   report.container='JPEG';let p=2,eoi=false,entropy=false,sawFrame=false,sawScan=false;
+   const metadata={xmp:false,extendedXmp:false,mpf:false,jumbf:false,otherAppSegments:false};
+   while(p<bytes.length){
+    check();
+    if(entropy){
+     while(p<bytes.length){
+      if((p&65535)===0&&performance.now()-started>3000)throw Error('JPEG scan time limit reached');
+      if(bytes[p++]!==255)continue;
+      while(p<bytes.length&&bytes[p]===255)p++;
+      if(p>=bytes.length)throw Error('Truncated JPEG entropy marker');
+      if(bytes[p]===0||(bytes[p]>=208&&bytes[p]<=215)){p++;continue;}
+      p--;entropy=false;break;
+     }
+     if(entropy)throw Error('Missing JPEG end marker');
     }
-    if (token !== generation) return;
-    reports.push({ mode: input.dataset.mode, selectedFileCount: files.length, files: items,
-      applePairVerification: 'Not performed', note: 'Count is files supplied to JavaScript, not Photos selections. Pair identity and playable motion require further validation.' });
-    output.textContent = JSON.stringify(reports, null, 2);
-  } catch { if (token === generation) output.textContent = 'Local inspection failed. No files were uploaded.'; }
-});
-document.querySelector('#clear').addEventListener('click', () => { generation++; reports.length = 0; output.textContent = 'Results cleared.'; });
+    if(bytes[p++]!==255)throw Error('Invalid JPEG marker boundary');
+    while(p<bytes.length&&bytes[p]===255)p++;
+    if(p>=bytes.length)throw Error('Truncated JPEG marker');
+    const marker=bytes[p++];
+    if(marker===217){eoi=true;trailer=p;break;}
+    if(marker===216||marker===0||(marker>=208&&marker<=215))throw Error('Unexpected JPEG marker');
+    if(marker===1)continue;
+    if(p+2>bytes.length)throw Error('Truncated JPEG segment length');
+    const length=view.getUint16(p);if(length<2||length>bytes.length-p)throw Error('Invalid JPEG segment length');
+    const data=p+2,n=length-2;
+    if([192,193,194,195,197,198,199,201,202,203,205,206,207].includes(marker)){
+     if(n<6 || bytes[data+5]===0 || n!==6+3*bytes[data+5])throw Error('Invalid JPEG frame header');
+     sawFrame=true;
+    }
+    if(marker===218){
+     if(!sawFrame || n<6 || bytes[data]===0 || n!==4+2*bytes[data])throw Error('Invalid JPEG scan header');
+     sawScan=true;
+    }
+    if(marker===225&&ascii(bytes,data,Math.min(n,29))==='http://ns.adobe.com/xap/1.0/\0')metadata.xmp=true;
+    else if(marker===225&&ascii(bytes,data,Math.min(n,35))==='http://ns.adobe.com/xmp/extension/\0')metadata.extendedXmp=true;
+    else if(marker===226&&n>=4&&ascii(bytes,data,4)==='MPF\0')metadata.mpf=true;
+    else if(marker===235&&n>=2&&ascii(bytes,data,2)==='JP')metadata.jumbf=true;
+    else if(marker>=224&&marker<=239)metadata.otherAppSegments=true;
+    p+=length;if(marker===218)entropy=true;
+   }
+   if(!eoi)throw Error('Missing JPEG end marker');
+   if(!sawFrame||!sawScan)throw Error('JPEG frame or scan header missing');
+   report.jpeg={endMarkerFound:true,trailingByteCount:bytes.length-trailer,metadataPresence:metadata,xmpDecoded:false,extendedXmpReassembled:false,mpfReferencesResolved:false,jumbfPayloadsDecoded:false};
+   report.structuralInspectionComplete=true;
+   if(Object.values(metadata).some(Boolean))report.limitations.push('JPEG metadata semantics and referenced payloads are not fully supported');
+   if(trailer<bytes.length)report.limitations.push('JPEG trailing bytes present; only bounded BMFF candidates validated');
+  }
+  const offsets=[...new Set([...(jpeg?(trailer<bytes.length?[trailer]:[]):[0]),...candidates])];
+  let topComplete=false;const movieOffsets=new Set(),videoOffsets=new Set();
+  if(offsets.length>64)report.limitations.push('Candidate validation capped at 64 total offsets');
+  for(const offset of offsets.slice(0,64)){
+   const parsed=bmff(offset,bytes.length);
+   if(offset===0&&!jpeg&&parsed.complete&&(parsed.kinds.has('ftyp')||parsed.kinds.has('moov'))){topComplete=true;report.container='ISO BMFF';report.topLevelBoxes=[...parsed.kinds];}
+   if(parsed.complete&&parsed.kinds.has('moov')&&parsed.kinds.has('mdat')){for(const m of parsed.movies)movieOffsets.add(m);for(const v of parsed.video)videoOffsets.add(v);}
+  }
+  report.movieContainerCandidate=movieOffsets.size>0;report.validMovieCandidateCount=movieOffsets.size;report.videoHandlerCount=videoOffsets.size;
+  if(!jpeg)report.structuralInspectionComplete=topComplete;
+  if(signatureCount>64||offsets.length>64)report.structuralInspectionComplete=false;
+ }catch(error){report.structuralInspectionComplete=false;report.incompleteReason=error.message;}
+ report.interpretation=report.movieContainerCandidate?'Movie box structure found; video handler count is structural evidence only, not decoded motion or a verified Live Photo pair.':report.structuralInspectionComplete?'No movie container detected within supported checks. Unsupported metadata/payloads remain; this does not establish absence of motion.':'Inspection incomplete or unsupported. No conclusion about motion can be drawn.';
+ return report;
+}
+function read(file){return new Promise((resolve,reject)=>{
+ const reader=new FileReader();activeReader=reader;
+ reader.onload=()=>{if(activeReader===reader)activeReader=null;resolve(new Uint8Array(reader.result));};
+ reader.onerror=reader.onabort=()=>{if(activeReader===reader)activeReader=null;reject(Error('Read failed or cancelled'));};
+ reader.readAsArrayBuffer(file);
+});}
+async function inspect(file,index){
+ const base={index,declaredMime:/^(image|video)\/[a-z0-9.+-]{1,60}$/i.test(file.type)?file.type:'Other/empty',byteLength:file.size};
+ if(file.size>LIMIT)return {...base,byteScanComplete:false,structuralInspectionComplete:false,inspection:'Skipped: exceeds 32 MiB cap'};
+ return {...base,...analyze(await read(file))};
+}
+function render(){output.textContent=JSON.stringify({version:'structural-v2',reports},null,2);}
+function cancel(){generation++;if(activeReader){activeReader.abort();activeReader=null;}}
+function append(report){if(reports.length===8)reports.shift();reports.push(report);render();}
+for(const input of document.querySelectorAll('input')){
+ input.addEventListener('click',()=>{lastMode=input.dataset.mode;});
+ input.addEventListener('cancel',()=>{cancel();append({mode:input.dataset.mode,outcome:'Picker cancelled; no new file inspected'});});
+ input.addEventListener('change',async()=>{
+  cancel();const token=generation;lastMode=input.dataset.mode;
+  const selected=Array.from(input.files||[]);input.value='';output.textContent='Inspecting locally…';
+  try{
+   const items=[];
+   for(const [index,file]of selected.slice(0,4).entries()){
+    if(token!==generation)return;items.push(await inspect(file,index+1));await new Promise(resolve=>setTimeout(resolve,0));
+   }
+   if(token!==generation)return;
+   append({mode:input.dataset.mode,selectedFileCount:selected.length,skippedFileCount:Math.max(0,selected.length-4),files:items,applePairVerification:'Not performed'});
+  }catch{if(token===generation)append({mode:input.dataset.mode,outcome:'Read failed or cancelled; inspection incomplete. Nothing uploaded.'});}
+ });
+}
+document.querySelector('#unavailable').addEventListener('click',()=>{cancel();append({mode:lastMode,outcome:'User reports original Live Photo unavailable in picker; no bytes inspected'});});
+document.querySelector('#clear').addEventListener('click',()=>{cancel();reports.length=0;for(const input of document.querySelectorAll('input'))input.value='';output.textContent='Results cleared.';});
 </script>
