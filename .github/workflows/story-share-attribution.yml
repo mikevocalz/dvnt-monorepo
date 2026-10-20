@@ -16,14 +16,17 @@ on:
       - "packages/app/features/home/screen.web.tsx"
       - "packages/app/features/messages/chat.web.tsx"
       - "packages/app/lib/api/stories.ts"
+      - "packages/app/lib/api/messages-impl.ts"
       - "packages/app/lib/hooks/use-stories.ts"
       - "packages/app/lib/hooks/use-share-post-to-story.ts"
+      - "packages/app/lib/hooks/use-shared-story-playback.ts"
       - "packages/app/lib/messages/story-share*"
       - "packages/app/lib/stories/**"
       - "packages/app/lib/stores/chat-store.ts"
       - "packages/app/lib/stores/story-viewer-store.ts"
       - "packages/app/lib/types/index.ts"
       - "scripts/test-story-share-*"
+      - "scripts/test-story-reply-identity.cjs"
       - "scripts/story-share-attribution-fixture.cjs"
       - "scripts/fixtures/story-share/**"
       - "scripts/test-post-social-actions.cjs"
@@ -56,6 +59,7 @@ jobs:
           node scripts/test-post-share-identity.cjs
           node scripts/test-story-share-message-dom.cjs
           node scripts/test-story-share-attribution-dom.cjs
+          node scripts/test-story-reply-identity.cjs
       - name: Responsive story playback and tappable attribution
         env:
           NODE_PATH: ${{ runner.temp }}/story/node_modules

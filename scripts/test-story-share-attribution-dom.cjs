@@ -180,6 +180,7 @@ const {
           ? [
               {
                 id: 102,
+                expires_at: new Date(Date.now() + 3600000).toISOString(),
                 author_id: "auth1",
                 created_at: "2026-10-20T20:00:00Z",
                 visibility: "public",
@@ -191,6 +192,7 @@ const {
               },
               {
                 id: 101,
+                expires_at: new Date(Date.now() + 3600000).toISOString(),
                 author_id: "auth1",
                 created_at: "2026-10-20T19:00:00Z",
                 visibility: "public",
@@ -303,17 +305,224 @@ const {
     };
     const deleted = await f.storiesApi.getStories();
     await flush(() => f.open(deleted));
-    assert.ok(
-      document.querySelector(
-        '[aria-label="Original author profile unavailable"]',
-      ),
+    assert.match(
+      document.querySelector('[role="status"]').textContent,
+      /no longer available/,
     );
+    assert.equal(document.querySelector(".dvnt-story-viewer"), null);
     assert.equal(
       document.querySelector('a[href="/profile/original"]'),
       null,
       "missing author cannot navigate a reassigned old handle",
     );
     await flush(() => f.close());
+
+    // Cached groups are only a selection list, never a playback authorization.
+    global.__storyDb = originalDb;
+    const rpc = global.__storyRpc;
+    const rpcCalls = [];
+    let pendingReads = [];
+    const deferReads = () => {
+      pendingReads = [];
+      global.__storyRpc = (name, args) => {
+        rpcCalls.push({ name, args });
+        return new Promise((resolve) => pendingReads.push(resolve));
+      };
+    };
+    const assertHidden = (status) => {
+      assert.equal(
+        document.querySelector(".dvnt-story-viewer"),
+        null,
+        "unauthorized shared media is never mounted",
+      );
+      assert.equal(
+        document.querySelector('section[aria-label^="Shared "]'),
+        null,
+        "cached attribution is hidden until fresh authorization",
+      );
+      assert.equal(document.querySelector('a[href="/feed/post/11"]'), null);
+      assert.equal(
+        document.querySelector('input[aria-label^="Reply to "]'),
+        null,
+        "pending/denied source cannot be replied to",
+      );
+      assert.match(
+        document.querySelector('[role="status"]').textContent,
+        status,
+      );
+    };
+    const granted = await rpc("get_story_share_for_playback", {
+      p_story_id: 101,
+      p_expected_viewer_id: 2,
+    });
+    const freshMedia = {
+      ...granted,
+      data: {
+        ...granted.data,
+        media: {
+          url: "https://fixture.invalid/fresh-authorized.jpg",
+          mime_type: "image/jpeg",
+        },
+      },
+    };
+    deferReads();
+    await flush(() => f.open(reloaded));
+    assertHidden(/Checking/);
+    assert.deepEqual(rpcCalls.at(-1), {
+      name: "get_story_share_for_playback",
+      args: { p_story_id: 101, p_expected_viewer_id: 2 },
+    });
+    await flush(() => pendingReads[0]({ data: null, error: null }));
+    assertHidden(/no longer available/);
+
+    // Even the exact same store group reference must obtain a new grant on reopen.
+    const sameGroups = f.useStoryViewerStore.getState().groups;
+    await flush(() => f.useStoryViewerStore.getState().openAt(sameGroups, 0));
+    assertHidden(/Checking/);
+    assert.equal(pendingReads.length, 2);
+    await flush(() => pendingReads[1](freshMedia));
+    assert.ok(attribution());
+    assert.equal(global.__player.stories[0].url, freshMedia.data.media.url);
+    assert.equal(
+      global.__player.stories[1].url,
+      f.SHARED_STORY_BACKDROP,
+      "inactive cached event URL is never handed to the player",
+    );
+    await flush(() => global.__player.onStoryChange(1));
+    assertHidden(/Checking/);
+    assert.equal(rpcCalls.at(-1).args.p_story_id, 102);
+    await flush(() =>
+      pendingReads[2]({ data: null, error: { message: "RLS denied" } }),
+    );
+    assertHidden(/no longer available/);
+
+    // A previous opening or A→B→A identity cannot grant the current visit.
+    deferReads();
+    await flush(() => f.open(reloaded));
+    const firstVisit = pendingReads[0];
+    await flush(() => {
+      f.useAuthStore.setState({ user: { id: "1", authId: "auth1" } });
+      f.useAuthStore.setState({ user: { id: "2", authId: "auth2" } });
+    });
+    assert.equal(
+      pendingReads.length,
+      2,
+      "ABA starts a new authorization even when the final viewer ID matches",
+    );
+    await flush(() => firstVisit(freshMedia));
+    assertHidden(/Checking/);
+    await flush(() => pendingReads[1]({ data: null, error: null }));
+    assertHidden(/no longer available/);
+    await flush(() => f.open(reloaded));
+    const closedVisit = pendingReads.at(-1);
+    await flush(() => {
+      f.close();
+      closedVisit(freshMedia);
+    });
+    assert.equal(document.querySelector(".dvnt-story-viewer"), null);
+    await flush(() => f.open(reloaded));
+    assertHidden(/Checking/);
+    await flush(() => pendingReads.at(-1)({ data: null, error: null }));
+    assertHidden(/no longer available/);
+
+    // The database actor, not just the UI ID, must match. A stale bridge JWT
+    // cannot authorize B using account A's wider access.
+    global.__storyRpc = rpc;
+    global.__rpcActor = "1";
+    await flush(() => f.open(reloaded));
+    assertHidden(/no longer available/);
+    delete global.__rpcActor;
+    await flush(() => f.open(reloaded));
+    assert.ok(attribution());
+
+    // Replies use the selected row, not the group's first row. A known source
+    // revocation during the pre-send check also removes the already-open frame.
+    await flush(() => global.__player.onStoryChange(1));
+    let messageIntent;
+    global.__sendStoryMessage = async (args) => {
+      messageIntent = args;
+      await args.beforeSend();
+    };
+    global.__storyRpc = async () => ({ data: null, error: null });
+    await flush(() =>
+      document.querySelector('button[aria-label="React ❤️"]').click(),
+    );
+    assert.equal(messageIntent.story.id, "102");
+    assert.equal(messageIntent.expectedViewerId, "2");
+    assert.equal(messageIntent.itemIndex, 1);
+    assert.equal(
+      messageIntent.story.items[1].url,
+      "https://fixture.invalid/flyer.jpg",
+    );
+    assert.equal(messageIntent.isCurrent(), false);
+    assertHidden(/no longer available/);
+    delete global.__sendStoryMessage;
+
+    // Invalid, mismatched and expired RPC data never falls back to cached media.
+    for (const data of [
+      { ...granted.data, shared_source: { ...source, id: "99" } },
+      { ...granted.data, expires_at: new Date(Date.now() - 1).toISOString() },
+      { ...granted.data, expires_at: "invalid" },
+      { ...granted.data, shared_source: null },
+    ]) {
+      global.__storyRpc = async () => ({ data, error: null });
+      await flush(() => f.open(reloaded));
+      assertHidden(/no longer available/);
+    }
+    // A row that expires while the fresh read is pending must never display.
+    deferReads();
+    await flush(() => f.open(reloaded));
+    await flush(() =>
+      pendingReads[0]({
+        ...granted,
+        data: {
+          ...granted.data,
+          expires_at: new Date(Date.now() - 1).toISOString(),
+        },
+      }),
+    );
+    assertHidden(/no longer available/);
+    global.__storyRpc = async () => ({
+      ...granted,
+      data: {
+        ...granted.data,
+        expires_at: new Date(Date.now() + 100).toISOString(),
+      },
+    });
+    await flush(() => f.open(reloaded));
+    assert.ok(attribution());
+    await flush(() => new Promise((resolve) => setTimeout(resolve, 130)));
+    assertHidden(/no longer available/);
+
+    // An ordinary media story has no new network gate or changed media payload.
+    const countBeforeOrdinary = rpcCalls.length;
+    global.__storyRpc = () => {
+      throw new Error("ordinary story must not authorize a shared source");
+    };
+    await flush(() =>
+      f.open([
+        {
+          id: "900",
+          userId: "1",
+          username: "publisher",
+          items: [
+            {
+              id: "900",
+              type: "image",
+              url: "https://fixture.invalid/ordinary.jpg",
+            },
+          ],
+        },
+      ]),
+    );
+    assert.ok(document.querySelector(".dvnt-story-viewer"));
+    assert.equal(
+      global.__player.stories[0].url,
+      "https://fixture.invalid/ordinary.jpg",
+    );
+    assert.equal(rpcCalls.length, countBeforeOrdinary);
+    await flush(() => f.close());
+    global.__storyRpc = rpc;
 
     // Deferred admission, token refresh, A→B→A, late success and unmount are all
     // pinned to the intent's account and lifetime, never a new viewer's cache.
@@ -379,7 +588,7 @@ const {
       "no client DM or conversation creation",
     );
     console.log(
-      "PASS story attribution DOM: real event action eligibility, source-only payload, single-flight, canonical cache, failed/retried UUID, reload/text media, per-segment author/profile/source links, account epochs and unmount isolation",
+      "PASS story attribution DOM: real event action eligibility, source-only payload, single-flight, canonical cache, failed/retried UUID, reload/text media, per-segment author/profile/source links, fresh actor-bound playback, no cached media flash, revocation/expiry, account epochs and unmount isolation",
     );
   } finally {
     if (app) await f.act(async () => app.unmount());

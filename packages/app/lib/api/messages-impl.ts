@@ -543,6 +543,10 @@ export const messagesApi = {
     metadata?: Record<string, unknown>;
     operationId?: string;
     expectedViewerId?: string;
+    /** Local view/account lifecycle check, never sent over the wire. */
+    isCurrent?: () => boolean;
+    /** Optional source-visibility check after token refresh, before transmission. */
+    beforeSend?: () => Promise<void>;
   }) {
     try {
       console.log(
@@ -551,8 +555,13 @@ export const messagesApi = {
       );
 
       if (data.expectedViewerId && useAuthStore.getState().user?.id !== data.expectedViewerId) throw new Error("Account changed");
+      if (data.isCurrent && !data.isCurrent()) throw new Error("Story viewer changed");
       const token = await requireBetterAuthToken();
       if (data.expectedViewerId && useAuthStore.getState().user?.id !== data.expectedViewerId) throw new Error("Account changed");
+      if (data.isCurrent && !data.isCurrent()) throw new Error("Story viewer changed");
+      await data.beforeSend?.();
+      if (data.expectedViewerId && useAuthStore.getState().user?.id !== data.expectedViewerId) throw new Error("Account changed");
+      if (data.isCurrent && !data.isCurrent()) throw new Error("Story viewer changed");
       const conversationIdInt = parseInt(data.conversationId);
 
       const body: Record<string, unknown> = {
@@ -560,6 +569,7 @@ export const messagesApi = {
         content: data.content,
       };
       if (data.operationId) body.operationId = data.operationId;
+      if (data.expectedViewerId) body.expectedViewerId = data.expectedViewerId;
       if (data.media && data.media.length > 0) {
         body.mediaItems = data.media;
         // Backwards compat: also set mediaUrl for single items

@@ -13,7 +13,7 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
-import { storyTagsApi } from "@dvnt/app/lib/api/stories";
+import { storiesApi, storyTagsApi } from "@dvnt/app/lib/api/stories";
 import { StoryViewer } from "@dvnt/ui";
 import { useStoryViewerStore } from "@dvnt/app/lib/stores/story-viewer-store";
 import { StoryOverlaysLayer } from "@dvnt/app/components/story-overlays-layer.web";
@@ -28,6 +28,8 @@ import {
 import { isSameUser } from "@dvnt/app/lib/profile/same-user";
 import { storyProfilePath } from "@dvnt/app/lib/profile/story-profile-path";
 import { StorySharedSourceCard } from "./story-shared-source.web";
+import { useSharedStoryPlayback } from "../lib/hooks/use-shared-story-playback";
+import { SHARED_STORY_BACKDROP } from "../lib/stories/shared-source";
 
 /**
  * Full-screen story viewer overlay (web) — pops over the ENTIRE app at the top
@@ -54,6 +56,7 @@ export function StoryViewerOverlay() {
   const open = useStoryViewerStore((s) => s.open);
   const groups = useStoryViewerStore((s) => s.groups);
   const groupIndex = useStoryViewerStore((s) => s.groupIndex);
+  const viewSession = useStoryViewerStore((s) => s.viewSession);
   const close = useStoryViewerStore((s) => s.close);
   const closeForNavigation = useStoryViewerStore((s) => s.closeForNavigation);
   const viewer = useAuthStore((s) => s.user);
@@ -67,8 +70,16 @@ export function StoryViewerOverlay() {
   // overlays are shown. react-insta-stories fires onStoryChange (onStoryStart)
   // on every segment start; reset to 0 whenever the group changes (the viewer
   // remounts per group via key={group.id}).
-  const [storyIndex, setStoryIndex] = useState(0);
-  useEffect(() => setStoryIndex(0), [groupIndex]);
+  const [selection, setSelection] = useState({ viewSession, groupIndex, index: 0 });
+  const storyIndex = selection.viewSession === viewSession && selection.groupIndex === groupIndex ? selection.index : 0;
+  const segmentEpoch = useRef(0);
+  const activeSegmentEpoch = segmentEpoch.current;
+  const changeStoryIndex = (index: number) => {
+    if (index === storyIndex) return;
+    // Invalidate queued sends synchronously, before React commits the new frame.
+    segmentEpoch.current++;
+    setSelection({ viewSession, groupIndex, index });
+  };
 
   // Deleting your own story existed on native and nowhere on web: the web
   // overlay had a close button and nothing else, so a member could post a story
@@ -101,10 +112,12 @@ export function StoryViewerOverlay() {
   const frameRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     setReplyText("");
+    setSendingReply(false);
     setComposerFocused(false);
     setShowViewers(false);
     setShowTags(false);
-  }, [groupIndex]);
+    setFloatingEmojis([]);
+  }, [viewSession, groupIndex, storyIndex, viewer?.id, viewer?.authId]);
 
   // react-insta-stories positions its internal layers using the width/height
   // props as PIXEL values — passing "100%" breaks its layout math so segments
@@ -175,13 +188,18 @@ export function StoryViewerOverlay() {
     groups.length > 0
       ? groups[Math.min(groupIndex, groups.length - 1)]
       : undefined;
+  const rawSegment = activeGroup?.segments[Math.min(storyIndex, activeGroup.segments.length - 1)];
+  const playback = useSharedStoryPlayback(rawSegment, open, `${viewSession}:${groupIndex}:${storyIndex}`);
+  const segment = playback.segment;
+  const playbackReady = playback.status === "ready";
+  const activeStoryId = rawSegment?.sharedSource ? rawSegment.id : activeGroup?.id;
 
   // Tagged people — native shows a pill over the story; web showed nothing, so
   // being tagged was invisible to everyone but the poster.
   const { data: storyTags = [] } = useQuery({
-    queryKey: ["story-tags", activeGroup?.id ?? ""],
-    queryFn: () => storyTagsApi.getTagsForStory(activeGroup?.id ?? ""),
-    enabled: open && !!activeGroup?.id,
+    queryKey: ["story-tags", activeStoryId ?? ""],
+    queryFn: () => storyTagsApi.getTagsForStory(activeStoryId ?? ""),
+    enabled: open && playbackReady && !!activeStoryId,
     staleTime: 60_000,
   });
 
@@ -194,28 +212,28 @@ export function StoryViewerOverlay() {
    */
   const storyItems = useMemo(
     () =>
-      (activeGroup?.segments ?? []).map((seg) => ({
-        url: seg.url,
-        type: seg.type,
+      (activeGroup?.segments ?? []).map((seg, index) => ({
+        // Never let the player prefetch a cached shared URL before its own
+        // activation has passed a fresh source-visibility check.
+        url: seg.sharedSource ? (index === storyIndex && segment ? segment.url : SHARED_STORY_BACKDROP) : seg.url,
+        type: seg.sharedSource ? (index === storyIndex && segment ? segment.type : "image" as const) : seg.type,
         duration: seg.duration,
         header: {
           heading: activeGroup?.username ?? "",
           profileImage: activeGroup?.avatar ?? "",
         },
       })),
-    [activeGroup],
+    [activeGroup, storyIndex, segment],
   );
 
   if (!mounted || !open || groups.length === 0 || size.w === 0) return null;
   const group = activeGroup;
   if (!group || group.segments.length === 0) return null;
-  const segment =
-    group.segments[Math.min(storyIndex, group.segments.length - 1)];
   // By id only. isSameUser deliberately refuses a username fallback, and this
   // is an ownership check that hands out a Delete button.
   const isOwnStory = isSameUser(viewer, { userId: group.userId });
   const removeStory = () => {
-    deleteStory.mutate(group.id, {
+    deleteStory.mutate(activeStoryId || group.id, {
       // The group is gone from the rail either way; leaving the viewer on a
       // deleted story is the one thing that must not happen.
       onSettled: () => {
@@ -228,16 +246,30 @@ export function StoryViewerOverlay() {
 
   // The story context the DM carries. Segments are the items, in order.
   const storyContext = {
-    id: group.id,
+    id: segment?.id || group.id,
     username: group.username,
     avatar: group.avatar,
-    items: group.segments.map((s) => ({ type: s.type, url: s.url })),
+    items: storyItems.map((s, index) => ({ type: s.type, url: index === storyIndex && segment?.isSourceCard ? "" : s.url })),
   };
-  const canMessageOwner = !isOwnStory && !!group.userId;
+  const canMessageOwner = playbackReady && !isOwnStory && !!group.userId;
+  const isCurrentPlayback = () => {
+    const state = useStoryViewerStore.getState();
+    return playbackReady && playback.isCurrent() && state.open && state.viewSession === viewSession && state.groupIndex === groupIndex && segmentEpoch.current === activeSegmentEpoch;
+  };
+  const beforeSend = rawSegment?.sharedSource ? async () => {
+    if (!rawSegment.id || !viewer?.id || !isCurrentPlayback()) throw new Error("Story viewer changed");
+    try {
+      const fresh = await storiesApi.getSharedStoryForPlayback(rawSegment.id, rawSegment.sharedSource!, viewer.id, isCurrentPlayback);
+      if (!fresh) throw new Error("This shared story is no longer available");
+    } catch (error) {
+      playback.revoke();
+      throw error;
+    }
+  } : undefined;
 
   const sendReply = async () => {
     const text = replyText.trim();
-    if (!text || sendingReply || !group.userId) return;
+    if (!playbackReady || !text || sendingReply || !group.userId) return;
     setSendingReply(true);
     try {
       await sendStoryMessage({
@@ -247,23 +279,30 @@ export function StoryViewerOverlay() {
         itemIndex: storyIndex,
         kind: "story_reply",
         content: text,
+        expectedViewerId: viewer?.id,
+        isCurrent: isCurrentPlayback,
+        beforeSend,
       });
+      if (!isCurrentPlayback()) return;
       setReplyText("");
       showToast("success", "Sent", `Reply sent to @${group.username}`);
     } catch (e: unknown) {
+      if (!isCurrentPlayback()) return;
       showToast(
         "error",
         "Reply didn't send",
         e instanceof Error ? e.message : "Try again in a moment.",
       );
     } finally {
-      setSendingReply(false);
-      setComposerFocused(false);
+      if (isCurrentPlayback()) {
+        setSendingReply(false);
+        setComposerFocused(false);
+      }
     }
   };
 
   const sendReaction = (emoji: string) => {
-    if (!group.userId) return;
+    if (!playbackReady || !group.userId) return;
     // Same 1.5s throttle native uses — the row is tappable faster than anyone
     // means to send five DMs.
     const now = Date.now();
@@ -282,7 +321,11 @@ export function StoryViewerOverlay() {
       itemIndex: storyIndex,
       kind: "story_reaction",
       content: emoji,
+      expectedViewerId: viewer?.id,
+      isCurrent: isCurrentPlayback,
+      beforeSend,
     }).catch(() => {
+      if (!isCurrentPlayback()) return;
       showToast("error", "Reaction didn't send", "Try again in a moment.");
     });
   };
@@ -346,11 +389,12 @@ export function StoryViewerOverlay() {
           isolation: "isolate",
         }}
       >
-        <StoryViewer
+        {playbackReady ? <StoryViewer
           key={group.id}
           stories={storyItems}
+          currentIndex={storyIndex}
           onAllStoriesEnd={nextGroup}
-          onStoryChange={setStoryIndex}
+          onStoryChange={changeStoryIndex}
           onProfilePress={() => {
             const path = storyProfilePath(group, viewer, "web");
             if (!path) return;
@@ -360,7 +404,17 @@ export function StoryViewerOverlay() {
           width={size.w}
           height={size.h}
           paused={composerFocused || showViewers || confirmingDelete}
-        />
+        /> : (
+          <div className="flex h-full flex-col items-center justify-center gap-5 px-8 text-center text-white" role="status">
+            <p>{playback.status === "checking" ? "Checking this shared story…" : "This shared story is no longer available."}</p>
+            {playback.status === "unavailable" ? (
+              <button type="button" className="rounded-xl bg-white/15 px-4 py-2" onClick={() => {
+                if (storyIndex < group.segments.length - 1) changeStoryIndex(storyIndex + 1);
+                else nextGroup();
+              }}>Next story</button>
+            ) : null}
+          </div>
+        )}
 
         {segment?.sharedSource ? (
           <StorySharedSourceCard
@@ -420,7 +474,7 @@ export function StoryViewerOverlay() {
 
         {/* Tagged people. Collapsed to a count, because a story with six tags
             should not cover the story with six names. */}
-        {storyTags.length > 0 ? (
+        {playbackReady && storyTags.length > 0 ? (
           <div
             className="absolute inset-x-0 flex justify-center px-4"
             style={{ bottom: isOwnStory ? 76 : 150, zIndex: STORY_UI_Z }}
@@ -469,7 +523,7 @@ export function StoryViewerOverlay() {
 
         {/* Reactions in flight — the receipt for a tap, without a toast over
             the story. */}
-        {floatingEmojis.length > 0 ? (
+        {playbackReady && floatingEmojis.length > 0 ? (
           <div
             className="pointer-events-none absolute inset-x-0 bottom-28 flex justify-center"
             style={{ zIndex: STORY_UI_Z }}
@@ -501,7 +555,7 @@ export function StoryViewerOverlay() {
 
         {/* Own story → who saw it. Someone else's → react or reply. Native has
             had both; web had neither. */}
-        {isOwnStory ? (
+        {playbackReady && isOwnStory ? (
           <div
             className="absolute inset-x-0 bottom-0 flex justify-center px-4 pb-5"
             style={{ zIndex: STORY_UI_Z }}
@@ -567,8 +621,8 @@ export function StoryViewerOverlay() {
         ) : null}
 
         <StoryViewersSheetWeb
-          storyId={group.id}
-          open={showViewers}
+          storyId={activeStoryId || group.id}
+          open={playbackReady && showViewers}
           onClose={() => setShowViewers(false)}
           onProfilePress={(username) => {
             closeForNavigation();

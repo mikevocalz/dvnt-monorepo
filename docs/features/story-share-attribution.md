@@ -55,6 +55,16 @@ replay refreshes the canonical author's display information.
   no longer exposes its existing share through client story reads. Ordinary
   stories are unaffected. Any future service-role story reader must explicitly
   apply the resolver because service-role reads bypass RLS.
+- Web playback rechecks each attributed segment on activation and every reopen,
+  outside the feed cache. Until that check succeeds, neither cached source media
+  nor its attribution is rendered; nonactive shared URLs are also withheld from
+  the player's prefetch list. Errors and revoked access fail closed.
+- The playback read is an authenticated, security-invoker RPC that verifies the
+  JWT subject resolves to the expected current profile before reading under RLS.
+  A stale previous-account JWT cannot authorize the new account's playback.
+  Opening and account epochs discard stale asynchronous results, including
+  A-to-B-to-A switches. This does not retroactively revoke media bytes already
+  delivered while a viewer was authorized.
 
 DM eligibility honors `messages.allowAll` (default false),
 `messages.messageRequests` (default true), or the author following the sharer.
@@ -62,6 +72,30 @@ The existing inbox partitions non-followed senders into Requests. Both settings
 disabled with no recipient-to-sender follow means `skipped_privacy`; no message
 or empty conversation is created. Sharing one's own source means `skipped_self`.
 Neither exception should show copy claiming that someone was notified.
+
+## Fresh playback authorization
+
+Cached story media is not permission to play it later. Before rendering an
+attributed story, call `get_story_share_for_playback(p_story_id integer,
+p_expected_viewer_id integer)` as the current authenticated client. It is
+`SECURITY INVOKER`, checks that the JWT subject resolves to exactly the expected
+public profile ID, and selects a fresh, attributed, unexpired story through the
+existing RLS policies. A cached JWT from a previous UI account is not accepted.
+
+The RPC returns `{ id, shared_source, expires_at, media: { url, mime_type } | null }`
+and refreshes the source author from public profile fields. Wrong/missing actor,
+unavailable source, blocked viewer, expired/deleted story or missing author
+returns `null`. Permission/read failures propagate as errors. There is no cached
+fallback and no service-role execution grant. The client must also discard any
+result after its own account/session epoch changes while the request is pending.
+
+Guarded story replies additionally send `expectedViewerId` (positive decimal
+profile ID string) to `send-message`. That endpoint compares it with the public
+profile resolved from the verified Better Auth send token before checking
+membership or inserting the message. A different actor returns `viewer_changed`;
+an invalid supplied ID returns `validation_error`. Omitted IDs preserve ordinary
+and older-client send behavior. The UI must not serialize callbacks or treat
+successful playback under one token as authorization to send with another.
 
 ## Atomicity and spoof resistance
 

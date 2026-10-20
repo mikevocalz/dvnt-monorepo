@@ -109,3 +109,39 @@ test('deleting a shared story removes owned DB copies, never canonical source CD
     assert.equal(network.length,isShare?0:2);
   }
 });
+
+test('guarded replies bind expected viewer to verified send-token actor before membership or insert, while legacy sends still work',async()=>{
+  async function send(extra) {
+    let handler;const tables=[];const inserts=[];let inserted;
+    const admin={from(table){tables.push(table);const q={
+      select(){return q},eq(){return q},neq(){return q},is(){return q},update(){return q},upsert(){return q},
+      insert(payload){inserts.push({table,payload});inserted={id:17,...payload,created_at:'2026-01-01T00:00:00Z'};return q},
+      async single(){return {data:table==='conversations_rels'?{id:8}:table==='conversations'?{is_group:false}:inserted,error:null}},
+      then(resolve){resolve({data:table==='conversations_rels'?[]:null,error:null})},
+    };return q}};
+    load('send-message/index.ts',{
+      '../_shared/watch-notification.ts':{},'./idempotency.ts':{},
+      'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>admin},
+      '../_shared/verify-session.ts':{verifySessionDetailed:async()=>({ok:true,userId:'verified-send-token-account-A'})},
+      '../_shared/resolve-user.ts':{resolveOrProvisionUser:async(_db,authId)=>{assert.equal(authId,'verified-send-token-account-A');return {id:1,username:'actor-A'}}},
+      '../_shared/rate-limit.ts':{checkRateLimit:()=>({allowed:true}),MESSAGE_LIMIT:{}},
+      '../_shared/verified-admission.ts':{resolveVerifiedAdmission:async()=>({state:'allowed'})},
+      '../_shared/story-share.ts':shareHelpers,
+    },{Deno:{serve:fn=>handler=fn,env:{get:()=> 'synthetic-only'}},fetch:()=>{throw Error('No external network allowed in edge fixture')}});
+    const response=await handler(new Request('https://fixture.invalid/send-message',{method:'POST',headers:{Authorization:'Bearer token-A'},body:JSON.stringify({conversationId:1,content:'Story reply',operationId:op,...extra})}));
+    return {body:await response.json(),tables,inserts};
+  }
+  const stale=await send({expectedViewerId:'2'});
+  assert.equal(stale.body.error.code,'viewer_changed');assert.deepEqual(stale.tables,[]);assert.deepEqual(stale.inserts,[]);
+  for(const expectedViewerId of [null,0,1,'','01','-1','user-A','9007199254740993']) {
+    const invalid=await send({expectedViewerId});
+    assert.equal(invalid.body.error.code,'validation_error');assert.deepEqual(invalid.tables,[]);assert.deepEqual(invalid.inserts,[]);
+  }
+  for(const extra of [{expectedViewerId:'1'},{}]) {
+    const success=await send(extra);
+    assert.equal(success.body.ok,true);assert.equal(success.body.data.message.senderId,'1');
+    assert.equal(success.inserts.length,1);assert.equal(success.inserts[0].table,'messages');
+    assert.equal(success.inserts[0].payload.sender_id,1);
+    assert.equal(Object.hasOwn(success.inserts[0].payload,'expectedViewerId'),false,'guard is not stored in the message');
+  }
+});

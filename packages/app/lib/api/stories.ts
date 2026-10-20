@@ -151,6 +151,47 @@ interface CreateStoryResponse {
 
 export const storiesApi = {
   /**
+   * A fresh RLS read, deliberately outside the feed/query cache. The restrictive
+   * story policy revalidates the original source's current privacy/block state.
+   * Never hand cached shared media to a player before this succeeds.
+   */
+  async getSharedStoryForPlayback(
+    storyId: string,
+    expectedSource: { type: "post" | "event"; id: string },
+    expectedViewerId: string,
+    isCurrent: () => boolean,
+  ) {
+    const assertCurrent = () => {
+      if (getCurrentUserId() !== expectedViewerId || !isCurrent()) throw new Error("Story viewer changed");
+    };
+    assertCurrent();
+    if (!/^[1-9]\d*$/.test(storyId) || !/^[1-9]\d*$/.test(expectedViewerId)) return null;
+    const id = Number(storyId), viewerId = Number(expectedViewerId);
+    if (!Number.isSafeInteger(id) || !Number.isSafeInteger(viewerId)) return null;
+    await requireBetterAuthToken();
+    assertCurrent();
+    // SECURITY INVOKER RPC pins the JWT actor to expectedViewerId before its
+    // RLS read. A stale bridge JWT from another account must not grant playback.
+    const { data: row, error } = await supabase.rpc("get_story_share_for_playback", {
+      p_story_id: id,
+      p_expected_viewer_id: viewerId,
+    });
+    assertCurrent();
+    if (error) throw error;
+    const sharedSource = parseStorySharedSource(row?.shared_source);
+    if (!row || !sharedSource || sharedSource.id !== expectedSource.id || sharedSource.type !== expectedSource.type) return null;
+    const expiresAt = Date.parse(row.expires_at);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
+    const mediaUrl = row.media?.url || "";
+    const mime = row.media?.mime_type || "";
+    return {
+      sharedSource,
+      expiresAt,
+      mediaUrl,
+      mediaType: (mime.startsWith("video/") || /\.(mp4|mov)(\?|$)/i.test(mediaUrl) ? "video" : "image") as "video" | "image",
+    };
+  },
+  /**
    * Get stories feed (active stories from followed users)
    */
   async getStories() {

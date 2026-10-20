@@ -90,6 +90,38 @@ const {
           title: "The original event",
         },
       };
+      // The production overlay performs a new RLS read on every shared segment.
+      // Return only these offline rows, never bypass the real API/guard.
+      globalThis.__storyDb = (table) => ({
+        error: null,
+        data:
+          table === "stories"
+            ? [
+                {
+                  id: post.id,
+                  expires_at: new Date(Date.now() + 3600000).toISOString(),
+                  shared_source: post.sharedSource,
+                  media: null,
+                },
+                {
+                  id: event.id,
+                  expires_at: new Date(Date.now() + 3600000).toISOString(),
+                  shared_source: event.sharedSource,
+                  media: { url: event.url, mime_type: "image/jpeg" },
+                },
+              ]
+            : table === "users"
+              ? [
+                  {
+                    id: author.id,
+                    username: author.username,
+                    first_name: "Original",
+                    last_name: "Author",
+                    avatar: { url: author.avatar },
+                  },
+                ]
+              : [],
+      });
       const makeGroup = (items) => ({
         id: "101",
         userId: "2",
@@ -215,6 +247,54 @@ const {
         );
       }
     }
+    // A cached group's real player is not mounted until a fresh row is allowed.
+    await page.evaluate(() => {
+      globalThis.__allowedRpc = globalThis.__storyRpc;
+      globalThis.__pending = [];
+      globalThis.__storyRpc = (name, args) =>
+        new Promise((resolve) =>
+          globalThis.__pending.push({ name, args, resolve }),
+        );
+      globalThis.__openStory("post");
+    });
+    await page.getByRole("status").filter({ hasText: "Checking" }).waitFor();
+    assert.equal(await page.locator(".dvnt-story-viewer").count(), 0);
+    assert.equal(await card().count(), 0);
+    assert.equal(
+      await page.locator('input[aria-label^="Reply to "]').count(),
+      0,
+    );
+    await page.evaluate(() =>
+      globalThis.__pending.at(-1).resolve({ data: null, error: null }),
+    );
+    await page
+      .getByRole("status")
+      .filter({ hasText: "no longer available" })
+      .waitFor();
+    assert.equal(await page.locator(".dvnt-story-viewer").count(), 0);
+    await page.getByRole("button", { name: "Next story", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "Checking" }).waitFor();
+    assert.equal(await page.locator(".dvnt-story-viewer").count(), 0);
+    assert.equal(
+      await page.evaluate(() => globalThis.__pending.at(-1).args.p_story_id),
+      102,
+    );
+    await page.evaluate(async () => {
+      const pending = globalThis.__pending.at(-1);
+      pending.resolve(
+        await globalThis.__allowedRpc(pending.name, pending.args),
+      );
+    });
+    await page
+      .locator('section[aria-label="Shared event by @original"]')
+      .waitFor();
+    // The selected second segment stays selected after sanitization/remount.
+    await page.waitForTimeout(100);
+    assert.equal(
+      await card().getAttribute("aria-label"),
+      "Shared event by @original",
+    );
+    assert.equal(await page.locator(".dvnt-story-viewer").count(), 1);
     assert.deepEqual(errors, []);
     console.log(
       "PASS story attribution Chromium: actual player, 320/375/1440px layouts, long text card, media event, author/source hit-testing above tap catcher, keyboard links, reply clearance and navigation-close semantics",

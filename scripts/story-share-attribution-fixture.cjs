@@ -17,13 +17,19 @@ async function buildFixture({ outfile, browser = false }) {
     "@dvnt/app/lib/hooks/use-verified-gate": `export const useVerifiedGate=()=> (_action,run)=>{if(globalThis.__deferGate)globalThis.__gate=run;else if(!globalThis.__blocked)run();};`,
     "@dvnt/app/lib/auth/identity": `export const requireBetterAuthToken=()=>globalThis.__token();export const getCurrentUserId=()=>globalThis.__viewer();`,
     "@dvnt/app/lib/api/auth-helper": `export const getCurrentUserId=()=>globalThis.__viewer();export const getCurrentUserIdSync=()=>Number(globalThis.__viewer());export const getCurrentUserAuthId=async()=> 'auth'+globalThis.__viewer();`,
-    "@dvnt/app/lib/supabase/client": `export const supabase={functions:{invoke:(...args)=>globalThis.__storyInvoke(...args)},from:table=>{
-      const q={then:(resolve,reject)=>Promise.resolve(globalThis.__storyDb(table)).then(resolve,reject)};
-      for(const method of ['select','eq','in','gt','order','limit'])q[method]=()=>q;return q;
+    "@dvnt/app/lib/supabase/client": `export const supabase={rpc:(...args)=>globalThis.__storyRpc(...args),functions:{invoke:(...args)=>globalThis.__storyInvoke(...args)},from:table=>{
+      const filters={eq:[],in:[],gt:[],single:false};
+      const q={then:(resolve,reject)=>Promise.resolve(globalThis.__storyDb(table,filters)).then(result=>{
+        if(!filters.single||!Array.isArray(result.data))return result;
+        const data=result.data.filter(row=>filters.eq.every(([key,value])=>String(row[key])===String(value)));
+        return {...result,data:data[0]||null};
+      }).then(resolve,reject)};
+      for(const method of ['select','eq','in','gt','order','limit'])q[method]=(...args)=>{if(Array.isArray(filters[method]))filters[method].push(args);return q};
+      q.maybeSingle=()=>{filters.single=true;return q};return q;
     }};`,
     "@dvnt/app/components/story-viewers-sheet.web": `export const StoryViewersSheetWeb=()=>null;`,
     "@dvnt/app/components/story-overlays-layer.web": `export const StoryOverlaysLayer=()=>null;`,
-    "@dvnt/app/lib/stories/story-message": `export const STORY_REACTION_EMOJIS=['❤️'];export const sendStoryMessage=()=>{throw new Error('unexpected client DM')};`,
+    "@dvnt/app/lib/stories/story-message": `export const STORY_REACTION_EMOJIS=['❤️'];export const sendStoryMessage=args=>{if(globalThis.__sendStoryMessage)return globalThis.__sendStoryMessage(args);throw new Error('unexpected client DM')};`,
     "@dvnt/ui": browser
       ? `export {StoryViewer} from '${ROOT}/packages/ui/src/media/StoryViewer.web.tsx';`
       : `export const StoryViewer=props=>{globalThis.__player=props;return <div className="dvnt-story-viewer" onClick={()=>globalThis.__advances++}>Player</div>};`,
@@ -55,6 +61,20 @@ async function buildFixture({ outfile, browser = false }) {
       globalThis.__viewer=()=>useAuthStore.getState().user?.id??null;
       globalThis.__routes=[];globalThis.__toasts=[];globalThis.__shared=0;globalThis.__advances=0;
       globalThis.__token=async()=> 'token';globalThis.__storyDb=()=>({data:[],error:null});
+      globalThis.__storyRpc=async(name,args)=>{
+        if(name!=="get_story_share_for_playback")throw new Error("unexpected RPC");
+        if(String(globalThis.__rpcActor??globalThis.__viewer())!==String(args.p_expected_viewer_id))return {data:null,error:null};
+        const response=await globalThis.__storyDb("stories",{single:true,eq:[["id",args.p_story_id]]});
+        if(response.error)return response;
+        const row=Array.isArray(response.data)?response.data.find(row=>String(row.id)===String(args.p_story_id)):response.data;
+        if(!row)return {data:null,error:null};
+        const authors=await globalThis.__storyDb("users",{single:true,eq:[["id",row.shared_source.author.id]]});
+        const author=Array.isArray(authors.data)?authors.data.find(author=>String(author.id)===String(row.shared_source.author.id)):authors.data;
+        if(authors.error||!author?.username)return {data:null,error:authors.error||null};
+        return {error:null,data:{...row,shared_source:{...row.shared_source,author:{
+          id:String(author.id),username:author.username,name:[author.first_name,author.last_name].filter(Boolean).join(" ")||author.username,avatar:author.avatar?.url||""
+        }}}};
+      };
       export {f};
     `,
     },

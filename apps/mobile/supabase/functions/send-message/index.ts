@@ -97,6 +97,7 @@ Deno.serve(async (req) => {
       mediaItems?: Array<{ uri: string; type: string }>;
       metadata?: Record<string, unknown>;
       operationId?: string;
+      expectedViewerId?: string;
     };
     try {
       body = await req.json();
@@ -104,7 +105,7 @@ Deno.serve(async (req) => {
       return errorResponse("validation_error", "Invalid JSON body");
     }
 
-    const { conversationId, content, mediaUrl, mediaItems, metadata, operationId } = body;
+    const { conversationId, content, mediaUrl, mediaItems, metadata, operationId, expectedViewerId } = body;
     if (hasReservedStoryShareMetadata(metadata)) {
       return errorResponse("forbidden", "Story share notifications are created only when a story is published");
     }
@@ -141,6 +142,17 @@ Deno.serve(async (req) => {
     if (!userData) return errorResponse("not_found", "User not found");
 
     const userId = userData.id;
+    // A guarded story reply may have been authorized with a different cached
+    // bridge JWT. Bind its expected UI account to this verified send token too.
+    // Omitted keeps ordinary/older send-message clients backwards compatible.
+    if (expectedViewerId !== undefined) {
+      if (typeof expectedViewerId !== "string" || !/^[1-9]\d{0,14}$/.test(expectedViewerId)) {
+        return errorResponse("validation_error", "expectedViewerId must be a positive user ID");
+      }
+      if (expectedViewerId !== String(userId)) {
+        return errorResponse("viewer_changed", "The signed-in account changed. Please try again.");
+      }
+    }
     const senderUsername = userData.username || "Someone";
     const sentAt = new Date().toISOString();
 

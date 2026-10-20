@@ -56,6 +56,8 @@ export function toStoryViewerGroup(s: import("../types").Story): StoryViewerGrou
 }
 
 interface StoryViewerState {
+  /** Every explicit open is a new view-time authorization boundary. */
+  viewSession: number;
   open: boolean;
   groups: StoryViewerGroup[];
   /** Index of the user-group currently playing. */
@@ -70,11 +72,12 @@ interface StoryViewerState {
 }
 
 export const useStoryViewerStore = create<StoryViewerState>((set, get) => ({
+  viewSession: 0,
   open: false,
   groups: [],
   groupIndex: 0,
   navigationClose: false,
-  openAt: (groups, groupIndex) => set({ open: true, groups, groupIndex, navigationClose: false }),
+  openAt: (groups, groupIndex) => set((state) => ({ open: true, groups, groupIndex, navigationClose: false, viewSession: state.viewSession + 1 })),
   close: () => set({ open: false, groups: [], groupIndex: 0, navigationClose: false }),
   closeForNavigation: () => set({ open: false, groups: [], groupIndex: 0, navigationClose: true }),
   nextGroup: () => {

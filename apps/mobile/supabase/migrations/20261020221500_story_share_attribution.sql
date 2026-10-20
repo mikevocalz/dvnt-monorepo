@@ -330,4 +330,48 @@ DROP POLICY IF EXISTS story_shared_source_boundary ON public.stories;
 CREATE POLICY story_shared_source_boundary ON public.stories AS RESTRICTIVE FOR SELECT TO anon, authenticated
   USING (public.can_view_story_share(shared_source));
 
+
+-- View-time authorization for cached web story players. A fresh RLS read alone
+-- does not bind a stale/cached bridge JWT to the current UI account. The caller
+-- supplies only the EXPECTED public profile ID; the actual actor is the JWT sub.
+-- SECURITY INVOKER is essential: keep the caller's table/column grants and all
+-- story/source RLS policies. Do not replace this with a service-role read.
+CREATE OR REPLACE FUNCTION public.get_story_share_for_playback(
+  p_story_id integer, p_expected_viewer_id integer
+) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+DECLARE
+  v_auth_id text;
+  v_response jsonb;
+BEGIN
+  IF p_story_id IS NULL OR p_story_id <= 0 OR p_expected_viewer_id IS NULL OR p_expected_viewer_id <= 0 THEN
+    RETURN NULL;
+  END IF;
+  v_auth_id := NULLIF(current_setting('request.jwt.claims', true), '')::jsonb->>'sub';
+  IF NULLIF(v_auth_id, '') IS NULL OR NOT EXISTS (
+    SELECT 1 FROM public.users u WHERE u.auth_id = v_auth_id AND u.id = p_expected_viewer_id
+  ) THEN RETURN NULL; END IF;
+
+  SELECT jsonb_build_object(
+    'id', s.id::text, 'expires_at', s.expires_at,
+    'shared_source', jsonb_set(s.shared_source, '{author}', jsonb_build_object(
+      'id', source_author.id::text, 'username', source_author.username,
+      'name', COALESCE(NULLIF(source_author.first_name, ''), source_author.username),
+      'avatar', avatar_media.url)),
+    'media', CASE WHEN story_media.id IS NULL THEN NULL ELSE jsonb_build_object(
+      'url', story_media.url, 'mime_type', story_media.mime_type) END
+  ) INTO v_response
+  FROM public.stories s
+  JOIN public.users source_author ON source_author.id::text = s.shared_source #>> '{author,id}'
+  LEFT JOIN public.media story_media ON story_media.id = s.media_id
+  LEFT JOIN public.media avatar_media ON avatar_media.id = source_author.avatar_id
+  WHERE s.id = p_story_id AND s.shared_source IS NOT NULL AND s.expires_at > now();
+  -- Missing/hidden/expired stories yield null, never a cached response. SQL
+  -- permission/read failures propagate as errors; clients must fail closed.
+  RETURN v_response;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.get_story_share_for_playback(integer,integer) FROM PUBLIC, anon, service_role;
+GRANT EXECUTE ON FUNCTION public.get_story_share_for_playback(integer,integer) TO authenticated;
+
 COMMIT;

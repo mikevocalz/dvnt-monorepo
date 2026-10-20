@@ -52,8 +52,8 @@ const fixture = `
     host:{id:'fixture-host',username:'community',avatar:'./fixture-avatar.svg'},location:'Brooklyn, NY',
     fullDate:'2099-06-20T23:00:00Z',event_tz:'America/New_York',lineup:['Local selectors'],perks:[],attendees:[]};
   export const useFixture=create(()=>({event,tiers,authenticated:false}));
-  export const f=window.fixture={checkouts:[],rsvps:[],routes:[],ui:useEventDetailUiStore,
-    configure:patch=>useFixture.setState(patch),configureTickets:tiers=>useFixture.setState(s=>({tiers,event:{...s.event,ticketTiers:tiers}})),reset:()=>{useEventDetailUiStore.getState().reset();f.checkouts=[];f.rsvps=[];f.routes=[];useFixture.setState({event,tiers,authenticated:false})}};
+  export const f=window.fixture={checkouts:[],rsvps:[],routes:[],storyShares:[],ui:useEventDetailUiStore,
+    configure:patch=>useFixture.setState(patch),configureTickets:tiers=>useFixture.setState(s=>({tiers,event:{...s.event,ticketTiers:tiers}})),reset:()=>{useEventDetailUiStore.getState().reset();f.checkouts=[];f.rsvps=[];f.routes=[];f.storyShares=[];useFixture.setState({event,tiers,authenticated:false})}};
   export const store=state=>Object.assign((select=s=>s)=>select(state),{getState:()=>state});
   export const guestCheckout=store({open:false,email:'',eventId:'42',tierId:'',requestKey:'fixture',quantity:1,
     discountCode:'',trackedPromoterCode:'',codeDraft:'',quoteRevision:0,patch:noop,
@@ -76,6 +76,10 @@ const boundaries = new Map([
   ['@dvnt/app/lib/hooks/use-event-realtime', `export const useEventRealtime=()=>{};`],
   ['@dvnt/app/lib/hooks/use-event-organizer', `import {query} from 'fixture';export const useEventOrganizer=()=>query(null);export const useEventCoOrganizers=()=>query([]);`],
   ['@dvnt/app/lib/hooks/use-follow', `import {mutation} from 'fixture';export const useFollow=()=>mutation;`],
+  // Keep the real story-share menu UI, but record its service dispatch instead
+  // of importing the story mutation's live auth/Supabase graph into this fixture.
+  // The actual share hook and backend behavior have their own attribution suite.
+  ['@dvnt/app/lib/hooks/use-share-post-to-story', `import {f} from 'fixture';export const useSharePostToStory=()=>({isPending:false,shareEvent:(event,onShared)=>{f.storyShares.push({type:'event',id:String(event.id)});onShared?.()}});`],
   ['@dvnt/app/lib/hooks/use-weather', `import {query} from 'fixture';export const useWeatherForecast=()=>query([]);`],
   ['@dvnt/app/lib/color/useEventDominantColor', `export const useEventDominantColor=()=>({color:'#26173d'});`],
   ['@dvnt/app/lib/stores/auth-store', `import {useFixture} from 'fixture';export const useAuthStore=select=>{const authenticated=useFixture(s=>s.authenticated);return select({isAuthenticated:authenticated,user:authenticated?{id:'fixture-member',username:'member'}:null})};`],
@@ -165,6 +169,12 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
           button(PAID).click();await until(()=>button(PAID).getAttribute('aria-pressed')==='true');
           dom.window.document.querySelector('[data-testid="event-purchase-action"]').click();
           assert.equal(dom.window.fixture.checkouts[1].tierId,PAID);
+          dom.window.document.querySelector('[aria-label="More"]').click();
+          const shareButton=()=>[...dom.window.document.querySelectorAll('button')].find(button=>button.textContent==='Share to Story');
+          await until(shareButton);
+          shareButton().click();
+          await until(()=>!shareButton());
+          assert.equal(JSON.stringify(dom.window.fixture.storyShares),JSON.stringify([{type:'event',id:'42'}]),'actual story menu dispatches the event at the service boundary');
         }else{
           await until(()=>dom.window.document.body.textContent.includes('VIP admission. See the organizer'));
           const text=dom.window.document.body.textContent;
@@ -175,7 +185,7 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       }finally{dom.window.close()}
     }
     assert.deepEqual(errors,[],'full real UI bundle has no runtime errors');
-    console.log('PASS full actual-screen ReactDOM smoke: free/paid selection, deferred checkout dispatch, upgrade descriptions, configured-only benefits. Browser geometry is not checked.');return;
+    console.log('PASS full actual-screen ReactDOM smoke: free/paid selection, deferred checkout dispatch, story-share menu dispatch, upgrade descriptions, configured-only benefits. Browser geometry is not checked.');return;
   }
   if(process.argv.includes('--emit-fixture')){
     fs.writeFileSync(path.join(OUT,'bundle.js'),built.js);
@@ -287,6 +297,12 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       await page.screenshot({path:longScreenshot});
       evidence.screens.at(-1).screenshots.push(longScreenshot);
       evidence.checks.push(size.name+': long ticket names and descriptions do not overflow');
+      await page.getByRole('button',{name:'More',exact:true}).click();
+      const storyShare=page.getByRole('button',{name:'Share to Story',exact:true});
+      await storyShare.click();await tick(page);
+      assert.deepEqual(await page.evaluate(()=>window.fixture.storyShares),[{type:'event',id:'42'}],'actual story menu dispatches the event at the service boundary');
+      assert.equal(await storyShare.count(),0,'successful share closes the actual event menu');
+      evidence.checks.push(size.name+': actual story-share menu dispatch and close; service only is a fixture');
       await page.close();
     }
     for(const configured of [false,true]){

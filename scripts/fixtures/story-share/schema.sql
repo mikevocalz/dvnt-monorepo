@@ -23,6 +23,9 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
 -- Deliberately permissive legacy client grants exercise the new boundary.
 GRANT SELECT,INSERT,UPDATE ON stories,messages TO anon,authenticated;
+-- Match production's public profile column grants; never grant all users data.
+GRANT SELECT(id,auth_id,username,first_name,avatar_id) ON users TO authenticated;
+GRANT SELECT ON media TO anon,authenticated;
 GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO anon,authenticated;
 ALTER TABLE stories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY legacy_story_read ON stories FOR SELECT USING(true);

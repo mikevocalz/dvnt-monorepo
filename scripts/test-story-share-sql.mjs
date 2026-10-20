@@ -233,3 +233,62 @@ test('deleted/expired story retry never resurrects it or sends again', async () 
     assert.equal((await counts(db)).messages,1);
   } finally { await db.close(); }
 });
+
+test('playback RPC binds JWT actor to expected viewer and never elevates RLS or exposes cached content', async () => {
+  const db = await fixture();
+  const playback = async (storyId, expected=1) => (await db.query('SELECT get_story_share_for_playback($1,$2) AS value',[Number(storyId),expected])).rows[0].value;
+  const actor = async sub => { await db.exec('RESET ROLE'); await db.query("SELECT set_config('request.jwt.claims',$1,false)",[JSON.stringify(sub ? {sub,role:'authenticated'} : {})]); await db.exec('SET ROLE authenticated'); };
+  try {
+    const created = await share(db);
+    const text = await share(db,{id:104,op:uuid(2)});
+    const {rows:[definition]}=await db.query("SELECT prosecdef,provolatile FROM pg_proc WHERE oid='get_story_share_for_playback(integer,integer)'::regprocedure");
+    assert.equal(definition.prosecdef,false,'must execute with caller privileges, never SECURITY DEFINER');
+    assert.equal(definition.provolatile,'s');
+    assert.equal((await db.query("SELECT has_function_privilege('anon','get_story_share_for_playback(integer,integer)','EXECUTE') AS allowed")).rows[0].allowed,false);
+    assert.equal((await db.query("SELECT has_function_privilege('service_role','get_story_share_for_playback(integer,integer)','EXECUTE') AS allowed")).rows[0].allowed,false);
+    await actor('fixture-sharer');
+    const value=await playback(created.story.id);
+    assert.equal(value.id,created.story.id);
+    assert.equal(value.shared_source.author.id,'2');
+    assert.deepEqual(value.media,{url:'https://fixture.invalid/post.jpg',mime_type:'image/jpeg'});
+    assert.equal((await playback(text.story.id)).media,null,'text card remains a valid media-free share');
+    assert.equal(await playback(created.story.id,4),null,'cached JWT A cannot stand in for current UI B');
+    assert.equal(await playback(created.story.id,null),null);
+    assert.equal(await playback(0),null);
+    assert.equal(await playback(999),null);
+    await actor('fixture-other');
+    assert.equal((await playback(created.story.id,4)).id,created.story.id,'another legitimate account can read public source');
+    assert.equal(await playback(created.story.id,1),null);
+    await actor(null);
+    assert.equal(await playback(created.story.id),null,'missing JWT subject never returns a source');
+    await actor('deleted-or-unknown-account');
+    assert.equal(await playback(created.story.id),null);
+    await db.exec('RESET ROLE; SET ROLE anon');
+    await assert.rejects(playback(created.story.id),/permission denied/);
+    await db.exec('RESET ROLE');
+
+    await db.exec("UPDATE users SET username='renamed-source-author' WHERE id=2");
+    await actor('fixture-sharer');
+    assert.equal((await playback(created.story.id)).shared_source.author.username,'renamed-source-author');
+    await db.exec('RESET ROLE');
+    // A stale JWT can still see the public source as A. Binding it to B fails;
+    // B's genuine JWT is also refused when only B is blocked by the author.
+    await db.exec('INSERT INTO blocks VALUES(2,4)');
+    await actor('fixture-sharer');
+    assert.ok(await playback(created.story.id,1));
+    assert.equal(await playback(created.story.id,4),null);
+    await actor('fixture-other');
+    assert.equal(await playback(created.story.id,4),null,'RLS block applies to the genuine B actor');
+    await db.exec('RESET ROLE; DELETE FROM blocks');
+
+    for(const mutation of ["UPDATE posts SET visibility='private' WHERE id=101", "INSERT INTO blocks VALUES(2,1)", "UPDATE stories SET expires_at=now()-interval '1 second'", 'DELETE FROM posts WHERE id=101']) {
+      await db.exec('BEGIN'); await db.exec(mutation); await actor('fixture-sharer');
+      assert.equal(await playback(created.story.id),null,mutation);
+      await db.exec('RESET ROLE; ROLLBACK');
+    }
+    await db.exec('REVOKE SELECT ON media FROM authenticated');
+    await actor('fixture-sharer');
+    await assert.rejects(playback(created.story.id),/permission denied/,'read failures must be errors, never a cached permissive fallback');
+    await db.exec('RESET ROLE');
+  } finally { await db.close(); }
+});
