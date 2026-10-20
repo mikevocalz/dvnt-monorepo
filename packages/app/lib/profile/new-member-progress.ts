@@ -1,6 +1,6 @@
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { supabase } from "@dvnt/app/lib/supabase/client";
-import { describeFunctionError } from "@dvnt/app/lib/api/invoke-edge";
+import { describeFunctionError } from "@dvnt/app/lib/api/function-error";
 import { readNewMemberProgress } from "./new-member-progress-contract";
 
 export type NewMemberStep = "not_required" | "pending_verification" | "photo" | "first_post" | "complete";

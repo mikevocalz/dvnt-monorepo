@@ -15,6 +15,9 @@
 
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
+import { describeFunctionError } from "@dvnt/app/lib/api/function-error";
+
+export { describeFunctionError };
 
 export interface InvokeEdgeOptions {
   /** Send as an unauthed request (no Authorization header). Default: true. */
@@ -34,36 +37,6 @@ export interface InvokeEdgeResult<T> {
      */
     status?: number;
   };
-}
-
-/**
- * Pull the real status + body off a supabase-js FunctionsHttpError, whose
- * `context` is the underlying Response. Best-effort: a network error has no
- * context at all.
- */
-export async function describeFunctionError(
-  error: any,
-): Promise<{ message: string; status?: number }> {
-  const res: Response | undefined = error?.context;
-  const status = typeof res?.status === "number" ? res.status : undefined;
-  if (res && typeof res.text === "function") {
-    try {
-      const body = (await res.text()).trim();
-      if (body) {
-        try {
-          const parsed = JSON.parse(body);
-          const detail = parsed?.error ?? parsed?.message;
-          if (typeof detail === "string" && detail) return { message: detail, status };
-        } catch {
-          // not JSON — fall through to the raw body
-        }
-        return { message: body.slice(0, 300), status };
-      }
-    } catch {
-      // body already consumed or unreadable
-    }
-  }
-  return { message: error?.message || "Edge function error", status };
 }
 
 export async function invokeEdge<T = any>(

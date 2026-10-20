@@ -20,7 +20,7 @@ interface CreatePostResponse {
 const PAGE_SIZE = 10;
 
 import { suppressedFeedAuthors } from "./feed-suppression";
-import { describeFunctionError } from "@dvnt/app/lib/api/invoke-edge";
+import { describeFunctionError } from "@dvnt/app/lib/api/function-error";
 
 interface TextSlidesFunctionResponse {
   ok: boolean;
