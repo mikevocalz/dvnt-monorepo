@@ -102,9 +102,12 @@ export function useCreateStory() {
 
       // Get current user for optimistic update
       const currentUser = useAuthStore.getState().user;
+      if (newStoryData.expectedViewerId && currentUser?.id !== newStoryData.expectedViewerId) throw new Error("Account changed");
 
       // Snapshot previous data
       const previousData = queryClient.getQueryData<Story[]>(storyKeys.list());
+
+      const optimisticId = `temp-${Date.now()}`;
 
       // Optimistically add the new story
       // CRITICAL: For optimistic update, we use currentUser.avatar since this IS the user's own story
@@ -114,7 +117,7 @@ export function useCreateStory() {
         const optimisticStory = buildStoryGroup(
           currentUser,
           {
-            id: `temp-${Date.now()}`,
+            id: optimisticId,
             authorId: currentUser?.id,
             author: {
               username: currentUser?.username,
@@ -129,16 +132,22 @@ export function useCreateStory() {
           : [optimisticStory];
       });
 
-      return { previousData };
+      return { previousData, optimisticId };
     },
-    onError: (_err, _variables, context) => {
+    onError: (_err, variables, context) => {
+      if (variables.expectedViewerId && useAuthStore.getState().user?.id !== variables.expectedViewerId) return;
       // Rollback on error
       if (context?.previousData) {
         queryClient.setQueryData(storyKeys.list(), context.previousData);
+      } else if (variables.expectedViewerId && context?.optimisticId) {
+        queryClient.setQueryData<Story[]>(storyKeys.list(), (old) =>
+          old?.filter((story) => story.id !== context.optimisticId),
+        );
       }
     },
     onSuccess: async (createdStory, variables) => {
       const currentUser = useAuthStore.getState().user;
+      if (variables.expectedViewerId && currentUser?.id !== variables.expectedViewerId) return;
 
       queryClient.setQueryData<Story[]>(storyKeys.list(), (old) => {
         const nextStory = buildStoryGroup(

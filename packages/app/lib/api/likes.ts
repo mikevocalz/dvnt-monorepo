@@ -1,5 +1,4 @@
 import { supabase } from "../supabase/client";
-import { DB } from "../supabase/db-map";
 import {
   hasAuthenticatedUser,
   requireBetterAuthToken,
@@ -19,47 +18,50 @@ export interface PostLiker {
   likedAt: string;
 }
 
+export interface PostLikersCursor {
+  likedAt: string;
+  userId: number;
+}
+
+export interface PostLikersPage {
+  likers: PostLiker[];
+  likesCount: number;
+  nextCursor: PostLikersCursor | null;
+}
+
 export const likesApi = {
-  /**
-   * Fetch all users who liked a post, ordered by most recent first.
-   * Uses Edge Function (service role) to bypass RLS and return full list.
-   */
+  /** Fetch a bounded page through the existing authenticated Edge Function. */
   async getPostLikers(
     postId: string,
-  ): Promise<{ likers: PostLiker[]; likesCount: number }> {
-    try {
-      const postIdInt = parseInt(postId);
-      if (isNaN(postIdInt)) return { likers: [], likesCount: 0 };
-
-      const token = await requireBetterAuthToken();
-
-      const { data, error } = await supabase.functions.invoke<{
-        likers?: PostLiker[];
-        likesCount?: number;
-        error?: string;
-      }>("get-post-likers", {
-        body: { postId: postIdInt },
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (error) {
-        console.error("[Likes] getPostLikers Edge Function error:", error);
-        return { likers: [], likesCount: 0 };
-      }
-
-      if (!data?.likers) {
-        if (data?.error) console.error("[Likes] get-post-likers:", data.error);
-        return { likers: [], likesCount: 0 };
-      }
-
-      return {
-        likers: data.likers,
-        likesCount: data.likesCount ?? data.likers.length,
-      };
-    } catch (error) {
-      console.error("[Likes] getPostLikers error:", error);
-      return { likers: [], likesCount: 0 };
+    options: { cursor?: PostLikersCursor | null; limit?: number } = {},
+  ): Promise<PostLikersPage> {
+    const postIdInt = Number(postId);
+    if (!/^\d+$/.test(postId) || !Number.isSafeInteger(postIdInt) || postIdInt <= 0) {
+      throw new Error("Invalid post ID");
     }
+
+    const token = await requireBetterAuthToken();
+    const { data, error } = await supabase.functions.invoke<{
+      likers?: PostLiker[];
+      likesCount?: number;
+      nextCursor?: PostLikersCursor | null;
+      error?: string;
+    }>("get-post-likers", {
+      body: { postId: postIdInt, limit: options.limit ?? 50, cursor: options.cursor ?? null },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    // An unavailable or unauthorized list is NOT an empty list. In particular,
+    // never replace an existing like count with zero after a failed request.
+    if (error || data?.error || !Array.isArray(data?.likers)) {
+      throw new Error(error?.message || data?.error || "Could not load likes");
+    }
+
+    return {
+      likers: data.likers,
+      likesCount: data.likesCount ?? data.likers.length,
+      nextCursor: data.nextCursor ?? null,
+    };
   },
 
   /**

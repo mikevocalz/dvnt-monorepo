@@ -1,6 +1,6 @@
 /**
  * Edge Function: get-post-likers
- * Fetch all users who liked a post. Uses service role to bypass RLS
+ * Fetch a bounded page of users who liked a post. Uses service role to bypass RLS
  * (Better Auth doesn't set auth.uid(), so client queries may miss rows).
  * Requires a verified Better Auth session (x-auth-token / Authorization).
  */
@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    let body: { postId?: number | string };
+    let body: { postId?: number | string; limit?: number; cursor?: { likedAt?: string; userId?: number } | null };
     try {
       body = await req.json();
     } catch {
@@ -53,9 +53,25 @@ Deno.serve(async (req) => {
       });
     }
 
-    const postIdInt = parseInt(postId);
-    if (isNaN(postIdInt)) {
+    const postIdInt = Number(postId);
+    if (!/^\d+$/.test(postId) || !Number.isSafeInteger(postIdInt) || postIdInt <= 0) {
       return new Response(JSON.stringify({ error: "Invalid postId" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Keep the old 500-row default for older mobile clients. New clients pass
+    // a smaller page size and follow the stable (created_at, user_id) cursor.
+    const limit = body.limit ?? 500;
+    const cursor = body.cursor;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500 || (cursor && (
+      typeof cursor.likedAt !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(cursor.likedAt) ||
+      !Number.isFinite(Date.parse(cursor.likedAt)) ||
+      !Number.isSafeInteger(cursor.userId) || (cursor.userId ?? 0) <= 0
+    ))) {
+      return new Response(JSON.stringify({ error: "Invalid pagination" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -79,7 +95,7 @@ Deno.serve(async (req) => {
     });
 
     // Require a verified Better Auth session — this function reads with the
-    // service role (and reconciles likes_count), so it must never be open.
+    // service role, so it must never be open.
     const authUserId = await verifySession(supabaseAdmin, req);
     if (!authUserId) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -88,7 +104,42 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data, error } = await supabaseAdmin
+    // Service-role reads must mirror the post SELECT policy rather than bypass
+    // visibility. Followers-only posts intentionally remain owner-only until a
+    // follower policy exists (20260916210000_authors_can_read_their_own_posts).
+    const { data: post, error: postError } = await supabaseAdmin
+      .from("posts")
+      .select("author_id, visibility")
+      .eq("id", postIdInt)
+      .maybeSingle();
+    let canView = !postError && !!post && (post.visibility == null || post.visibility === "public");
+    if (!postError && post && !canView) {
+      const { data: viewer, error: viewerError } = await supabaseAdmin
+        .from("users")
+        .select("id")
+        .eq("auth_id", authUserId)
+        .maybeSingle();
+      canView = !viewerError && !!viewer && viewer.id === post.author_id;
+    }
+    if (!canView) {
+      return new Response(JSON.stringify({ error: "Post not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { count: likesCount, error: countError } = await supabaseAdmin
+      .from("likes")
+      .select("user_id", { count: "exact", head: true })
+      .eq("post_id", postIdInt);
+    if (countError || likesCount == null) {
+      return new Response(JSON.stringify({ error: "Could not load likes" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let query = supabaseAdmin
       .from("likes")
       .select(
         `
@@ -104,7 +155,14 @@ Deno.serve(async (req) => {
       )
       .eq("post_id", postIdInt)
       .order("created_at", { ascending: false })
-      .limit(500);
+      .order("user_id", { ascending: false })
+      .limit(limit + 1);
+    if (cursor) {
+      query = query.or(
+        `created_at.lt.${cursor.likedAt},and(created_at.eq.${cursor.likedAt},user_id.lt.${cursor.userId})`,
+      );
+    }
+    const { data, error } = await query;
 
     if (error) {
       console.error("[Edge:get-post-likers] Supabase error:", error);
@@ -114,10 +172,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    const actualCount = (data || []).length;
+    const hasMore = (data || []).length > limit;
+    const page = (data || []).slice(0, limit);
 
     // Collect user_ids that have no users row so we can resolve via Better Auth
-    const missingUserIds = (data || [])
+    const missingUserIds = page
       .filter((row: any) => !row.user?.username)
       .map((row: any) => row.user_id);
 
@@ -149,7 +208,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const likers: LikerRow[] = (data || []).map((row: any) => ({
+    const likers: LikerRow[] = page.map((row: any) => ({
       userId: row.user_id,
       username: row.user?.username || authFallback[row.user_id]?.name || "User",
       avatar: row.user?.avatar?.url || "",
@@ -161,24 +220,14 @@ Deno.serve(async (req) => {
       likedAt: row.created_at,
     }));
 
-    // Reconcile likes_count if it drifted from actual count
-    const { data: postRow } = await supabaseAdmin
-      .from("posts")
-      .select("likes_count")
-      .eq("id", postIdInt)
-      .single();
-
-    if (postRow && postRow.likes_count !== actualCount) {
-      console.log(
-        `[Edge:get-post-likers] Reconciling likes_count: ${postRow.likes_count} → ${actualCount} for post ${postIdInt}`,
-      );
-      await supabaseAdmin
-        .from("posts")
-        .update({ likes_count: actualCount })
-        .eq("id", postIdInt);
-    }
-
-    return new Response(JSON.stringify({ likers, likesCount: actualCount }), {
+    // Reading a capped page must NEVER write that page length to posts.likes_count.
+    // The existing database trigger owns counts; this response reports an exact
+    // total independently of pagination, without mutating any post.
+    const last = likers[likers.length - 1];
+    const nextCursor = hasMore && last
+      ? { likedAt: last.likedAt, userId: last.userId }
+      : null;
+    return new Response(JSON.stringify({ likers, likesCount, nextCursor }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

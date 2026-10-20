@@ -28,6 +28,7 @@ const geistMono = Geist_Mono({
 // Next 16 moved themeColor out of metadata.
 export const viewport: Viewport = {
   themeColor: "#0a0408",
+  viewportFit: "cover",
 };
 
 export const metadata: Metadata = {

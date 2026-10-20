@@ -49,7 +49,10 @@ export const activityKeys = {
 
 export const postLikersKeys = {
   all: ["postLikers"] as const,
+  /** Prefix for invalidating every viewer after a like changes. */
   forPost: (postId: string) => ["postLikers", postId] as const,
+  forViewer: (postId: string, viewerId: string, pageSize = 500) =>
+    [...postLikersKeys.forPost(postId), viewerId, pageSize] as const,
 };
 
 export const likeStateKeys = {

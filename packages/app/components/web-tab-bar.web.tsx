@@ -1,11 +1,14 @@
+"use client";
+
 /**
  * Web tab bar (shared). Native uses NativeTabs; web renders this. Liquid-glass
  * bar — Home · Events · [+] · Activity · Profile — using the shared CenterButton
- * and Solito navigation. Semantic universal UI via @expo/html-elements (real
- * <nav>) + RN primitives (works on Next; native never imports this .web file).
+ * and Solito navigation. The viewport layer uses a real <nav> portalled to
+ * body; native never imports this .web file.
  */
+import { useEffect, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { Pressable, Text, View, StyleSheet, useWindowDimensions } from "react-native";
-import { Nav } from "@dvnt/app/components/ui/html";
 import { useRouter, usePathname } from "solito/navigation";
 import { Home, Calendar, Plus, Heart, User } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -33,10 +36,15 @@ export function WebTabBar() {
       label: "Profile",
     },
   ];
-  // On phones the bar sits flush at the absolute bottom (edge-to-edge, safe-area
+  // On phones the bar sits flush at the viewport bottom (edge-to-edge, safe-area
   // aware); on larger screens it floats as a centered liquid-glass pill.
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
+  // Keep SSR and the first client render identical. Portalling only after mount
+  // also avoids reading document on the server. The portal keeps fixed chrome
+  // outside scrolling, transformed or paint-contained app/layout ancestors.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const TabItem = ({ href, Icon, label }: Tab) => {
     const active = pathname === href;
@@ -58,8 +66,14 @@ export function WebTabBar() {
     );
   };
 
-  return (
-    <Nav style={[styles.wrap, isMobile && styles.wrapMobile]} aria-label="Primary">
+  if (!mounted) return null;
+
+  return createPortal(
+    <nav
+      data-dvnt-tab-bar=""
+      style={{ ...viewportStyle, ...(isMobile ? mobileViewportStyle : {}) }}
+      aria-label="Primary"
+    >
       <View style={[styles.bar, isMobile && styles.barMobile]}>
         {LEFT.map((t) => (
           <TabItem key={t.href} {...t} />
@@ -69,25 +83,35 @@ export function WebTabBar() {
           <TabItem key={t.href} {...t} />
         ))}
       </View>
-    </Nav>
+    </nav>,
+    document.body,
   );
 }
 
-// Web-only style props (position:fixed, backdrop-filter) cast through `any`.
+// Do not send the fixed positioning through RN/NativeWind's style interop.
+// A body-level DOM element anchors it to the viewport, not a scroll surface.
+const viewportStyle: CSSProperties = {
+  position: "fixed",
+  display: "flex",
+  flexDirection: "column",
+  left: 0,
+  right: 0,
+  bottom: 18,
+  alignItems: "center",
+  zIndex: 1000,
+  pointerEvents: "none",
+  padding: "0 16px",
+};
+const mobileViewportStyle: CSSProperties = {
+  bottom: 0,
+  padding: 0,
+};
+
+// Web-only style props (backdrop-filter, CSS lengths) cast through `any`.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const web = (s: Record<string, unknown>) => s as any;
 
 const styles = StyleSheet.create({
-  wrap: web({
-    position: "fixed",
-    left: 0,
-    right: 0,
-    bottom: 18,
-    alignItems: "center",
-    zIndex: 1000,
-    pointerEvents: "none",
-    paddingHorizontal: 16,
-  }),
   bar: web({
     pointerEvents: "auto",
     width: "100%",
@@ -106,11 +130,7 @@ const styles = StyleSheet.create({
     backdropFilter: "saturate(160%) blur(18px)",
     WebkitBackdropFilter: "saturate(160%) blur(18px)",
   }),
-  // Mobile: flush to the absolute bottom, edge-to-edge, safe-area aware.
-  wrapMobile: web({
-    bottom: 2,
-    paddingHorizontal: 0,
-  }),
+  // Mobile: flush to the viewport bottom, edge-to-edge, safe-area aware.
   barMobile: web({
     maxWidth: "100%",
     borderRadius: 20,
@@ -120,8 +140,9 @@ const styles = StyleSheet.create({
     boxShadow: "0 -8px 24px rgba(0,0,0,0.4)",
     backgroundColor: "rgba(8,10,18,0.6)",
     height: "auto",
+    minHeight: "calc(58px + env(safe-area-inset-bottom, 0px))",
     paddingTop: 8,
-    paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
+    paddingBottom: "calc(8px + env(safe-area-inset-bottom, 0px))",
   }),
   item: {
     flex: 1,

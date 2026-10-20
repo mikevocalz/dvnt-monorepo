@@ -9,6 +9,8 @@ on:
       - 'packages/ui/src/video/RoomTimer*'
       - 'scripts/test-lynk-layout-browser.cjs'
       - 'scripts/test-lynk-native-stage-lifecycle.cjs'
+      - 'scripts/test-lynk-guest-gallery-dom.cjs'
+      - 'scripts/test-lynk-watermark-dom.cjs'
       - '.github/workflows/lynk-layout-regressions.yml'
   workflow_dispatch:
 permissions:
@@ -30,6 +32,14 @@ jobs:
         run: "$RUNNER_TEMP/lynk-layout/node_modules/.bin/playwright install --with-deps chromium"
       - name: Native dock and crowd geometry
         run: node --test packages/app/features/sneaky-lynk/ui/controls-layout.test.ts packages/app/features/sneaky-lynk/ui/native-stage-layout.test.ts
+      - name: Web stacked and paginated guest geometry
+        run: node --test packages/app/features/sneaky-lynk/ui/guest-gallery-layout.test.ts packages/app/features/sneaky-lynk/ui/stage-grid.test.ts
+      - name: Preserve web media and capture guards without watermarks
+        env:
+          NODE_PATH: ${{ runner.temp }}/lynk-layout/node_modules
+        run: |
+          node scripts/test-lynk-guest-gallery-dom.cjs
+          node scripts/test-lynk-watermark-dom.cjs
       - name: Preserve native media tiles across roster and viewport changes
         env:
           LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-layout

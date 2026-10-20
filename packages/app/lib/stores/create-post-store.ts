@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import { appendLegacyCaptionTags } from "@dvnt/app/lib/posts/post-caption";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
@@ -6,8 +7,12 @@ import type { PostKind, TextPostSlide, TextPostThemeKey } from "@dvnt/app/lib/ty
 import { storage, registerUserDataReset } from "@dvnt/app/lib/utils/storage";
 import {
   createTextPostSlide,
+  DEFAULT_TEXT_POST_THEME,
   normalizeTextPostSlides,
 } from "@dvnt/app/lib/posts/text-post";
+
+const useBrandedDraft = Platform.OS === "web";
+const initialTextTheme: TextPostThemeKey = useBrandedDraft ? DEFAULT_TEXT_POST_THEME : "graphite";
 
 interface LocationData {
   name: string;
@@ -88,7 +93,7 @@ const initialState = {
   placedTags: [] as PlacedPostTag[],
   isNSFW: false,
   postKind: "media" as PostKind,
-  textTheme: "graphite" as TextPostThemeKey,
+  textTheme: initialTextTheme,
   step: "select" as const,
   isUploading: false,
   uploadProgress: 0,
@@ -210,8 +215,8 @@ export const useCreatePostStore = create<CreatePostState>()(
         });
       },
       setIsNSFW: (isNSFW) => set({ isNSFW }),
-      setPostKind: (postKind) => set({ postKind }),
-      setTextTheme: (textTheme) => set({ textTheme }),
+      setPostKind: (postKind) => set(useBrandedDraft ? { postKind, textTheme: DEFAULT_TEXT_POST_THEME } : { postKind }),
+      setTextTheme: (textTheme) => set({ textTheme: useBrandedDraft ? DEFAULT_TEXT_POST_THEME : textTheme }),
       setStep: (step) => set({ step }),
       startUpload: () => set({ isUploading: true, uploadProgress: 0 }),
       setUploadProgress: (progress) => set({ uploadProgress: progress }),
@@ -249,7 +254,7 @@ export const useCreatePostStore = create<CreatePostState>()(
           state.textSlides.some((slide) => slide.content.trim().length > 0)
             ? "text"
             : "media",
-        textTheme: state.textTheme,
+        textTheme: useBrandedDraft ? DEFAULT_TEXT_POST_THEME : state.textTheme,
         textSlides: state.textSlides,
         activeTextSlideIndex: state.activeTextSlideIndex,
         location:
@@ -267,6 +272,9 @@ export const useCreatePostStore = create<CreatePostState>()(
 
         return {
           ...merged,
+          // A saved composer draft is still a new post, not a published post.
+          // Rehydrate its content without reviving the retired color choices.
+          textTheme: useBrandedDraft ? DEFAULT_TEXT_POST_THEME : merged.textTheme,
           caption: typeof merged.caption === "string" ? merged.caption : "",
           tags: Array.isArray(merged.tags) ? merged.tags.filter((tag) => typeof tag === "string") : [],
           textSlides: normalizeTextPostSlides(merged.textSlides),

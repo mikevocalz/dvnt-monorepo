@@ -43,8 +43,8 @@
      phone the message input sat underneath it, half visible and unusable.
      Bottom-anchored surfaces add this to their own padding. Zero on desktop,
      where AppShell renders the side rail instead of the bar.
-     Geometry mirrors `web-tab-bar.web.tsx` styles.wrapMobile/barMobile:
-     bottom 2 + paddingTop 8 + item 40 + paddingBottom 8. EXCLUDES the safe-area
+     Geometry mirrors `web-tab-bar.web.tsx` barMobile:
+     a 58px minimum-height bar, flush to the viewport bottom. EXCLUDES the safe-area
      inset on purpose — every consumer already adds `env(safe-area-inset-bottom)`
      itself, and the bar's own bottom padding is that same inset, so folding it
      in here would reserve it twice. */

@@ -33,12 +33,12 @@
  *     `sneakyLynkApi.endRoom(id)` (host) + `useLynkHistoryStore.endRoom(...)`.
  *   - Hand-raise / chat / eject domain state = the SHARED `useRoomStore`.
  *
- * Web capture protection is DETERRENCE + ATTRIBUTION only: browsers offer no
+ * Web capture protection is DETERRENCE only: browsers offer no
  * equivalent of Android FLAG_SECURE or the iOS capture blackout, and macOS
  * screenshots (⌘⇧3/4/5) and Win+Shift+S are invisible to the page. The live
  * room uses `SecureCaptureBoundary` for what web can actually do: an
- * anti-capture wrapper, focus/visibility blackout, context/copy/shortcut
- * blocking, and a forensic watermark that survives into any screenshot.
+ * anti-capture wrapper, focus/visibility blackout, and context/copy/shortcut
+ * blocking. The live video is intentionally free of repeated watermark text.
  *
  * Signals are TIERED (`useSecureCaptureGuard`): only PrintScreen keyup,
  * `beforeprint`, and Cmd/Ctrl+P notify the room. Blur and tab-switch blackout
@@ -1189,8 +1189,8 @@ function RoomInner({
   const remotePublisherTiles = remoteTiles.filter((t) => t.isPublisher);
   const listenerTiles = remoteTiles.filter((t) => !t.isPublisher);
 
-  // Equal stage tiles for every publisher; roles remain visible as chips.
-  // Stable ordering keeps the same host-first grid for every participant.
+  // Keep host-first ordering for the stacked focus and paged guest gallery.
+  // Roles and local identity stay attached to the same keyed media tiles.
   const stageTiles = [localTile, ...remotePublisherTiles].sort(
     (a, b) => Number(b.isHost) - Number(a.isHost) ||
       Number(b.isCoHost) - Number(a.isCoHost) ||
@@ -1362,7 +1362,7 @@ function RoomInner({
       mode="sneaky-lynk"
       blackoutOnBlur
       blackoutOnVisibilityHidden
-      watermark
+      watermark={false}
       logEvents
       onCaptureAttempt={(kind) => captureBroadcast.notifyLocalCapture(kind)}
     >
@@ -1437,11 +1437,11 @@ function RoomInner({
         </div>
       ) : (
         <>
-           {/* Solo invites, one-to-one equal split, or responsive group grid.
-               Keep the speaker ring and roles; remove the oversized host hero. */}
+           {/* Host above a single guest or swipeable guest pages. Two people
+               stay vertically stacked even on desktop and in landscape. */}
            <section
              data-stage-participants={stageTiles.length}
-             className={`relative flex flex-1 flex-col items-center justify-center gap-2 pl-[max(12px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] py-2 [@media(max-height:500px)_and_(min-width:600px)]:py-1 ${stageTiles.length > 2 ? "min-h-[calc(clamp(144px,26dvh,280px)+240px)] [@media(max-height:500px)_and_(min-width:600px)]:min-h-[min(360px,calc(var(--lynk-visible-height,100dvh)-120px))]" : "min-h-40"}`}
+             className={`relative flex flex-1 flex-col items-center justify-center gap-2 pl-[max(12px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] py-2 [@media(max-height:500px)_and_(min-width:600px)]:py-1 ${stageTiles.length > 2 ? "min-h-80" : "min-h-40"}`}
            >
              {rosterReady && stageTiles.length === 1 ? (
                <div role="status" className="flex shrink-0 flex-wrap items-center justify-center gap-2 rounded-xl border border-white/10 bg-[#111522]/85 px-3 py-2 text-xs text-white/70">

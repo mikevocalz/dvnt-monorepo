@@ -2,6 +2,9 @@ import type { TextPostSlide, TextPostThemeKey } from "@dvnt/app/lib/types";
 
 export const TEXT_POST_MAX_SLIDES = 6;
 export const TEXT_POST_MAX_LENGTH = 1500;
+// Creation uses DVNT branding. Keep the full palette and legacy fallback below
+// so already-published posts retain their original appearance.
+export const DEFAULT_TEXT_POST_THEME = "deviant" satisfies TextPostThemeKey;
 const TRAILING_HASHTAG_BLOCK_RE = /\n+(#[^\s#]+(?:\s+#[^\s#]+)*)\s*$/;
 
 export interface TextPostTheme {
