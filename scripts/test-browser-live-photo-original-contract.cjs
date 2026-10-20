@@ -18,9 +18,10 @@ function load(relative, adapters = {}) {
 }
 const policy = load('packages/app/lib/media/upload-policy.ts');
 const fileMime = load('packages/app/lib/media/browser-file-mime.ts');
+const contentId = load('packages/app/lib/media/apple-content-id.ts');
 const videoPolicy = load('packages/app/lib/media/video-pick-policy.ts', {'./upload-policy.ts':policy});
 const liveImport = load('packages/app/features/create/browser-live-photo-import.ts', {'../../lib/media/upload-policy.ts':policy,'../../lib/media/video-pick-policy.ts':videoPolicy,'../../lib/media/browser-file-mime.ts':fileMime});
-const intake = load('packages/app/features/create/browser-media-intake.ts', {'../../lib/media/upload-policy.ts':policy,'../../lib/media/video-pick-policy.ts':videoPolicy,'../../lib/media/browser-file-mime.ts':fileMime,'./browser-live-photo-import.ts':liveImport});
+const intake = load('packages/app/features/create/browser-media-intake.ts', {'../../lib/media/upload-policy.ts':policy,'../../lib/media/video-pick-policy.ts':videoPolicy,'../../lib/media/browser-file-mime.ts':fileMime,'../../lib/media/apple-content-id.ts':contentId,'./browser-live-photo-import.ts':liveImport});
 const calls = [], sent = [], urls = [];
 const blobURL = (bytes, type) => { const uri = URL.createObjectURL(new Blob([bytes],{type})); urls.push(uri); return uri; };
 const functions = new FunctionsClient('https://fixture.invalid/functions/v1', {customFetch: async (url, init) => {

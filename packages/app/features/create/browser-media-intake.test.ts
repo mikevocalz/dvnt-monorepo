@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { MediaAsset } from "../../lib/hooks/use-media-picker";
-import { readBrowserMediaFiles, associateBrowserMedia, separateBrowserMedia, captureBrowserMediaReplacement, releaseUnselectedBrowserMedia } from "./browser-media-intake.ts";
+import { readBrowserMediaFiles, associateBrowserMedia, separateBrowserMedia, mergeByAppleContentId, captureBrowserMediaReplacement, releaseUnselectedBrowserMedia } from "./browser-media-intake.ts";
 import { sizeLimitForKind } from "../../lib/media/upload-policy.ts";
 
 const image = (name = "IMG_1234.jpg", type = "image/jpeg") => new File([new Uint8Array([255, 216, 0, 1, 2, 3])], name, { type });
@@ -37,6 +37,38 @@ test("a generic octet-stream MIME falls back to the extension and the upload blo
   releaseUnselectedBrowserMedia(result.assets, []);
   const unknown = await readFiles([image("notes.txt", "application/octet-stream")]);
   assert.equal(unknown.assets.length, 0); assert.equal(unknown.errors.length, 1);
+});
+
+const withIds = (ids: Record<string, string>) => ({ readDuration, readContentId: async (file: Blob) => ids[(file as File).name] ?? null });
+const names = (media: readonly MediaAsset[]) => media.map(item => `${item.fileName}:${item.kind}`);
+
+test("matching Apple content identifiers pair automatically; missing or ambiguous ones stay separate", async () => {
+  const ids = { "a.HEIC": "ID-A", "a.MOV": "ID-A", "b.HEIC": "ID-B", "c.HEIC": "ID-C", "c2.HEIC": "ID-C", "c.MOV": "ID-C" };
+  const files = [image("a.HEIC", "image/heic"), video("a.MOV"), image("b.HEIC", "image/heic"), video("x.MOV"), image("c.HEIC", "image/heic"), image("c2.HEIC", "image/heic"), video("c.MOV")];
+  const { assets } = await readBrowserMediaFiles(files, withIds(ids));
+  const { media, removed } = mergeByAppleContentId([], assets);
+  assert.deepEqual(names(media), ["a.HEIC:livePhoto", "b.HEIC:image", "x.MOV:video", "c.HEIC:image", "c2.HEIC:image", "c.MOV:video"]);
+  assert.equal(media[0].pairedVideoUri, assets[1].uri); assert.deepEqual(removed, []);
+  releaseUnselectedBrowserMedia(assets, []);
+});
+
+test("an exported pair replaces the lone sidebar still; a held Live Photo is not duplicated; a split stays split", async () => {
+  const ids = { "sidebar.jpg": "ID-A", "a.HEIC": "ID-A", "a.MOV": "ID-A" };
+  const first = mergeByAppleContentId([], (await readBrowserMediaFiles([image("sidebar.jpg")], withIds(ids))).assets);
+  const second = mergeByAppleContentId(first.media, (await readBrowserMediaFiles([image("a.HEIC", "image/heic"), video("a.MOV")], withIds(ids))).assets);
+  assert.deepEqual(names(second.media), ["a.HEIC:livePhoto"]); assert.deepEqual(names(second.removed), ["sidebar.jpg:image"]);
+  const again = mergeByAppleContentId(second.media, (await readBrowserMediaFiles([image("a.HEIC", "image/heic"), video("a.MOV")], withIds(ids))).assets);
+  assert.deepEqual(names(again.media), ["a.HEIC:livePhoto"]);
+  const split = separateBrowserMedia(second.media, second.media[0].id); assert.ok(split.ok); if (!split.ok) return;
+  const later = mergeByAppleContentId(split.media, (await readBrowserMediaFiles([image("other.jpg")], withIds(ids))).assets);
+  assert.deepEqual(names(later.media), ["a.HEIC:image", "a.MOV:video", "other.jpg:image"]);
+});
+
+test("the motion half can arrive after its still", async () => {
+  const ids = { "a.HEIC": "ID-A", "a.MOV": "ID-A" };
+  const first = mergeByAppleContentId([], (await readBrowserMediaFiles([image("a.HEIC", "image/heic")], withIds(ids))).assets);
+  const second = mergeByAppleContentId(first.media, (await readBrowserMediaFiles([video("a.MOV")], withIds(ids))).assets);
+  assert.deepEqual(names(second.media), ["a.HEIC:livePhoto"]); assert.deepEqual(second.removed, []);
 });
 
 test("explicit association preserves chosen identities and disassociation restores both without revocation", async () => {
