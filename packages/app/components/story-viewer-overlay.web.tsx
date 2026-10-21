@@ -27,7 +27,7 @@ import {
 } from "@dvnt/app/lib/stories/story-message";
 import { isSameUser } from "@dvnt/app/lib/profile/same-user";
 import { storyProfilePath } from "@dvnt/app/lib/profile/story-profile-path";
-import { StorySharedSourceCard, StorySharedSourceContent } from "./story-shared-source.web";
+import { StorySharedSourceActions, StorySharedSourceContent } from "./story-shared-source.web";
 import { useSharedStoryPlayback } from "../lib/hooks/use-shared-story-playback";
 import { SHARED_STORY_BACKDROP } from "../lib/stories/shared-source";
 
@@ -501,7 +501,7 @@ export function StoryViewerOverlay() {
           </div>
         ) : null}
 
-        {/* One bottom stack keeps attribution, tags and messaging clear of each
+        {/* One bottom stack keeps source actions, tags and messaging clear of each
             other. Empty story space stays transparent to the player's tap zones. */}
         {playbackReady ? (
           <div
@@ -525,7 +525,7 @@ export function StoryViewerOverlay() {
               onClick={(event) => event.stopPropagation()}
             >
               {/* Keep tags in the bottom stack; their expanded list opens above
-                  it instead of covering attribution or messaging controls. */}
+                  it instead of covering source actions or messaging controls. */}
               {storyTags.length > 0 ? (
                 <div data-story-tags className="relative flex justify-center">
                   <button
@@ -565,12 +565,8 @@ export function StoryViewerOverlay() {
                 </div>
               ) : null}
               {segment?.sharedSource ? (
-                <StorySharedSourceCard
+                <StorySharedSourceActions
                   source={segment.sharedSource}
-                  profilePath={segment.sharedSource.author.profileUnavailable ? null : storyProfilePath({
-                    userId: segment.sharedSource.author.id,
-                    username: segment.sharedSource.author.username,
-                  }, viewer, "web")}
                   viewersAction={isOwnStory ? viewersAction : undefined}
                   onNavigate={(path) => {
                     closeForNavigation();

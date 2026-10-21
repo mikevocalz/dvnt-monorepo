@@ -41,92 +41,40 @@ export function StorySharedSourceContent({
   );
 }
 
-/** Compact source identity and actions, separate from the story publisher. */
-export function StorySharedSourceCard({
+/** Only footer actions are visible; source identity remains in the metadata. */
+export function StorySharedSourceActions({
   source,
-  profilePath,
   viewersAction,
   onNavigate,
 }: {
   source: StorySharedSource;
-  profilePath: string | null;
   viewersAction?: ReactNode;
   onNavigate: (path: string) => void;
 }) {
-  const authorName = source.author.name || `@${source.author.username}`;
-  const AuthorTag = profilePath ? "a" : "div";
   const sourcePath = storySourcePath(source);
-  const navigate = (event: React.MouseEvent<HTMLElement>, path: string) => {
-    event.stopPropagation();
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
-      return;
-    event.preventDefault();
-    onNavigate(path);
-  };
 
   return (
     <section
-      data-story-source-card
+      data-story-source-actions
       aria-label={`Shared ${source.type} by @${source.author.username}`}
-      className="flex min-w-0 flex-col gap-2 rounded-xl border border-white/20 bg-black/65 p-3 text-white backdrop-blur-md"
+      className="flex min-w-0 items-center justify-between gap-2 text-white"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
-      <AuthorTag
-        href={profilePath || undefined}
-        onClick={
-          profilePath
-            ? (event: React.MouseEvent<HTMLElement>) =>
-                navigate(event, profilePath)
-            : undefined
-        }
-        aria-label={
-          profilePath
-            ? `View @${source.author.username}'s profile`
-            : "Original author profile unavailable"
-        }
-        className="flex min-h-11 min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline-2 focus-visible:outline-white"
+      {viewersAction}
+      <a
+        href={sourcePath}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+            return;
+          event.preventDefault();
+          onNavigate(sourcePath);
+        }}
+        className="ml-auto inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-xl border border-white/15 bg-black/45 px-3 text-xs font-semibold backdrop-blur-md hover:bg-black/60 focus-visible:outline-2 focus-visible:outline-white"
       >
-        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/15 text-sm font-bold">
-          {source.author.username.slice(0, 1).toUpperCase()}
-          {source.author.avatar ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={source.author.avatar}
-              alt=""
-              className="absolute inset-0 h-full w-full object-cover"
-              onError={(event) => {
-                event.currentTarget.style.visibility = "hidden";
-              }}
-            />
-          ) : null}
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold" title={authorName}>
-            {authorName}
-          </span>
-          <span className="block truncate text-xs text-white/70">
-            {profilePath
-              ? `@${source.author.username} · Original ${source.type}`
-              : "Profile unavailable"}
-          </span>
-          {source.title ? (
-            <span className="block truncate text-xs font-medium" title={source.title}>
-              {source.title}
-            </span>
-          ) : null}
-        </span>
-      </AuthorTag>
-      <div data-story-source-actions className="flex min-w-0 items-center justify-between gap-2">
-        {viewersAction}
-        <a
-          href={sourcePath}
-          onClick={(event) => navigate(event, sourcePath)}
-          className="ml-auto inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-xl bg-white/15 px-3 text-xs font-semibold hover:bg-white/25 focus-visible:outline-2 focus-visible:outline-white"
-        >
-          {source.type === "event" ? "View Event" : "View Post"}
-        </a>
-      </div>
+        {source.type === "event" ? "View Event" : "View Post"}
+      </a>
     </section>
   );
 }

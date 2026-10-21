@@ -166,11 +166,9 @@ const {
       };
       globalThis.__openStory("post");
     });
-    const card = () => page.locator("[data-story-source-card]");
-    const profile = () =>
-      card().getByRole("link", { name: "View @original's profile" });
+    const actions = () => page.locator("[data-story-source-actions]");
     const sourceLink = () =>
-      card().getByRole("link", { name: /^View (Event|Post)$/ });
+      actions().getByRole("link", { name: /^View (Event|Post)$/ });
     const screenshots = process.env.STORY_SHARE_SCREENSHOT_DIR;
     if (screenshots) fs.mkdirSync(screenshots, { recursive: true });
     for (const viewport of [
@@ -182,10 +180,9 @@ const {
       for (const role of ["own", "other"]) {
         for (const kind of ["post", "photo", "event", "text-event"]) {
           await page.evaluate(({ kind, role }) => globalThis.__openStory(kind, role), { kind, role });
-          await card().waitFor();
-          await profile().waitFor();
+          await actions().waitFor();
           await page.mouse.move(0, 0);
-          const geometry = await card().evaluate((el) => {
+          const geometry = await actions().evaluate((el) => {
             const rect = (e) => {
               if (!e) return null;
               const b = e.getBoundingClientRect();
@@ -196,31 +193,46 @@ const {
               const b = e.getBoundingClientRect();
               return e.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2));
             };
-            const author = el.querySelector("a");
-            const source = el.querySelector("[data-story-source-actions] a");
+            const source = el.querySelector("a");
+            const style = getComputedStyle(el);
             const viewers = el.querySelector('button[aria-label="See who viewed this story"]');
             const footer = el.closest("[data-story-footer]");
             const frame = document.querySelector(".dvnt-story-viewer").parentElement;
             const content = document.querySelector('section[aria-label$=" content"]');
             return {
-              card: rect(el), author: rect(author), source: rect(source), viewers: rect(viewers),
+              actions: rect(el), source: rect(source), viewers: rect(viewers),
               footer: rect(footer), frame: rect(frame), content: rect(content),
               caption: rect(content?.querySelector("p")),
               reply: rect(document.querySelector('input[aria-label^="Reply to "]')?.closest("form")),
               reactions: [...document.querySelectorAll('button[aria-label^="React "]')].map(rect),
-              authorHit: hit(author), sourceHit: hit(source), viewersHit: hit(viewers),
+              sourceHit: hit(source), viewersHit: hit(viewers),
+              actionCount: el.querySelectorAll("a, button").length,
+              avatarCount: el.querySelectorAll("img").length,
+              profileLinkCount: el.querySelectorAll('a[href^="/profile/"]').length,
+              visibleText: el.textContent,
+              background: style.backgroundColor,
+              borderWidth: parseFloat(style.borderTopWidth),
+              padding: parseFloat(style.paddingTop),
               bottomPadding: parseFloat(getComputedStyle(footer).paddingBottom),
             };
           });
           const context = `${kind}/${role}/${viewport.width}: ${JSON.stringify(geometry)}`;
-          assert.ok(geometry.authorHit && geometry.sourceHit, context);
-          assert.ok(geometry.card.left >= geometry.frame.left && geometry.card.right <= geometry.frame.right, context);
-          assert.ok(geometry.card.top > geometry.frame.top + geometry.frame.height * 0.4, "attribution belongs in the bottom area: " + context);
+          assert.ok(geometry.sourceHit, context);
+          assert.equal(geometry.actionCount, role === "own" ? 2 : 1, "only the requested footer actions: " + context);
+          assert.equal(geometry.avatarCount, 0, "no footer avatar: " + context);
+          assert.equal(geometry.profileLinkCount, 0, "no third or hidden profile action: " + context);
+          assert.equal(geometry.visibleText, `${role === "own" ? "Viewers" : ""}${kind.includes("event") ? "View Event" : "View Post"}`, "no author/name/title row: " + context);
+          assert.equal(geometry.background, "rgba(0, 0, 0, 0)", "no surrounding card background: " + context);
+          assert.equal(geometry.borderWidth, 0, "no surrounding card border: " + context);
+          assert.equal(geometry.padding, 0, "no surrounding card padding: " + context);
+          assert.ok(geometry.actions.left >= geometry.frame.left && geometry.actions.right <= geometry.frame.right, context);
+          assert.ok(geometry.actions.top > geometry.frame.top + geometry.frame.height * 0.4, "source actions belong in the bottom area: " + context);
           assert.ok(Math.abs(geometry.footer.bottom - geometry.frame.bottom) <= 1, context);
           assert.ok(geometry.bottomPadding >= 20, "bottom safe-area baseline: " + context);
-          assert.ok(geometry.author.height >= 44 && geometry.source.height >= 44, context);
+          assert.ok(geometry.source.height >= 44, context);
+          assert.ok(geometry.actions.height <= 45, "single-row footer: " + context);
           assert.ok(geometry.source.right > geometry.frame.left + geometry.frame.width * 0.75, "source action must be on the right: " + context);
-          assert.ok(geometry.source.bottom <= geometry.card.bottom, context);
+          assert.ok(geometry.source.bottom <= geometry.actions.bottom, context);
           assert.equal(await sourceLink().textContent(), kind.includes("event") ? "View Event" : "View Post");
           if (role === "own") {
             assert.ok(geometry.viewersHit, context);
@@ -233,24 +245,24 @@ const {
           } else {
             assert.equal(geometry.viewers, null);
             assert.equal(geometry.reactions.length, 7);
-            assert.ok(geometry.card.bottom < geometry.reply.top, context);
+            assert.ok(geometry.actions.bottom < geometry.reply.top, context);
             for (const reaction of geometry.reactions) {
               assert.ok(reaction.width >= 44 && reaction.height >= 44, "reactions never shrink: " + context);
               assert.ok(reaction.left >= geometry.frame.left && reaction.right <= geometry.frame.right, context);
-              assert.ok(geometry.card.bottom < reaction.top && reaction.bottom < geometry.reply.top, context);
+              assert.ok(geometry.actions.bottom < reaction.top && reaction.bottom < geometry.reply.top, context);
             }
           }
           if (kind === "post" || kind === "text-event") {
             assert.ok(geometry.content.bottom < geometry.footer.top, "text remains in the body above the footer: " + context);
             assert.ok(geometry.content.height >= 80, "text body remains readable: " + context);
-            assert.equal(await card().getByText("A text post", { exact: false }).count(), 0);
+            assert.equal(await actions().getByText("A text post", { exact: false }).count(), 0);
           } else assert.equal(geometry.content, null);
-          // Footer padding must not advance the player.
-          await card().click({ position: { x: 3, y: 3 } });
-          assert.equal(await card().getAttribute("aria-label"), `Shared ${kind.includes("event") ? "event" : "post"} by @original`);
+          // The empty space between footer actions must not advance the player.
+          await actions().click({ position: { x: geometry.actions.width / 2, y: geometry.actions.height / 2 } });
+          assert.equal(await actions().getAttribute("aria-label"), `Shared ${kind.includes("event") ? "event" : "post"} by @original`);
           if (screenshots) await page.screenshot({ path: path.join(screenshots, `${kind}-${role}-${viewport.width}x${viewport.height}.png`) });
           if (role === "own") {
-            await card().getByRole("button", { name: "See who viewed this story" }).click();
+            await actions().getByRole("button", { name: "See who viewed this story" }).click();
             await page.getByRole("dialog", { name: "Story viewers" }).waitFor();
             assert.equal(await page.evaluate(() => globalThis.__viewersSheet.storyId), kind === "event" ? "102" : kind === "text-event" ? "104" : kind === "photo" ? "103" : "101");
             await page.getByRole("button", { name: "Close viewers" }).click();
@@ -258,28 +270,23 @@ const {
             await page.getByRole("textbox", { name: "Reply to publisher" }).fill("A draft reply");
             assert.equal(await page.getByRole("button", { name: /^React / }).count(), 0);
             assert.ok(await sourceLink().isVisible(), "composer focus preserves source access");
-            await card().click({ position: { x: 3, y: 3 } });
+            await actions().click({ position: { x: geometry.actions.width / 2, y: geometry.actions.height / 2 } });
           }
-          await profile().click();
-          await card().waitFor({ state: "detached" });
-          assert.equal(await page.evaluate(() => globalThis.__routes.at(-1)), "/profile/original");
-          assert.equal(await page.evaluate(() => globalThis.__fixture.useStoryViewerStore.getState().navigationClose), true);
-          await page.evaluate(({ kind, role }) => globalThis.__openStory(kind, role), { kind, role });
-          await sourceLink().waitFor();
           await sourceLink().focus();
           await page.keyboard.press("Enter");
-          await card().waitFor({ state: "detached" });
+          await actions().waitFor({ state: "detached" });
           assert.equal(await page.evaluate(() => globalThis.__routes.at(-1)), kind.includes("event") ? "/e/22" : "/feed/post/11");
+          assert.equal(await page.evaluate(() => globalThis.__fixture.useStoryViewerStore.getState().navigationClose), true);
         }
-        // Tag expansion does not shift or occlude the attribution/action stack.
+        // Tag expansion does not shift or occlude the source action row.
         await page.evaluate((role) => globalThis.__openStory("text-event", role, true), role);
-        await card().waitFor();
-        const before = await card().boundingBox();
+        await actions().waitFor();
+        const before = await actions().boundingBox();
         await page.getByRole("button", { name: "8 people tagged" }).click();
         const tags = await page.locator("[data-story-tag-list]").boundingBox();
-        const after = await card().boundingBox();
+        const after = await actions().boundingBox();
         assert.deepEqual(after, before);
-        assert.ok(tags.y >= 0 && tags.y + tags.height < after.y, "expanded tags stay above attribution");
+        assert.ok(tags.y >= 0 && tags.y + tags.height < after.y, "expanded tags stay above source actions");
         assert.ok(await sourceLink().isVisible());
         await page.getByRole("button", { name: "8 people tagged" }).click();
         const textBody = page.locator('section[aria-label="Shared event content"]');
@@ -288,21 +295,21 @@ const {
         await textBody.focus();
         await page.keyboard.press("End");
         await page.waitForFunction(() => document.querySelector('section[aria-label="Shared event content"]').scrollTop > 0);
-        assert.equal(await card().getAttribute("aria-label"), "Shared event by @original", "scroll keys must not advance the story");
+        assert.equal(await actions().getAttribute("aria-label"), "Shared event by @original", "scroll keys must not advance the story");
         assert.equal(await page.locator("[data-story-tag-list]").count(), 0);
         await page.keyboard.press("Escape");
-        await card().waitFor({ state: "detached" });
+        await actions().waitFor({ state: "detached" });
       }
     }
     // The transparent middle still accepts ordinary next-segment clicks.
     await page.evaluate(() => globalThis.__openStory("event", "own"));
-    await card().waitFor();
+    await actions().waitFor();
     const frame = await page.locator(".dvnt-story-viewer").boundingBox();
     await page.mouse.click(frame.x + frame.width * 0.8, frame.y + frame.height * 0.5);
-    await page.locator('[data-story-source-card][aria-label="Shared post by @original"]').waitFor();
+    await page.locator('[data-story-source-actions][aria-label="Shared post by @original"]').waitFor();
     // A signed-out account cannot retain the owner-only footer or sheet.
     await page.evaluate(() => globalThis.__openStory("event", "own"));
-    await card().getByRole("button", { name: "See who viewed this story" }).click();
+    await actions().getByRole("button", { name: "See who viewed this story" }).click();
     await page.evaluate(() => globalThis.__fixture.useAuthStore.setState({ user: null }));
     await page.getByRole("dialog", { name: "Story viewers" }).waitFor({ state: "detached" });
     assert.equal(await page.getByRole("button", { name: "See who viewed this story" }).count(), 0);
@@ -318,7 +325,7 @@ const {
     });
     await page.getByRole("status").filter({ hasText: "Checking" }).waitFor();
     assert.equal(await page.locator(".dvnt-story-viewer").count(), 0);
-    assert.equal(await card().count(), 0);
+    assert.equal(await actions().count(), 0);
     assert.equal(
       await page.locator('input[aria-label^="Reply to "]').count(),
       0,
@@ -350,13 +357,13 @@ const {
     // The selected second segment stays selected after sanitization/remount.
     await page.waitForTimeout(100);
     assert.equal(
-      await card().getAttribute("aria-label"),
+      await actions().getAttribute("aria-label"),
       "Shared event by @original",
     );
     assert.equal(await page.locator(".dvnt-story-viewer").count(), 1);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS story attribution Chromium: actual player, own/other/guest eligibility, 320/375/1440px bottom footer, Viewers left/source right, text/photo/event, seven 44px reactions, expanded tags, composer focus, hit-testing, keyboard and navigation-close semantics",
+      "PASS story attribution Chromium: actual player, own/other/guest eligibility, 320/375/1440px unboxed two-action footer, Viewers left/source right, text/photo/event, seven 44px reactions, expanded tags, composer focus, hit-testing, keyboard and navigation-close semantics",
     );
   } finally {
     if (browser) await browser.close();
