@@ -610,7 +610,7 @@ export function EventEditScreen() {
 
   if (isLoading || s.hydratedId !== id) {
     return (
-      <div className="min-h-[100dvh] bg-[#06070d] text-white flex items-center justify-center">
+      <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#06070d] text-white flex items-center justify-center">
         <span className="text-sm text-white/50">Loading event…</span>
       </div>
     );
@@ -622,7 +622,7 @@ export function EventEditScreen() {
   const isOwner = !currentUser || !hostId || String(hostId) === String(currentUser.id);
   if (!isOwner) {
     return (
-      <div className="min-h-[100dvh] bg-[#06070d] text-white flex flex-col items-center justify-center gap-3 px-6">
+      <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#06070d] text-white flex flex-col items-center justify-center gap-3 px-6">
         <span className="text-sm text-white/60 text-center">
           You don&apos;t have permission to edit this event.
         </span>
@@ -637,7 +637,7 @@ export function EventEditScreen() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-[#06070d] text-white">
+    <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#06070d] text-white">
       {/* Sticky header */}
       <div
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"

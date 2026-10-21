@@ -77,7 +77,7 @@ const { chromium } = require('playwright');
       const bar = () => document.querySelector('[data-dvnt-tab-bar]');
       const checkBar = () => {
         assert.ok(bar()); assert.equal(bar().parentElement, document.body);
-        assert.equal(bar().style.position, 'fixed'); assert.equal(bar().style.bottom, '0px');
+        assert.equal(bar().style.position, 'fixed'); assert.equal(bar().style.bottom, 'auto'); assert.equal(bar().style.transform, 'translateY(-100%)');
         assert.equal(document.querySelectorAll('[data-dvnt-tab-bar]').length, 1);
       };
       const hydrationNode = document.createElement('div');

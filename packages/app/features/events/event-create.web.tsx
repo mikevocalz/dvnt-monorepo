@@ -761,9 +761,9 @@ export function CreateEventScreen() {
   const publishing = busy || createEvent.isPending;
 
   return (
-    <div className="min-h-[100dvh] bg-[#02030A] text-white">
+    <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#02030A] text-white">
       <div className="mx-auto max-w-5xl px-4 pt-4 pb-28">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-extrabold">Create event</h1>
           <div className="flex items-center gap-2">
             <button
@@ -828,7 +828,7 @@ export function CreateEventScreen() {
           is optional.
         </p>
 
-        <div className="grid lg:grid-cols-[1fr_380px] gap-5 mt-5 items-start">
+        <div className="grid grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_380px] gap-5 mt-5 items-start">
           {/* ── Form ── */}
           <div className="flex flex-col gap-4">
             <Section title="Basics">

@@ -57,6 +57,26 @@
   }
 }
 
+/* Event editors contain nested date, tier, add-on and RNW venue controls.
+   Intrinsic input widths must not expand their grid/flex tracks on a phone.
+   These rules do not clip content or create another scroll container. */
+[data-dvnt-event-editor] :is(input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+}
+[data-dvnt-event-editor] :is(section, section > div) {
+  min-width: 0;
+}
+@media (max-width: 767px) {
+  /* iOS auto-zooms focused controls below 16px and can retain that zoom after
+     keyboard dismissal. Keep pinch zoom enabled; fix the controls, not the
+     viewport meta. !important also covers Tailwind's important utilities and
+     RNW's inline venue-input font. Desktop typography is unchanged. */
+  [data-dvnt-event-editor] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea) {
+    font-size: 16px !important;
+  }
+}
+
 /* Global rounded, gradient deviant scrollbar (Firefox + WebKit/Blink). */
 * {
   scrollbar-width: thin;

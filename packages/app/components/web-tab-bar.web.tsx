@@ -6,12 +6,13 @@
  * and Solito navigation. The viewport layer uses a real <nav> portalled to
  * body; native never imports this .web file.
  */
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { Pressable, Text, View, StyleSheet, useWindowDimensions } from "react-native";
 import { useRouter, usePathname } from "solito/navigation";
 import { Home, Calendar, Plus, Heart, User } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useVisualViewportBottom } from "./use-visual-viewport-bottom.web";
 import { CenterButton } from "./center-button.web";
 
 const CYAN = "#3FDCFF";
@@ -45,6 +46,8 @@ export function WebTabBar() {
   // outside scrolling, transformed or paint-contained app/layout ancestors.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+  const viewportRef = useRef<HTMLElement>(null);
+  useVisualViewportBottom(viewportRef, mounted && isMobile);
 
   const TabItem = ({ href, Icon, label }: Tab) => {
     const active = pathname === href;
@@ -70,6 +73,7 @@ export function WebTabBar() {
 
   return createPortal(
     <nav
+      ref={viewportRef}
       data-dvnt-tab-bar=""
       style={{ ...viewportStyle, ...(isMobile ? mobileViewportStyle : {}) }}
       aria-label="Primary"
@@ -103,7 +107,9 @@ const viewportStyle: CSSProperties = {
   padding: "0 16px",
 };
 const mobileViewportStyle: CSSProperties = {
-  bottom: 0,
+  top: "var(--dvnt-visible-bottom, 100dvh)",
+  bottom: "auto",
+  transform: "translateY(-100%)",
   padding: 0,
 };
 
