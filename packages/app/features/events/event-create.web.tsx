@@ -1749,7 +1749,7 @@ function TicketTiersEditor() {
           {/* Tier type — v2 enum (GA / VIP / Early Bird / Table / Group). */}
           <div className="flex flex-col gap-1">
             <span className="text-[11px] text-white/55">Tier type</span>
-            <div className="flex gap-1.5">
+            <div className="flex flex-wrap gap-1.5">
               {TIER_TYPE_OPTIONS.map((o) => {
                 const selected = (tier.tierType ?? "ga") === o.value;
                 return (
@@ -1773,7 +1773,7 @@ function TicketTiersEditor() {
           {/* Visibility — public / hidden / locked (+ unlock code). */}
           <div className="flex flex-col gap-1">
             <span className="text-[11px] text-white/55">Visibility</span>
-            <div className="flex gap-1.5">
+            <div className="flex flex-wrap gap-1.5">
               {TIER_VISIBILITY_OPTIONS.map((o) => {
                 const selected = (tier.visibility ?? "public") === o.value;
                 return (

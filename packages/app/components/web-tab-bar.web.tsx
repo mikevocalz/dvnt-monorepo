@@ -47,7 +47,11 @@ export function WebTabBar() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const viewportRef = useRef<HTMLElement>(null);
-  useVisualViewportBottom(viewportRef, mounted && isMobile);
+  // Limit the Safari editor workaround to routes covered by editor tests.
+  // Chat/comment composers retain their existing shared bottom:0 behavior.
+  const isEventEditor = pathname === "/feed/events/create" ||
+    /^\/feed\/edit-event\/[^/]+\/?$/.test(pathname ?? "");
+  useVisualViewportBottom(viewportRef, mounted && isMobile && isEventEditor);
 
   const TabItem = ({ href, Icon, label }: Tab) => {
     const active = pathname === href;
@@ -75,7 +79,7 @@ export function WebTabBar() {
     <nav
       ref={viewportRef}
       data-dvnt-tab-bar=""
-      style={{ ...viewportStyle, ...(isMobile ? mobileViewportStyle : {}) }}
+      style={{ ...viewportStyle, ...(isMobile ? mobileViewportStyle : {}), ...(isMobile && isEventEditor ? editorViewportStyle : {}) }}
       aria-label="Primary"
     >
       <View style={[styles.bar, isMobile && styles.barMobile]}>
@@ -106,10 +110,13 @@ const viewportStyle: CSSProperties = {
   pointerEvents: "none",
   padding: "0 16px",
 };
-const mobileViewportStyle: CSSProperties = {
+const editorViewportStyle: CSSProperties = {
   top: "var(--dvnt-visible-bottom, 100dvh)",
   bottom: "auto",
   transform: "translateY(-100%)",
+};
+const mobileViewportStyle: CSSProperties = {
+  bottom: 0,
   padding: 0,
 };
 

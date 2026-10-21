@@ -22,6 +22,11 @@
       "react-native": "./src/ImageProvider.tsx",
       "import": "./src/ImageProvider.tsx",
       "default": "./src/ImageProvider.tsx"
+    },
+    "./sticky-save-bar-web": {
+      "types": "./src/form/StickySaveBar.web.tsx",
+      "import": "./src/form/StickySaveBar.web.tsx",
+      "default": "./src/form/StickySaveBar.web.tsx"
     }
   },
   "scripts": {

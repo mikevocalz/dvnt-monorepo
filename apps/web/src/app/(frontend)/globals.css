@@ -49,11 +49,14 @@
      itself, and the bar's own bottom padding is that same inset, so folding it
      in here would reserve it twice. */
   --dvnt-tabbar-clearance: 0px;
+  --dvnt-tabbar-overlay-clearance: 0px;
 }
 
 @media (max-width: 767px) {
   :root {
     --dvnt-tabbar-clearance: 58px;
+    /* Includes the raised Create control for a separate floating save bar. */
+    --dvnt-tabbar-overlay-clearance: 78px;
   }
 }
 

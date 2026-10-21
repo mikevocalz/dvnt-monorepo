@@ -18,6 +18,8 @@ function options(file) {
   return [...read(file).matchAll(/export const [A-Z_]+[^=]*= \[[\s\S]*?\n\];/g)].map(m => m[0]).join('\n');
 }
 const mocks = {
+  '@dvnt/ui/sticky-save-bar-web': `export {StickySaveBar} from '${root}/packages/ui/src/form/StickySaveBar.web';`,
+  '@legendapp/list/react-native': `export const LegendList=()=>null;`,
   '@dvnt/supabase': `export const supabase={};`,
   'solito/navigation': `export const usePathname = () => window.editorFixture?.path || '/feed/events/create'; export const useParams=()=>({id:'fixture-event'}); export const useRouter=()=>({push:path=>window.editorFixture.navigate(path),replace:path=>window.editorFixture.navigate(path),back:()=>history.back()});`,
   '@dvnt/app/lib/stores/auth-store': `const state={user:{id:'fixture-owner',username:'member'},isAuthenticated:true,_hasHydrated:true}; export const useAuthStore=selector=>selector(state); useAuthStore.getState=()=>state;`,
@@ -39,13 +41,13 @@ const mocks = {
   '@dvnt/app/lib/api/event-drafts': `export const eventDraftsApi={saveCurrent:async()=>({revision:1})};`,
   '@dvnt/app/lib/auth/identity': `export const getAuthIdFromStore=()=> 'fixture-owner'; export const requireBetterAuthToken=()=> {throw Error('network forbidden')};`,
   '@dvnt/app/lib/stores/event-guest-store': `import {create} from 'zustand'; export const useEventGuestStore=create(()=>({guests:[],results:[],search:'',loading:false,load:async()=>{},reset:()=>{}}));`,
-  '@dvnt/ui': `export {FormField} from '${root}/packages/ui/src/form/FormField.web'; export {StickySaveBar} from '${root}/packages/ui/src/form/StickySaveBar.web'; export const useDirtyGuard=()=>{}; export const VenueSearchInput=()=> <input aria-label="Venue"/>;`,
+  '@dvnt/ui': `export {FormField} from '${root}/packages/ui/src/form/FormField.web'; export {StickySaveBar} from '${root}/packages/ui/src/form/StickySaveBar.web'; export const useDirtyGuard=()=>{}; export {VenueSearchInput} from '${root}/packages/ui/src/VenueSearchInput';`,
   '@dvnt/app/components/ui/html': `export const Main=props=><main {...props}/>;`,
   '@dvnt/app/components/logo': `export default ()=> <span>DVNT</span>;`,
   './web-top-bar.web': `export const WebTopBar=()=> <header style={{height:56}}>DVNT</header>;`,
 };
 (async()=>{
-  let browser, server;
+  let browser, server, page;
   try {
     await build({bundle:true,jsx:'automatic',tsconfigRaw:{},platform:'browser',format:'iife',outfile:path.join(dir,'app.js'),
       nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),
@@ -81,7 +83,7 @@ const mocks = {
     if(process.argv.includes('--serve')) {console.log(`Fixture: http://127.0.0.1:${server.address().port}/feed/events/create`); await new Promise(()=>{});}
     const engine=process.env.TABBAR_BROWSER==='webkit'?webkit:chromium;
     browser=await engine.launch({headless:true,...(engine===chromium?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||(fs.existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']}: {})});
-    const page=await browser.newPage({viewport:{width:393,height:852},isMobile:true,deviceScaleFactor:1});
+    page=await browser.newPage({viewport:{width:393,height:852},isMobile:true,deviceScaleFactor:1});
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/feed/events/create`);
     await page.getByRole('heading',{name:'Create event',exact:true}).waitFor();
@@ -114,11 +116,18 @@ const mocks = {
     await pinned('tickets scroll');
     await page.screenshot({path:path.join(dir,'create-tickets.png')});
     await page.getByLabel('Go public at').fill('2026-12-30T18:00');
-    await page.getByRole('button',{name:'Clear',exact:true}).click();
+    await page.getByRole('button',{name:'Clear',exact:true}).first().click();
     await page.getByRole('button',{name:'Add add-on',exact:true}).click();
     await page.getByPlaceholder('Add-on name (e.g. Coat check, Event tee)').fill('Coat check');
     await page.getByLabel('Sell tickets',{exact:true}).check();
-    await fits('expanded add-on and tickets');await readable();
+    await page.getByRole('button',{name:'Switch to multiple tiers'}).click();
+    await page.getByRole('button',{name:'Price goes up at a date'}).click();
+    await page.getByRole('button',{name:'First N tickets cheaper'}).click();
+    await page.getByRole('button',{name:'Merch',exact:true}).click();
+    await page.getByRole('button',{name:'Add size / color'}).click();
+    await page.getByPlaceholder('Size',{exact:true}).fill('XL');
+    await page.getByPlaceholder('Color',{exact:true}).fill('Purple');
+    await fits('expanded add-on variants and ticket tiers');await readable();
     for(const viewport of [{width:320,height:568},{width:375,height:812},{width:393,height:852},{width:430,height:932},{width:767,height:900},{width:852,height:393},{width:768,height:1024},{width:1024,height:900},{width:1440,height:900},{width:393,height:852}]){
       await page.setViewportSize(viewport);await nextFrame();
       if(viewport.width<768){await bar.waitFor();await pinned('resize '+JSON.stringify(viewport));await readable();}
@@ -153,8 +162,22 @@ const mocks = {
     await page.evaluate(()=>window.editorFixture.navigate('/feed/edit-event/fixture-event'));
     await page.getByRole('heading',{name:'Edit Event',exact:true}).waitFor();
     await pinned('edit route');await fits('edit route');await readable();
+    const usableChrome=async()=>{
+      const hit=await page.evaluate(()=>{
+        const selectors=['[data-dvnt-tab-bar] [aria-label="Create"]','[data-dvnt-tab-bar] [aria-label="Home"]','[aria-label="Unsaved changes"] button:last-child'];
+        return selectors.map(selector=>{const el=document.querySelector(selector),r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {selector,clickable:el===hit||el.contains(hit),rect:r.toJSON()};});
+      });
+      assert.equal(hit.every(result=>result.clickable),true,'save + navigation controls must both be clickable: '+JSON.stringify(hit));
+    };
+    await usableChrome();
+    await page.getByLabel('Sell tickets for this event').check();
+    await page.getByRole('button',{name:'Add Tier',exact:true}).click();
+    const sale=page.locator('input[type="datetime-local"]').last();
+    await sale.fill('2026-12-30T18:00');
+    await page.setViewportSize({width:320,height:568});await nextFrame();await fits('edit tier date + Clear at320');await readable();await usableChrome();
+    await page.setViewportSize({width:393,height:852});await nextFrame();
     await page.getByLabel('Go public at').fill('2026-12-30T18:00');
-    await page.getByRole('button',{name:'Clear',exact:true}).click();
+    await page.getByRole('button',{name:'Clear',exact:true}).first().click();
     for(const top of [0,900,99999,0]){await page.evaluate(y=>scrollTo(0,y),top);await pinned('edit scroll '+top);}
     await page.screenshot({path:path.join(dir,'edit-event.png')});
     await page.goBack();await page.getByRole('heading',{name:'Create event',exact:true}).waitFor();
@@ -162,5 +185,5 @@ const mocks = {
     await pinned('back to create');
     console.log('PASS complete create/edit screens: real Tailwind, 320–1440px + landscape, scroll, expanded tickets/add-ons, publication field, focus fonts, viewport divergence/recovery, real Chromium zoom + safe area, route/back draft retention. Physical iOS keyboard remains a device check. Evidence:',dir);
     assert.deepEqual(errors,[]);
-  }finally{await browser?.close();await new Promise(resolve=>server?server.close(resolve):resolve());}
+  }catch(error){if(page){console.error('Failure page:',await page.locator('body').innerText().catch(()=>''));await page.screenshot({path:path.join(dir,'failure.png')}).catch(()=>{});}throw error;}finally{await browser?.close();await new Promise(resolve=>server?server.close(resolve):resolve());}
 })().catch(e=>{console.error(e);process.exitCode=1});

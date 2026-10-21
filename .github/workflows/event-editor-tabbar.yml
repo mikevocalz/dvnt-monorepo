@@ -2,6 +2,8 @@ name: Event editor viewport regression
 on:
   pull_request:
     paths:
+      - 'packages/ui/src/form/StickySaveBar.web.tsx'
+      - 'packages/ui/package.json'
       - 'packages/app/components/web-tab-bar.web.tsx'
       - 'packages/app/components/use-visual-viewport-bottom.web.ts'
       - 'packages/app/features/events/event-create.web.tsx'
