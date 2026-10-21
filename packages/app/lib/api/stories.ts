@@ -15,6 +15,7 @@ import type {
   StoryTextStylePreset,
 } from "../types";
 import { STORY_TEXT_STYLE_PRESETS } from "../types";
+import { parseStorySharedSource, storySourceText } from "../stories/shared-source";
 
 function isStringMap(value: unknown): value is Record<string, string> {
   return (
@@ -150,6 +151,47 @@ interface CreateStoryResponse {
 
 export const storiesApi = {
   /**
+   * A fresh RLS read, deliberately outside the feed/query cache. The restrictive
+   * story policy revalidates the original source's current privacy/block state.
+   * Never hand cached shared media to a player before this succeeds.
+   */
+  async getSharedStoryForPlayback(
+    storyId: string,
+    expectedSource: { type: "post" | "event"; id: string },
+    expectedViewerId: string,
+    isCurrent: () => boolean,
+  ) {
+    const assertCurrent = () => {
+      if (getCurrentUserId() !== expectedViewerId || !isCurrent()) throw new Error("Story viewer changed");
+    };
+    assertCurrent();
+    if (!/^[1-9]\d*$/.test(storyId) || !/^[1-9]\d*$/.test(expectedViewerId)) return null;
+    const id = Number(storyId), viewerId = Number(expectedViewerId);
+    if (!Number.isSafeInteger(id) || !Number.isSafeInteger(viewerId)) return null;
+    await requireBetterAuthToken();
+    assertCurrent();
+    // SECURITY INVOKER RPC pins the JWT actor to expectedViewerId before its
+    // RLS read. A stale bridge JWT from another account must not grant playback.
+    const { data: row, error } = await supabase.rpc("get_story_share_for_playback", {
+      p_story_id: id,
+      p_expected_viewer_id: viewerId,
+    });
+    assertCurrent();
+    if (error) throw error;
+    const sharedSource = parseStorySharedSource(row?.shared_source);
+    if (!row || !sharedSource || sharedSource.id !== expectedSource.id || sharedSource.type !== expectedSource.type) return null;
+    const expiresAt = Date.parse(row.expires_at);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
+    const mediaUrl = row.media?.url || "";
+    const mime = row.media?.mime_type || "";
+    return {
+      sharedSource,
+      expiresAt,
+      mediaUrl,
+      mediaType: (mime.startsWith("video/") || /\.(mp4|mov)(\?|$)/i.test(mediaUrl) ? "video" : "image") as "video" | "image",
+    };
+  },
+  /**
    * Get stories feed (active stories from followed users)
    */
   async getStories() {
@@ -213,8 +255,12 @@ export const storiesApi = {
       const authorIds = [
         ...new Set(visibleStories.map((s: any) => s[DB.stories.authorId])),
       ];
+      const sourceAuthorIds = [...new Set(visibleStories.flatMap((story: any) => {
+        const source = parseStorySharedSource(story.shared_source);
+        return source ? [source.author.id] : [];
+      }))];
 
-      const [stickerRowsResult, authorsResult] = await Promise.all([
+      const [stickerRowsResult, authorsResult, sourceAuthorsResult] = await Promise.all([
         visibleStoryIds.length > 0
           ? supabase
               .from("stories_stickers")
@@ -229,6 +275,11 @@ export const storiesApi = {
                 `${DB.users.id}, ${DB.users.authId}, ${DB.users.username}, avatar:${DB.users.avatarId}(url)`,
               )
               .in(DB.users.authId, authorIds)
+          : Promise.resolve({ data: [], error: null } as const),
+        sourceAuthorIds.length > 0
+          ? supabase.from(DB.users.table)
+              .select(`id, username, first_name, last_name, avatar:${DB.users.avatarId}(url)`)
+              .in(DB.users.id, sourceAuthorIds)
           : Promise.resolve({ data: [], error: null } as const),
       ]);
 
@@ -257,6 +308,9 @@ export const storiesApi = {
 
       const authorsMap = new Map(
         (authors || []).map((a: any) => [a[DB.users.authId], a]),
+      );
+      const sourceAuthorsMap = new Map<string, any>(
+        (sourceAuthorsResult.error ? [] : sourceAuthorsResult.data || []).map((author: any) => [String(author.id), author]),
       );
 
       // Group by author - stories-bar expects 'items' array, not 'stories'
@@ -288,15 +342,28 @@ export const storiesApi = {
         }
 
         const mediaUrl = story.media?.url;
-        if (mediaUrl) {
+        const sharedSource = parseStorySharedSource(story.shared_source);
+        if (sharedSource) {
+          const sourceAuthor = sourceAuthorsMap.get(sharedSource.author.id);
+          // A snapshot handle may have been renamed/reassigned since sharing.
+          // Resolve by the immutable source-author ID; missing profiles never
+          // navigate to a possibly different account using an old handle.
+          sharedSource.author = sourceAuthor?.username ? {
+            id: sharedSource.author.id,
+            username: sourceAuthor.username,
+            name: [sourceAuthor.first_name, sourceAuthor.last_name].filter(Boolean).join(" ") || sourceAuthor.username,
+            avatar: sourceAuthor.avatar?.url || "",
+          } : { ...sharedSource.author, profileUnavailable: true };
+        }
+        if (mediaUrl || sharedSource) {
           const mimeType = story.media?.mime_type || "";
           const isVideo =
             mimeType.startsWith("video/") ||
-            mediaUrl.endsWith(".mp4") ||
-            mediaUrl.endsWith(".mov") ||
-            mediaUrl.includes("/video/");
+            mediaUrl?.endsWith(".mp4") ||
+            mediaUrl?.endsWith(".mov") ||
+            mediaUrl?.includes("/video/");
           const isGif =
-            mimeType === "image/gif" || mediaUrl.toLowerCase().endsWith(".gif");
+            mimeType === "image/gif" || mediaUrl?.toLowerCase().endsWith(".gif");
           const thumbnailUrl = story.thumbnail?.url || undefined;
           const storyOverlays =
             storyOverlaysByStoryId.get(String(story[DB.stories.id])) || [];
@@ -315,9 +382,15 @@ export const storiesApi = {
             id: String(story[DB.stories.id]),
             url: mediaUrl,
             thumbnail: thumbnailUrl,
-            type: isVideo ? "video" : isGif ? "gif" : "image",
+            type: !mediaUrl && sharedSource ? "text" : isVideo ? "video" : isGif ? "gif" : "image",
+            ...(!mediaUrl && sharedSource ? {
+              text: storySourceText(sharedSource),
+              textColor: "#FFFFFF",
+              backgroundColor: "#1A0A2E",
+            } : {}),
             duration: isVideo ? 30000 : 5000,
             visibility,
+            sharedSource,
             animatedGifOverlays,
             storyOverlays,
             header: {
@@ -346,7 +419,7 @@ export const storiesApi = {
    * Create story
    */
   async createStory(storyData: {
-    items: Array<{
+    items?: Array<{
       type: string;
       url?: string;
       storageKey?: string;
@@ -361,16 +434,39 @@ export const storiesApi = {
     visibility?: "public" | "close_friends";
     /** Prevent a deferred share from crossing an account switch. */
     expectedViewerId?: string;
+    sharedSource?: { type: "post" | "event"; id: string };
+    operationId?: string;
+    /** Local lifecycle gate; never serialized or treated as server authority. */
+    isCurrent?: () => boolean;
   }) {
     try {
       console.log("[Stories] createStory");
 
       console.log("[Stories] createStory via Edge Function");
 
-      if (storyData.expectedViewerId && getCurrentUserId() !== storyData.expectedViewerId) throw new Error("Account changed");
+      const assertCurrent = () => {
+        if (storyData.expectedViewerId && getCurrentUserId() !== storyData.expectedViewerId) throw new Error("Account changed");
+        if (storyData.isCurrent && !storyData.isCurrent()) throw new Error("Share cancelled");
+      };
+      assertCurrent();
       const token = await requireBetterAuthToken();
-      if (storyData.expectedViewerId && getCurrentUserId() !== storyData.expectedViewerId) throw new Error("Account changed");
+      assertCurrent();
       const visibility = storyData.visibility || "public";
+
+      if (storyData.sharedSource) {
+        const { data: response, error } = await supabase.functions.invoke<CreateStoryResponse>("create-story", {
+          body: {
+            sharedSource: storyData.sharedSource,
+            operationId: storyData.operationId,
+            expectedViewerId: storyData.expectedViewerId,
+            visibility,
+          },
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (error) throw new Error(error.message || "Failed to share story");
+        if (!response?.ok || !response?.data?.story) throw new Error(response?.error?.message || "Failed to share story");
+        return response.data.story;
+      }
 
       if (!storyData.items || storyData.items.length === 0) {
         throw new Error("Story must have at least one media item");
@@ -379,6 +475,7 @@ export const storiesApi = {
       // Create one story row per item — they get grouped by author in getStories
       let lastStory: any = null;
       for (const item of storyData.items) {
+        assertCurrent();
         const mediaUrl = item.url || "";
         const mediaType = item.type === "video" ? "video" : "image";
 

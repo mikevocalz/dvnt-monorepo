@@ -267,10 +267,11 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
       storyButton().click();
     });
     assert.equal(f.state.stories.length, 1);
-    assert.deepEqual(f.state.stories[0], {
-      items: [{ type: "video", url: "video.mp4", thumbnail: "poster.jpg" }],
-      expectedViewerId: "1",
-    });
+    assert.deepEqual(f.state.stories[0].sharedSource, { type: "post", id: "11" });
+    assert.equal(f.state.stories[0].expectedViewerId, "1");
+    assert.match(f.state.stories[0].operationId, /^[0-9a-f-]{36}$/);
+    assert.equal(typeof f.state.stories[0].isCurrent, "function");
+    assert.equal(f.state.stories[0].items, undefined, "source media and author are resolved on the server");
     await flush(() => f.state.resolveStory());
     assert.equal(f.usePostDetailUIStore.getState().showMenu, false);
     f.state.releaseStory = false;
@@ -323,10 +324,10 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
     await flush(() => storyButton().click());
     assert.equal(
       f.state.stories.length,
-      previous,
-      "text/no-media post never sends an invalid story",
+      previous + 1,
+      "text/no-media post shares its canonical source for a branded story card",
     );
-    assert.equal(f.state.toasts.at(-1)[1], "No media to share");
+    assert.equal(f.state.toasts.at(-1)[1], "Added to your story");
     await flush(() => button("Reshare post").click());
     await flush(() => f.auth.setState({ user: null }));
     assert.equal(

@@ -5,23 +5,9 @@ import { useParams, useRouter } from "solito/navigation";
 import { useStories } from "@dvnt/app/lib/hooks/use-stories";
 import {
   useStoryViewerStore,
-  type StoryViewerGroup,
+  toStoryViewerGroup,
 } from "@dvnt/app/lib/stores/story-viewer-store";
 import { StoryViewerOverlay } from "@dvnt/app/components/story-viewer-overlay.web";
-
-// Same flatten as the feed StoriesRow: keep playable image/video segments.
-function toViewerGroup(s: any): StoryViewerGroup {
-  const segments = (s.items ?? [])
-    .filter((it: any) => typeof it.url === "string" && it.url)
-    .map((it: any) => ({
-      type: (it.type === "video" ? "video" : "image") as "image" | "video",
-      url: it.url as string,
-      duration: it.duration as number | undefined,
-      storyOverlays: it.storyOverlays,
-      animatedGifOverlays: it.animatedGifOverlays,
-    }));
-  return { id: String(s.id ?? s.username), userId: s.userId == null ? undefined : String(s.userId), username: s.username, avatar: s.avatar, segments };
-}
 
 /**
  * Direct-link story route (web) — /feed/story/[id]. Opens the SAME full-screen
@@ -46,7 +32,7 @@ export function StoryRouteScreen() {
     if (!stories || !id) return;
     // Own story included — /feed/story/[id] must open your own fresh post too.
     const groups = (stories as any[])
-      .map(toViewerGroup)
+      .map(toStoryViewerGroup)
       .filter((g) => g.segments.length > 0);
     const idx = groups.findIndex((g) => g.id === id);
     if (idx >= 0) {

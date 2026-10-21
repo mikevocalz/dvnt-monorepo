@@ -14,6 +14,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { messagesApiClient } from "@dvnt/app/lib/api/messages";
 import { getOrCreateConversationCached } from "@dvnt/app/lib/hooks/use-conversation-resolution";
+import { useAuthStore } from "../stores/auth-store";
 
 /** The emoji row under a story. Same set on both platforms. */
 export const STORY_REACTION_EMOJIS = ["❤️", "🔥", "😂", "😍", "👏", "😮", "😈"];
@@ -77,6 +78,9 @@ export async function sendStoryMessage({
   itemIndex,
   kind,
   content,
+  expectedViewerId,
+  isCurrent,
+  beforeSend,
 }: {
   queryClient: QueryClient;
   recipientUserId: string;
@@ -85,16 +89,28 @@ export async function sendStoryMessage({
   kind: "story_reply" | "story_reaction";
   /** The reply text, or the emoji for a reaction. */
   content: string;
+  expectedViewerId?: string;
+  isCurrent?: () => boolean;
+  beforeSend?: () => Promise<void>;
 }) {
+  const assertCurrent = () => {
+    if (expectedViewerId && useAuthStore.getState().user?.id !== expectedViewerId) throw new Error("Account changed");
+    if (isCurrent && !isCurrent()) throw new Error("Story viewer changed");
+  };
+  assertCurrent();
   const conversationId = await getOrCreateConversationCached(
     queryClient,
     recipientUserId,
   );
+  assertCurrent();
   if (!conversationId) throw new Error("Could not start conversation");
 
   return messagesApiClient.sendMessage({
     conversationId,
     content,
+    expectedViewerId,
+    isCurrent,
+    beforeSend,
     metadata: buildStoryMessageMetadata(
       kind,
       story,

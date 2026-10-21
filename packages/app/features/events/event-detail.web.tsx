@@ -2,6 +2,7 @@ import { EVENT_FLYER_ASPECT } from "@dvnt/app/lib/events/flyer-layout";
 import { useCheckoutCode } from "./use-checkout-code.web";
 import { canContinueWithCheckoutCode } from "@dvnt/app/lib/payments/checkout-code";
 import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
+import { ShareEventToStoryMenuItem } from "./ui/share-event-to-story.web";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
 import { canHostEventLynk, waitingSinceLabel } from "@dvnt/app/lib/events/event-lynk";
@@ -1334,6 +1335,7 @@ export function EventDetailScreen() {
                   }
                   onClick={share}
                 />
+                <ShareEventToStoryMenuItem event={e} onShared={() => setMenuOpen(false)} />
                 {/* 5. TRANSLATION — toggle the About copy via useContentTranslation. */}
                 {showTranslate ? (
                   <MenuItem

@@ -75,6 +75,8 @@ import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 import { toast } from "sonner";
+import { StoryShareBubble } from "@dvnt/app/components/chat/story-share-bubble.web";
+import { parseStoryShareContext } from "@dvnt/app/lib/messages/story-share";
 import { SharedPostBubble } from "@dvnt/app/components/chat/shared-post-bubble";
 import { AddMemberDialog } from "./add-member.web";
 import { StoryReplyBubble } from "@dvnt/app/components/chat/story-reply-bubble";
@@ -308,7 +310,9 @@ function MessageRow({
 
   // Special bubbles (shared RN components, render via react-native-web).
   let inner: React.ReactNode;
-  if (item.sharedPost) {
+  if (item.storyShare) {
+    inner = <StoryShareBubble share={item.storyShare} isOwnMessage={isMe} />;
+  } else if (item.sharedPost) {
     inner = (
       <SharedPostBubble sharedPost={item.sharedPost} isOwnMessage={isMe} />
     );
@@ -876,6 +880,7 @@ export function ChatScreen() {
                 }))
               : meta?.mediaUrl &&
                   meta.type !== "shared_post" &&
+                  meta.type !== "story_share" &&
                   meta.type !== "story_reply"
                 ? [
                     {
@@ -904,6 +909,7 @@ export function ChatScreen() {
             time: timeStr,
             readAt: newMsg.read_at || null,
             media: mediaItems,
+            storyShare: parseStoryShareContext(meta),
             reactions: Array.isArray(meta?.reactions) ? meta.reactions : [],
           };
           mergeRealtimeMessage(convId, localMessage);

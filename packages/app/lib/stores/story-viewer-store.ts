@@ -2,10 +2,16 @@ import { create } from "zustand";
 import type {
   StoryAnimatedGifOverlay,
   StoryOverlay,
+  StorySharedSource,
 } from "@dvnt/app/lib/types";
+import { parseStorySharedSource, SHARED_STORY_BACKDROP } from "../stories/shared-source";
 
 /** One playable segment within a user's story group. */
 export interface StoryViewerSegment {
+  id?: string;
+  sharedSource?: StorySharedSource;
+  /** True only for a server-backed share with no source media. */
+  isSourceCard?: boolean;
   type: "image" | "video";
   url: string;
   duration?: number;
@@ -24,7 +30,34 @@ export interface StoryViewerGroup {
   segments: StoryViewerSegment[];
 }
 
+/** Both the feed rail and direct story route must preserve segment attribution. */
+export function toStoryViewerGroup(s: import("../types").Story): StoryViewerGroup {
+  const segments = (s.items ?? []).flatMap((item) => {
+    const sharedSource = parseStorySharedSource(item.sharedSource);
+    if (!item.url && !sharedSource) return [];
+    return [{
+      id: item.id,
+      type: (item.type === "video" ? "video" : "image") as "image" | "video",
+      url: item.url || SHARED_STORY_BACKDROP,
+      duration: item.duration,
+      storyOverlays: item.storyOverlays,
+      animatedGifOverlays: item.animatedGifOverlays,
+      sharedSource,
+      isSourceCard: !item.url && !!sharedSource,
+    }];
+  });
+  return {
+    id: String(s.id ?? s.username),
+    userId: s.userId == null ? undefined : String(s.userId),
+    username: s.username,
+    avatar: s.avatar,
+    segments,
+  };
+}
+
 interface StoryViewerState {
+  /** Every explicit open is a new view-time authorization boundary. */
+  viewSession: number;
   open: boolean;
   groups: StoryViewerGroup[];
   /** Index of the user-group currently playing. */
@@ -39,11 +72,12 @@ interface StoryViewerState {
 }
 
 export const useStoryViewerStore = create<StoryViewerState>((set, get) => ({
+  viewSession: 0,
   open: false,
   groups: [],
   groupIndex: 0,
   navigationClose: false,
-  openAt: (groups, groupIndex) => set({ open: true, groups, groupIndex, navigationClose: false }),
+  openAt: (groups, groupIndex) => set((state) => ({ open: true, groups, groupIndex, navigationClose: false, viewSession: state.viewSession + 1 })),
   close: () => set({ open: false, groups: [], groupIndex: 0, navigationClose: false }),
   closeForNavigation: () => set({ open: false, groups: [], groupIndex: 0, navigationClose: true }),
   nextGroup: () => {
