@@ -1,5 +1,6 @@
 import type { StoryShareContext } from "@dvnt/app/lib/messages/story-share";
 import { storyShareSourcePath } from "@dvnt/app/lib/messages/story-share";
+import { useStoryEventPath } from "@dvnt/app/lib/hooks/use-story-event-path";
 
 /** The native client can still read the stored plain-text message. */
 export function StoryShareBubble({
@@ -9,7 +10,8 @@ export function StoryShareBubble({
   share: StoryShareContext;
   isOwnMessage: boolean;
 }) {
-  const href = storyShareSourcePath(share);
+  const eventPath = useStoryEventPath(share.sourceType === "event" ? share.sourceId : undefined);
+  const href = eventPath ?? storyShareSourcePath(share);
   return (
     <div className="max-w-72 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white">
       <p>

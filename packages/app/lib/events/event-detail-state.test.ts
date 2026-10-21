@@ -38,9 +38,9 @@ test("share-token resolution ignores the disabled slug index", () => {
   assert.equal(eventDetailIsResolving({ ...route, token: pending }), true);
 });
 
-test("unresolved title slugs wait for the list/index but stop after empty/error answers", () => {
+test("unresolved title slugs wait only for the authoritative index, not the feed list", () => {
   const route = { ...input, hasResolvedId: false, detail: disabled };
   assert.equal(eventDetailIsResolving(route), false);
-  assert.equal(eventDetailIsResolving({ ...route, list: pending }), true);
+  assert.equal(eventDetailIsResolving({ ...route, list: pending }), false);
   assert.equal(eventDetailIsResolving({ ...route, index: pending }), true);
 });

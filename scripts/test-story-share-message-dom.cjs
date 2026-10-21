@@ -14,7 +14,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "story-share-message-"));
 try {
   buildSync({
     stdin: {
-      contents: `import React from 'react';import {renderToStaticMarkup} from 'react-dom/server';import {StoryShareBubble} from './packages/app/components/chat/story-share-bubble.web';export function render(share, own){return renderToStaticMarkup(<StoryShareBubble share={share} isOwnMessage={own}/>);}`,
+      contents: `import React from 'react';import {renderToStaticMarkup} from 'react-dom/server';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';import {StoryShareBubble} from './packages/app/components/chat/story-share-bubble.web';export function render(share, own){return renderToStaticMarkup(<QueryClientProvider client={new QueryClient()}><StoryShareBubble share={share} isOwnMessage={own}/></QueryClientProvider>);}`,
       resolveDir: root,
       loader: "tsx",
     },
@@ -28,7 +28,7 @@ try {
     alias: {
       "@dvnt/app": path.join(root, "packages/app"),
       ...Object.fromEntries(
-        ["react", "react-dom"].map((name) => [
+        ["react", "react-dom", "@tanstack/react-query", "@tanstack/query-core"].map((name) => [
           name,
           path.dirname(resolve(name + "/package.json")),
         ]),

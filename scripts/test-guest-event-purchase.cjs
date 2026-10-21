@@ -59,11 +59,12 @@ mocks['@tanstack/react-query'] = {
 };
 app('lib/hooks/use-events', {
   useEvents: () => scenario.eventsQuery,
-  useEvent: () => scenario.eventQuery,
+  useEvent: (id) => { scenario.resolvedIds.push(id); return id ? scenario.eventQuery : query(undefined, { isPending: true }); },
   useDeleteEvent: () => ({ isPending: false }),
   useToggleEventLike: () => ({ mutate: noop }),
   useRsvpEvent: () => ({ isPending: false, mutate: (value) => scenario.memberRsvps.push(value) }),
 });
+app('lib/hooks/use-event-title-route', { useEventTitleRoute: () => ({ ...scenario.indexQuery, routingIndex: !scenario.indexQuery.isError && !scenario.indexQuery.isFetching ? scenario.indexQuery.data : undefined }) });
 app('lib/hooks/use-tickets', {
   useTicketTypes: () => scenario.tiersQuery,
   useMyTicketStatusForEvent: () => ({ primary: null, isPending: false, isError: false }),
@@ -97,7 +98,7 @@ app('lib/payments/checkout-sheet-totals', { computeCheckoutSheetTotals: () => ({
 app('lib/api/promoters', { promotersApi: { getClaim: async () => null } });
 Object.assign(mocks['./use-checkout-code.web'], { useCheckoutCode: () => ({}) });
 Object.assign(mocks['@dvnt/ui'], { Dialog: Object.assign(Empty, { Root: Empty, Content: Empty, Header: Empty, Title: Empty, Description: Empty, Footer: Empty, Close: Empty }) });
-for (const relative of ['lib/tickets/pricing', 'lib/tickets/guest-purchase-state', 'lib/events/event-detail-state', 'lib/events/event-discovery', 'lib/events/event-time', 'lib/events/event-zone', 'lib/auth/return-to']) {
+for (const relative of ['lib/tickets/pricing', 'lib/tickets/guest-purchase-state', 'lib/events/event-detail-state', 'lib/events/event-detail-route', 'lib/events/event-discovery', 'lib/events/event-time', 'lib/events/event-zone', 'lib/auth/return-to']) {
   mocks['@dvnt/app/' + relative] = load(path.join(ROOT, 'packages/app', relative + '.ts'));
 }
 mocks['./ticket-upgrade-benefits'] = load(path.join(ROOT, 'packages/app/features/events/ticket-upgrade-benefits.ts'));
@@ -119,7 +120,7 @@ beforeEach(() => {
   global.window = dom.window; global.document = dom.window.document; global.IS_REACT_ACT_ENVIRONMENT = true;
   root = createRoot(document.getElementById('root'));
   scenario = {
-    params: { id: '42' }, auth: { isAuthenticated: false, user: null }, navigation: [], guestCheckouts: [], guestRsvps: [], memberRsvps: [], retries: [],
+    params: { id: '42' }, resolvedIds: [], auth: { isAuthenticated: false, user: null }, navigation: [], guestCheckouts: [], guestRsvps: [], memberRsvps: [], retries: [],
     eventsQuery: query([]), indexQuery: query([]), tokenQuery: query(undefined, { isPending: true }),
     eventQuery: query(fixtureEvent, { refetch: () => scenario.retries.push('event') }),
     tiersQuery: query([free, paid], { refetch: () => scenario.retries.push('tiers') }),
@@ -404,4 +405,32 @@ test('server-unlocked tier becomes selectable inline', async () => {
   assertNoPurchase();
   await click(button('Get tickets'));
   assert.equal(scenario.guestCheckouts[0].tierId, paid.id);
+});
+
+
+test('title route never renders or fetches a different cached event while its index is pending or failed', async () => {
+  scenario.params = { slug: 'synthetic-public-event' };
+  scenario.eventsQuery = query([{ ...fixtureEvent, id: 99 }]);
+  scenario.indexQuery = query([{ ...fixtureEvent, id: 99 }], { isFetching: true });
+  await render();
+  assert.equal(scenario.resolvedIds.at(-1), '');
+  assert.match(document.body.textContent, /Loading…/);
+  assert.doesNotMatch(document.body.textContent, /Synthetic public event/);
+  scenario.indexQuery = query([{ ...fixtureEvent, id: 99 }], { isError: true });
+  await render();
+  assert.equal(scenario.resolvedIds.at(-1), '');
+  assert.doesNotMatch(document.body.textContent, /Synthetic public event/);
+  scenario.indexQuery = query([fixtureEvent]);
+  await render();
+  assert.equal(scenario.resolvedIds.at(-1), '42');
+  assert.match(document.body.textContent, /Synthetic public event/);
+});
+
+test('share-token route keeps its token identity even when the public index is unavailable', async () => {
+  scenario.params = { slug: 'a'.repeat(32) };
+  scenario.tokenQuery = query({ id: 42 });
+  scenario.indexQuery = query(undefined, { isPending: true });
+  await render();
+  assert.equal(scenario.resolvedIds.at(-1), '42');
+  assert.match(document.body.textContent, /Synthetic public event/);
 });
