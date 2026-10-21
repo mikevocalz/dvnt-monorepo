@@ -132,11 +132,14 @@ export async function issueTicketsForCheckoutSession(
 
   // Resolve the order up front so tickets stamp the authoritative
   // order_id link (pre-migration rows used only the Stripe links).
-  const { data: orderRow } = await supabase
+  const { data: orderRow, error: orderError } = await supabase
     .from("orders")
     .select("id, ticket_email_status")
     .eq("stripe_checkout_session_id", session.id)
     .maybeSingle();
+
+  if (orderError) throw orderError;
+  if (!orderRow) throw new Error("Paid checkout order is not available yet");
 
   const ticketRows = [];
   for (let i = 0; i < quantity; i++) {
@@ -182,13 +185,6 @@ export async function issueTicketsForCheckoutSession(
     })
     .select("id, qr_token, guest_lookup_token");
 
-  // Convert inventory hold to prevent double-counting
-  await supabase
-    .from("ticket_holds")
-    .update({ status: "converted" })
-    .eq("payment_intent_id", session.id)
-    .eq("status", "active");
-
   if (ticketError) {
     console.error(`${logPrefix} Ticket insert error:`, ticketError);
     throw ticketError;
@@ -232,6 +228,15 @@ export async function issueTicketsForCheckoutSession(
 
 
   }
+
+  // Never release reserved capacity after a failed ticket write. A successful
+  // replay can repair conversion if the first attempt stopped after insertion.
+  const { error: holdError } = await supabase
+    .from("ticket_holds")
+    .update({ status: "converted" })
+    .eq("payment_intent_id", session.id)
+    .eq("status", "active");
+  if (holdError) throw holdError;
 
   // ── Update order → paid + add timeline ────────
   // Runs even when issued === 0 (replay): the money-state RPC is
@@ -281,7 +286,7 @@ export async function issueTicketsForCheckoutSession(
       paymentMethodBrand: pmBrand,
       paymentMethodLast4: pmLast4,
       paidAt: new Date().toISOString(),
-    });
+    }, { throwOnError: true });
 
     // Delivery requires an authoritative paid order. Persist money-state first
     // on both first issuance and replay, otherwise delivery exits order_not_paid.

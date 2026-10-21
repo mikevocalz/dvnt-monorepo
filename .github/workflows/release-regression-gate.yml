@@ -115,5 +115,6 @@ jobs:
       - run: pnpm test:node
       - run: pnpm test:community
       - run: pnpm test:tickets
+      - run: pnpm test:ticket-contracts
       - run: pnpm test:lynk-session
 
