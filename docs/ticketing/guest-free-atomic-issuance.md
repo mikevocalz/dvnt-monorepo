@@ -22,7 +22,8 @@ usage and attribution remain after commit; simultaneous replay does not repeat
 those side effects.
 
 The guest capacity check uses the larger of recorded sold inventory and actual
-kept ticket rows, plus both active hold tables. This prevents an older paid
+kept ticket rows, plus both active hold tables in one statement snapshot. This
+avoids missing both sides of a paid hold-to-ticket transition and prevents an older paid
 writer's stale counter from admitting another free guest. Refunded/void tickets
 do not occupy that floor; scanned, transfer-pending and unknown/null statuses do.
 An issued ticket with an unconverted paid hold can temporarily be counted twice,

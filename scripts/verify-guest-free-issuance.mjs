@@ -559,6 +559,63 @@ try {
     assert.deepEqual(await inventory(t), { quantity_sold: 3, tickets: 3, active_holds: 0, converted_holds: 1 });
   });
 
+  await test("a concurrent hosted paid hold conversion never reopens its already-issued seat", async () => {
+    const e = await event(); const t = await tier(e, 1, 0);
+    const paidHold = await hold(t); successful(paidHold);
+    // Current hosted fulfillment commits tickets, converts its hold, and only
+    // then updates the sold counter. Model that real intermediate state.
+    await sql(`INSERT INTO tickets(event_id,ticket_type_id,user_id,status,qr_token)
+      VALUES($1,$2,'paid-buyer','active',$3)`, [e,t,randomUUID()]);
+
+    // A test-only pause after the actual-ticket subquery lets the paid writer
+    // convert its hold while the guest admission SELECT is still executing.
+    // The original migration is restored in finally; no production hook exists.
+    await sql(`CREATE FUNCTION public.harness_pause_guest_count(p_count bigint)
+      RETURNS bigint LANGUAGE plpgsql VOLATILE AS $$ BEGIN
+        PERFORM pg_advisory_xact_lock(620017, 1); RETURN p_count;
+      END; $$;`);
+    const source = read(migrationName);
+    const needle = "(SELECT count(*) FROM public.tickets\n      WHERE ticket_type_id = p_ticket_type_id";
+    assert.equal(source.split(needle).length, 2, "capacity count must have one identifiable statement snapshot");
+    await sql(source.replace(needle,
+      "(SELECT public.harness_pause_guest_count(count(*)) FROM public.tickets\n      WHERE ticket_type_id = p_ticket_type_id"));
+    const control = await pool.connect(); const guest = await pool.connect(); const paid = await pool.connect();
+    let guestPending, paidPending;
+    try {
+      await control.query("BEGIN");
+      await control.query("SELECT pg_advisory_xact_lock(620017, 1)");
+      const controlPid = (await sql("SELECT pg_backend_pid() AS pid", [], control))[0].pid;
+      const guestPid = (await sql("SELECT pg_backend_pid() AS pid", [], guest))[0].pid;
+      const paidPid = (await sql("SELECT pg_backend_pid() AS pid", [], paid))[0].pid;
+      guestPending = { settled: false };
+      guestPending.promise = issue(selection(e,t),guest).then(
+        result => { guestPending.settled=true; return {result}; },
+        error => { guestPending.settled=true; return {error}; });
+      await waitForBlocked(controlPid,guestPid,guestPending);
+      await paid.query("UPDATE ticket_holds SET status='converted' WHERE id=$1", [paidHold.holdId]);
+      paidPending = { settled: false };
+      paidPending.promise = paid.query("UPDATE ticket_types SET quantity_sold=1 WHERE id=$1", [t]).then(
+        result => { paidPending.settled=true; return {result}; },
+        error => { paidPending.settled=true; return {error}; });
+      await waitForBlocked(guestPid,paidPid,paidPending);
+      await control.query("COMMIT");
+      const guestResult = await guestPending.promise;
+      if (guestResult.error) throw guestResult.error;
+      rejected(guestResult.result,"insufficient_inventory");
+      const paidResult = await paidPending.promise;
+      if (paidResult.error) throw paidResult.error;
+      assert.deepEqual(await inventory(t), {quantity_sold:1,tickets:1,active_holds:0,converted_holds:1});
+      assert.equal((await snapshot(e)).orders.length,0,"free guest was issued against the paid seat");
+    } finally {
+      await control.query("ROLLBACK");
+      if (guestPending) await guestPending.promise;
+      if (paidPending) await paidPending.promise;
+      control.release();guest.release();paid.release();
+      await sql(source);
+      await sql("DROP FUNCTION public.harness_pause_guest_count(bigint)");
+    }
+  });
+
   console.log(`\nPASS: ${passed} real PostgreSQL free-guest issuance regressions; multi-connection lock barriers verified.`);
 } finally {
   await pool.end();

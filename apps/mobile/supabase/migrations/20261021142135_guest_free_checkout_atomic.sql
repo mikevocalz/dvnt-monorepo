@@ -105,18 +105,23 @@ BEGIN
   -- as a floor. An overcount remains conservative; no historic reconciliation
   -- is performed. Active holds may temporarily double-count tickets that a
   -- legacy paid writer has inserted but not converted, which safely fails closed.
-  SELECT count(*) INTO v_actual_sold FROM public.tickets
-    WHERE ticket_type_id = p_ticket_type_id
-      AND status IS DISTINCT FROM 'refunded' AND status IS DISTINCT FROM 'void';
-  v_sold := greatest(coalesce(v_tier.quantity_sold, 0), v_actual_sold);
-  IF v_tier.quantity_total IS NOT NULL THEN
-    SELECT coalesce(sum(qty), 0) INTO v_held FROM (
+  -- These MUST share one statement snapshot: hosted paid fulfillment inserts
+  -- its tickets and converts its hold before incrementing the tier. Separate
+  -- reads could see neither side if that handoff commits between the reads.
+  SELECT
+    (SELECT count(*) FROM public.tickets
+      WHERE ticket_type_id = p_ticket_type_id
+        AND status IS DISTINCT FROM 'refunded' AND status IS DISTINCT FROM 'void'),
+    (SELECT coalesce(sum(qty), 0) FROM (
       SELECT quantity AS qty FROM public.ticket_holds
         WHERE ticket_type_id = p_ticket_type_id AND status = 'active' AND expires_at > now()
       UNION ALL
       SELECT qty FROM public.cart_holds
         WHERE tier_id = p_ticket_type_id AND released = false AND expires_at > now()
-    ) holds;
+    ) holds)
+  INTO v_actual_sold, v_held;
+  v_sold := greatest(coalesce(v_tier.quantity_sold, 0), v_actual_sold);
+  IF v_tier.quantity_total IS NOT NULL THEN
     v_available := v_tier.quantity_total - v_sold - v_held;
     IF v_available < v_quantity THEN
       RETURN jsonb_build_object('ok', false, 'error', 'insufficient_inventory',
