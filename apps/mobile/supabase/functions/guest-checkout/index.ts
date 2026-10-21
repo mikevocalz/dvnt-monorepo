@@ -1,12 +1,12 @@
 /**
  * Edge Function: guest-checkout
  *
- * Paid ticket purchase for a GUEST (no account) — the paid sibling of the RSVP
- * flow. Validates the event/tier/availability + per-email cap, then creates a
- * hosted Stripe Checkout Session (mode=payment) carrying the same event_ticket
- * metadata the stripe-webhook already issues guest tickets from. The buyer pays
- * on Stripe's page; the webhook issues + emails the ticket(s). No card data ever
- * touches us, no account required.
+ * Ticket checkout for a GUEST (no account), including free RSVP tiers when
+ * Sell tickets is off. Validates the event/tier/availability + per-email cap,
+ * then issues a $0 order directly or creates a hosted Stripe Checkout Session
+ * (mode=payment) carrying the same event_ticket metadata the stripe-webhook
+ * already issues guest tickets from. Paid buyers use Stripe's page; the webhook
+ * issues + emails their ticket(s). No card data touches us, no account required.
  *
  *   POST { event_id, ticket_type_id, quantity, guest_email, guest_name?,
  *          username?, full_name?, phone? }
@@ -128,7 +128,6 @@ Deno.serve(async (req) => {
     const body = isQuote ? envelope.quote_request : envelope;
     if (!body || typeof body !== "object" || Array.isArray(body))
       return err("invalid_request", "Invalid checkout request.", 400);
-    if (!isQuote && !STRIPE_SECRET_KEY) return err("config", "Payments are not configured.", 500);
     const eventId = Number(body.event_id);
     const ticketTypeId = String(body.ticket_type_id || "");
     const quantity = Number(body.quantity ?? 1);
@@ -197,7 +196,7 @@ Deno.serve(async (req) => {
     // not-yet-published event: it reads as missing, like a private one.
     if (!ev || ev.visibility !== "public" || ev.nsfw === true || isUnpublished(ev)) return err("event_not_found", "Event not found.", 404);
     if (ev.status === "cancelled" || ev.status === "canceled") return err("event_cancelled", "This event was cancelled.");
-    if (ev.status !== "active" || ev.ticketing_enabled !== true)
+    if (ev.status !== "active")
       return err("event_unavailable", "Tickets aren't available for this event.", 409);
     // Card-not-present sales stop 30 min before the event ends — after
     // that the only legitimate way to sell is card-present (Tap to Pay).
@@ -219,6 +218,12 @@ Deno.serve(async (req) => {
       .eq("id", ticketTypeId)
       .single();
     if (!tier || tier.event_id !== eventId) return err("tier_not_found", "Ticket type not found.", 404);
+    // Sell tickets controls PAID sales, not free RSVP admission. Only a
+    // server-priced $0 tier may use a non-ticketed event; discounts must never
+    // reopen a disabled paid tier. Unknown flags/prices still fail closed.
+    if (ev.ticketing_enabled !== true &&
+        !(ev.ticketing_enabled === false && tier.price_cents === 0))
+      return err("event_unavailable", "Tickets aren't available for this event.", 409);
     if (tier.is_active === false || tier.status === "paused" || tier.status === "ended")
       return err("tier_unavailable", "That ticket isn't on sale.");
 
@@ -451,6 +456,9 @@ Deno.serve(async (req) => {
         count: quantity,
       });
     }
+
+    // Free RSVPs need neither Stripe configuration nor organizer onboarding.
+    if (!STRIPE_SECRET_KEY) return err("config", "Payments are not configured.", 500);
 
     // Organizer must be onboarded to Stripe Connect — the charge is a
     // destination charge to their account (same as the authed flow); otherwise
