@@ -59,6 +59,7 @@ import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { checkoutTicketLines } from "../_shared/checkout-line-items.ts";
 import { withSentry } from "../_shared/sentry.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { tierSaleAvailabilityError } from "../_shared/tier-sale-availability.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -325,32 +326,6 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       );
     }
 
-    // Enforce tier sale window — early-bird style pricing.
-    // `sale_start` / `sale_end` already exist on ticket_types; until now
-    // they were declarative only. Reject purchases outside the window
-    // with an actionable message.
-    const now = new Date();
-    if (ticketType.sale_start) {
-      const saleStartAt = new Date(ticketType.sale_start);
-      if (!isNaN(saleStartAt.getTime()) && now < saleStartAt) {
-        return new Response(
-          JSON.stringify({
-            error: `This tier goes on sale ${saleStartAt.toLocaleString()}.`,
-          }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
-        );
-      }
-    }
-    if (ticketType.sale_end) {
-      const saleEndAt = new Date(ticketType.sale_end);
-      if (!isNaN(saleEndAt.getTime()) && now >= saleEndAt) {
-        return new Response(
-          JSON.stringify({ error: "Sales for this tier have ended." }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
-        );
-      }
-    }
-
     // ── Tier visibility guard (mirror of cart_create_hold v3) ──
     // This rail inserts ticket_holds directly, bypassing the RPC's
     // hidden/locked enforcement — so enforce it here. Never echo the code.
@@ -370,6 +345,15 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
           headers: { "Content-Type": "application/json" },
         },
       );
+    }
+
+    // Apply the same sale policy before paid checkout AND free/promo issuance.
+    // Visibility runs first so hidden tiers do not disclose their sale state.
+    const saleError = tierSaleAvailabilityError(ticketType);
+    if (saleError) {
+      return new Response(JSON.stringify(saleError), {
+        status: 400, headers: { "Content-Type": "application/json" },
+      });
     }
 
     // Check availability (including active holds from other checkouts)
