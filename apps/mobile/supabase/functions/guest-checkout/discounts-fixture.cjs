@@ -35,6 +35,21 @@ function fixture(options={}){
  const db={rpc:async(fn,args)=>{
   writes.push({table:'rpc',fn,args});
   if(fn==='ticket_hold_create_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
+  if(fn==='guest_free_checkout_atomic'){
+   if(options.atomicError)return{data:null,error:options.atomicError};
+   if(options.atomicResult)return{data:options.atomicResult,error:null};
+   if(options.ticketInsertError)return{data:null,error:{message:'fixture atomic ticket insert failure'}};
+   // This stub is only for handler contracts. The real SQL/rollback/locking
+   // semantics are exercised by scripts/verify-guest-free-issuance.mjs.
+   const order={id:'row-'+(++serial),status:'paid',currency:'usd',...args.p_order};
+   delete order.expected_unit_price_cents;
+   const rows=args.p_ticket_rows.map((t,i)=>({...t,order_id:order.id,order_index:i+1,order_count:order.quantity}));
+   tables.orders.push(order);tables.tickets.push(...rows);
+   tables.ticket_holds.push({id:'hold-'+serial,ticket_type_id:args.p_ticket_type_id,quantity:order.quantity,status:'converted'});
+   tables.ticket_types.find(t=>t.id===args.p_ticket_type_id).quantity_sold+=order.quantity;
+   tables.order_timeline.push({order_id:order.id,type:'created'},{order_id:order.id,type:'payment_captured'});
+   return{data:{ok:true,idempotent:false,order_id:order.id,count:order.quantity,order},error:null};
+  }
   if(fn==='increment_promo_uses'){usage.push(args.p_promo_id);return{data:null,error:null}}
   throw Error('Unexpected RPC '+fn);
  },from:table=>{

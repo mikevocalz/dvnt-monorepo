@@ -168,12 +168,15 @@ Deno.serve(async (req) => {
           return err("idempotency_conflict", "This checkout attempt belongs to a different selection.", 409);
         if (existing.status !== "paid" || existing.total_cents !== 0)
           return err("checkout_processing", "Your previous checkout is still processing.", 409);
-        const { count } = await supabase
+        const { data: existingTickets, error: replayError } = await supabase
           .from("tickets")
-          .select("id", { count: "exact", head: true })
+          .select("ticket_type_id")
           .eq("order_id", existing.id);
-        if (count !== existing.quantity)
+        if (replayError || existingTickets?.length !== existing.quantity)
           return err("checkout_processing", "Your tickets are still being issued. Please retry shortly.", 409);
+        if (existingTickets.some((ticket: { ticket_type_id: string }) => ticket.ticket_type_id !== ticketTypeId))
+          return err("idempotency_conflict", "This checkout attempt belongs to a different selection.", 409);
+        const count = existingTickets.length;
         await recordFreePromoterAttribution(supabase, existing);
         return json({
           ok: true,
@@ -286,89 +289,10 @@ Deno.serve(async (req) => {
     if (body.expected_quote_key && body.expected_quote_key !== pricing.quote.quote_key)
       return err("quote_changed", "Your ticket price or discount changed. Review the updated total before paying.", 409);
 
-    // ── Free tier or fully discounted ticket — existing direct issuance ─────
-    // A $0 tier is still real inventory: capacity is serialized by the
-    // same atomic hold the paid rails use (counts live ticket_holds +
-    // cart_holds), converted to sold on success, released on failure.
-    // The guest gets the standard ticket-bundle email — the QR + lookup
-    // link is the whole delivery contract for account-less buyers.
+    // Free issuance is a single database transaction. The RPC holds the tier
+    // lock until order + tickets + sold count + hold conversion all commit;
+    // there is no gap where an issued seat becomes available again.
     if (pricing.quote.total_cents === 0) {
-      const { data: freeHold, error: freeHoldErr } = await supabase.rpc(
-        "ticket_hold_create_atomic",
-        {
-          p_ticket_type_id: ticketTypeId,
-          p_quantity: quantity,
-          p_guest_email: guestEmail,
-          p_hold_seconds: 600,
-        },
-      );
-      if (freeHoldErr || !freeHold?.ok) {
-        const available = freeHold?.available;
-        return err(
-          "sold_out",
-          typeof available === "number" && available > 0
-            ? `Only ${available} left.`
-            : "Those tickets just sold out.",
-          409,
-        );
-      }
-
-      // Order first so every ticket stamps the authoritative order_id.
-      const { data: freeOrder, error: freeOrderErr } = await supabase
-        .from("orders")
-        .insert({
-          user_id: null,
-          guest_email: guestEmail,
-          type: "event_ticket",
-          status: "paid",
-          quantity,
-          subtotal_cents: 0,
-          total_cents: 0,
-          event_id: eventId,
-          paid_at: new Date().toISOString(),
-          currency: "usd",
-          ...pricing.orderFields,
-          ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
-        })
-        .select("id")
-        .single();
-      if (freeOrderErr || !freeOrder?.id) {
-        await supabase
-          .from("ticket_holds")
-          .update({ status: "released" })
-          .eq("id", freeHold.holdId);
-        // Lost the same-key race → the winner's order is the answer.
-        if (freeOrderErr?.code === "23505" && idempotencyKey) {
-          const { data: won } = await supabase
-            .from("orders")
-            .select("id, quantity, event_id, guest_email, total_cents, status, promoter_id, promoter_customer_discount_bps, promoter_commission_bps, promoter_discount_amount_cents, promoter_commission_amount_cents")
-            .eq("idempotency_key", idempotencyKey)
-            .maybeSingle();
-          if (won) {
-            if (won.event_id !== eventId || won.guest_email !== guestEmail || won.quantity !== quantity)
-              return err("idempotency_conflict", "This checkout attempt belongs to a different selection.", 409);
-            if (won.status !== "paid" || won.total_cents !== 0)
-              return err("checkout_processing", "Your previous checkout is still processing.", 409);
-            const { count } = await supabase
-              .from("tickets")
-              .select("id", { count: "exact", head: true })
-              .eq("order_id", won.id);
-            if (count !== won.quantity)
-              return err("checkout_processing", "Your tickets are still being issued. Please retry shortly.", 409);
-            await recordFreePromoterAttribution(supabase, won);
-            return json({
-              ok: true,
-              free: true,
-              order_id: won.id,
-              count: count ?? won.quantity ?? quantity,
-              idempotent: true,
-            });
-          }
-        }
-        console.error("[guest-checkout] free order insert failed:", freeOrderErr);
-        return err("internal_error", "Could not issue your ticket.", 500);
-      }
-
       const ticketRows = [];
       for (let i = 0; i < quantity; i++) {
         const ticketUuid = crypto.randomUUID();
@@ -389,42 +313,52 @@ Deno.serve(async (req) => {
           qr_token: qrToken,
           qr_payload: qrPayload,
           purchase_amount_cents: 0,
-          order_id: freeOrder.id,
           order_index: i + 1,
           order_count: quantity,
         });
       }
-      const { error: ticketErr } = await supabase
-        .from("tickets")
-        .insert(ticketRows);
-      if (ticketErr) {
-        // Roll back: release the hold and drop the orphaned order so a
-        // retry starts clean rather than stranding a paid-status $0 order.
-        await supabase
-          .from("ticket_holds")
-          .update({ status: "released" })
-          .eq("id", freeHold.holdId);
-        await supabase.from("orders").delete().eq("id", freeOrder.id);
-        console.error("[guest-checkout] free ticket insert failed:", ticketErr);
+
+      const { data: issued, error: issueError } = await supabase.rpc(
+        "guest_free_checkout_atomic",
+        {
+          p_ticket_type_id: ticketTypeId,
+          p_ticket_rows: ticketRows,
+          p_order: {
+            guest_email: guestEmail,
+            quantity,
+            subtotal_cents: 0,
+            total_cents: 0,
+            event_id: eventId,
+            expected_unit_price_cents: tier.price_cents,
+            ...pricing.orderFields,
+            ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+          },
+        },
+      );
+      if (issueError || !issued?.ok) {
+        const code = issued?.error;
+        if (code === "insufficient_inventory")
+          return err("sold_out", typeof issued.available === "number" && issued.available > 0
+            ? `Only ${issued.available} left.` : "Those tickets just sold out.", 409);
+        if (code === "limit") return err("limit", `Limit ${issued.limit} per person for this ticket.`, 409);
+        if (code === "idempotency_conflict")
+          return err(code, "This checkout attempt belongs to a different selection.", 409);
+        if (code === "checkout_processing" || issueError?.code === "23505")
+          return err("checkout_processing", "Your previous checkout is still processing. Please retry shortly.", 409);
+        if (code === "quote_changed")
+          return err(code, "Your ticket price or discount changed. Review the updated total before paying.", 409);
+        if (code === "tier_not_found" || code === "tier_unavailable")
+          return err("tier_unavailable", "That ticket isn't on sale.", 409);
+        console.error("[guest-checkout] atomic free issuance failed:", issueError || issued);
         return err("internal_error", "Could not issue your ticket.", 500);
       }
-
-      await supabase
-        .from("ticket_holds")
-        .update({ status: "converted" })
-        .eq("id", freeHold.holdId);
-      await supabase
-        .from("ticket_types")
-        .update({ quantity_sold: (tier.quantity_sold || 0) + quantity })
-        .eq("id", ticketTypeId);
-      await supabase.from("order_timeline").insert([
-        { order_id: freeOrder.id, type: "created", label: "Order created" },
-        {
-          order_id: freeOrder.id,
-          type: "payment_captured",
-          label: "Free guest ticket issued",
-        },
-      ]);
+      const freeOrder = { id: issued.order_id };
+      // A simultaneous same-key request may have committed while this request
+      // prepared its QR rows. Only the winning transaction runs side effects.
+      if (issued.idempotent) {
+        await recordFreePromoterAttribution(supabase, issued.order);
+        return json({ ok: true, free: true, order_id: freeOrder.id, count: issued.count, idempotent: true });
+      }
 
       // Count a promo only after the ticket insert succeeds, never on quote,
       // abandoned checkout, or the existing idempotent replay path.
