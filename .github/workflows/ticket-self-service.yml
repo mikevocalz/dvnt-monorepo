@@ -10,6 +10,10 @@ on:
       - 'packages/app/lib/api/ticket-cancel-contract.test.ts'
       - 'packages/app/lib/tickets/**'
       - 'scripts/test-ticket-self-service-dom.cjs'
+      - 'scripts/test-order-refund-dom.cjs'
+      - 'packages/app/features/settings/order-detail.web.tsx'
+      - 'packages/app/features/routes/screens/settings/order/**'
+      - 'packages/app/lib/payments/order-refund-eligibility*'
       - 'package.json'
       - '.github/workflows/ticket-self-service.yml'
   push:

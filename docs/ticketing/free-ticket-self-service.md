@@ -36,6 +36,9 @@ page's separate `not_going` RSVP toggle is not a ticket-cancellation substitute.
   compare-and-set result, preventing stale transfer reads from reviving a void ticket.
 - Both UI handlers prevent concurrent repeated submissions across A→B→A navigation
   and suppress late success/navigation after route/account changes or unmount.
+- Order-detail screens also require a positive final paid total before offering
+  an order-level support refund request. The `purchases` handler enforces the
+  same guard, while positive paid add-on totals remain eligible.
 
 ## Verification
 
@@ -51,6 +54,8 @@ fallback. `POSTGRES_SINGLE_USER=1` is a separately labelled sequential supplemen
 not evidence of concurrency.
 
 The draft's dedicated GitHub workflow runs both commands without project secrets.
+The first published source tree passed all 12 real PostgreSQL concurrency/rollback
+checks in CI, with zero skips. Recheck the latest PR head before release.
 The broad existing ticket-release suite and release/issuance gates must remain green.
 Local full-web and shared-package typechecks were killed by runtime resource limits;
 focused helper typecheck, changed-file lint and executable regression tests ran.
@@ -61,8 +66,8 @@ This is source-only. No live cancellation, refund, purchase, migration, deployme
 or native release is authorized by preparing this draft.
 
 After separate release approval: apply the cancellation migration first; verify
-service-role-only execution; deploy the reviewed `ticket-refund`, `transfer-ticket`
-and `get-my-tickets` dependency closures; then release web. Older servers omit the
+service-role-only execution; deploy the reviewed `ticket-refund`, `transfer-ticket`,
+`get-my-tickets` and `purchases` dependency closures; then release web. Older servers omit the
 action projection, so updated UI fails closed. Native changes require their own
 release. Old clients cannot silently cancel free tickets through monetary refund.
 

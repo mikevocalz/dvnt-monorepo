@@ -38,6 +38,7 @@ import { OrderDetailSkeleton } from "@dvnt/app/components/skeletons";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { purchasesApi } from "@dvnt/app/lib/api/payments";
 import { getOrderStatusAppearance } from "@dvnt/app/lib/payments/order-status-appearance";
+import { canRequestOrderRefund } from "@dvnt/app/lib/payments/order-refund-eligibility";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
   type Order,
@@ -369,7 +370,7 @@ export default function OrderDetailScreen() {
           </View>
 
           {/* Refund + Support */}
-          {activeOrder.status === "paid" && (
+          {canRequestOrderRefund(activeOrder) && (
             <ActionButton
               icon={<RotateCcw size={18} color="#F97316" />}
               label="Request Refund"
