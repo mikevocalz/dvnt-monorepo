@@ -99,7 +99,7 @@ function checkout(rail, patch = {}, options = {}) {
     "rate-limit.ts": { checkRateLimit: () => ({ allowed: true }) },
   };
   const realHelpers = new Set([
-    "tier-sale-availability.ts", "tier-visibility.ts", "sales-cutoff.ts",
+    "checkout-replay.ts", "tier-sale-availability.ts", "tier-visibility.ts", "sales-cutoff.ts",
     "fee-calculator.ts", "async-settlement.ts", "checkout-line-items.ts",
   ]);
   let handler;
