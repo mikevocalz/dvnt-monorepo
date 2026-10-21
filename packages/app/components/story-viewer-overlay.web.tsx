@@ -27,7 +27,7 @@ import {
 } from "@dvnt/app/lib/stories/story-message";
 import { isSameUser } from "@dvnt/app/lib/profile/same-user";
 import { storyProfilePath } from "@dvnt/app/lib/profile/story-profile-path";
-import { StorySharedSourceCard } from "./story-shared-source.web";
+import { StorySharedSourceCard, StorySharedSourceContent } from "./story-shared-source.web";
 import { useSharedStoryPlayback } from "../lib/hooks/use-shared-story-playback";
 import { SHARED_STORY_BACKDROP } from "../lib/stories/shared-source";
 
@@ -330,6 +330,18 @@ export function StoryViewerOverlay() {
     });
   };
 
+  const viewersAction = (
+    <button
+      type="button"
+      onClick={() => setShowViewers(true)}
+      className="flex min-h-11 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-white/15 bg-black/45 px-3 text-white backdrop-blur-md focus-visible:outline-2 focus-visible:outline-white"
+      aria-label="See who viewed this story"
+    >
+      <Eye size={16} color="#fff" />
+      <span className="text-[13px] font-semibold">Viewers</span>
+    </button>
+  );
+
   // Portal to <body> so the overlay escapes every ancestor stacking context
   // (the shell's backdrop-filter / transforms) and truly sits on top of the
   // whole app — above header (z-100), tab bar (z-1000) and lightbox (z-2000).
@@ -416,21 +428,6 @@ export function StoryViewerOverlay() {
           </div>
         )}
 
-        {segment?.sharedSource ? (
-          <StorySharedSourceCard
-            source={segment.sharedSource}
-            isSourceCard={segment.isSourceCard}
-            profilePath={segment.sharedSource.author.profileUnavailable ? null : storyProfilePath({
-              userId: segment.sharedSource.author.id,
-              username: segment.sharedSource.author.username,
-            }, viewer, "web")}
-            onNavigate={(path) => {
-              closeForNavigation();
-              router.push(path);
-            }}
-          />
-        ) : null}
-
         {/* Story overlays for the current segment — the SAME shared renderer the
             create preview uses. WS-4 stickers are tappable here (deep-link per
             their metadata); tapping closes the viewer and navigates. */}
@@ -472,55 +469,6 @@ export function StoryViewerOverlay() {
           </button>
         ) : null}
 
-        {/* Tagged people. Collapsed to a count, because a story with six tags
-            should not cover the story with six names. */}
-        {playbackReady && storyTags.length > 0 ? (
-          <div
-            className="absolute inset-x-0 flex justify-center px-4"
-            style={{ bottom: isOwnStory ? 76 : 150, zIndex: STORY_UI_Z }}
-          >
-            {showTags ? (
-              <div className="flex max-w-full flex-col gap-1 rounded-2xl border border-white/15 bg-black/65 p-2 backdrop-blur-md">
-                {storyTags.map((tag) => (
-                  <button
-                    key={tag.id}
-                    onClick={() => {
-                      closeForNavigation();
-                      router.push(`/feed/${tag.username}`);
-                    }}
-                    className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-white/10"
-                  >
-                    {tag.avatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={tag.avatar}
-                        alt=""
-                        className="h-6 w-6 rounded-md bg-white/10 object-cover"
-                      />
-                    ) : null}
-                    <span className="text-[13px] font-semibold text-white">
-                      @{tag.username}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowTags(true)}
-                aria-label={`${storyTags.length} people tagged`}
-                className="flex items-center gap-2 rounded-2xl border border-white/15 bg-black/60 px-3.5 py-2 backdrop-blur-md"
-              >
-                <Users size={14} color="#fff" />
-                <span className="text-[13px] font-semibold text-white">
-                  {storyTags.length === 1
-                    ? `@${storyTags[0].username}`
-                    : `${storyTags.length} people`}
-                </span>
-              </button>
-            )}
-          </div>
-        ) : null}
-
         {/* Reactions in flight — the receipt for a tap, without a toast over
             the story. */}
         {playbackReady && floatingEmojis.length > 0 ? (
@@ -553,76 +501,137 @@ export function StoryViewerOverlay() {
           </div>
         ) : null}
 
-        {/* Own story → who saw it. Someone else's → react or reply. Native has
-            had both; web had neither. */}
-        {playbackReady && isOwnStory ? (
+        {/* One bottom stack keeps attribution, tags and messaging clear of each
+            other. Empty story space stays transparent to the player's tap zones. */}
+        {playbackReady ? (
           <div
-            className="absolute inset-x-0 bottom-0 flex justify-center px-4 pb-5"
-            style={{ zIndex: STORY_UI_Z }}
+            className="pointer-events-none absolute inset-0 flex min-h-0 flex-col"
+            style={{
+              zIndex: STORY_UI_Z,
+              paddingTop: segment?.isSourceCard ? Math.max(72, size.h * 0.12) : 0,
+            }}
           >
-            <button
-              onClick={() => setShowViewers(true)}
-              className="flex items-center gap-2 rounded-2xl border border-white/15 bg-black/45 px-4 py-2.5 backdrop-blur-md"
-              aria-label="See who viewed this story"
-            >
-              <Eye size={16} color="#fff" />
-              <span className="text-[13px] font-semibold text-white">
-                Viewers
-              </span>
-            </button>
-          </div>
-        ) : canMessageOwner ? (
-          <div
-            className="absolute inset-x-0 bottom-0 flex flex-col gap-3 px-4 pb-5"
-            style={{ zIndex: STORY_UI_Z }}
-          >
-            {!composerFocused ? (
-              <div className="flex justify-center gap-2">
-                {STORY_REACTION_EMOJIS.map((emoji) => (
-                  <button
-                    key={emoji}
-                    onClick={() => sendReaction(emoji)}
-                    aria-label={`React ${emoji}`}
-                    className="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-black/45 text-[22px] backdrop-blur-md transition-transform active:scale-90 hover:scale-110"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void sendReply();
-              }}
-              className="flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-4 py-2 backdrop-blur-md"
-            >
-              <input
-                value={replyText}
-                onChange={(e) => setReplyText(e.target.value)}
-                onFocus={() => setComposerFocused(true)}
-                onBlur={() => setComposerFocused(false)}
-                placeholder={`Reply to @${group.username}…`}
-                aria-label={`Reply to ${group.username}`}
-                maxLength={1000}
-                className="min-w-0 flex-1 bg-transparent py-1.5 text-[15px] text-white placeholder:text-white/45 focus:outline-none"
+            {segment?.sharedSource && segment.isSourceCard ? (
+              <StorySharedSourceContent
+                key={`${segment.sharedSource.type}:${segment.sharedSource.id}`}
+                source={segment.sharedSource}
               />
-              <button
-                type="submit"
-                disabled={!replyText.trim() || sendingReply}
-                aria-label="Send reply"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15 disabled:opacity-40"
-              >
-                <SendHorizontal size={17} color="#fff" />
-              </button>
-            </form>
+            ) : null}
+            <div
+              data-story-footer
+              className="pointer-events-auto mt-auto flex shrink-0 flex-col gap-3 px-4"
+              style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 20px)" }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {/* Keep tags in the bottom stack; their expanded list opens above
+                  it instead of covering attribution or messaging controls. */}
+              {storyTags.length > 0 ? (
+                <div data-story-tags className="relative flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowTags((visible) => !visible)}
+                    aria-label={`${storyTags.length} people tagged`}
+                    aria-expanded={showTags}
+                    className="flex min-h-11 items-center gap-2 rounded-2xl border border-white/15 bg-black/60 px-3.5 py-2 backdrop-blur-md"
+                  >
+                    <Users size={14} color="#fff" />
+                    <span className="text-[13px] font-semibold text-white">
+                      {storyTags.length === 1
+                        ? `@${storyTags[0].username}`
+                        : `${storyTags.length} people`}
+                    </span>
+                  </button>
+                  {showTags ? (
+                    <div data-story-tag-list className="absolute bottom-full mb-2 flex max-h-32 max-w-full flex-col gap-1 overflow-y-auto rounded-2xl border border-white/15 bg-black/65 p-2 backdrop-blur-md">
+                      {storyTags.map((tag) => (
+                        <button
+                          key={tag.id}
+                          onClick={() => {
+                            closeForNavigation();
+                            router.push(`/feed/${tag.username}`);
+                          }}
+                          className="flex shrink-0 items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-white/10"
+                        >
+                          {tag.avatar ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={tag.avatar} alt="" className="h-6 w-6 rounded-md bg-white/10 object-cover" />
+                          ) : null}
+                          <span className="text-[13px] font-semibold text-white">@{tag.username}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {segment?.sharedSource ? (
+                <StorySharedSourceCard
+                  source={segment.sharedSource}
+                  profilePath={segment.sharedSource.author.profileUnavailable ? null : storyProfilePath({
+                    userId: segment.sharedSource.author.id,
+                    username: segment.sharedSource.author.username,
+                  }, viewer, "web")}
+                  viewersAction={isOwnStory ? viewersAction : undefined}
+                  onNavigate={(path) => {
+                    closeForNavigation();
+                    router.push(path);
+                  }}
+                />
+              ) : isOwnStory ? (
+                <div className="flex justify-start">{viewersAction}</div>
+              ) : null}
+              {canMessageOwner ? (
+                <div className="flex min-w-0 flex-col gap-3">
+                  {!composerFocused ? (
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {STORY_REACTION_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          onClick={() => sendReaction(emoji)}
+                          aria-label={`React ${emoji}`}
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/45 text-[22px] backdrop-blur-md transition-transform active:scale-90 hover:scale-110"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void sendReply();
+                    }}
+                    className="flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-4 py-2 backdrop-blur-md"
+                  >
+                    <input
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      onFocus={() => setComposerFocused(true)}
+                      onBlur={() => setComposerFocused(false)}
+                      placeholder={`Reply to @${group.username}…`}
+                      aria-label={`Reply to ${group.username}`}
+                      maxLength={1000}
+                      className="min-w-0 flex-1 bg-transparent py-1.5 text-[15px] text-white placeholder:text-white/45 focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!replyText.trim() || sendingReply}
+                      aria-label="Send reply"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15 disabled:opacity-40"
+                    >
+                      <SendHorizontal size={17} color="#fff" />
+                    </button>
+                  </form>
+                </div>
+              ) : null}
+            </div>
           </div>
         ) : null}
 
         <StoryViewersSheetWeb
           storyId={activeStoryId || group.id}
-          open={playbackReady && showViewers}
+          open={playbackReady && isOwnStory && showViewers}
           onClose={() => setShowViewers(false)}
           onProfilePress={(username) => {
             closeForNavigation();

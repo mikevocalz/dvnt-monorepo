@@ -244,7 +244,11 @@ const {
     const attribution = () =>
       document.querySelector('[aria-label="Shared post by @original"]');
     assert.ok(attribution());
-    assert.match(attribution().textContent, /Canonical text/);
+    assert.match(document.querySelector('[aria-label="Shared post content"]').textContent, /Canonical text/);
+    assert.doesNotMatch(attribution().textContent, /Canonical text/);
+    assert.ok(attribution().closest("[data-story-footer]"));
+    assert.equal(attribution().querySelector('a[href="/feed/post/11"]').textContent.trim(), "View Post");
+    assert.equal(document.querySelectorAll('button[aria-label^="React "]').length, 7);
     assert.match(attribution().textContent, /Original Author/);
     const profile = attribution().querySelector("a");
     assert.equal(profile.getAttribute("href"), "/profile/original");
@@ -270,9 +274,38 @@ const {
     assert.ok(
       document.querySelector('[aria-label="Shared event by @original"]'),
     );
+    assert.equal(document.querySelector('a[href="/e/22"]').textContent.trim(), "View Event");
+    assert.equal(document.querySelector('[aria-label="Shared event content"]'), null, "media events do not duplicate their flyer with a text card");
     await flush(() => document.querySelector('a[href="/e/22"]').click());
     assert.equal(global.__routes.at(-1), "/e/22");
     assert.equal(global.__advances, 0);
+
+    // Viewers stays owner-only, shares an action row with the source link, and
+    // cannot remain open after the owner changes or signs out.
+    await flush(() => f.useAuthStore.setState({ user: { id: "1", authId: "auth1" } }));
+    await flush(() => f.open(reloaded));
+    const viewers = () => document.querySelector('button[aria-label="See who viewed this story"]');
+    assert.ok(viewers());
+    assert.equal(viewers().parentElement, attribution().querySelector('[data-story-source-actions]'));
+    assert.equal(viewers().nextElementSibling.textContent.trim(), "View Post");
+    assert.equal(document.querySelector('input[aria-label^="Reply to "]'), null);
+    await flush(() => viewers().click());
+    assert.equal(global.__viewersSheet.open, true);
+    assert.equal(global.__viewersSheet.storyId, "101");
+    assert.equal(global.__player.paused, true);
+    await flush(() => global.__viewersSheet.onClose());
+    assert.equal(global.__viewersSheet.open, false);
+    assert.equal(global.__player.paused, false);
+    await flush(() => global.__player.onStoryChange(1));
+    await flush(() => viewers().click());
+    assert.equal(global.__viewersSheet.storyId, "102");
+    await flush(() => f.useAuthStore.setState({ user: { id: "2", authId: "auth2" } }));
+    assert.equal(viewers(), null);
+    assert.equal(global.__viewersSheet.open, false);
+    await flush(() => f.useAuthStore.setState({ user: null }));
+    assert.equal(viewers(), null);
+    assert.equal(document.querySelector('[role="dialog"]'), null);
+    await flush(() => f.useAuthStore.setState({ user: { id: "2", authId: "auth2" } }));
 
     const originalDb = global.__storyDb;
     global.__storyDb = (table) => {
@@ -521,6 +554,17 @@ const {
       "https://fixture.invalid/ordinary.jpg",
     );
     assert.equal(rpcCalls.length, countBeforeOrdinary);
+    assert.equal(viewers(), null, "ordinary other-member story has no Viewers button");
+    await flush(() => f.useAuthStore.setState({ user: { id: "1", authId: "auth1" } }));
+    assert.ok(viewers(), "ordinary owner keeps Viewers at the footer");
+    assert.ok(viewers().closest("[data-story-footer]"));
+    await flush(() => viewers().click());
+    assert.equal(global.__viewersSheet.open, true);
+    global.__viewersSheetRenders = [];
+    await flush(() => f.useAuthStore.setState({ user: null }));
+    assert.equal(viewers(), null);
+    assert.equal(global.__viewersSheet.open, false);
+    assert.ok(global.__viewersSheetRenders.every((render) => !render.open), "logout cannot transiently expose the viewers sheet before effects reset state");
     await flush(() => f.close());
     global.__storyRpc = rpc;
 
@@ -588,7 +632,7 @@ const {
       "no client DM or conversation creation",
     );
     console.log(
-      "PASS story attribution DOM: real event action eligibility, source-only payload, single-flight, canonical cache, failed/retried UUID, reload/text media, per-segment author/profile/source links, fresh actor-bound playback, no cached media flash, revocation/expiry, account epochs and unmount isolation",
+      "PASS story attribution DOM: real event action eligibility, source-only payload, single-flight, canonical cache, failed/retried UUID, reload/text media, bottom attribution, exact CTA labels, owner/guest viewer eligibility, seven reactions, per-segment author/profile/source links, fresh actor-bound playback, no cached media flash, revocation/expiry, account epochs and unmount isolation",
     );
   } finally {
     if (app) await f.act(async () => app.unmount());

@@ -10,6 +10,7 @@ const paths = [
 const resolve = (name) => require.resolve(name, { paths });
 const load = (name) => require(resolve(name));
 async function buildFixture({ outfile, browser = false }) {
+  const reactionArray = fs.readFileSync(path.join(ROOT, "packages/app/lib/stories/story-message.ts"), "utf8").match(/export const STORY_REACTION_EMOJIS = (\[[^;]+\]);/)[1];
   const boundaries = {
     "solito/navigation": `export const useRouter=()=>({push:path=>globalThis.__routes.push(path)});`,
     "@dvnt/app/lib/stores/auth-store": `import {create} from 'zustand';export const useAuthStore=create(()=>({user:{id:'1',authId:'auth1',username:'publisher',avatar:'publisher.jpg'}}));`,
@@ -27,9 +28,9 @@ async function buildFixture({ outfile, browser = false }) {
       for(const method of ['select','eq','in','gt','order','limit'])q[method]=(...args)=>{if(Array.isArray(filters[method]))filters[method].push(args);return q};
       q.maybeSingle=()=>{filters.single=true;return q};return q;
     }};`,
-    "@dvnt/app/components/story-viewers-sheet.web": `export const StoryViewersSheetWeb=()=>null;`,
+    "@dvnt/app/components/story-viewers-sheet.web": `export const StoryViewersSheetWeb=props=>{globalThis.__viewersSheet=props;(globalThis.__viewersSheetRenders??=[]).push({open:props.open,viewerId:globalThis.__viewer?.()});return props.open?<div role="dialog" aria-label="Story viewers" style={{position:"absolute",inset:0,zIndex:100001,background:"black"}}><button onClick={props.onClose}>Close viewers</button></div>:null};`,
     "@dvnt/app/components/story-overlays-layer.web": `export const StoryOverlaysLayer=()=>null;`,
-    "@dvnt/app/lib/stories/story-message": `export const STORY_REACTION_EMOJIS=['❤️'];export const sendStoryMessage=args=>{if(globalThis.__sendStoryMessage)return globalThis.__sendStoryMessage(args);throw new Error('unexpected client DM')};`,
+    "@dvnt/app/lib/stories/story-message": `export const STORY_REACTION_EMOJIS=${reactionArray};export const sendStoryMessage=args=>{if(globalThis.__sendStoryMessage)return globalThis.__sendStoryMessage(args);throw new Error('unexpected client DM')};`,
     "@dvnt/ui": browser
       ? `export {StoryViewer} from '${ROOT}/packages/ui/src/media/StoryViewer.web.tsx';`
       : `export const StoryViewer=props=>{globalThis.__player=props;return <div className="dvnt-story-viewer" onClick={()=>globalThis.__advances++}>Player</div>};`,
