@@ -68,6 +68,48 @@
       "owner": "platform",
       "kind": "command",
       "automation": "verify:functions"
+    },
+    {
+      "id": "ticket-paid-webhook-retry",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/stripe-webhook/ticket-fulfillment.test.cjs"
+    },
+    {
+      "id": "ticket-hosted-fulfillment-retry",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/_shared/session-issuance.test.cjs"
+    },
+    {
+      "id": "ticket-free-rsvp-guest-gate",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/guest-checkout/access.test.cjs"
+    },
+    {
+      "id": "ticket-guest-promo",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs"
+    },
+    {
+      "id": "ticket-refund-scope",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/stripe-webhook/charge-refunded.test.cjs"
+    },
+    {
+      "id": "ticket-scan-admission",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/ticket-scan/index.test.cjs"
+    },
+    {
+      "id": "ticket-processing-fee",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/_shared/stripe-processing-fee.test.cjs"
     }
   ],
   "releaseCandidateManual": [
