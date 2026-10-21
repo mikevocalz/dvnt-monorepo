@@ -13,6 +13,8 @@ import Animated, {
 import type { TicketTier } from "../types";
 
 interface StickyCTAProps {
+  /** Pending checkout taps only recheck the original purchase, never pay again. */
+  checkoutState?: "checking" | "pending";
   selectedTier: TicketTier | null;
   hasTicket: boolean;
   isPast?: boolean;
@@ -39,6 +41,7 @@ interface StickyCTAProps {
 }
 
 export const StickyCTA = memo(function StickyCTA({
+  checkoutState,
   selectedTier,
   hasTicket,
   isPast,
@@ -119,7 +122,34 @@ export const StickyCTA = memo(function StickyCTA({
   const glowColor = selectedTier?.glowColor ?? "rgb(62, 164, 229)";
   const totalPrice = price * ticketQty;
 
-  // Cancelled takes priority over every other CTA state.
+  // Recover an already-submitted purchase before offering any new checkout.
+  if (checkoutState) {
+    return (
+      <View style={[styles.container, { paddingBottom: insets.bottom + 8 }]}>
+        <View style={styles.inner}>
+          <Pressable
+            onPress={onGetTickets}
+            disabled={checkoutState === "checking"}
+            accessibilityRole="button"
+            style={styles.ticketButton}
+          >
+            {checkoutState === "checking" ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Clock size={18} color="#fff" />
+            )}
+            <Text style={styles.ticketButtonText}>
+              {checkoutState === "checking"
+                ? "Confirming tickets..."
+                : "Check ticket status"}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // Cancelled takes priority over every other sales CTA state.
   // Holders see "View Ticket" (still useful for the receipt + refund
   // record). Non-holders see a disabled, dimmed "Event Cancelled" pill.
   if (isCancelled) {
