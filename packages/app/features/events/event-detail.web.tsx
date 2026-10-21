@@ -76,6 +76,8 @@ import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
 import { useEvents, useEvent, useToggleEventLike, useRsvpEvent } from "@dvnt/app/lib/hooks/use-events";
+import { useEventTitleRoute } from "@dvnt/app/lib/hooks/use-event-title-route";
+import { matchingEventDetailPreview, resolveEventDetailId } from "@dvnt/app/lib/events/event-detail-route";
 import { useEventRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useEventDominantColor } from "@dvnt/app/lib/color/useEventDominantColor";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
@@ -322,51 +324,24 @@ export function EventDetailScreen() {
       return rows?.[0] ?? null;
     },
   });
-  // The cached list is filtered (upcoming only), so it can't resolve past events.
-  // A lightweight {id,title,status,created_at} index over ALL events resolves
-  // any slug. status + created_at are what resolveEventBySlug needs to skip a
-  // cancelled row and break a same-title tie toward the newest event — without
-  // them, /events/dc-dick-strict lands on whichever row PostgREST returns first.
-  // visibility rides along so the title lane stays public-only: a signed-in
-  // member can still list link_only rows, and slugify(title) must not be a
-  // second door into one.
-  const slugIndexQuery = useQuery<
-    Array<{
-      id: number;
-      title?: string;
-      status?: string | null;
-      created_at?: string | null;
-      visibility?: string | null;
-    }>
-  >({
-    queryKey: ["events", "slug-index"],
-    enabled: directId === undefined && !!slug && !isEventShareToken(slug),
-    staleTime: 5 * 60 * 1000,
-    queryFn: async () => {
-      const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
-      const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-      if (!url || !key) return [];
-      const res = await fetch(
-        `${url}/rest/v1/events?select=id,title,status,created_at,visibility`,
-        { headers: { apikey: key, Authorization: `Bearer ${key}` } },
-      );
-      return res.ok ? res.json() : [];
-    },
-  });
+  // Shared with story/DM links: resolve titles from the complete public index,
+  // not the partial upcoming list, which may still carry a renamed/duplicate row.
+  const slugIndexQuery = useEventTitleRoute(
+    slug, directId === undefined && !!slug && !isEventShareToken(slug),
+  );
   const tokenEvent = tokenQuery.data;
-  const slugIndex = slugIndexQuery.data;
+  const slugIndex = slugIndexQuery.routingIndex;
   // directId first: /feed/events/[id] is the ownership path. A ticket holder,
   // host or staff member opening a cancelled event by id still resolves here —
   // only the slug lane applies the discovery gate.
-  const resolvedId =
-    directId ??
-    tokenEvent?.id ??
-    listEvent?.id ??
-    resolveEventByPathSegment(slugIndex ?? [], slug)?.id;
+  const resolvedId = resolveEventDetailId({
+    directId, slug, tokenId: tokenEvent?.id, titleId: slugIndexQuery.resolvedTitleId, listEvent, index: slugIndex,
+  });
+  const listPreview = matchingEventDetailPreview(listEvent, resolvedId);
   const eventQuery = useEvent(resolvedId ? String(resolvedId) : "");
   const { data: full } = eventQuery;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const e = (full ?? listEvent) as any;
+  const e = (full ?? listPreview) as any;
 
   // Cover dominant color: db value if the edge fn already set it, else extract
   // on-device (video → thumbnail frame) and persist via set-event-color so this
@@ -700,7 +675,7 @@ export function EventDetailScreen() {
   };
 
   // ── 5. TRANSLATION — caption/description translate toggle ────────────
-  const descText = ((full ?? listEvent) as any)?.description ?? "";
+  const descText = ((full ?? listPreview) as any)?.description ?? "";
   const {
     displayText: translatedDescription,
     isTranslated: isDescriptionTranslated,

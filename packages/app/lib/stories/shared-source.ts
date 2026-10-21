@@ -1,4 +1,5 @@
 import type { StorySharedSource } from "../types";
+import { webEventDetailRoute } from "../events/event-detail-route";
 
 /** Reject partial/legacy junk rather than attributing a share to its publisher. */
 export function parseStorySharedSource(
@@ -38,7 +39,7 @@ export function parseStorySharedSource(
 
 export function storySourcePath(source: StorySharedSource): string {
   return source.type === "event"
-    ? `/e/${encodeURIComponent(source.id)}`
+    ? webEventDetailRoute(source.id)
     : `/feed/post/${encodeURIComponent(source.id)}`;
 }
 
