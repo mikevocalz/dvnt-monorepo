@@ -23,8 +23,8 @@ const {
     const css = await buildStyles();
     assert.match(
       css,
-      /\.bottom-40/,
-      "actual card safe clearance utility must be built",
+      /\.min-h-11/,
+      "actual 44px footer hit-target utility must be built",
     );
     const { chromium } = load("playwright");
     const executablePath =
@@ -90,6 +90,12 @@ const {
           title: "The original event",
         },
       };
+      const photo = { ...post, id: "103", url: flyer };
+      const textEvent = { ...event, id: "104", url: undefined, sharedSource: {
+        ...event.sharedSource,
+        title: "A long original event title that wraps across multiple lines on a narrow story",
+        caption: "A no-media event description that stays reachable. ".repeat(20),
+      } };
       // The production overlay performs a new RLS read on every shared segment.
       // Return only these offline rows, never bypass the real API/guard.
       globalThis.__storyDb = (table) => ({
@@ -102,6 +108,18 @@ const {
                   expires_at: new Date(Date.now() + 3600000).toISOString(),
                   shared_source: post.sharedSource,
                   media: null,
+                },
+                {
+                  id: textEvent.id,
+                  expires_at: new Date(Date.now() + 3600000).toISOString(),
+                  shared_source: textEvent.sharedSource,
+                  media: null,
+                },
+                {
+                  id: photo.id,
+                  expires_at: new Date(Date.now() + 3600000).toISOString(),
+                  shared_source: photo.sharedSource,
+                  media: { url: photo.url, mime_type: "image/jpeg" },
                 },
                 {
                   id: event.id,
@@ -133,15 +151,26 @@ const {
       const f = globalThis.__fixture;
       const app = f.mount(document.getElementById("root"));
       app.render();
-      globalThis.__openStory = (kind) =>
-        f.open([makeGroup(kind === "event" ? [event, post] : [post, event])]);
+      globalThis.__openStory = (kind, role = "other", tagged = false) => {
+        f.useAuthStore.setState({ user: role === "guest" ? null : {
+          id: role === "own" ? "2" : "1",
+          authId: role === "own" ? "auth2" : "auth1",
+          username: role === "own" ? "publisher" : "viewer",
+        } });
+        for (const id of ["101", "102", "103", "104"]) {
+          f.client.setQueryData(["story-tags", id], tagged ? Array.from({ length: 8 }, (_, index) => ({
+            id: `tag-${index}`, username: `tagged-member-${index}`, avatar,
+          })) : []);
+        }
+        f.open([makeGroup(kind === "event" ? [event, post] : kind === "text-event" ? [textEvent, post] : kind === "photo" ? [photo, event] : [post, event])]);
+      };
       globalThis.__openStory("post");
     });
-    const card = () => page.locator('section[aria-label^="Shared "]');
+    const card = () => page.locator("[data-story-source-card]");
     const profile = () =>
       card().getByRole("link", { name: "View @original's profile" });
     const sourceLink = () =>
-      card().getByRole("link", { name: /View original/ });
+      card().getByRole("link", { name: /^View (Event|Post)$/ });
     const screenshots = process.env.STORY_SHARE_SCREENSHOT_DIR;
     if (screenshots) fs.mkdirSync(screenshots, { recursive: true });
     for (const viewport of [
@@ -150,103 +179,133 @@ const {
       { width: 1440, height: 900 },
     ]) {
       await page.setViewportSize(viewport);
-      for (const kind of ["post", "event"]) {
-        await page.evaluate((kind) => globalThis.__openStory(kind), kind);
-        await card().waitFor();
-        await profile().waitFor();
-        const geometry = await card().evaluate((el) => {
-          const rect = (e) => {
-            const b = e.getBoundingClientRect();
-            return {
-              left: b.left,
-              right: b.right,
-              top: b.top,
-              bottom: b.bottom,
-              width: b.width,
-              height: b.height,
+      for (const role of ["own", "other"]) {
+        for (const kind of ["post", "photo", "event", "text-event"]) {
+          await page.evaluate(({ kind, role }) => globalThis.__openStory(kind, role), { kind, role });
+          await card().waitFor();
+          await profile().waitFor();
+          await page.mouse.move(0, 0);
+          const geometry = await card().evaluate((el) => {
+            const rect = (e) => {
+              if (!e) return null;
+              const b = e.getBoundingClientRect();
+              return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width, height: b.height };
             };
-          };
-          const author = el.querySelector("a");
-          const source = el.querySelectorAll("a")[1];
-          const reply = document.querySelector(
-            'input[aria-label^="Reply to "]',
-          );
-          const a = author.getBoundingClientRect(),
-            s = source.getBoundingClientRect();
-          return {
-            card: rect(el),
-            author: rect(author),
-            source: rect(source),
-            reply: rect(reply),
-            authorHit: author.contains(
-              document.elementFromPoint(a.x + a.width / 2, a.y + a.height / 2),
-            ),
-            sourceHit: source.contains(
-              document.elementFromPoint(s.x + s.width / 2, s.y + s.height / 2),
-            ),
-            viewport: { w: innerWidth, h: innerHeight },
-          };
-        });
-        assert.ok(geometry.authorHit, JSON.stringify(geometry));
-        assert.ok(
-          geometry.sourceHit,
-          "source link must be above player tap catcher",
-        );
-        assert.ok(
-          geometry.card.left >= 0 && geometry.card.right <= viewport.width,
-          JSON.stringify(geometry),
-        );
-        assert.ok(
-          geometry.source.bottom < geometry.reply.top,
-          "reply controls cannot occlude source attribution",
-        );
-        assert.ok(
-          geometry.author.height >= 36,
-          "avatar/name have a usable click target",
-        );
-        assert.ok(
-          geometry.source.bottom <= geometry.card.bottom,
-          "source link stays inside short-screen card",
-        );
-        // Clicking card padding must not hit the player's next-segment surface.
-        await card().click({ position: { x: 3, y: 3 } });
-        assert.equal(
-          await card().getAttribute("aria-label"),
-          `Shared ${kind} by @original`,
-        );
-        if (screenshots)
-          await page.screenshot({
-            path: path.join(
-              screenshots,
-              `${kind}-${viewport.width}x${viewport.height}.png`,
-            ),
+            const hit = (e) => {
+              if (!e) return null;
+              const b = e.getBoundingClientRect();
+              return e.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2));
+            };
+            const author = el.querySelector("a");
+            const source = el.querySelector("[data-story-source-actions] a");
+            const viewers = el.querySelector('button[aria-label="See who viewed this story"]');
+            const footer = el.closest("[data-story-footer]");
+            const frame = document.querySelector(".dvnt-story-viewer").parentElement;
+            const content = document.querySelector('section[aria-label$=" content"]');
+            return {
+              card: rect(el), author: rect(author), source: rect(source), viewers: rect(viewers),
+              footer: rect(footer), frame: rect(frame), content: rect(content),
+              caption: rect(content?.querySelector("p")),
+              reply: rect(document.querySelector('input[aria-label^="Reply to "]')?.closest("form")),
+              reactions: [...document.querySelectorAll('button[aria-label^="React "]')].map(rect),
+              authorHit: hit(author), sourceHit: hit(source), viewersHit: hit(viewers),
+              bottomPadding: parseFloat(getComputedStyle(footer).paddingBottom),
+            };
           });
-        await profile().click();
+          const context = `${kind}/${role}/${viewport.width}: ${JSON.stringify(geometry)}`;
+          assert.ok(geometry.authorHit && geometry.sourceHit, context);
+          assert.ok(geometry.card.left >= geometry.frame.left && geometry.card.right <= geometry.frame.right, context);
+          assert.ok(geometry.card.top > geometry.frame.top + geometry.frame.height * 0.4, "attribution belongs in the bottom area: " + context);
+          assert.ok(Math.abs(geometry.footer.bottom - geometry.frame.bottom) <= 1, context);
+          assert.ok(geometry.bottomPadding >= 20, "bottom safe-area baseline: " + context);
+          assert.ok(geometry.author.height >= 44 && geometry.source.height >= 44, context);
+          assert.ok(geometry.source.right > geometry.frame.left + geometry.frame.width * 0.75, "source action must be on the right: " + context);
+          assert.ok(geometry.source.bottom <= geometry.card.bottom, context);
+          assert.equal(await sourceLink().textContent(), kind.includes("event") ? "View Event" : "View Post");
+          if (role === "own") {
+            assert.ok(geometry.viewersHit, context);
+            assert.ok(geometry.viewers.height >= 44 && geometry.viewers.width >= 44, context);
+            assert.ok(Math.abs(geometry.viewers.top - geometry.source.top) <= 1, "actions share a bottom row: " + context);
+            assert.ok(geometry.viewers.left < geometry.frame.left + geometry.frame.width * 0.25, "Viewers must be on the left: " + context);
+            assert.ok(geometry.viewers.right < geometry.source.left, "actions cannot overlap: " + context);
+            assert.equal(geometry.reply, null);
+            assert.equal(geometry.reactions.length, 0);
+          } else {
+            assert.equal(geometry.viewers, null);
+            assert.equal(geometry.reactions.length, 7);
+            assert.ok(geometry.card.bottom < geometry.reply.top, context);
+            for (const reaction of geometry.reactions) {
+              assert.ok(reaction.width >= 44 && reaction.height >= 44, "reactions never shrink: " + context);
+              assert.ok(reaction.left >= geometry.frame.left && reaction.right <= geometry.frame.right, context);
+              assert.ok(geometry.card.bottom < reaction.top && reaction.bottom < geometry.reply.top, context);
+            }
+          }
+          if (kind === "post" || kind === "text-event") {
+            assert.ok(geometry.content.bottom < geometry.footer.top, "text remains in the body above the footer: " + context);
+            assert.ok(geometry.content.height >= 80, "text body remains readable: " + context);
+            assert.equal(await card().getByText("A text post", { exact: false }).count(), 0);
+          } else assert.equal(geometry.content, null);
+          // Footer padding must not advance the player.
+          await card().click({ position: { x: 3, y: 3 } });
+          assert.equal(await card().getAttribute("aria-label"), `Shared ${kind.includes("event") ? "event" : "post"} by @original`);
+          if (screenshots) await page.screenshot({ path: path.join(screenshots, `${kind}-${role}-${viewport.width}x${viewport.height}.png`) });
+          if (role === "own") {
+            await card().getByRole("button", { name: "See who viewed this story" }).click();
+            await page.getByRole("dialog", { name: "Story viewers" }).waitFor();
+            assert.equal(await page.evaluate(() => globalThis.__viewersSheet.storyId), kind === "event" ? "102" : kind === "text-event" ? "104" : kind === "photo" ? "103" : "101");
+            await page.getByRole("button", { name: "Close viewers" }).click();
+          } else {
+            await page.getByRole("textbox", { name: "Reply to publisher" }).fill("A draft reply");
+            assert.equal(await page.getByRole("button", { name: /^React / }).count(), 0);
+            assert.ok(await sourceLink().isVisible(), "composer focus preserves source access");
+            await card().click({ position: { x: 3, y: 3 } });
+          }
+          await profile().click();
+          await card().waitFor({ state: "detached" });
+          assert.equal(await page.evaluate(() => globalThis.__routes.at(-1)), "/profile/original");
+          assert.equal(await page.evaluate(() => globalThis.__fixture.useStoryViewerStore.getState().navigationClose), true);
+          await page.evaluate(({ kind, role }) => globalThis.__openStory(kind, role), { kind, role });
+          await sourceLink().waitFor();
+          await sourceLink().focus();
+          await page.keyboard.press("Enter");
+          await card().waitFor({ state: "detached" });
+          assert.equal(await page.evaluate(() => globalThis.__routes.at(-1)), kind.includes("event") ? "/e/22" : "/feed/post/11");
+        }
+        // Tag expansion does not shift or occlude the attribution/action stack.
+        await page.evaluate((role) => globalThis.__openStory("text-event", role, true), role);
+        await card().waitFor();
+        const before = await card().boundingBox();
+        await page.getByRole("button", { name: "8 people tagged" }).click();
+        const tags = await page.locator("[data-story-tag-list]").boundingBox();
+        const after = await card().boundingBox();
+        assert.deepEqual(after, before);
+        assert.ok(tags.y >= 0 && tags.y + tags.height < after.y, "expanded tags stay above attribution");
+        assert.ok(await sourceLink().isVisible());
+        await page.getByRole("button", { name: "8 people tagged" }).click();
+        const textBody = page.locator('section[aria-label="Shared event content"]');
+        const textBox = await textBody.boundingBox();
+        assert.ok(textBox.height >= 80, "long-title text event retains a readable body at " + viewport.width);
+        await textBody.focus();
+        await page.keyboard.press("End");
+        await page.waitForFunction(() => document.querySelector('section[aria-label="Shared event content"]').scrollTop > 0);
+        assert.equal(await card().getAttribute("aria-label"), "Shared event by @original", "scroll keys must not advance the story");
+        assert.equal(await page.locator("[data-story-tag-list]").count(), 0);
+        await page.keyboard.press("Escape");
         await card().waitFor({ state: "detached" });
-        assert.equal(
-          await page.evaluate(() => globalThis.__routes.at(-1)),
-          "/profile/original",
-        );
-        assert.equal(
-          await page.evaluate(
-            () =>
-              globalThis.__fixture.useStoryViewerStore.getState()
-                .navigationClose,
-          ),
-          true,
-        );
-        await page.evaluate((kind) => globalThis.__openStory(kind), kind);
-        await sourceLink().waitFor();
-        // Keyboard activation exercises the same proper anchor, not a decorative pill.
-        await sourceLink().focus();
-        await page.keyboard.press("Enter");
-        await card().waitFor({ state: "detached" });
-        assert.equal(
-          await page.evaluate(() => globalThis.__routes.at(-1)),
-          kind === "post" ? "/feed/post/11" : "/e/22",
-        );
       }
     }
+    // The transparent middle still accepts ordinary next-segment clicks.
+    await page.evaluate(() => globalThis.__openStory("event", "own"));
+    await card().waitFor();
+    const frame = await page.locator(".dvnt-story-viewer").boundingBox();
+    await page.mouse.click(frame.x + frame.width * 0.8, frame.y + frame.height * 0.5);
+    await page.locator('[data-story-source-card][aria-label="Shared post by @original"]').waitFor();
+    // A signed-out account cannot retain the owner-only footer or sheet.
+    await page.evaluate(() => globalThis.__openStory("event", "own"));
+    await card().getByRole("button", { name: "See who viewed this story" }).click();
+    await page.evaluate(() => globalThis.__fixture.useAuthStore.setState({ user: null }));
+    await page.getByRole("dialog", { name: "Story viewers" }).waitFor({ state: "detached" });
+    assert.equal(await page.getByRole("button", { name: "See who viewed this story" }).count(), 0);
     // A cached group's real player is not mounted until a fresh row is allowed.
     await page.evaluate(() => {
       globalThis.__allowedRpc = globalThis.__storyRpc;
@@ -297,7 +356,7 @@ const {
     assert.equal(await page.locator(".dvnt-story-viewer").count(), 1);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS story attribution Chromium: actual player, 320/375/1440px layouts, long text card, media event, author/source hit-testing above tap catcher, keyboard links, reply clearance and navigation-close semantics",
+      "PASS story attribution Chromium: actual player, own/other/guest eligibility, 320/375/1440px bottom footer, Viewers left/source right, text/photo/event, seven 44px reactions, expanded tags, composer focus, hit-testing, keyboard and navigation-close semantics",
     );
   } finally {
     if (browser) await browser.close();
