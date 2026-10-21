@@ -114,6 +114,8 @@ Object.assign(sourceModules, {
   "@dvnt/app/components/event/EventFlyer.web": "packages/app/components/event/EventFlyer.web.tsx",
   "@dvnt/app/components/ui/card-link.web": "packages/app/components/ui/card-link.web.tsx",
   "@dvnt/app/lib/events/event-detail-route": "packages/app/lib/events/event-detail-route.ts",
+  "./event-discovery.ts": "packages/app/lib/events/event-discovery.ts",
+  "../slug.ts": "packages/app/lib/slug.ts",
 });
 const { FeedEventCard: WebCard } = loadSource("packages/app/components/event/FeedEventCard.web.tsx");
 const { FeedEventCard: NativeCard } = loadSource("packages/app/components/feed/feed-event-card.tsx");
@@ -207,12 +209,13 @@ test("feed link reaches the Next id route and resolves that exact event", () => 
   const resolvedId = detail.match(/const resolvedId =[\s\S]*?;/)?.[0];
   assert.ok(idParam && directId && resolvedId, "production detail id resolution must exist");
   const { resolve } = loadSource("scripts/feed-route-contract-fixture.ts", `
+    import { resolveEventDetailId } from "@dvnt/app/lib/events/event-detail-route";
     export function resolve(params: { id?: string; slug?: string }) {
       const slug = params.slug ?? "";
       const tokenEvent = { id: 901 };
       const listEvent = { id: 902 };
       const slugIndex = [];
-      const resolveEventByPathSegment = () => ({ id: 903 });
+      const slugIndexQuery = { resolvedTitleId: 903 };
       ${idParam}
       ${directId}
       ${resolvedId}
