@@ -66,7 +66,7 @@ const mocks = {
         function App(){const [path,setPath]=useState(location.pathname); fixture.path=path;fixture.navigate=path=>{history.pushState({},'',path);setPath(path)};
           useEffect(()=>{const pop=()=>setPath(location.pathname);addEventListener('popstate',pop);return()=>removeEventListener('popstate',pop)},[]);
           useEffect(()=>{fixture.mounts++},[]);
-          return <AppShell><WebAppShell>{path.includes('edit-event')?<EventEditScreen/>:<CreateEventScreen/>}</WebAppShell></AppShell>;
+          return <AppShell><WebAppShell>{path.includes('edit-event')?<EventEditScreen/>:path==='/feed/events/create'?<CreateEventScreen/>:<h1>Feed fixture</h1>}</WebAppShell></AppShell>;
         } createRoot(document.getElementById('root')).render(<React.StrictMode><App/></React.StrictMode>);`}});
     // Compile production Tailwind classes with the production theme/preflight.
     const tw=path.dirname(require.resolve('tailwindcss/package.json'));
@@ -145,11 +145,13 @@ const mocks = {
       window.editorFixture.viewportOriginals={};
       for(const key of ['height','offsetTop'])window.editorFixture.viewportOriginals[key]=Object.getOwnPropertyDescriptor(visualViewport,key);
     });
+    const setViewportMetrics=metrics=>page.evaluate(metrics=>{for(const [key,value] of Object.entries(metrics))Object.defineProperty(visualViewport,key,{configurable:true,value});visualViewport.dispatchEvent(new Event('resize'));visualViewport.dispatchEvent(new Event('scroll'));},metrics);
+    const restoreViewportMetrics=()=>page.evaluate(()=>{for(const [key,value] of Object.entries(window.editorFixture.viewportOriginals)){if(value)Object.defineProperty(visualViewport,key,value);else delete visualViewport[key];}visualViewport.dispatchEvent(new Event('resize'));});
     for(const metrics of [{height:500,offsetTop:0},{height:470,offsetTop:70},{height:852,offsetTop:0},{height:760,offsetTop:0},{height:852,offsetTop:0}]){
-      await page.evaluate(metrics=>{for(const [key,value] of Object.entries(metrics))Object.defineProperty(visualViewport,key,{configurable:true,value});visualViewport.dispatchEvent(new Event('resize'));visualViewport.dispatchEvent(new Event('scroll'));},metrics);
+      await setViewportMetrics(metrics);
       await pinned('simulated keyboard/browser chrome '+JSON.stringify(metrics));
     }
-    await page.evaluate(()=>{for(const [key,value] of Object.entries(window.editorFixture.viewportOriginals)){if(value)Object.defineProperty(visualViewport,key,value);else delete visualViewport[key];}visualViewport.dispatchEvent(new Event('resize'));});
+    await restoreViewportMetrics();
     await pinned('viewport restored');
     if(engine===chromium){
       const cdp=await page.context().newCDPSession(page);
@@ -170,6 +172,12 @@ const mocks = {
       assert.equal(hit.every(result=>result.clickable),true,'save + navigation controls must both be clickable: '+JSON.stringify(hit));
     };
     await usableChrome();
+    for(const metrics of [{height:500,offsetTop:0},{height:470,offsetTop:70},{height:852,offsetTop:0}]){
+      await setViewportMetrics(metrics);await pinned('edit viewport divergence '+JSON.stringify(metrics));await usableChrome();
+      const saveBottom=await page.getByRole('region',{name:'Unsaved changes'}).evaluate(el=>el.getBoundingClientRect().bottom);
+      assert.ok(Math.abs(saveBottom-(metrics.height+metrics.offsetTop-78))<1,'save bar must track the visible viewport above the raised Create control');
+    }
+    await restoreViewportMetrics();await pinned('edit viewport recovery');await usableChrome();
     await page.getByLabel('Sell tickets for this event').check();
     await page.getByRole('button',{name:'Add Tier',exact:true}).click();
     const sale=page.locator('input[type="datetime-local"]').last();
@@ -180,10 +188,19 @@ const mocks = {
     await page.getByRole('button',{name:'Clear',exact:true}).first().click();
     for(const top of [0,900,99999,0]){await page.evaluate(y=>scrollTo(0,y),top);await pinned('edit scroll '+top);}
     await page.screenshot({path:path.join(dir,'edit-event.png')});
+    await page.getByRole('button',{name:'Home',exact:true}).click();
+    await page.getByRole('heading',{name:'Feed fixture'}).waitFor();await nextFrame();
+    assert.equal(await page.getByRole('region',{name:'Unsaved changes'}).count(),0);
+    const restoredChrome=()=>bar.evaluate(el=>({bottom:el.style.bottom,top:el.style.top,transform:el.style.transform,viewport:el.style.getPropertyValue('--dvnt-visible-bottom')}));
+    assert.deepEqual(await restoredChrome(),{bottom:'0px',top:'',transform:'',viewport:''},'leaving the editor must restore shared non-editor chrome');
+    await setViewportMetrics({height:500,offsetTop:70});await nextFrame();
+    assert.equal((await restoredChrome()).viewport,'','editor viewport listeners must be removed on navigation');
+    await restoreViewportMetrics();
+    await page.goBack();await page.getByRole('heading',{name:'Edit Event',exact:true}).waitFor();await pinned('back to edit');await usableChrome();
     await page.goBack();await page.getByRole('heading',{name:'Create event',exact:true}).waitFor();
     assert.equal(await page.getByPlaceholder("What's the event called?").inputValue(),'Retain this draft');
     await pinned('back to create');
-    console.log('PASS complete create/edit screens: real Tailwind, 320–1440px + landscape, scroll, expanded tickets/add-ons, publication field, focus fonts, viewport divergence/recovery, real Chromium zoom + safe area, route/back draft retention. Physical iOS keyboard remains a device check. Evidence:',dir);
+    console.log('PASS complete create/edit screens: real Tailwind, 320–1440px + landscape, scroll, expanded tickets/add-ons, publication field, focus fonts, viewport divergence/recovery, real Chromium zoom + safe area, route cleanup/back draft retention, edit savebar recovery + hit testing. Physical iOS keyboard remains a device check. Evidence:',dir);
     assert.deepEqual(errors,[]);
   }catch(error){if(page){console.error('Failure page:',await page.locator('body').innerText().catch(()=>''));await page.screenshot({path:path.join(dir,'failure.png')}).catch(()=>{});}throw error;}finally{await browser?.close();await new Promise(resolve=>server?server.close(resolve):resolve());}
 })().catch(e=>{console.error(e);process.exitCode=1});
