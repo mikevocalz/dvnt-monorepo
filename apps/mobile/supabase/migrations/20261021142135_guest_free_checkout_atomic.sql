@@ -105,9 +105,9 @@ BEGIN
   -- as a floor. An overcount remains conservative; no historic reconciliation
   -- is performed. Active holds may temporarily double-count tickets that a
   -- legacy paid writer has inserted but not converted, which safely fails closed.
-  -- These MUST share one statement snapshot: hosted paid fulfillment inserts
-  -- its tickets and converts its hold before incrementing the tier. Separate
-  -- reads could see neither side if that handoff commits between the reads.
+  -- Keep both sides of a hold-to-ticket handoff in one coherent snapshot.
+  -- The tier's FOR UPDATE lock also blocks fresh paid inserts through the FK;
+  -- this paired read is defense in depth, not a substitute for that lock.
   SELECT
     (SELECT count(*) FROM public.tickets
       WHERE ticket_type_id = p_ticket_type_id

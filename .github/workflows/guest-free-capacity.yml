@@ -2,17 +2,17 @@ name: Guest free issuance capacity
 on:
   pull_request:
     paths:
-      - 'apps/mobile/supabase/functions/guest-checkout/**'
-      - 'apps/mobile/supabase/migrations/*guest_free_checkout_atomic.sql'
-      - 'apps/mobile/supabase/migrations/*atomic_legacy_ticket_hold.sql'
+      # Cross-rail writers and schema changes must rerun the shared inventory
+      # contract too, not just edits to the free guest endpoint.
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
       - 'scripts/verify-guest-free-issuance.mjs'
       - '.github/workflows/guest-free-capacity.yml'
   push:
     branches: [master, main]
     paths:
-      - 'apps/mobile/supabase/functions/guest-checkout/**'
-      - 'apps/mobile/supabase/migrations/*guest_free_checkout_atomic.sql'
-      - 'apps/mobile/supabase/migrations/*atomic_legacy_ticket_hold.sql'
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
       - 'scripts/verify-guest-free-issuance.mjs'
       - '.github/workflows/guest-free-capacity.yml'
 permissions:
