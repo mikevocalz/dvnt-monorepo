@@ -231,7 +231,7 @@ Deno.serve(async (req: Request) => {
       // Verify ticket ownership
       const { data: ticket, error: ticketErr } = await supabase
         .from("tickets")
-        .select("id, user_id, event_id, status")
+        .select("id, user_id, event_id, status, checked_in_at")
         .eq("id", ticket_id)
         .single();
 
@@ -239,7 +239,7 @@ Deno.serve(async (req: Request) => {
       if (ticket.user_id !== userId) {
         return json({ error: "You don't own this ticket" }, 403);
       }
-      if (ticket.status !== "active") {
+      if (ticket.status !== "active" || ticket.checked_in_at) {
         return json(
           { error: `Cannot transfer ticket with status "${ticket.status}"` },
           400,
@@ -293,11 +293,20 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Mark ticket as transfer_pending to prevent scanning
-      await supabase
+      // Cancellation or a door scan may win while recipient lookup is in
+      // flight. Claim only the still-active owned credential, never resurrect
+      // a void/refunded/scanned ticket from the earlier read.
+      const { data: claimedTicket, error: claimError } = await supabase
         .from("tickets")
         .update({ status: "transfer_pending" })
-        .eq("id", ticket_id);
+        .eq("id", ticket_id)
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .is("checked_in_at", null)
+        .select("id")
+        .maybeSingle();
+      if (claimError) return json({ error: "Could not start transfer. Please try again." }, 503);
+      if (!claimedTicket) return json({ error: "This ticket is no longer available to transfer." }, 409);
 
       // Void sender's wallet pass (if any)
       await voidWalletPass(supabase, ticket_id);

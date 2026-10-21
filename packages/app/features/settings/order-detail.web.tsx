@@ -19,7 +19,7 @@
  * Navigation (web): order id via Solito `useParams`. Event card →
  * /feed/events/{id}; tickets → /feed/events/my-tickets (web ticket surface);
  * View Receipt → /settings/receipt-viewer?orderId={id}&type=receipt; Request
- * Refund (paid only) → /settings/refund-request?orderId={id}; Get Help →
+ * Refund (positive paid total only) → /settings/refund-request?orderId={id}; Get Help →
  * /settings/faq. Native's Print/Share CTAs depend on expo-print/expo-haptics
  * (native-only) and have no web equivalent, so they are omitted here.
  */
@@ -44,6 +44,7 @@ import {
 } from "@dvnt/app/lib/types/payments";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { getOrderStatusAppearance } from "@dvnt/app/lib/payments/order-status-appearance";
+import { canRequestOrderRefund } from "@dvnt/app/lib/payments/order-refund-eligibility";
 
 const BG = "#06070d";
 
@@ -374,7 +375,7 @@ export function OrderDetailScreen() {
             }
           />
 
-          {order.status === "paid" ? (
+          {canRequestOrderRefund(order) ? (
             <ActionButton
               icon={<RotateCcw size={18} color="#F97316" />}
               label="Request Refund"

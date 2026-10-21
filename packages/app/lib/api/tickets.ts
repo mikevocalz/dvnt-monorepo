@@ -11,6 +11,7 @@ import {
 } from "@dvnt/app/lib/contracts/dto";
 import type { PlanKey } from "@dvnt/app/lib/subscription/types";
 import type { PerkKey } from "@dvnt/app/lib/perks/perk-config";
+import type { TicketSelfServiceAction } from "../tickets/self-service-action";
 
 /** Keyset cursor for the roster — the previous page's last row. */
 export interface RosterCursor {
@@ -37,6 +38,8 @@ export interface TicketRecord {
   stripe_payment_intent_id?: string | null;
   cart_id?: string | null;
   cart_line_item_id?: string | null;
+  /** Server-verified amount, buyer, payment and policy eligibility. */
+  self_service_action?: TicketSelfServiceAction | null;
   created_at: string;
   updated_at?: string;
   wallet_pass_updated_at?: string | null;
@@ -868,6 +871,26 @@ export const ticketsApi = {
     } catch (error: any) {
       console.error("[Tickets] requestRefund error:", error);
       return { error: error.message || "Refund request failed" };
+    }
+  },
+
+  /** Explicit zero-money cancellation. The server rechecks eligibility atomically. */
+  async cancelFreeTicket(ticketId: string): Promise<{
+    ok?: boolean;
+    message?: string;
+    error?: string;
+  }> {
+    try {
+      const token = await requireBetterAuthToken();
+      const { data, error } = await supabase.functions.invoke("ticket-refund", {
+        body: { ticket_id: ticketId, action: "cancel_free" },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (error) throw error;
+      return typeof data === "string" ? JSON.parse(data) : data;
+    } catch (error: any) {
+      console.error("[Tickets] cancelFreeTicket error:", error);
+      return { error: error.message || "Cancellation failed" };
     }
   },
 

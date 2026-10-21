@@ -2,13 +2,14 @@
  * Buyer-Initiated Ticket Refund
  *
  * POST /ticket-refund
- * Body: { ticket_id }
+ * Body: { ticket_id, action?: 'refund' | 'cancel_free' }
  *
  * Rules:
  * - Must be the ticket owner.
  * - Ticket must be status = 'active' (not already scanned/refunded/void).
  * - Event must not have started yet (start_date > now()).
- * - Free tickets (no payment_intent) are voided directly; no Stripe call needed.
+ * - Exact-zero tickets use explicit cancel_free and an atomic cancellation RPC.
+ *   A missing purchase amount is never inferred to be a free ticket.
  * - Paid tickets: issues Stripe refund for the payment_intent on the ticket.
  *   The stripe-webhook handles the full state sync on `charge.refunded`, but
  *   we also immediately set status = 'refunded' so the UI reflects it fast.
@@ -20,16 +21,13 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { getTicketSelfServiceAction } from "../_shared/ticket-self-service.ts";
+import { voidWalletPass } from "../_shared/wallet-push.ts";
+import { notifyNextWaitlister } from "../_shared/notify-waitlisters.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-
-if (!STRIPE_SECRET_KEY) {
-  console.error(
-    "[ticket-refund] FATAL: STRIPE_SECRET_KEY env var is not set.",
-  );
-}
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -64,16 +62,6 @@ Deno.serve(withSentry("ticket-refund", async (req: Request) => {
     return new Response("Method not allowed", { status: 405, headers: cors });
   }
 
-  if (!STRIPE_SECRET_KEY) {
-    return json(
-      {
-        error:
-          "Stripe is not configured for this environment. Contact support.",
-      },
-      503,
-    );
-  }
-
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -83,19 +71,105 @@ Deno.serve(withSentry("ticket-refund", async (req: Request) => {
     const authId = await verifySession(supabase, req);
     if (!authId) return json({ error: "Unauthorized" }, 401);
 
-    const { ticket_id } = await req.json();
-    if (!ticket_id) return json({ error: "ticket_id is required" }, 400);
+    let body: any;
+    try { body = await req.json(); } catch {
+      return json({ error: "Invalid JSON" }, 400);
+    }
+    const { ticket_id, action = "refund" } = body ?? {};
+    if (typeof ticket_id !== "string" || !ticket_id.trim()) {
+      return json({ error: "ticket_id is required" }, 400);
+    }
+    if (action !== "refund" && action !== "cancel_free") {
+      return json({ error: "Invalid ticket action" }, 400);
+    }
 
     // Fetch ticket with event info
     const { data: ticket, error: ticketErr } = await supabase
       .from("tickets")
-      .select("id, event_id, user_id, status, purchase_amount_cents, stripe_payment_intent_id, ticket_type_id, checked_in_at")
+      .select("id, event_id, user_id, status, purchase_amount_cents, stripe_payment_intent_id, ticket_type_id, checked_in_at, transferred_from, order_id, cart_id, cart_line_item_id")
       .eq("id", ticket_id)
       .single();
 
     if (ticketErr || !ticket) return json({ error: "Ticket not found" }, 404);
     if (String(ticket.user_id) !== String(authId)) {
       return json({ error: "Not your ticket" }, 403);
+    }
+
+    if (action === "cancel_free") {
+      const { data: event, error: eventError } = await supabase.from("events")
+        .select("start_date, refund_policy, refund_days_before, title")
+        .eq("id", ticket.event_id).maybeSingle();
+      if (eventError) return json({ error: "Could not verify cancellation eligibility" }, 503);
+      let order = null;
+      if (ticket.order_id) {
+        const result = await supabase.from("orders")
+          .select("id, event_id, user_id, status, total_cents, cart_id")
+          .eq("id", ticket.order_id).maybeSingle();
+        if (result.error) return json({ error: "Could not verify cancellation eligibility" }, 503);
+        order = result.data;
+      }
+      // A repeated cancel is safe: the RPC checks the persisted void state and
+      // returns changed=false, never releasing inventory/notifications twice.
+      // A completed cancellation remains retryable after the cutoff or a
+      // policy change. For void rows the RPC rechecks ownership/price/order
+      // and returns its persisted no-op before consulting today's window.
+      const replay = ticket.status === "void" && ticket.purchase_amount_cents === 0;
+      if (!replay && getTicketSelfServiceAction({ ticket, event, order, userId: authId }) !== "cancel_free") {
+        return json({ error: "This ticket cannot be cancelled with free ticket self-service." }, 409);
+      }
+      const { data: cancelled, error: cancelError } = await supabase.rpc("cancel_free_ticket", {
+        p_ticket_id: ticket_id, p_user_id: authId,
+      });
+      if (cancelError) {
+        console.error("[ticket-refund] atomic cancellation failed:", cancelError);
+        // No REST fallback: the migration must be available before this action
+        // is deployed. A failed transaction must never report success.
+        return json({ error: "Cancellation is temporarily unavailable. Please try again." }, 503);
+      }
+      if (!cancelled?.ok) {
+        return json({ error: "This ticket can no longer be cancelled." }, 409);
+      }
+      if (cancelled.changed === true) {
+        // Durable ticket/RSVP/inventory/Wallet state has already committed.
+        // Post-commit notification failures must not turn success into a retry.
+        try { await voidWalletPass(supabase, ticket_id); } catch (error) {
+          console.warn("[ticket-refund] Wallet notification failed:", error);
+        }
+        try {
+          await notifyNextWaitlister(supabase, {
+            eventId: cancelled.event_id, ticketTypeId: cancelled.ticket_type_id,
+            eventTitle: event?.title ?? null,
+          });
+        } catch (error) {
+          console.warn("[ticket-refund] Waitlist notification failed:", error);
+        }
+      }
+      return json({ ok: true, ticket_id, action: "cancel_free", stripe_refund_id: null,
+        already_cancelled: cancelled.changed !== true, message: "Free ticket cancelled successfully" });
+    }
+
+    // Legacy requests default to monetary refund, never silent free-ticket
+    // cancellation. Null/invalid prices are unknown, not a zero-dollar refund.
+    if (!Number.isSafeInteger(ticket.purchase_amount_cents) || ticket.purchase_amount_cents <= 0) {
+      return json({ error: ticket.purchase_amount_cents === 0
+        ? "Free tickets must be cancelled, not refunded."
+        : "This ticket's payment could not be verified. Contact the organizer." }, 409);
+    }
+    if (ticket.transferred_from != null || ticket.cart_line_item_id || ticket.cart_id) {
+      return json({ error: "This ticket is not eligible for an individual buyer refund." }, 409);
+    }
+    if (ticket.order_id) {
+      const { data: order, error: orderError } = await supabase.from("orders")
+        .select("id, event_id, user_id, status, cart_id")
+        .eq("id", ticket.order_id).maybeSingle();
+      if (orderError) return json({ error: "Could not verify the original ticket purchase." }, 503);
+      if (!order || order.user_id !== authId || order.event_id !== ticket.event_id ||
+          order.cart_id || !["paid", "partially_refunded"].includes(order.status)) {
+        return json({ error: "Only the original buyer can refund this ticket." }, 409);
+      }
+    }
+    if (!STRIPE_SECRET_KEY) {
+      return json({ error: "Stripe is not configured for this environment. Contact support." }, 503);
     }
     if (ticket.status !== "active") {
       return json({ error: "Only active tickets can be refunded" }, 400);
@@ -143,7 +217,8 @@ Deno.serve(withSentry("ticket-refund", async (req: Request) => {
     // no waitlist promotion, ticket stuck 'void' instead of 'refunded'), and a
     // paid ticket with no PaymentIntent was voided with no refund at all while
     // the response said "cancelled successfully".
-    const paidCents = ticket.purchase_amount_cents ?? 0;
+    // Only an explicitly positive amount reaches this monetary path.
+    const paidCents = ticket.purchase_amount_cents;
     const isPaid = paidCents > 0;
 
     if (isPaid && !ticket.stripe_payment_intent_id) {
@@ -182,7 +257,7 @@ Deno.serve(withSentry("ticket-refund", async (req: Request) => {
     // active → refunded for THIS ticket and handles the wallet pass + waitlist.
     // Write it here too so the UI is right even if the webhook is slow; the
     // webhook's .eq("status","active") makes the second write a no-op.
-    // Free: no Stripe event is coming, so this is the only writer.
+    // Free cancellation returned above and never enters this refund path.
     await supabase
       .from("tickets")
       .update({ status: isPaid ? "refunded" : "void" })

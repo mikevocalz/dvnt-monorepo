@@ -281,7 +281,10 @@ Deno.serve(async (req: Request) => {
           .single();
 
         if (!order) return errorResponse("Order not found", 404);
-        if (order.status !== "paid") {
+        // Paid is also the completion status of free/comp/fully discounted orders.
+        // A refund request must represent an actual positive purchase amount.
+        if (order.status !== "paid" ||
+          !Number.isSafeInteger(order.total_cents) || order.total_cents <= 0) {
           return errorResponse("Order is not eligible for refund");
         }
 

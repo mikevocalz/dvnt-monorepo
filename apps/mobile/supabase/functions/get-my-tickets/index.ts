@@ -16,6 +16,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getTicketSelfServiceAction } from "../_shared/ticket-self-service.ts";
 import {
   verifySession,
   jsonResponse,
@@ -63,7 +64,7 @@ Deno.serve(async (req: Request) => {
         // `dominant_color` rides along so the Apple Watch has an offline-safe
         // flyer colour for every card (see features/watch/watch-payload.ts).
         // It is one already-materialised column on a row we are joining anyway.
-        "*, ticket_types(name), events(title, cover_image_url, dominant_color, start_date, end_date, location, event_tz, is_online)",
+        "*, ticket_types(name), events(title, cover_image_url, dominant_color, start_date, end_date, location, event_tz, is_online, refund_policy, refund_days_before)",
       )
       .in("user_id", userIdCandidates)
       .order("created_at", { ascending: false });
@@ -81,8 +82,35 @@ Deno.serve(async (req: Request) => {
       return errorResponse("Could not fetch tickets", 500);
     }
 
-    const tickets = (data || []).map((t: any) => ({
+    // Eligibility is derived from the credential and purchase, not the event's
+    // generic paid/free setting. Read only context referenced by owned tickets;
+    // a failed context lookup hides actions without hiding the ticket itself.
+    const rows = data || [];
+    const ids = (field: string) => [...new Set(rows.map((t: any) => t[field]).filter(Boolean))];
+    async function context(table: string, fields: string, values: unknown[]) {
+      if (!values.length) return new Map<string, any>();
+      const result = await supabase.from(table).select(fields).in("id", values);
+      if (result.error) {
+        console.warn(`[get-my-tickets] ${table} action context unavailable`);
+        return new Map<string, any>();
+      }
+      return new Map<string, any>((result.data || []).map((row: any) => [row.id, row]));
+    }
+    const [orders, carts, lines] = await Promise.all([
+      context("orders", "id, event_id, user_id, status, total_cents, cart_id", ids("order_id")),
+      context("carts", "id, event_id, user_id, status, stripe_pi_id", ids("cart_id")),
+      context("cart_line_items", "id, cart_id, tier_id, addon_id, quantity, unit_price_cents, refunded_amount_cents", ids("cart_line_item_id")),
+    ]);
+    const tickets = rows.map((t: any) => ({
       ...t,
+      self_service_action: getTicketSelfServiceAction({
+        ticket: t,
+        event: t.events,
+        order: orders.get(t.order_id),
+        cart: carts.get(t.cart_id),
+        line: lines.get(t.cart_line_item_id),
+        userId: authId,
+      }),
       ticket_type_name: t.ticket_types?.name || "General",
       event_title: t.events?.title || "",
       event_image: t.events?.cover_image_url || "",
