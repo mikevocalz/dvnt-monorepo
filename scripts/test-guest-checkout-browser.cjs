@@ -8,6 +8,9 @@ const ROOT=path.resolve(__dirname,'..');
 const f=fixture({promos:[promo(),promo({id:'slow',code:'SLOW',discount_value:50})],promoters:[promoter()]});
 const TIER2='44444444-4444-4444-8444-444444444444';
 f.tables.events.push({...f.tables.events[0],id:2});f.tables.ticket_types.push({...f.tables.ticket_types[0],id:TIER2,event_id:2,price_cents:4000});
+const RSVP_TIER='55555555-5555-4555-8555-555555555555';
+f.tables.events.push({...f.tables.events[0],id:3,ticketing_enabled:false});
+f.tables.ticket_types.push({...f.tables.ticket_types[0],id:RSVP_TIER,event_id:3,name:'RSVP',price_cents:0});
 const calls=[];
 const boundaries={
  'react-native':`import React from 'react';const box=tag=>({children,accessibilityRole,accessibilityLabel,accessibilityLiveRegion,...props})=>React.createElement(tag,{...props,role:accessibilityRole,'aria-label':accessibilityLabel,'aria-live':accessibilityLiveRegion},children);export const View=box('div');export const Text=box('span');`,
@@ -44,7 +47,21 @@ const boundaries={
  try{
   browser=await chromium.launch({headless:true,channel:'chromium',args:['--no-sandbox','--disable-dev-shm-usage']});
   const page=await browser.newPage({viewport:{width:390,height:844}});const pageErrors=[];page.on('pageerror',e=>pageErrors.push(e.message));
-  await page.goto('http://127.0.0.1:'+server.address().port);await page.evaluate(()=>window.begin());
+  await page.goto('http://127.0.0.1:'+server.address().port);
+  // A signed-out free RSVP must quote and issue without enabling paid sales.
+  await page.evaluate(({tier})=>window.begin({eventId:'3',tierId:tier,tierName:'RSVP',priceCents:0}),{tier:RSVP_TIER});
+  await page.getByRole('button',{name:'Get free tickets',exact:true}).waitFor();
+  assert.equal(f.writes.length,0,'opening RSVP only requests a read-only quote');
+  await page.getByRole('button',{name:'More',exact:true}).click();
+  await page.waitForFunction(()=>window.store.getState().quote?.total_cents===0&&!window.store.getState().quoteLoading);
+  await page.getByRole('button',{name:'Get free tickets',exact:true}).click();
+  await page.getByRole('heading',{name:"You're in!",exact:true}).waitFor();
+  assert.equal(f.tables.tickets.length,2);assert.equal(f.emails.length,1);assert.equal(f.stripe.length,0);
+  const rsvp=calls.find(body=>body.action!=='quote');
+  assert.equal(rsvp.event_id,3);assert.equal(rsvp.quantity,2);assert.match(rsvp.expected_quote_key,/^[a-f0-9]{64}$/);
+  assert.deepEqual(f.profileCalls,[],'free RSVP does not create an account');
+  await page.getByRole('button',{name:'Done',exact:true}).click();
+  await page.evaluate(()=>window.begin());
   assert.equal(await page.getByRole('textbox',{name:/username|mobile number/i}).count(),0);
   await page.getByRole('textbox',{name:'Name (optional)',exact:true}).fill('Guest Buyer');
   const code=page.getByRole('textbox',{name:'Promo or promoter code'});
@@ -68,10 +85,10 @@ const boundaries={
   await page.getByRole('button',{name:'Apply code',exact:true}).click();await page.getByRole('button',{name:'Pay $28.68',exact:true}).waitFor();
   await page.route('https://checkout.stripe.com/**',route=>route.fulfill({body:'Fixture hosted checkout; no card charge.'}));
   await page.getByRole('button',{name:'Pay $28.68',exact:true}).click();await page.waitForURL('https://checkout.stripe.com/**');
-  const payment=calls.find(body=>body.action!=='quote');assert.equal(payment.discount_code,'SAVE10');assert.match(payment.expected_quote_key,/^[a-f0-9]{64}$/);
+  const payment=calls.find(body=>body.action!=='quote'&&body.event_id===1);assert.equal(payment.discount_code,'SAVE10');assert.match(payment.expected_quote_key,/^[a-f0-9]{64}$/);
   for(const field of ['username','full_name','phone'])assert.equal(Object.hasOwn(payment,field),false,field+' must not provision an account');
   assert.equal(f.tables.orders.at(-1).total_cents,2868);assert.equal(f.stripe.length,1);
   assert.deepEqual(pageErrors,[],'no unexpected browser errors');
-  console.log('PASS: visible mobile code field, apply/remove, quantity repricing, invalid code, stale quote, new-event reset, reviewed checkout payload and redirect (fixture Stripe).');
+  console.log('PASS: free RSVP with paid sales off, guest issuance without signup, visible mobile code field, apply/remove, quantity repricing, invalid code, stale quote, new-event reset, reviewed checkout payload and redirect (fixture Stripe).');
  }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1});

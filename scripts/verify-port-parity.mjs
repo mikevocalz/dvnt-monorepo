@@ -128,6 +128,10 @@ const NATIVE_ONLY_WIRING = new Set([
   // @stripe/stripe-js, so these native hooks have no web counterpart.
   "useStripe", "useStripeSafe", "use-stripe-safe", "useConfirmPayment",
   "useMixedCartCheckout", "use-mixed-cart-checkout",
+  // Native single-tier PaymentSheet returns a PI; this store retains that
+  // purchase while webhook issuance is pending. Web uses its cart/status
+  // checkout flow instead, not this native PaymentSheet recovery state.
+  "native-ticket-checkout-store", "useNativeTicketCheckoutStore",
   // react-native-vision-camera (native camera) — web uses the html5-qrcode
   // QrScanner kit, so these native camera hooks have no web counterpart.
   "useCameraDevice", "useCameraFormat", "useCameraPermission",

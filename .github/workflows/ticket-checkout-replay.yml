@@ -1,0 +1,44 @@
+name: Ticket checkout replay authorization
+
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/create-payment-intent/**'
+      - 'apps/mobile/supabase/functions/ticket-checkout/**'
+      - 'apps/mobile/supabase/functions/_shared/**'
+      - 'packages/app/lib/tickets/**'
+      - '.github/workflows/ticket-checkout-replay.yml'
+  push:
+    branches: [master, main]
+    paths:
+      - 'apps/mobile/supabase/functions/create-payment-intent/**'
+      - 'apps/mobile/supabase/functions/ticket-checkout/**'
+      - 'apps/mobile/supabase/functions/_shared/**'
+      - 'packages/app/lib/tickets/**'
+      - '.github/workflows/ticket-checkout-replay.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  checkout-replay-authorization:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated TypeScript test tool
+        run: npm install --prefix "$RUNNER_TEMP/ticket-tests" --no-package-lock --no-save --ignore-scripts typescript@5.9.2
+      - name: Actual checkout handlers and policy regressions (no live services)
+        env:
+          NODE_PATH: ${{ runner.temp }}/ticket-tests/node_modules
+        run: |
+          node --test apps/mobile/supabase/functions/_shared/checkout-replay.test.cjs
+          node --test apps/mobile/supabase/functions/_shared/door-sale.test.cjs apps/mobile/supabase/functions/_shared/checkout-failure.test.ts packages/app/lib/tickets/pricing.test.ts packages/app/lib/tickets/guest-purchase-state.test.ts
+          "$RUNNER_TEMP/ticket-tests/node_modules/.bin/tsc" --noEmit --strict --target es2022 --module esnext apps/mobile/supabase/functions/_shared/checkout-replay.ts
+          node scripts/verify-edge-functions.mjs
+          node scripts/verify-issuance-invariants.mjs

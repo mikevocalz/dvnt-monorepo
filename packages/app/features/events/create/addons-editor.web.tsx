@@ -164,7 +164,7 @@ export function AddonsEditor({
             {/* Binding mode */}
             <div className="flex flex-col gap-1">
               <span className="text-[11px] text-white/55">Sold</span>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 {ADDON_BINDING_OPTIONS.map((o) => (
                   <button
                     key={o.value}
@@ -228,7 +228,7 @@ export function AddonsEditor({
                   Variants (size × color)
                 </span>
                 {addon.variants.map((row, ri) => (
-                  <div key={`variant-${ri}`} className="flex items-center gap-2">
+                  <div key={`variant-${ri}`} className="flex flex-wrap items-center gap-2">
                     <input
                       className={`w-16 ${miniInputCls}`}
                       placeholder="Size"
@@ -313,7 +313,7 @@ export function AddonsEditor({
             {/* Status */}
             <div className="flex flex-col gap-1">
               <span className="text-[11px] text-white/55">Status</span>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 {ADDON_STATUS_OPTIONS.map((o) => (
                   <button
                     key={o.value}

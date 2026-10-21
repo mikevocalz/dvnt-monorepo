@@ -168,7 +168,7 @@ test('replay does not activate an older free order with a positive commission sn
  const f=fixture({promoters:[promoter()]});
  f.tables.orders.push({id:'old-free',quantity:1,event_id:1,guest_email:EMAIL,total_cents:0,status:'paid',
   idempotency_key:'old-free',promoter_code:'SHARE10',promoter_commission_amount_cents:270});
- f.tables.tickets.push({id:'old-ticket',order_id:'old-free'});
+ f.tables.tickets.push({id:'old-ticket',order_id:'old-free',ticket_type_id:TIER});
  const replay=await f.pay({idempotency_key:'old-free'});assert.equal(replay.data.idempotent,true);
  assert.equal(f.tables.promoter_attributions.length,0);assert.equal(f.writes.length,0);
 });

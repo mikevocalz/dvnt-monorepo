@@ -25,6 +25,7 @@ import { canAccessEvent } from "../_shared/event-access.ts";
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { readCheckoutReplay, CHECKOUT_REPLAY_UNAVAILABLE } from "../_shared/checkout-replay.ts";
 import { computeFeesWithMode } from "../_shared/fee-calculator.ts";
 import {
   enforceTierVisibility,
@@ -59,6 +60,7 @@ import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { checkoutTicketLines } from "../_shared/checkout-line-items.ts";
 import { withSentry } from "../_shared/sentry.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { tierSaleAvailabilityError } from "../_shared/tier-sale-availability.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -200,32 +202,6 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
         ? idempotency_key
         : null;
 
-    // Replay short-circuit BEFORE any cap/inventory checks: a retried
-    // request would otherwise trip max_per_user on the tickets it already
-    // minted. Returns the SAME order's tickets, never a second issuance.
-    if (idemKey) {
-      const { data: existing } = await supabase
-        .from("orders")
-        .select("id")
-        .eq("idempotency_key", idemKey)
-        .maybeSingle();
-      if (existing) {
-        const { data: existingTickets } = await supabase
-          .from("tickets")
-          .select("id, qr_token")
-          .eq("order_id", existing.id);
-        return new Response(
-          JSON.stringify({
-            tickets: existingTickets || [],
-            free: true,
-            order_id: existing.id,
-            idempotent: true,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-    }
-
     if (!user_id && !isGuest) {
       return new Response(
         JSON.stringify({
@@ -235,6 +211,36 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
         }),
         { status: 401, headers: { "Content-Type": "application/json" } },
       );
+    }
+
+    if (!event_id || !ticket_type_id) {
+      return new Response(
+        JSON.stringify({ error: "Missing required fields" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return new Response(JSON.stringify({ error: "Invalid quantity" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // Replay is allowed before caps/cutoff, but only for this buyer's exact
+    // completed free purchase. An attempt key is never authentication.
+    const replayRequest = {
+      idempotencyKey: idemKey || "", eventId: Number(event_id),
+      ticketTypeId: ticket_type_id, quantity, userId: user_id,
+      guestEmail: isGuest ? trimmedGuestEmail : null,
+    };
+    if (idemKey) {
+      const replay = await readCheckoutReplay(supabase, replayRequest);
+      if (replay) {
+        return new Response(JSON.stringify(replay.body), {
+          status: replay.status, headers: { "Content-Type": "application/json" },
+        });
+      }
     }
 
     // No verified-admission check here. Buying a ticket is open to unverified
@@ -271,20 +277,6 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
         }),
         { status: 429, headers: { "Content-Type": "application/json" } },
       );
-    }
-
-    if (!event_id || !ticket_type_id) {
-      return new Response(
-        JSON.stringify({ error: "Missing required fields" }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
-      );
-    }
-
-    if (!Number.isInteger(quantity) || quantity < 1) {
-      return new Response(JSON.stringify({ error: "Invalid quantity" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
     }
 
     if (!await canAccessEvent(supabase, Number(event_id), user_id)) {
@@ -325,32 +317,6 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       );
     }
 
-    // Enforce tier sale window — early-bird style pricing.
-    // `sale_start` / `sale_end` already exist on ticket_types; until now
-    // they were declarative only. Reject purchases outside the window
-    // with an actionable message.
-    const now = new Date();
-    if (ticketType.sale_start) {
-      const saleStartAt = new Date(ticketType.sale_start);
-      if (!isNaN(saleStartAt.getTime()) && now < saleStartAt) {
-        return new Response(
-          JSON.stringify({
-            error: `This tier goes on sale ${saleStartAt.toLocaleString()}.`,
-          }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
-        );
-      }
-    }
-    if (ticketType.sale_end) {
-      const saleEndAt = new Date(ticketType.sale_end);
-      if (!isNaN(saleEndAt.getTime()) && now >= saleEndAt) {
-        return new Response(
-          JSON.stringify({ error: "Sales for this tier have ended." }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
-        );
-      }
-    }
-
     // ── Tier visibility guard (mirror of cart_create_hold v3) ──
     // This rail inserts ticket_holds directly, bypassing the RPC's
     // hidden/locked enforcement — so enforce it here. Never echo the code.
@@ -370,6 +336,15 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
           headers: { "Content-Type": "application/json" },
         },
       );
+    }
+
+    // Apply the same sale policy before paid checkout AND free/promo issuance.
+    // Visibility runs first so hidden tiers do not disclose their sale state.
+    const saleError = tierSaleAvailabilityError(ticketType);
+    if (saleError) {
+      return new Response(JSON.stringify(saleError), {
+        status: 400, headers: { "Content-Type": "application/json" },
+      });
     }
 
     // Check availability (including active holds from other checkouts)
@@ -506,29 +481,13 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
         .select("id")
         .single();
 
-      // Lost the same-key race → return the winner's tickets. No tickets
-      // were minted on this attempt, so nothing is orphaned or doubled.
+      // Lost the same-key race: apply the SAME identity/completion check.
+      // No tickets were minted on this attempt; guest recovery stays in email.
       if (freeOrderErr?.code === "23505" && idemKey) {
-        const { data: won } = await supabase
-          .from("orders")
-          .select("id")
-          .eq("idempotency_key", idemKey)
-          .maybeSingle();
-        if (won) {
-          const { data: wonTickets } = await supabase
-            .from("tickets")
-            .select("id, qr_token")
-            .eq("order_id", won.id);
-          return new Response(
-            JSON.stringify({
-              tickets: wonTickets || [],
-              free: true,
-              order_id: won.id,
-              idempotent: true,
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
+        const replay = await readCheckoutReplay(supabase, replayRequest);
+        return new Response(JSON.stringify(replay?.body ?? CHECKOUT_REPLAY_UNAVAILABLE), {
+          status: replay?.status ?? 409, headers: { "Content-Type": "application/json" },
+        });
       }
       if (freeOrderErr) throw freeOrderErr;
 
