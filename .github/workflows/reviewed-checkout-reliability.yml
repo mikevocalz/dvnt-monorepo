@@ -1,0 +1,58 @@
+name: Reviewed checkout reliability
+on:
+  pull_request:
+    paths:
+      - "packages/app/features/events/checkout-review.web.tsx"
+      - "packages/app/features/events/checkout-success.web.tsx"
+      - "packages/app/lib/hooks/use-ticket-checkout.ts"
+      - "packages/app/lib/hooks/use-mixed-cart-checkout.ts"
+      - "packages/app/lib/checkout/reviewed-cart.ts"
+      - "packages/app/lib/stores/cart.ts"
+      - "packages/app/lib/stores/payments-store.ts"
+      - "packages/app/lib/api/cart.ts"
+      - "apps/mobile/supabase/functions/cart-create-hold/**"
+      - "scripts/fixtures/reviewed-checkout.cjs"
+      - "scripts/test-reviewed-checkout-*.cjs"
+      - ".github/workflows/reviewed-checkout-reliability.yml"
+  push:
+    branches: [master]
+    paths:
+      - "packages/app/features/events/checkout-review.web.tsx"
+      - "packages/app/features/events/checkout-success.web.tsx"
+      - "packages/app/lib/hooks/use-*-checkout.ts"
+      - "packages/app/lib/checkout/reviewed-cart.ts"
+      - "packages/app/lib/stores/cart.ts"
+      - "packages/app/lib/stores/payments-store.ts"
+      - "packages/app/lib/api/cart.ts"
+      - "apps/mobile/supabase/functions/cart-create-hold/**"
+      - "scripts/fixtures/reviewed-checkout.cjs"
+      - "scripts/test-reviewed-checkout-*.cjs"
+      - ".github/workflows/reviewed-checkout-reliability.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  reviewed-payment-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated test tools
+        run: npm install --prefix "$RUNNER_TEMP/checkout" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 zod@4.5.0 happy-dom@20.0.11 lucide-react@1.30.0 playwright@1.58.2
+      - name: Install Chromium
+        run: node "$RUNNER_TEMP/checkout/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Frozen cart handler and real React execution
+        env:
+          NODE_PATH: ${{ runner.temp }}/checkout/node_modules
+        run: |
+          node --test apps/mobile/supabase/functions/cart-create-hold/index.test.cjs
+          node scripts/test-reviewed-checkout-dom.cjs
+      - name: Reviewed payment and native hook races in Chromium
+        env:
+          NODE_PATH: ${{ runner.temp }}/checkout/node_modules
+        run: node scripts/test-reviewed-checkout-browser.cjs
