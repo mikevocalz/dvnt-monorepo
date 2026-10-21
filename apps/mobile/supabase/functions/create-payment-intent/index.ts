@@ -33,6 +33,7 @@ import {
 } from "../_shared/apply-promoter-code.ts";
 import { withSentry } from "../_shared/sentry.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { tierSaleAvailabilityError } from "../_shared/tier-sale-availability.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -292,6 +293,11 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
         visibilityError === "tier_hidden" ? 404 : 403,
       );
     }
+
+    // Apply the same sale policy before paid checkout AND free/promo issuance.
+    // Visibility runs first so hidden tiers do not disclose their sale state.
+    const saleError = tierSaleAvailabilityError(ticketType);
+    if (saleError) return json(saleError, 400);
 
     // ── Availability ─────────────────────────────────────────
     // The real check is now the atomic one at the hold below
