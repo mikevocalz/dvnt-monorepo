@@ -22,6 +22,7 @@ const fixture = {
     export const likes=create(set=>({likes:0,hasLiked:false,toggle:()=>set(s=>({likes:s.hasLiked?0:1,hasLiked:!s.hasLiked}))}));
     export const router={push:p=>state.navigations.push(p),back:()=>state.navigations.push('back')};
     export const conversations=[{id:'c1',user:{id:'2',username:'alice',avatar:'alice.jpg'}},{id:'c2',user:{id:'3',username:'bob',avatar:'bob.jpg'}}];
+    export const conversationData=create(()=>({data:conversations,isPending:false,isError:false,refetch(){}}));
     export const messagesApi={sendMessage:async input=>{state.sent.push(input);if(state.releaseSend)await new Promise(resolve=>{state.resolveSend=resolve});if(state.failSend)throw new Error('send refused');return {id:'m1'}}};`,
   "solito/navigation": `import {router} from 'social-fixture';export const useRouter=()=>router;export const useParams=()=>({id:'11'});`,
   "react-native": `export const useWindowDimensions=()=>({width:375,height:812});`,
@@ -39,7 +40,7 @@ const fixture = {
   "@dvnt/app/lib/hooks/use-verified-gate": `import {state} from 'social-fixture';export const useVerifiedGate=()=> (action,run)=>{if(state.deferGate)state.gate=run;else if(!state.blocked)run()};`,
   "@dvnt/app/lib/stores/auth-store": `export {auth as useAuthStore} from 'social-fixture';`,
   "@dvnt/app/lib/stores/ui-store": `import {state} from 'social-fixture';const value={showToast:(...args)=>state.toasts.push(args)};export const useUIStore=s=>s(value);useUIStore.getState=()=>value;`,
-  "@dvnt/app/lib/hooks/use-messages": `import {conversations} from 'social-fixture';export const useConversations=()=>({data:conversations,isPending:false,isError:false,refetch(){}});`,
+  "@dvnt/app/lib/hooks/use-messages": `import {conversationData} from 'social-fixture';export const useConversations=()=>conversationData();`,
   "@dvnt/app/lib/api/messages-impl": `export {messagesApi} from 'social-fixture';`,
   "@dvnt/app/lib/server-upload": `export const uploadToServer=()=>{throw new Error('unexpected upload')};`,
   "@dvnt/app/lib/auth/auth-logger": `export const logChat=()=>{};`,
@@ -76,9 +77,9 @@ import {usePostDetailUIStore} from './packages/app/lib/stores/post-detail-ui-sto
 import {useChatStore} from './packages/app/lib/stores/chat-store';
 import {useShareSheetStore} from './packages/app/lib/stores/share-sheet-store';
 import {postStoryItem} from './packages/app/lib/posts/share-post';
-import {state,post,auth,likes} from 'social-fixture';
-export {act,state,post,auth,likes,postStoryItem,useChatStore,useWebPostShareStore,useShareSheetStore,usePostDetailUIStore};
-export function mount(node){const root=createRoot(node);return {render:(detail=false)=>root.render(<React.StrictMode>{detail?<PostDetailScreen/>:<><MasonryCell post={post} fallbackHeight={220}/><ShareToInboxSheet/></>}</React.StrictMode>),unmount:()=>root.unmount()};}`;
+import {state,post,auth,likes,conversationData} from 'social-fixture';
+export {act,state,post,auth,likes,conversationData,postStoryItem,useChatStore,useWebPostShareStore,useShareSheetStore,usePostDetailUIStore};
+export function mount(node){const root=createRoot(node);return {render:(detail=false,showSheet=true)=>root.render(<React.StrictMode>{detail?<PostDetailScreen/>:<><MasonryCell post={post} fallbackHeight={220}/>{showSheet&&<ShareToInboxSheet/>}</>}</React.StrictMode>),unmount:()=>root.unmount()};}`;
 (async () => {
   const { Window } = await import(
     require.resolve("happy-dom", {
@@ -252,6 +253,421 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
       "closed share cancels deferred send",
     );
     f.state.deferGate = false;
+
+    // Groups retain their own identity, even when their legacy user field is
+    // the same creator as a direct chat or another identically named group.
+    const directConversations = f.conversationData.getState().data;
+    const creator = directConversations[0].user;
+    const members = [
+      {
+        id: "member-41",
+        authId: "member-auth-41",
+        username: "charlie",
+        avatar: "charlie.jpg",
+      },
+      {
+        id: "member-42",
+        authId: "member-auth-42",
+        username: "delta",
+        avatar: "delta.jpg",
+      },
+    ];
+    const groupConversations = [
+      {
+        id: "group-lantern-a",
+        isGroup: true,
+        groupName: "Lantern Studio",
+        user: creator,
+        members,
+      },
+      {
+        id: "group-lantern-b",
+        isGroup: true,
+        groupName: "Lantern Studio",
+        user: creator,
+        members: [...members].reverse(),
+      },
+      {
+        id: "group-hiking",
+        isGroup: true,
+        groupName: "Hiking Plans",
+        user: creator,
+        members: [members[1]],
+      },
+      { id: "group-unnamed", isGroup: true, groupName: "   ", user: creator },
+      {
+        id: "group-incomplete",
+        isGroup: true,
+        groupName: "Incomplete Profiles",
+        user: creator,
+        members: [
+          {
+            id: "member-43",
+            authId: "member-auth-43",
+            username: "",
+            avatar: "",
+          },
+        ],
+      },
+    ];
+    const allConversations = [...directConversations, ...groupConversations];
+    const setConversations = (data) =>
+      flush(() => f.conversationData.setState({ data }));
+    const recipientButtons = () =>
+      Array.from(
+        document.querySelectorAll('button[aria-label^="Share post with"]'),
+      );
+    const groupButtons = (name) =>
+      recipientButtons().filter(
+        (b) => b.getAttribute("aria-label") === `Share post with group ${name}`,
+      );
+    const setSearch = (value) =>
+      flush(() => f.useShareSheetStore.getState().setSearchQuery(value));
+    const closeShare = () =>
+      flush(() => f.useWebPostShareStore.getState().close());
+    const openShare = () => flush(() => button("Reshare post").click());
+    await setConversations(allConversations);
+    await openShare();
+    assert.equal(recipientButtons().length, allConversations.length);
+    assert.equal(
+      groupButtons("Lantern Studio").length,
+      2,
+      "same-named groups remain distinct rows",
+    );
+    assert.equal(
+      recipientButtons().filter(
+        (b) => b.getAttribute("aria-label") === "Share post with @alice",
+      ).length,
+      1,
+      "creator has exactly one direct-chat row, not one per group",
+    );
+    for (const group of groupConversations) {
+      const name = group.groupName.trim() || "Unnamed group";
+      const row = groupButtons(name)[0];
+      assert.ok(row, `group is identified as ${name}`);
+      assert.ok(
+        Array.from(row.querySelectorAll("span")).some(
+          (el) => el.textContent === name,
+        ),
+        "visible group name matches exactly",
+      );
+      assert.ok(
+        Array.from(row.querySelectorAll("span")).some((el) =>
+          /^Group(?:\s|$)/.test(el.textContent),
+        ),
+        "visible Group marker distinguishes group from person",
+      );
+      assert.ok(
+        !row.textContent.includes("@alice"),
+        "group never presents creator as the destination",
+      );
+      assert.ok(
+        !row.querySelector('img[src="alice.jpg"]'),
+        "group never uses creator's lone avatar",
+      );
+    }
+    const compositeImages =
+      groupButtons("Lantern Studio")[0].querySelectorAll("img");
+    assert.equal(
+      compositeImages.length,
+      2,
+      "populated group has composite member avatars",
+    );
+    assert.deepEqual(
+      Array.from(compositeImages, (img) => img.getAttribute("src")).sort(),
+      ["charlie.jpg", "delta.jpg"],
+    );
+    for (const name of [
+      "Hiking Plans",
+      "Unnamed group",
+      "Incomplete Profiles",
+    ]) {
+      const row = groupButtons(name)[0];
+      assert.equal(
+        row.querySelectorAll("img").length,
+        0,
+        "insufficient member data does not imply a single recipient",
+      );
+      assert.ok(
+        row.querySelector("svg.lucide-users"),
+        "insufficient member data uses a group icon",
+      );
+    }
+    assert.equal(
+      button("Share post with @alice").querySelector("img").getAttribute("src"),
+      "alice.jpg",
+      "direct avatar remains unchanged",
+    );
+
+    await setSearch("  lAnTeRn StUdIo  ");
+    assert.equal(
+      recipientButtons().length,
+      2,
+      "group-name search is trimmed and case-insensitive",
+    );
+    await setSearch("CHARLIE");
+    assert.equal(
+      groupButtons("Lantern Studio").length,
+      2,
+      "member username finds the group without relabeling it",
+    );
+    assert.equal(recipientButtons().length, 2);
+    await setSearch("delta");
+    assert.equal(
+      recipientButtons().length,
+      3,
+      "member search works for sparse group membership too",
+    );
+    await setSearch("alice");
+    assert.equal(
+      recipientButtons().length,
+      1,
+      "group creator proxy is not searched as a direct recipient",
+    );
+    assert.ok(button("Share post with @alice"));
+    await setSearch("unnamed");
+    assert.equal(
+      groupButtons("Unnamed group").length,
+      1,
+      "blank group names remain searchable by their displayed fallback",
+    );
+    await setSearch("nobody-matches-this");
+    assert.equal(recipientButtons().length, 0);
+    assert.ok(document.body.textContent.includes("No matching conversations."));
+    await setSearch("");
+
+    const beforeGroupSends = f.state.sent.length;
+    f.state.releaseSend = true;
+    await flush(() => {
+      groupButtons("Lantern Studio")[0].click();
+      groupButtons("Lantern Studio")[0].click();
+      groupButtons("Lantern Studio")[1].click();
+    });
+    assert.equal(
+      f.state.sent.length,
+      beforeGroupSends + 1,
+      "group send is single-flight across duplicate-named rows",
+    );
+    assert.equal(f.state.sent.at(-1).conversationId, "group-lantern-a");
+    assert.equal(f.state.sent.at(-1).expectedViewerId, "1");
+    assert.equal(f.state.sent.at(-1).metadata.type, "shared_post");
+    assert.equal(f.state.sent.at(-1).metadata.postId, "11");
+    assert.equal(f.useShareSheetStore.getState().sendingTo, "group-lantern-a");
+    assert.equal(
+      groupButtons("Lantern Studio")[0].querySelector('[role="status"]')
+        .textContent,
+      "Sending…",
+    );
+    assert.equal(
+      groupButtons("Lantern Studio")[1].querySelector('[role="status"]'),
+      null,
+      "sending feedback tracks ID, not duplicate name",
+    );
+    assert.ok(recipientButtons().every((b) => b.disabled));
+    await flush(() => f.state.resolveSend());
+    f.state.releaseSend = false;
+    assert.equal(
+      f.state.toasts.at(-1)[2],
+      "Post shared with group Lantern Studio",
+      "success names the displayed group, never its creator",
+    );
+    assert.equal(f.useWebPostShareStore.getState().post, null);
+    await openShare();
+    await flush(() => groupButtons("Lantern Studio")[1].click());
+    assert.equal(
+      f.state.sent.at(-1).conversationId,
+      "group-lantern-b",
+      "same-named second group keeps its own destination ID",
+    );
+    await openShare();
+    await flush(() => button("Share post with @alice").click());
+    assert.equal(
+      f.state.sent.at(-1).conversationId,
+      "c1",
+      "creator direct chat remains independently selectable",
+    );
+    await openShare();
+    await flush(() => groupButtons("Unnamed group")[0].click());
+    assert.equal(f.state.sent.at(-1).conversationId, "group-unnamed");
+    assert.equal(
+      f.state.toasts.at(-1)[2],
+      "Post shared with group Unnamed group",
+      "success uses the same fallback name as the row",
+    );
+
+    // The verified-action callback may resolve after a query refresh. Compare
+    // destination identity, not object reference, and reject stale selections.
+    f.state.deferGate = true;
+    const expectStaleSelectionBlocked = async (label, replace, reason) => {
+      await setConversations(allConversations);
+      await openShare();
+      await flush(() => button(label).click());
+      const gate = f.state.gate;
+      assert.equal(typeof gate, "function");
+      const sentBefore = f.state.sent.length;
+      const toastsBefore = f.state.toasts.length;
+      await setConversations(replace(allConversations));
+      await flush(() => gate());
+      assert.equal(f.state.sent.length, sentBefore, reason);
+      assert.ok(
+        f.state.toasts
+          .slice(toastsBefore)
+          .every((toast) => toast[0] !== "success"),
+        "cancelled selection never reports success",
+      );
+      assert.equal(
+        f.useShareSheetStore.getState().sendingTo,
+        null,
+        "cancelled selection does not lock the picker",
+      );
+      await closeShare();
+    };
+    await expectStaleSelectionBlocked(
+      "Share post with group Lantern Studio",
+      (rows) => rows.filter((c) => c.id !== "group-lantern-a"),
+      "removed group cancels deferred send even when same-named group remains",
+    );
+    await expectStaleSelectionBlocked(
+      "Share post with group Lantern Studio",
+      (rows) =>
+        rows.map((c) =>
+          c.id === "group-lantern-a"
+            ? { ...c, groupName: "Renamed Studio" }
+            : c,
+        ),
+      "renamed group must be selected again before sending",
+    );
+    await expectStaleSelectionBlocked(
+      "Share post with group Lantern Studio",
+      (rows) =>
+        rows.map((c) =>
+          c.id === "group-lantern-a" ? { ...c, isGroup: false } : c,
+        ),
+      "group becoming direct cancels deferred send",
+    );
+    await expectStaleSelectionBlocked(
+      "Share post with @alice",
+      (rows) =>
+        rows.map((c) =>
+          c.id === "c1"
+            ? { ...c, isGroup: true, groupName: "Unexpected Group", members }
+            : c,
+        ),
+      "direct becoming group cancels deferred send",
+    );
+    await expectStaleSelectionBlocked(
+      "Share post with @alice",
+      (rows) =>
+        rows.map((c) =>
+          c.id === "c1"
+            ? { ...c, user: { ...c.user, id: "replacement-person" } }
+            : c,
+        ),
+      "changed direct-user identity cancels deferred send",
+    );
+    await expectStaleSelectionBlocked(
+      "Share post with @alice",
+      (rows) =>
+        rows.map((c) =>
+          c.id === "c1"
+            ? { ...c, user: { ...c.user, username: "renamed-alice" } }
+            : c,
+        ),
+      "changed displayed direct username cancels deferred send",
+    );
+    await setConversations(allConversations);
+    for (const label of [
+      "Share post with group Lantern Studio",
+      "Share post with @alice",
+    ]) {
+      await openShare();
+      await flush(() => button(label).click());
+      const gate = f.state.gate;
+      const before = f.state.sent.length;
+      await setConversations(
+        allConversations.map((c) => ({
+          ...c,
+          user: { ...c.user },
+          members: c.members?.map((m) => ({ ...m })),
+        })),
+      );
+      await flush(() => gate());
+      assert.equal(
+        f.state.sent.length,
+        before + 1,
+        "ordinary data refetch with same identity is allowed",
+      );
+      assert.equal(
+        f.state.sent.at(-1).conversationId,
+        label.includes("group") ? "group-lantern-a" : "c1",
+      );
+    }
+
+    for (const unmountOnly of [false, true]) {
+      await openShare();
+      const samePost = f.useWebPostShareStore.getState().post;
+      await flush(() => button("Share post with group Lantern Studio").click());
+      const staleGate = f.state.gate;
+      const before = f.state.sent.length;
+      if (unmountOnly) {
+        await flush(() => app.render(false, false));
+        assert.equal(
+          f.useWebPostShareStore.getState().post,
+          samePost,
+          "unmount test retains the exact post object",
+        );
+        await flush(() => app.render(false, true));
+      } else {
+        await closeShare();
+        await flush(() => f.useWebPostShareStore.getState().open(samePost));
+      }
+      await flush(() => staleGate());
+      assert.equal(
+        f.state.sent.length,
+        before,
+        unmountOnly
+          ? "unmounted sheet callback cannot send after remount"
+          : "close/reopen with same post object cancels old selection",
+      );
+      assert.ok(
+        button("Share post with group Lantern Studio"),
+        "newly opened picker remains usable",
+      );
+      await flush(() => button("Share post with group Lantern Studio").click());
+      await flush(() => f.state.gate());
+      assert.equal(
+        f.state.sent.length,
+        before + 1,
+        "fresh selection after reopen sends normally",
+      );
+    }
+    await openShare();
+    await flush(() => button("Share post with group Lantern Studio").click());
+    const gateBeforeAccountChange = f.state.gate;
+    const sentBeforeAccountChange = f.state.sent.length;
+    await flush(() =>
+      f.auth.setState({
+        user: { id: "9", authId: "auth9", username: "other" },
+      }),
+    );
+    await flush(() => gateBeforeAccountChange());
+    assert.equal(
+      f.state.sent.length,
+      sentBeforeAccountChange,
+      "deferred group send cannot cross accounts",
+    );
+    assert.equal(
+      f.useWebPostShareStore.getState().post,
+      null,
+      "account switch dismisses group picker",
+    );
+    await flush(() =>
+      f.auth.setState({
+        user: { id: "1", authId: "auth1", username: "viewer" },
+      }),
+    );
+    f.state.deferGate = false;
+    await setConversations(directConversations);
     await flush(() => app.render(true));
     assert.ok(button("View 1 like"));
     assert.ok(button("Reshare post"));
@@ -267,11 +683,18 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
       storyButton().click();
     });
     assert.equal(f.state.stories.length, 1);
-    assert.deepEqual(f.state.stories[0].sharedSource, { type: "post", id: "11" });
+    assert.deepEqual(f.state.stories[0].sharedSource, {
+      type: "post",
+      id: "11",
+    });
     assert.equal(f.state.stories[0].expectedViewerId, "1");
     assert.match(f.state.stories[0].operationId, /^[0-9a-f-]{36}$/);
     assert.equal(typeof f.state.stories[0].isCurrent, "function");
-    assert.equal(f.state.stories[0].items, undefined, "source media and author are resolved on the server");
+    assert.equal(
+      f.state.stories[0].items,
+      undefined,
+      "source media and author are resolved on the server",
+    );
     await flush(() => f.state.resolveStory());
     assert.equal(f.usePostDetailUIStore.getState().showMenu, false);
     f.state.releaseStory = false;
@@ -346,7 +769,7 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
     );
     await flush(() => app.unmount());
     console.log(
-      "PASS production social actions: counts, isolated likes tap, inbox metadata, repeat click, rollback/retry, Escape/signout, story publish/error/gate/no-media",
+      "PASS production social actions: counts, isolated likes tap, inbox metadata, group identity/search/avatars/distinct IDs, stale-selection/unmount/account guards, repeat click, rollback/retry, Escape/signout, story publish/error/gate/no-media",
     );
   } finally {
     window.happyDOM.abort();
