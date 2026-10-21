@@ -10,6 +10,7 @@ on:
       - "packages/app/components/chat/story-share-bubble.web.tsx"
       - "packages/app/components/story-viewer*"
       - "packages/app/components/story-shared-source.web.tsx"
+      - "packages/app/components/share-to-inbox-sheet.web.tsx"
       - "packages/app/features/story/**"
       - "packages/app/features/events/event-detail.web.tsx"
       - "packages/app/features/events/ui/share-event-to-story.web.tsx"
@@ -37,6 +38,7 @@ on:
       - "scripts/fixtures/story-share/**"
       - "scripts/test-post-social-actions.cjs"
       - "scripts/test-post-share-identity.cjs"
+      - "scripts/test-share-picker-browser.cjs"
       - ".github/workflows/story-share-attribution.yml"
   workflow_dispatch:
 permissions:
@@ -78,5 +80,17 @@ jobs:
         with:
           name: story-attribution-browser
           path: ${{ runner.temp }}/story-attribution-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Group and individual share recipients in Chromium
+        env:
+          NODE_PATH: ${{ runner.temp }}/story/node_modules
+          SHARE_PICKER_SCREENSHOT_DIR: ${{ runner.temp }}/share-picker-screenshots
+        run: node scripts/test-share-picker-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: share-picker-browser
+          path: ${{ runner.temp }}/share-picker-screenshots
           if-no-files-found: ignore
           retention-days: 7
