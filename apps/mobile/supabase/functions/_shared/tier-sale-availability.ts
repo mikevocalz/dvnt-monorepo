@@ -1,6 +1,6 @@
 /**
  * Sale policy for ordinary online tier purchases (native PaymentSheet and
- * hosted Checkout), before either paid checkout or zero-dollar issuance.
+ * hosted Checkout, and guest checkout), before paid checkout or zero-dollar issuance.
  *
  * This does not replace tier visibility, the event-wide sales cutoff, or the
  * atomic inventory allocator. It deliberately does not apply to staff comps,

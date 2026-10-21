@@ -116,7 +116,7 @@ try {
       event_id integer NOT NULL REFERENCES events(id),
       quantity_total integer, quantity_sold integer DEFAULT 0,
       price_cents integer NOT NULL DEFAULT 0, max_per_user integer,
-      is_active boolean DEFAULT true, status text DEFAULT 'on_sale',
+      is_active boolean DEFAULT true, is_sold_out boolean DEFAULT false, status text DEFAULT 'on_sale',
       tier_visibility text DEFAULT 'public', sale_start timestamptz, sale_end timestamptz
     );
     CREATE TABLE public.orders (
@@ -261,6 +261,99 @@ try {
       second.release();
     }
   }
+
+  // Eligibility is rechecked by the actual transaction, not just the edge.
+  for (const [label, patch] of [
+    ["inactive", "is_active=false"], ["draft", "status='draft'"],
+    ["scheduled", "status='scheduled'"], ["paused", "status='paused'"],
+    ["ended", "status='ended'"], ["sold-out status", "status='sold_out'"],
+    ["unknown status", "status='unknown'"], ["empty status", "status=''"],
+    ["legacy sold-out flag", "is_sold_out=true"], ["hidden", "tier_visibility='hidden'"],
+    ["before opening", "sale_start=clock_timestamp()+interval '1 day'"],
+    ["closed sale", "sale_end=clock_timestamp()"],
+    ["past closing", "sale_end=clock_timestamp()-interval '1 day'"],
+    ["empty window", "sale_start=now(),sale_end=now()"],
+    ["reversed window", "sale_start=now()+interval '1 day',sale_end=now()-interval '1 day'"],
+    ["infinite opening", "sale_start='-infinity'"],
+    ["infinite closing", "sale_end='infinity'"],
+  ]) {
+    await test(`sale eligibility: ${label} rejects without any bookkeeping writes`, async () => {
+      const e = await event(); const t = await tier(e, 10);
+      await sql(`UPDATE ticket_types SET ${patch} WHERE id=$1`, [t]);
+      const before = await snapshot(e);
+      rejected(await issue(selection(e,t)), "tier_unavailable");
+      assert.deepEqual(await snapshot(e), before);
+    });
+  }
+  for (const [label, patch] of [
+    ["open window", "sale_start=now()-interval '1 day',sale_end=now()+interval '1 day'"],
+    ["opening boundary", "sale_start=clock_timestamp()"],
+    ["null legacy flags", "is_active=NULL,is_sold_out=NULL,status=NULL,sale_start=NULL,sale_end=NULL"],
+  ]) {
+    await test(`sale eligibility: ${label} preserves free issuance`, async () => {
+      const e = await event(); const t = await tier(e, 10);
+      await sql(`UPDATE ticket_types SET ${patch} WHERE id=$1`, [t]);
+      successful(await issue(selection(e,t)));
+      assert.deepEqual(await inventory(t), { quantity_sold: 1, tickets: 1, active_holds: 0, converted_holds: 1 });
+    });
+  }
+  for (const patch of ["status='paused'", "is_sold_out=true"]) {
+    await test(`sale eligibility rechecks ${patch} committed while waiting for the tier lock`, async () => {
+      const e = await event(); const t = await tier(e, 10);
+      const [, result] = await race(async (client) => {
+        await sql(`UPDATE ticket_types SET ${patch} WHERE id=$1`, [t], client);
+        return { ok: true };
+      }, (client) => issue(selection(e,t), client));
+      rejected(result, "tier_unavailable");
+      assert.deepEqual(await inventory(t), { quantity_sold: 0, tickets: 0, active_holds: 0, converted_holds: 0 });
+      assert.equal((await snapshot(e)).orders.length, 0);
+    });
+  }
+  await test("a sale closing during the tier-lock wait rejects using wall time, not transaction-start time", async () => {
+    const e = await event(); const t = await tier(e, 10);
+    const control = await pool.connect(); const guest = await pool.connect();
+    let pending;
+    try {
+      await control.query("BEGIN");
+      await sql("SELECT id FROM ticket_types WHERE id=$1 FOR UPDATE", [t], control);
+      await guest.query("BEGIN");
+      const controlPid = (await sql("SELECT pg_backend_pid() AS pid", [], control))[0].pid;
+      const guestPid = (await sql("SELECT pg_backend_pid() AS pid", [], guest))[0].pid;
+      pending = { settled: false };
+      pending.promise = issue(selection(e,t),guest).then(
+        result => { pending.settled=true; return {result}; },
+        error => { pending.settled=true; return {error}; });
+      await waitForBlocked(controlPid,guestPid,pending);
+      // End the sale only AFTER the lock barrier proves this transaction is
+      // waiting. The observed timestamps prove stale now() would admit it,
+      // without depending on a fixed delay or runner speed.
+      await sql("UPDATE ticket_types SET sale_end=clock_timestamp() WHERE id=$1", [t], control);
+      const [timing] = await sql(`SELECT clock_timestamp() >= sale_end AS ended,
+        (SELECT xact_start FROM pg_stat_activity WHERE pid=$2) < sale_end AS began_before_end
+        FROM ticket_types WHERE id=$1`, [t,guestPid], control);
+      assert.equal(timing.ended, true);
+      assert.equal(timing.began_before_end, true);
+      await control.query("COMMIT");
+      const result = await pending.promise;
+      if (result.error) throw result.error;
+      rejected(result.result, "tier_unavailable");
+      assert.deepEqual(await inventory(t), { quantity_sold: 0, tickets: 0, active_holds: 0, converted_holds: 0 });
+    } finally {
+      await control.query("ROLLBACK");
+      if (pending) await pending.promise;
+      await guest.query("ROLLBACK");
+      control.release(); guest.release();
+    }
+  });
+  await test("a completed same-key free order remains a no-write replay after its sale is closed", async () => {
+    const e = await event(); const t = await tier(e, 10); const request = selection(e,t);
+    const first = await issue(request); successful(first);
+    await sql("UPDATE ticket_types SET status='ended',is_sold_out=true,sale_end=clock_timestamp() WHERE id=$1", [t]);
+    const before = await snapshot(e);
+    const replay = await issue(request); successful(replay);
+    assert.equal(replay.idempotent, true); assert.equal(replay.order_id, first.order_id);
+    assert.deepEqual(await snapshot(e), before);
+  });
 
   await test("the pre-fix split-write schedule reproduces oversell and a lost sold increment", async () => {
     // Mirror the old edge flow using separate committed statements: reserve,

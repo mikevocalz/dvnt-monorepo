@@ -31,7 +31,7 @@ function fixture(options={}){
  quantity_total:100,quantity_sold:0,max_per_user:10,...options.tier}],orders:[],tickets:[],ticket_holds:[],order_timeline:[],
  organizer_accounts:[{host_id:'host',stripe_account_id:'acct_fixture',charges_enabled:true}],
  promo_codes:options.promos||[],event_promoters:options.promoters||[],promoter_attributions:[]};
- const writes=[],stripe=[],emails=[],usage=[],logs=[],profileCalls=[];let serial=0;
+ const writes=[],stripe=[],emails=[],usage=[],logs=[],profileCalls=[],qr=[];let serial=0;
  const db={rpc:async(fn,args)=>{
   writes.push({table:'rpc',fn,args});
   if(fn==='ticket_hold_create_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
@@ -92,7 +92,8 @@ function fixture(options={}){
   const full=path.resolve(file);if(cache.has(full))return cache.get(full);
   const exports={};cache.set(full,exports);
   const code=ts.transpileModule(fs.readFileSync(full,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  vm.runInNewContext(code,{exports,Request,Response,URL,URLSearchParams,TextEncoder,Date,crypto,console:{...console,error:(...args)=>logs.push(args)},
+  vm.runInNewContext(code,{exports,Request,Response,URL,URLSearchParams,TextEncoder,
+   Date:options.now==null?Date:class extends Date{constructor(...args){super(...(args.length?args:[options.now]))}static now(){return options.now}},crypto,console:{...console,error:(...args)=>logs.push(args)},
    Deno:{env:{get:k=>k==='STRIPE_SECRET_KEY'?(options.noStripe?'':'fixture-not-a-provider-key'):''},serve:fn=>{handler=fn}},
    fetch:async(url,opts)=>{
     assert.equal(new URL(url).hostname,'api.stripe.com');
@@ -101,7 +102,7 @@ function fixture(options={}){
    },require:name=>{
     if(options.entrypoint && name.endsWith('/verify-session.ts'))return{verifySession:async()=>options.unauthorized?null:'member-fixture'};
     if(name.startsWith('https://esm.sh/@supabase/'))return{createClient:()=>db};
-    if(name.endsWith('/hmac-qr.ts'))return{createSignedQrPayload:async()=>({qrToken:'fixture',qrPayload:'fixture'})};
+    if(name.endsWith('/hmac-qr.ts'))return{createSignedQrPayload:async()=>{qr.push(true);return{qrToken:'fixture',qrPayload:'fixture'}}};
     if(name.endsWith('/ticket-email-delivery.ts'))return{deliverTicketBundleEmail:async(...args)=>emails.push(args[1])};
     if(name.endsWith('/checkout-profile.ts'))return{recordCheckoutProfileIntake:async(...args)=>{profileCalls.push({kind:'intake',args})},provisionCheckoutProfile:async(...args)=>{profileCalls.push({kind:'provision',args});return null}};
     return load(path.resolve(path.dirname(full),name));
@@ -113,7 +114,7 @@ function fixture(options={}){
   const res=await handler(new Request('https://fixture.invalid/guest-checkout',{method,...(method==='POST'?{body:JSON.stringify(body)}:{})}));
   return {status:res.status,headers:res.headers,data:await res.json()};
  }
- return{tables,writes,stripe,emails,usage,logs,profileCalls,load,call,
+ return{tables,writes,stripe,emails,usage,logs,profileCalls,qr,load,call,
   quote:(body={})=>call({action:'quote',quote_request:{...selection,...body}}),
   pay:(body={})=>call({...selection,...body})};
 }

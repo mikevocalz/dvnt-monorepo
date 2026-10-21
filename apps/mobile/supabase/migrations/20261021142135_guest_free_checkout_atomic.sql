@@ -18,6 +18,7 @@ DECLARE
   v_sold integer;
   v_held integer;
   v_available integer;
+  v_sale_now timestamptz;
 BEGIN
   IF jsonb_typeof(p_order) IS DISTINCT FROM 'object'
      OR jsonb_typeof(p_ticket_rows) IS DISTINCT FROM 'array' THEN
@@ -83,9 +84,17 @@ BEGIN
         v_tier.price_cents::bigint * v_quantity THEN
     RETURN jsonb_build_object('ok', false, 'error', 'quote_changed');
   END IF;
-  IF v_tier.is_active IS FALSE OR v_tier.status IN ('paused', 'ended')
+  -- Recheck the same online-sale policy as tier-sale-availability.ts under
+  -- the tier lock. Sample wall time AFTER any wait: transaction-start now()
+  -- could keep an already-ended sale open while this transaction was blocked.
+  -- Null legacy flags/windows remain valid; explicit non-on_sale states do not.
+  v_sale_now := clock_timestamp();
+  IF v_tier.is_active IS FALSE OR v_tier.is_sold_out IS TRUE
+     OR (v_tier.status IS NOT NULL AND v_tier.status <> 'on_sale')
      OR v_tier.tier_visibility = 'hidden'
-     OR v_tier.sale_start > now() OR v_tier.sale_end < now() THEN
+     OR NOT isfinite(v_tier.sale_start) OR NOT isfinite(v_tier.sale_end)
+     OR v_tier.sale_start >= v_tier.sale_end
+     OR v_tier.sale_start > v_sale_now OR v_tier.sale_end <= v_sale_now THEN
     RETURN jsonb_build_object('ok', false, 'error', 'tier_unavailable');
   END IF;
 

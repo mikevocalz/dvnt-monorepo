@@ -27,6 +27,7 @@ import {
   TIER_VISIBILITY_MESSAGES,
 } from "../_shared/tier-visibility.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { tierSaleAvailabilityError } from "../_shared/tier-sale-availability.ts";
 import { isUnpublished } from "../_shared/event-access.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
@@ -216,7 +217,7 @@ Deno.serve(async (req) => {
     const { data: tier } = await supabase
       .from("ticket_types")
       .select(
-        "id, event_id, name, price_cents, is_active, status, sale_start, sale_end, quantity_total, quantity_sold, quantity_held, max_per_user, tier_visibility, unlock_code, unlocks_after_tier_id",
+        "id, event_id, name, price_cents, is_active, is_sold_out, status, sale_start, sale_end, quantity_total, quantity_sold, quantity_held, max_per_user, tier_visibility, unlock_code, unlocks_after_tier_id",
       )
       .eq("id", ticketTypeId)
       .single();
@@ -227,8 +228,6 @@ Deno.serve(async (req) => {
     if (ev.ticketing_enabled !== true &&
         !(ev.ticketing_enabled === false && tier.price_cents === 0))
       return err("event_unavailable", "Tickets aren't available for this event.", 409);
-    if (tier.is_active === false || tier.status === "paused" || tier.status === "ended")
-      return err("tier_unavailable", "That ticket isn't on sale.");
 
     // Tier visibility guard (mirror of cart_create_hold v3) — this rail
     // inserts ticket_holds directly, bypassing the RPC's hidden/locked
@@ -246,11 +245,10 @@ Deno.serve(async (req) => {
         visibilityError === "tier_hidden" ? 404 : 403,
       );
     }
-    const now = Date.now();
-    if (tier.sale_start && new Date(tier.sale_start).getTime() > now)
-      return err("not_started", "Sales haven't started yet.");
-    if (tier.sale_end && new Date(tier.sale_end).getTime() < now)
-      return err("sale_ended", "Sales have ended.");
+    // The quote and both paid/free checkout use the same online sale policy.
+    // Keep visibility first so unavailable tiers cannot disclose hidden state.
+    const saleError = tierSaleAvailabilityError(tier);
+    if (saleError) return err(saleError.code, saleError.error);
 
     // Advisory pre-check only — fails an obviously sold-out tier before we
     // create a Stripe session. The binding check is ticket_hold_create_atomic
