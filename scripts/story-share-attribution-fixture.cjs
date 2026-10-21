@@ -41,9 +41,12 @@ async function buildFixture({ outfile, browser = false }) {
       loader: "tsx",
       contents: `
       import React,{act} from 'react';import {createRoot} from 'react-dom/client';
-      import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
+      import {QueryClient,QueryClientProvider,onlineManager} from '@tanstack/react-query';
       import {useSharePostToStory} from './packages/app/lib/hooks/use-share-post-to-story';
       import {ShareEventToStoryMenuItem} from './packages/app/features/events/ui/share-event-to-story.web';
+      import {useEventTitleRoute} from './packages/app/lib/hooks/use-event-title-route';
+      import {StoryShareBubble} from './packages/app/components/chat/story-share-bubble.web';
+      import {StorySharedSourceActions} from './packages/app/components/story-shared-source.web';
       import {StoryViewerOverlay} from './packages/app/components/story-viewer-overlay.web';
       import {useStoryViewerStore,toStoryViewerGroup} from './packages/app/lib/stores/story-viewer-store';
       import {useAuthStore} from '@dvnt/app/lib/stores/auth-store';
@@ -52,15 +55,22 @@ async function buildFixture({ outfile, browser = false }) {
       import {parseStorySharedSource,SHARED_STORY_BACKDROP} from './packages/app/lib/stories/shared-source';
       const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});
       let share;function Probe(){share=useSharePostToStory();return null}
-      const f={act,client,useAuthStore,storiesApi,storyKeys,useStoryViewerStore,toStoryViewerGroup,parseStorySharedSource,SHARED_STORY_BACKDROP,
+      function TitleRoute({slug}){const route=useEventTitleRoute(slug,true);return <output data-title-id={route.resolvedTitleId??''}>{route.resolvedTitleId??''}</output>}
+      const f={act,client,onlineManager,useAuthStore,storiesApi,storyKeys,useStoryViewerStore,toStoryViewerGroup,parseStorySharedSource,SHARED_STORY_BACKDROP,
         share:(source,cb)=>source.type==='event'?share.shareEvent(source,cb):share.share(source,cb),
         open:groups=>useStoryViewerStore.getState().openAt(groups.map(toStoryViewerGroup),0),
         close:()=>useStoryViewerStore.getState().close(),
+        mountTitleRoute:node=>{const app=createRoot(node);return {render:slug=>app.render(<QueryClientProvider client={client}><TitleRoute slug={slug}/></QueryClientProvider>),unmount:()=>app.unmount()}},
+        mountLinks:node=>{const app=createRoot(node);return {render:(source,share)=>app.render(<QueryClientProvider client={client}>{source?<StorySharedSourceActions source={source} onNavigate={path=>globalThis.__routes.push(path)}/>:null}{share?<StoryShareBubble share={share} isOwnMessage={false}/>:null}</QueryClientProvider>),unmount:()=>app.unmount()}},
         mount:node=>{const app=createRoot(node);return {render:(event={id:'22',visibility:'public',status:'active'})=>app.render(<React.StrictMode><QueryClientProvider client={client}><Probe/><ShareEventToStoryMenuItem event={event} onShared={()=>globalThis.__shared++}/><StoryViewerOverlay/></QueryClientProvider></React.StrictMode>),unmount:()=>app.unmount()}}
       };
       globalThis.__fixture=f;
       globalThis.__viewer=()=>useAuthStore.getState().user?.id??null;
       globalThis.__routes=[];globalThis.__toasts=[];globalThis.__shared=0;globalThis.__advances=0;
+      globalThis.__eventIndexCalls=[];
+      globalThis.__eventIndexRows=[{id:22,title:"Current Event Title",status:"active",visibility:"public"}];
+      globalThis.__eventIndexFetch=async()=>new Response(JSON.stringify(globalThis.__eventIndexRows),{headers:{"content-range":"0-"+Math.max(0,globalThis.__eventIndexRows.length-1)+"/"+globalThis.__eventIndexRows.length}});
+      globalThis.fetch=async(url,options)=>{if(!String(url).startsWith("https://fixture.invalid/rest/v1/events?"))throw new Error("Unexpected network request");globalThis.__eventIndexCalls.push({url:String(url),options});return globalThis.__eventIndexFetch(url,options)};
       globalThis.__token=async()=> 'token';globalThis.__storyDb=()=>({data:[],error:null});
       globalThis.__storyRpc=async(name,args)=>{
         if(name!=="get_story_share_for_playback")throw new Error("unexpected RPC");
@@ -79,6 +89,7 @@ async function buildFixture({ outfile, browser = false }) {
       export {f};
     `,
     },
+    define: { "process.env.EXPO_PUBLIC_SUPABASE_URL": JSON.stringify("https://fixture.invalid"), "process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY": JSON.stringify("fixture-anon") },
     bundle: true,
     platform: browser ? "browser" : "node",
     format: browser ? "iife" : "cjs",

@@ -181,6 +181,8 @@ const {
         for (const kind of ["post", "photo", "event", "text-event"]) {
           await page.evaluate(({ kind, role }) => globalThis.__openStory(kind, role), { kind, role });
           await actions().waitFor();
+          if (kind.includes("event")) await page.waitForFunction(() => document.querySelector("[data-story-source-actions] a")?.getAttribute("href") === "/events/current-event-title");
+          assert.equal(await sourceLink().getAttribute("href"), kind.includes("event") ? "/events/current-event-title" : "/feed/post/11");
           await page.mouse.move(0, 0);
           const geometry = await actions().evaluate((el) => {
             const rect = (e) => {
@@ -275,7 +277,7 @@ const {
           await sourceLink().focus();
           await page.keyboard.press("Enter");
           await actions().waitFor({ state: "detached" });
-          assert.equal(await page.evaluate(() => globalThis.__routes.at(-1)), kind.includes("event") ? "/e/22" : "/feed/post/11");
+          assert.equal(await page.evaluate(() => globalThis.__routes.at(-1)), kind.includes("event") ? "/events/current-event-title" : "/feed/post/11");
           assert.equal(await page.evaluate(() => globalThis.__fixture.useStoryViewerStore.getState().navigationClose), true);
         }
         // Tag expansion does not shift or occlude the source action row.
@@ -301,6 +303,36 @@ const {
         await actions().waitFor({ state: "detached" });
       }
     }
+    // Fallbacks are real in-app links with the same keyboard/close behavior,
+    // never the public event page or a different event with a duplicate title.
+    for (const lookup of ["titleless", "duplicate", "failed"]) {
+      await page.evaluate((lookup) => {
+        globalThis.__fixture.client.removeQueries({ queryKey: ["events", "public-slug-index"] });
+        globalThis.__eventIndexFetch = async () => {
+          if (lookup === "failed") throw new Error("Offline fixture");
+          const rows = lookup === "titleless" ? [{ id: 22, title: "" }] : [
+            { id: 22, title: "Duplicate Night", status: "active" },
+            { id: 23, title: "Duplicate-Night", status: "active" },
+          ];
+          return new Response(JSON.stringify(rows), { headers: { "content-range": `0-${rows.length - 1}/${rows.length}` } });
+        };
+        globalThis.__openStory("event", "own");
+      }, lookup);
+      await actions().waitFor();
+      await page.waitForFunction(() => {
+        const query = globalThis.__fixture.client.getQueryState(["events", "public-slug-index"]);
+        return query && query.status !== "pending" && query.fetchStatus === "idle";
+      });
+      assert.equal(await sourceLink().getAttribute("href"), "/feed/events/22", lookup);
+      await sourceLink().focus();
+      await page.keyboard.press("Enter");
+      await actions().waitFor({ state: "detached" });
+      assert.equal(await page.evaluate(() => globalThis.__routes.at(-1)), "/feed/events/22", lookup);
+    }
+    await page.evaluate(() => {
+      globalThis.__fixture.client.removeQueries({ queryKey: ["events", "public-slug-index"] });
+      globalThis.__eventIndexFetch = async () => new Response(JSON.stringify(globalThis.__eventIndexRows), { headers: { "content-range": "0-0/1" } });
+    });
     // The transparent middle still accepts ordinary next-segment clicks.
     await page.evaluate(() => globalThis.__openStory("event", "own"));
     await actions().waitFor();

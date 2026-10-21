@@ -10,7 +10,6 @@ export function eventDetailIsResolving({
   detail,
   isTokenRoute,
   token,
-  list,
   index,
 }: {
   hasResolvedId: boolean;
@@ -24,5 +23,5 @@ export function eventDetailIsResolving({
   if (hasResolvedId) return detail.isPending || detail.isFetching;
   if (!hasSlug) return false;
   if (isTokenRoute) return token.isPending || token.isFetching;
-  return list.isPending || list.isFetching || index.isPending || index.isFetching;
+  return index.isPending || index.isFetching;
 }

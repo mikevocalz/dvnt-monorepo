@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import type { StorySharedSource } from "../lib/types";
 import { storySourcePath } from "../lib/stories/shared-source";
+import { useStoryEventPath } from "../lib/hooks/use-story-event-path";
 
 /** Text-only shares keep their content in the story, not in the footer. */
 export function StorySharedSourceContent({
@@ -51,7 +52,8 @@ export function StorySharedSourceActions({
   viewersAction?: ReactNode;
   onNavigate: (path: string) => void;
 }) {
-  const sourcePath = storySourcePath(source);
+  const eventPath = useStoryEventPath(source.type === "event" ? source.id : undefined);
+  const sourcePath = eventPath ?? storySourcePath(source);
 
   return (
     <section

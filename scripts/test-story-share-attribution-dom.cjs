@@ -273,11 +273,12 @@ const {
     assert.ok(
       document.querySelector('[aria-label="Shared event by @original"]'),
     );
-    assert.equal(document.querySelector('a[href="/e/22"]').textContent.trim(), "View Event");
+    for (let i = 0; i < 100 && !document.querySelector('a[href="/events/current-event-title"]'); i++) await flush();
+    assert.equal(document.querySelector('a[href="/events/current-event-title"]').textContent.trim(), "View Event");
     assert.equal(document.querySelector('[data-story-source-actions]').textContent.trim(), "View Event", "event footer has no author or title row");
     assert.equal(document.querySelector('[aria-label="Shared event content"]'), null, "media events do not duplicate their flyer with a text card");
-    await flush(() => document.querySelector('a[href="/e/22"]').click());
-    assert.equal(global.__routes.at(-1), "/e/22");
+    await flush(() => document.querySelector('a[href="/events/current-event-title"]').click());
+    assert.equal(global.__routes.at(-1), "/events/current-event-title");
     assert.equal(global.__advances, 0);
 
     // Viewers stays owner-only, shares an action row with the source link, and
