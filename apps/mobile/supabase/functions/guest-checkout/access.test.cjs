@@ -81,8 +81,8 @@ test('free RSVP with Sell tickets off quotes and issues through the existing gue
   assert.equal(f.tables.orders[0].status,'paid');assert.equal(f.tables.tickets.length,2);
   assert.ok(f.tables.tickets.every(t=>t.ticket_type_id===TIER&&t.guest_email===EMAIL&&t.qr_payload&&t.order_id===result.data.order_id));
   assert.equal(f.tables.ticket_types[0].quantity_sold,2);
-  assert.equal(f.writes.filter(w=>w.fn==='ticket_hold_create_atomic').length,1);
-  assert.equal(f.writes.find(w=>w.fn==='ticket_hold_create_atomic').args.p_quantity,2);
+  assert.equal(f.writes.filter(w=>w.fn==='guest_free_checkout_atomic').length,1);
+  assert.equal(f.writes.find(w=>w.fn==='guest_free_checkout_atomic').args.p_order.quantity,2);
   assert.equal(f.emails.length,1);assert.equal(f.stripe.length,0);assert.deepEqual(f.profileCalls,[]);
   const replay=await f.pay(input);
   assert.equal(replay.data.idempotent,true);assert.equal(replay.data.order_id,result.data.order_id);

@@ -1,0 +1,50 @@
+name: Event editor viewport regression
+on:
+  pull_request:
+    paths:
+      - 'packages/ui/src/form/StickySaveBar.web.tsx'
+      - 'packages/ui/package.json'
+      - 'packages/app/components/web-tab-bar.web.tsx'
+      - 'packages/app/components/use-visual-viewport-bottom.web.ts'
+      - 'packages/app/features/events/event-create.web.tsx'
+      - 'packages/app/features/events/event-edit.web.tsx'
+      - 'packages/app/features/events/create/**'
+      - 'packages/app/features/events/ui/**'
+      - 'apps/web/src/app/(frontend)/globals.css'
+      - 'scripts/test-event-editor-tabbar-browser.cjs'
+      - 'scripts/test-web-tab-bar-browser.cjs'
+      - '.github/workflows/event-editor-tabbar.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  event-editor-viewport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated browser tools
+        run: npm install --prefix "$RUNNER_TEMP/editor" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 lucide-react@1.30.0 react-native-web@0.21.2 playwright@1.58.2 tailwindcss@4.3.0
+      - name: Install test browser
+        run: node "$RUNNER_TEMP/editor/node_modules/playwright/cli.js" install --with-deps ${{ matrix.browser }}
+      - name: Exercise complete event editors
+        env:
+          NODE_PATH: ${{ runner.temp }}/editor/node_modules
+          TABBAR_BROWSER: ${{ matrix.browser }}
+          TABBAR_EVIDENCE_DIR: ${{ runner.temp }}/editor-evidence
+        run: node scripts/test-event-editor-tabbar-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: editor-viewport-${{ matrix.browser }}
+          path: ${{ runner.temp }}/editor-evidence/*.png
+          if-no-files-found: ignore

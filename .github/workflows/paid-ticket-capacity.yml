@@ -1,0 +1,36 @@
+name: Paid ticket issuance capacity
+on:
+  pull_request:
+    paths:
+      # Shared inventory and both paid delivery rails are one capacity contract.
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
+      - 'scripts/verify-paid-ticket-issuance.mjs'
+      - '.github/workflows/paid-ticket-capacity.yml'
+  push:
+    branches: [master, main]
+    paths:
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
+      - 'scripts/verify-paid-ticket-issuance.mjs'
+      - '.github/workflows/paid-ticket-capacity.yml'
+permissions:
+  contents: read
+jobs:
+  atomic-paid-capacity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Real paid handler contracts and replay behavior
+        run: node --test apps/mobile/supabase/functions/_shared/paid-ticket-issuance.test.cjs apps/mobile/supabase/functions/_shared/session-issuance.test.cjs apps/mobile/supabase/functions/stripe-webhook/ticket-fulfillment.test.cjs apps/mobile/supabase/functions/stripe-webhook/charge-refunded.test.cjs apps/mobile/supabase/functions/_shared/payment-safety.test.cjs apps/mobile/supabase/functions/_shared/door-sale.test.cjs
+      # Disposable local PostgreSQL only. No project credentials, no deployed
+      # migration, and no --allow-skip fallback for absent server binaries.
+      - name: Real multi-connection PostgreSQL paid capacity and rollback regressions
+        run: node scripts/verify-paid-ticket-issuance.mjs

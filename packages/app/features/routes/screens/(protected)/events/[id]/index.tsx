@@ -83,7 +83,7 @@ import {
   normalizeEvent,
   normalizeArray,
 } from "@dvnt/app/lib/normalization/safe-entity";
-import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useTicketViewerId } from "@dvnt/app/lib/hooks/use-tickets";
 import { tierIsHiddenFromBuyers } from "@dvnt/app/lib/tickets/pricing";
@@ -99,6 +99,11 @@ import { useSaleNotifyStore } from "@dvnt/app/lib/stores/sale-notify-store";
 import { SafeCalendar as Calendar } from "@dvnt/app/lib/safe-native-modules";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
+import { completeNativeTicketCheckout } from "@dvnt/app/lib/tickets/native-checkout-outcome";
+import {
+  nativeTicketCheckoutKey,
+  useNativeTicketCheckoutStore,
+} from "@dvnt/app/lib/stores/native-ticket-checkout-store";
 import { CheckoutPhoneField } from "@dvnt/app/features/events/checkout-phone-field";
 import { MENTION_COLOR } from "@dvnt/app/lib/constants/mentions";
 import { usePromotionStore } from "@dvnt/app/lib/stores/promotion-store";
@@ -837,6 +842,10 @@ function EventDetailScreenContent() {
   // whole event detail screen on every keystroke.
   const isCheckingOut = useEventDetailScreenStore((s) => s.isCheckingOut);
   const setIsCheckingOut = useEventDetailScreenStore((s) => s.setIsCheckingOut);
+  const nativeCheckoutKey = nativeTicketCheckoutKey(viewerId, eventId);
+  const pendingNativeCheckout = useNativeTicketCheckoutStore(
+    (s) => s.pending[nativeCheckoutKey],
+  );
   // B3: deferred ID verification — gate age-restricted RSVP/tickets.
   const verifyOpen = useEventDetailScreenStore((s) => s.verifyOpen);
   const setVerifyOpen = useEventDetailScreenStore((s) => s.setVerifyOpen);
@@ -855,8 +864,90 @@ function EventDetailScreenContent() {
     };
   }, [eventId, resetEventDetailScreen]);
 
+  const handleNativeTicketCheckout = useCallback(async () => {
+    // Read the live flag, not the last render, to close same-frame double taps.
+    if (!eventData || useEventDetailScreenStore.getState().isCheckingOut) return;
+    setIsCheckingOut(true);
+    const pendingCopy = () =>
+      showToast(
+        "info",
+        "Tickets processing",
+        "Your checkout is still being confirmed. Please don't pay again. Check My Tickets shortly, or contact support.",
+      );
+    try {
+      const checkoutStore = useNativeTicketCheckoutStore.getState();
+      const outcome = await completeNativeTicketCheckout({
+        eventId,
+        ticketTypeId: selectedTier?.id || "",
+        quantity: ticketQty,
+        pending: checkoutStore.pending[nativeCheckoutKey],
+        checkout: () =>
+          nativeCheckout({
+            eventId,
+            ticketTypeId: selectedTier?.id || "",
+            quantity: ticketQty,
+            ...(promoCode.trim() ? { promoCode: promoCode.trim() } : {}),
+          }),
+        rememberPending: (purchase) =>
+          checkoutStore.remember(nativeCheckoutKey, purchase),
+        clearPending: () => checkoutStore.clear(nativeCheckoutKey),
+        readTickets: () => ticketsApi.getMyTickets(),
+      });
+      if (outcome.kind === "cancelled") return;
+      if (outcome.kind === "failed") {
+        showToast("error", "Checkout Failed", outcome.error);
+        return;
+      }
+
+      // Counts and RSVP state come back from the server. Never invent an
+      // attendee while issuance is pending, or add the same purchase twice.
+      queryClient.invalidateQueries({ queryKey: qk.tickets.mine(viewerId) });
+      queryClient.invalidateQueries({
+        queryKey: qk.tickets.forEvent(viewerId, eventId),
+      });
+      queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      if (outcome.kind === "pending") {
+        pendingCopy();
+        return;
+      }
+      showToast(
+        "success",
+        outcome.ticketCount > 1
+          ? `${outcome.ticketCount} Tickets Confirmed`
+          : "Ticket Confirmed",
+        `You're going to ${eventData.title}!`,
+      );
+    } catch (err: any) {
+      console.error("[EventDetail] Checkout error:", err);
+      if (useNativeTicketCheckoutStore.getState().pending[nativeCheckoutKey]) {
+        pendingCopy();
+      } else {
+        showToast("error", "Error", err.message || "Checkout failed");
+      }
+    } finally {
+      setIsCheckingOut(false);
+    }
+  }, [
+    eventData,
+    eventId,
+    nativeCheckoutKey,
+    nativeCheckout,
+    selectedTier?.id,
+    ticketQty,
+    promoCode,
+    queryClient,
+    viewerId,
+    setIsCheckingOut,
+    showToast,
+  ]);
+
   const handleGetTickets = useCallback(async () => {
-    if (!eventData || isCheckingOut) return;
+    if (!eventData || useEventDetailScreenStore.getState().isCheckingOut) return;
+    // A pending purchase is read-only recovery, even if sales have since ended.
+    if (useNativeTicketCheckoutStore.getState().pending[nativeCheckoutKey]) {
+      await handleNativeTicketCheckout();
+      return;
+    }
     loopDetection.log("EventDetail", "checkout:start", { eventId });
     // Block ticket purchase for cancelled events. The UI already hides
     // the CTA when cancelled, but a stale render or a deep-link tap
@@ -943,125 +1034,7 @@ function EventDetailScreenContent() {
       ) {
         return;
       }
-      setIsCheckingOut(true);
-      try {
-        // Use native PaymentSheet for in-app checkout
-        const result = await nativeCheckout({
-          eventId,
-          ticketTypeId: selectedTier?.id || "",
-          quantity: ticketQty,
-          ...(promoCode.trim() ? { promoCode: promoCode.trim() } : {}),
-        });
-
-        if (result.error) {
-          if (result.error !== "Payment cancelled") {
-            showToast("error", "Checkout Failed", result.error);
-          }
-          return;
-        }
-
-        // Free ticket — issued server-side, store locally
-        if (result.free && result.tickets?.length) {
-          const qty = result.tickets.length;
-          // The server issued these; the tickets query is the one place they
-          // live. Mirroring them into Zustand as well gave the app two answers
-          // to "what is my pass", and the local copy had no way to learn about
-          // a later scan, transfer, or refund.
-          queryClient.invalidateQueries({ queryKey: qk.tickets.mine(viewerId) });
-          queryClient.invalidateQueries({
-            queryKey: qk.tickets.forEvent(viewerId, eventId),
-          });
-          toggleRsvp(eventId);
-          queryClient.setQueryData(eventKeys.detail(eventId), (old: any) =>
-            old ? { ...old, attendees: (old.attendees || 0) + qty } : old,
-          );
-          queryClient.setQueriesData(
-            { queryKey: eventKeys.all },
-            (old: any) => {
-              if (!Array.isArray(old)) return old;
-              return old.map((e: any) =>
-                String(e.id) === String(eventId)
-                  ? {
-                      ...e,
-                      attendees: (e.attendees || 0) + qty,
-                      totalAttendees: (e.totalAttendees || 0) + qty,
-                    }
-                  : e,
-              );
-            },
-          );
-          queryClient.invalidateQueries({ queryKey: eventKeys.all });
-          showToast(
-            "success",
-            qty > 1 ? `${qty} Tickets Confirmed` : "Confirmed",
-            `You're going to ${eventData.title}!`,
-          );
-          return;
-        }
-
-        // Paid ticket succeeded — webhook will finalize tickets
-        if (result.success) {
-          // Poll for ticket creation (webhook may take a moment)
-          let newTicket: any = null;
-          for (let attempt = 0; attempt < 5; attempt++) {
-            await new Promise((r) => setTimeout(r, 1500));
-            // A read that fails mid-poll is not a failed purchase. Swallow it
-            // and try the next attempt — the payment already succeeded, and
-            // throwing here would drop the caller into the error branch.
-            let myTickets: TicketRecord[] = [];
-            try {
-              myTickets = await ticketsApi.getMyTickets();
-            } catch {
-              continue;
-            }
-            newTicket = myTickets.find(
-              (t) =>
-                String(t.event_id) === String(eventId) && t.status === "active",
-            );
-            if (newTicket) break;
-          }
-
-          if (newTicket) {
-            queryClient.invalidateQueries({
-              queryKey: qk.tickets.mine(viewerId),
-            });
-            queryClient.invalidateQueries({
-              queryKey: qk.tickets.forEvent(viewerId, eventId),
-            });
-            toggleRsvp(eventId);
-            queryClient.setQueryData(eventKeys.detail(eventId), (old: any) =>
-              old ? { ...old, attendees: (old.attendees || 0) + 1 } : old,
-            );
-            queryClient.setQueriesData(
-              { queryKey: eventKeys.all },
-              (old: any) => {
-                if (!Array.isArray(old)) return old;
-                return old.map((e: any) =>
-                  String(e.id) === String(eventId)
-                    ? {
-                        ...e,
-                        attendees: (e.attendees || 0) + 1,
-                        totalAttendees: (e.totalAttendees || 0) + 1,
-                      }
-                    : e,
-                );
-              },
-            );
-            queryClient.invalidateQueries({ queryKey: eventKeys.all });
-          }
-          showToast(
-            "success",
-            "Ticket Purchased",
-            `You're going to ${eventData.title}!`,
-          );
-          return;
-        }
-      } catch (err: any) {
-        console.error("[EventDetail] Checkout error:", err);
-        showToast("error", "Error", err.message || "Checkout failed");
-      } finally {
-        setIsCheckingOut(false);
-      }
+      await handleNativeTicketCheckout();
       return;
     }
 
@@ -1138,7 +1111,10 @@ function EventDetailScreenContent() {
     eventData,
     selectedTier,
     user?.id,
-    isCheckingOut,
+    nativeCheckoutKey,
+    handleNativeTicketCheckout,
+    verificationStatus,
+    setVerifyOpen,
     toggleRsvp,
     showToast,
     queryClient,
@@ -3035,6 +3011,13 @@ function EventDetailScreenContent() {
 
       {/* ── Sticky CTA ─────────────────────────────────────────── */}
       <StickyCTA
+        checkoutState={
+          isCheckingOut || isNativeCheckoutLoading
+            ? "checking"
+            : pendingNativeCheckout
+              ? "pending"
+              : undefined
+        }
         selectedTier={selectedTier}
         hasTicket={hasTicket}
         isPast={isPast}

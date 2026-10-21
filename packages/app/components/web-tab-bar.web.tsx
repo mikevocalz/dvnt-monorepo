@@ -6,12 +6,13 @@
  * and Solito navigation. The viewport layer uses a real <nav> portalled to
  * body; native never imports this .web file.
  */
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { Pressable, Text, View, StyleSheet, useWindowDimensions } from "react-native";
 import { useRouter, usePathname } from "solito/navigation";
 import { Home, Calendar, Plus, Heart, User } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useVisualViewportBottom } from "./use-visual-viewport-bottom.web";
 import { CenterButton } from "./center-button.web";
 
 const CYAN = "#3FDCFF";
@@ -45,6 +46,12 @@ export function WebTabBar() {
   // outside scrolling, transformed or paint-contained app/layout ancestors.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+  const viewportRef = useRef<HTMLElement>(null);
+  // Limit the Safari editor workaround to routes covered by editor tests.
+  // Chat/comment composers retain their existing shared bottom:0 behavior.
+  const isEventEditor = pathname === "/feed/events/create" ||
+    /^\/feed\/edit-event\/[^/]+\/?$/.test(pathname ?? "");
+  useVisualViewportBottom(viewportRef, mounted && isMobile && isEventEditor);
 
   const TabItem = ({ href, Icon, label }: Tab) => {
     const active = pathname === href;
@@ -70,8 +77,9 @@ export function WebTabBar() {
 
   return createPortal(
     <nav
+      ref={viewportRef}
       data-dvnt-tab-bar=""
-      style={{ ...viewportStyle, ...(isMobile ? mobileViewportStyle : {}) }}
+      style={{ ...viewportStyle, ...(isMobile ? mobileViewportStyle : {}), ...(isMobile && isEventEditor ? editorViewportStyle : {}) }}
       aria-label="Primary"
     >
       <View style={[styles.bar, isMobile && styles.barMobile]}>
@@ -101,6 +109,11 @@ const viewportStyle: CSSProperties = {
   zIndex: 1000,
   pointerEvents: "none",
   padding: "0 16px",
+};
+const editorViewportStyle: CSSProperties = {
+  top: "var(--dvnt-visible-bottom, 100dvh)",
+  bottom: "auto",
+  transform: "translateY(-100%)",
 };
 const mobileViewportStyle: CSSProperties = {
   bottom: 0,
