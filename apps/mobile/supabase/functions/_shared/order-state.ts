@@ -13,8 +13,9 @@ import { computeLockedPromoterEarning } from "./promoter-earning.ts";
  * event (older Stripe event.created) is a guaranteed no-op — same
  * pattern as upsert_membership_subscription. Optional params COALESCE
  * server-side, so passing null never clears previously-written refs.
- * Errors are logged, not thrown: the stripe_events dedupe row is
- * already written, so a throw would make Stripe retry into a skip.
+ * Callers that must persist money-state before fulfillment/delivery opt into
+ * throwOnError. Unfinished stripe_events rows are retryable; actual database
+ * failures must not be confused with a harmless stale-event no-op.
  */
 export async function upsertOrderMoneyState(
   // deno-lint-ignore no-explicit-any
@@ -29,6 +30,7 @@ export async function upsertOrderMoneyState(
     paidAt?: string | null;
     refundedAt?: string | null;
   },
+  opts: { throwOnError?: boolean } = {},
 ): Promise<boolean> {
   const { data: applied, error } = await supabase.rpc(
     "upsert_order_money_state",
@@ -48,6 +50,7 @@ export async function upsertOrderMoneyState(
       `[stripe-webhook] upsert_order_money_state failed for order ${args.orderId} (→ ${args.status}):`,
       error,
     );
+    if (opts.throwOnError) throw error;
     return false;
   }
   if (applied === false) {

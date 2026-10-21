@@ -33,6 +33,8 @@ export interface TicketRecord {
   checked_in_by: string | null;
   purchase_amount_cents: number | null;
   category?: "admission" | "coat_check" | "product" | "service";
+  /** Purchase identity returned by get-my-tickets for issuance confirmation. */
+  stripe_payment_intent_id?: string | null;
   cart_id?: string | null;
   cart_line_item_id?: string | null;
   created_at: string;

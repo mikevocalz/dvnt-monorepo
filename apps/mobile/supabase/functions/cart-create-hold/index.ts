@@ -145,7 +145,8 @@ function validateBody(input: unknown): CartCreateHoldBody | { error: string } {
     const isAddon = category === "addon";
     if (isAddon) {
       if (!UUID_RE.test(addonId)) return { error: "Invalid addonId" };
-      if (variantId && !UUID_RE.test(variantId)) return { error: "Invalid variantId" };
+      if (variantId && !UUID_RE.test(variantId))
+        return { error: "Invalid variantId" };
       if (boundLineItemId && !UUID_RE.test(boundLineItemId)) {
         return { error: "Invalid boundTicketLineItemId" };
       }
@@ -238,7 +239,7 @@ Deno.serve(async (req: Request) => {
     const body = validateBody(parsed);
     if ("error" in body) return errorResponse(body.error, 400);
 
-    if (!await canAccessEvent(supabase, Number(body.eventId), authId)) {
+    if (!(await canAccessEvent(supabase, Number(body.eventId), authId))) {
       return errorResponse("Event not found or invitation required", 404);
     }
 
@@ -251,7 +252,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: existingCart, error: existingCartError } = await supabase
       .from("carts")
-      .select("id, user_id, status")
+      .select("id, user_id, status, stripe_pi_id")
       .eq("id", body.cartId)
       .maybeSingle();
 
@@ -267,6 +268,16 @@ Deno.serve(async (req: Request) => {
     }
     if (existingCart?.status === "completed") {
       return errorResponse("Cart already completed", 409);
+    }
+
+    // Once a PaymentIntent is attached, its reviewed order is immutable.
+    // Replacing lines here could charge the old intent for a different cart.
+    // This is a fail-closed sequential guard, not a cross-request row lock.
+    if (existingCart?.status === "paying" || existingCart?.stripe_pi_id) {
+      return errorResponse(
+        "Payment already started for this cart. Start a new cart to change your order.",
+        409,
+      );
     }
 
     const { error: cartUpsertError } = await supabase.from("carts").upsert(

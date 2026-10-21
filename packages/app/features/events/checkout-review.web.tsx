@@ -24,7 +24,7 @@ import { canContinueWithCheckoutCode } from "@dvnt/app/lib/payments/checkout-cod
  * only; bg #06070d, accent cyan #3FDCFF.
  */
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "solito/navigation";
 import { create } from "zustand";
 import { useQuery } from "@tanstack/react-query";
@@ -51,9 +51,15 @@ import {
 import { FormField } from "@dvnt/ui";
 import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
 import type {
+  Cart,
+  CartCheckoutResponse,
   CartLineItem,
   LineItemCategory,
 } from "@dvnt/app/lib/contracts/dto";
+import {
+  reviewedCartKey,
+  snapshotReviewedCart,
+} from "@dvnt/app/lib/checkout/reviewed-cart";
 import { calculateCartSubtotalCents } from "@dvnt/app/lib/contracts/invariants";
 import { computeFees, formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { cartApi } from "@dvnt/app/lib/api/cart";
@@ -127,6 +133,12 @@ type PendingPayment = {
   clientSecret: string;
   publishableKey: string;
   paymentIntentId: string;
+  reviewedCart: Cart;
+  reviewKey: string;
+  totals: CartCheckoutResponse["totals"];
+  expiresAt: number;
+  confirmed?: boolean;
+  expired?: boolean;
 };
 interface PaymentState {
   payment: PendingPayment | null;
@@ -136,6 +148,18 @@ const usePendingPaymentStore = create<PaymentState>((set) => ({
   payment: null,
   setPayment: (payment) => set({ payment }),
 }));
+
+// Guard handlers as well as disabled buttons: React may not have committed the
+// disabled state when another callback runs in the same tick.
+function cartEditsLocked() {
+  return (
+    usePaymentsStore.getState().checkoutLoading ||
+    !!usePendingPaymentStore.getState().payment ||
+    !!useCartStore.getState().cart?.paymentIntentId ||
+    useCartStore.getState().cart?.status === "paying" ||
+    useCartStore.getState().cart?.status === "completed"
+  );
+}
 
 /** Memoised per publishable key — loadStripe must not run on every render. */
 const stripePromiseCache = new Map<string, ReturnType<typeof loadStripe>>();
@@ -155,24 +179,55 @@ function stripePromiseFor(publishableKey: string) {
  * same way.
  */
 function CartPayForm({
-  totalLabel,
+  payment,
   onPaid,
 }: {
-  totalLabel: string;
-  onPaid: (paymentIntentId: string) => void;
+  payment: PendingPayment;
+  onPaid: (cartId: string) => void;
 }) {
   const stripe = useStripe();
   const elements = useElements();
-  const payment = usePendingPaymentStore((s) => s.payment);
-  const setPayment = usePendingPaymentStore((s) => s.setPayment);
   const showToast = useUIStore((s) => s.showToast);
   const isLoading = usePaymentsStore((s) => s.checkoutLoading);
   const setCheckoutLoading = usePaymentsStore((s) => s.setCheckoutLoading);
+  const completed = useRef(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const handlePay = useCallback(async () => {
-    if (!stripe || !elements || !payment) return;
+    if (
+      !stripe ||
+      !elements ||
+      completed.current ||
+      payment.confirmed ||
+      usePaymentsStore.getState().checkoutLoading
+    )
+      return;
+    const requireCurrentReview = () => {
+      if (
+        !mounted.current ||
+        usePendingPaymentStore.getState().payment !== payment ||
+        reviewedCartKey(useCartStore.getState().cart) !== payment.reviewKey
+      ) {
+        throw new Error("Your cart changed. Review it before paying.");
+      }
+      if (payment.expired || payment.expiresAt <= Date.now()) {
+        usePendingPaymentStore
+          .getState()
+          .setPayment({ ...payment, expired: true });
+        throw new Error(
+          "Your reservation expired. Start a new cart to reserve tickets again.",
+        );
+      }
+    };
     setCheckoutLoading(true);
     try {
+      requireCurrentReview();
       const { error: submitError } = await elements.submit();
       if (submitError) {
         showToast(
@@ -182,6 +237,9 @@ function CartPayForm({
         );
         return;
       }
+      // Submit may be asynchronous; a replaced cart or a Back navigation must
+      // not confirm the old intent after that await.
+      requireCurrentReview();
       const { error } = await stripe.confirmPayment({
         elements,
         redirect: "if_required",
@@ -198,36 +256,60 @@ function CartPayForm({
         );
         return;
       }
+      completed.current = true;
+      usePendingPaymentStore
+        .getState()
+        .setPayment({ ...payment, confirmed: true });
       AppTrace.trace("CART", "mixed_cart_payment_sheet_succeeded", {
         paymentIntentId: payment.paymentIntentId,
       });
-      setPayment(null);
-      onPaid(payment.paymentIntentId);
+      // Always follow the order that was actually paid, not a newer store cart.
+      onPaid(payment.reviewedCart.cartId);
+    } catch (error) {
+      showToast(
+        "error",
+        "Payment could not finish",
+        error instanceof Error ? error.message : "Please try again.",
+      );
     } finally {
       setCheckoutLoading(false);
     }
-  }, [
-    stripe,
-    elements,
-    payment,
-    setPayment,
-    setCheckoutLoading,
-    showToast,
-    onPaid,
-  ]);
+  }, [stripe, elements, payment, setCheckoutLoading, showToast, onPaid]);
+
+  const totalLabel = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: payment.totals.currency,
+  }).format(payment.totals.totalCents / 100);
 
   return (
     <div className="mt-4">
+      <p className="mb-3 text-sm text-white/60">
+        Your reviewed order is locked while payment is open.
+      </p>
       <div className="rounded-xl border border-white/10 bg-white/6 p-4">
         <PaymentElement />
       </div>
       <button
         type="button"
-        disabled={isLoading || !stripe || !elements}
+        disabled={
+          isLoading ||
+          completed.current ||
+          payment.confirmed ||
+          payment.expired ||
+          payment.expiresAt <= Date.now() ||
+          !stripe ||
+          !elements
+        }
         onClick={handlePay}
         className="mt-4 h-12 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] font-bold text-white disabled:opacity-50"
       >
-        {isLoading ? "Paying…" : `Pay ${totalLabel}`}
+        {payment.confirmed
+          ? "Payment received"
+          : isLoading
+            ? "Paying…"
+            : payment.expired || payment.expiresAt <= Date.now()
+              ? "Reservation expired"
+              : `Pay ${totalLabel}`}
       </button>
     </div>
   );
@@ -269,7 +351,9 @@ function CheckoutEventWhen({ eventId }: { eventId: string }) {
       <CalendarDays size={18} className="shrink-0 text-[#3FDCFF]" />
       <div className="min-w-0">
         {event?.title ? (
-          <p className="truncate text-sm font-semibold text-white">{event.title}</p>
+          <p className="truncate text-sm font-semibold text-white">
+            {event.title}
+          </p>
         ) : null}
         <p className="text-xs text-white/70">{when}</p>
       </div>
@@ -287,9 +371,11 @@ function CheckoutEventWhen({ eventId }: { eventId: string }) {
 function AddonUpsellSection({
   eventId,
   eventTitle,
+  disabled,
 }: {
   eventId: string;
   eventTitle: string;
+  disabled: boolean;
 }) {
   const cart = useCartStore((state) => state.cart);
   const addLineItem = useCartStore((state) => state.addLineItem);
@@ -309,7 +395,9 @@ function AddonUpsellSection({
   const inCart = new Set(
     lineItems
       .filter((li) => li.category === "addon")
-      .map((li) => (li.variantId ? `${li.addonId}:${li.variantId}` : String(li.addonId))),
+      .map((li) =>
+        li.variantId ? `${li.addonId}:${li.variantId}` : String(li.addonId),
+      ),
   );
 
   const eligible = filterEligibleAddons(addons, selectedTierIds).filter(
@@ -323,6 +411,7 @@ function AddonUpsellSection({
   if (eligible.length === 0) return null;
 
   const add = (addon: AddonRecord, variantId: string | null) => {
+    if (cartEditsLocked()) return;
     const variant = variantId
       ? addon.ticket_addon_variants?.find((v) => v.id === variantId)
       : null;
@@ -379,6 +468,7 @@ function AddonUpsellSection({
                   </span>
                   <button
                     type="button"
+                    disabled={disabled}
                     onClick={() => add(addon, variant.id)}
                     className="h-8 shrink-0 rounded-lg border border-[#3FDCFF]/40 bg-[#3FDCFF]/10 px-3 text-xs font-bold text-[#3FDCFF] active:scale-95"
                   >
@@ -406,6 +496,7 @@ function AddonUpsellSection({
               </span>
               <button
                 type="button"
+                disabled={disabled}
                 onClick={() => add(addon, null)}
                 className="h-8 shrink-0 rounded-lg border border-[#3FDCFF]/40 bg-[#3FDCFF]/10 px-3 text-xs font-bold text-[#3FDCFF] active:scale-95"
               >
@@ -426,7 +517,8 @@ function CategoryIcon({
   category: LineItemCategory;
   className?: string;
 }) {
-  if (category === "coat_check") return <Shirt size={18} className={className} />;
+  if (category === "coat_check")
+    return <Shirt size={18} className={className} />;
   if (category === "addon" || category === "product" || category === "service")
     return <Sparkles size={18} className={className} />;
   return <Ticket size={18} className={className} />;
@@ -434,11 +526,13 @@ function CategoryIcon({
 
 function LineItemRow({
   lineItem,
+  disabled,
   onIncrement,
   onDecrement,
   onRemove,
 }: {
   lineItem: CartLineItem;
+  disabled: boolean;
   onIncrement: (lineItem: CartLineItem) => void;
   onDecrement: (lineItem: CartLineItem) => void;
   onRemove: (lineItem: CartLineItem) => void;
@@ -471,13 +565,16 @@ function LineItemRow({
         <div className="flex items-center gap-2">
           <button
             type="button"
+            disabled={disabled}
             onClick={() => onDecrement(lineItem)}
             aria-label={`Decrease ${title} quantity`}
             className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 active:scale-95 disabled:opacity-40"
           >
             <Minus
               size={14}
-              className={lineItem.quantity <= 1 ? "text-white/40" : "text-white"}
+              className={
+                lineItem.quantity <= 1 ? "text-white/40" : "text-white"
+              }
             />
           </button>
           <span className="min-w-[20px] text-center text-sm font-bold text-white">
@@ -485,6 +582,7 @@ function LineItemRow({
           </span>
           <button
             type="button"
+            disabled={disabled}
             onClick={() => onIncrement(lineItem)}
             aria-label={`Increase ${title} quantity`}
             className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 active:scale-95"
@@ -499,6 +597,7 @@ function LineItemRow({
           </span>
           <button
             type="button"
+            disabled={disabled}
             onClick={() => onRemove(lineItem)}
             aria-label={`Remove ${title}`}
             className="flex h-7 w-7 items-center justify-center rounded-lg active:scale-95"
@@ -523,18 +622,34 @@ export function CheckoutReviewScreen() {
   const clearCart = useCartStore((state) => state.clearCart);
   const setHold = useCartStore((state) => state.setHold);
   const setPaymentIntent = useCartStore((state) => state.setPaymentIntent);
-  const pendingPayment = usePendingPaymentStore((s) => s.payment);
+  const storedPayment = usePendingPaymentStore((s) => s.payment);
+  const reviewKey = reviewedCartKey(cart);
+  const pendingPayment =
+    storedPayment?.reviewedCart.cartId === cart?.cartId ? storedPayment : null;
   const setPendingPayment = usePendingPaymentStore((s) => s.setPayment);
 
-  // Leaving the screen must not strand a half-finished payment on the next
-  // visit — the client secret belongs to a hold that has already expired by
-  // then, and Stripe would render a dead form against it.
-  useEffect(() => () => setPendingPayment(null), [setPendingPayment]);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, [setPendingPayment]);
+  useEffect(() => {
+    if (storedPayment && storedPayment.reviewedCart.cartId !== cart?.cartId) {
+      setPendingPayment(null);
+    }
+  }, [storedPayment, cart?.cartId, setPendingPayment]);
 
-  const handlePaid = useCallback(() => {
-    showToast("success", "Payment received");
-    router.replace("/feed/checkout/success");
-  }, [router, showToast]);
+  const handlePaid = useCallback(
+    (paidCartId: string) => {
+      showToast("success", "Payment received");
+      router.replace(
+        `/feed/checkout/success?cartId=${encodeURIComponent(paidCartId)}`,
+      );
+    },
+    [router, showToast],
+  );
 
   const isLoading = usePaymentsStore((state) => state.checkoutLoading);
   const setCheckoutLoading = usePaymentsStore(
@@ -553,12 +668,20 @@ export function CheckoutReviewScreen() {
   // A code validated for another event's cart is not applied here; the
   // server would reject it with "Invalid promo code".
   const appliedPromo = promoForCart(storedPromo, cart?.eventId);
-  const promoterRef = usePromoterRefStore(
-    (s) => (cart?.eventId ? s.refs[String(cart.eventId)] ?? null : null),
+  const promoterRef = usePromoterRefStore((s) =>
+    cart?.eventId ? (s.refs[String(cart.eventId)] ?? null) : null,
   );
   const setPromoterRef = usePromoterRefStore((s) => s.setRef);
 
-  const lineItems = cart?.lineItems ?? [];
+  const lineItems =
+    pendingPayment?.reviewedCart.lineItems ?? cart?.lineItems ?? [];
+  const needsPaymentRecovery =
+    !pendingPayment &&
+    !!cart &&
+    (!!cart.paymentIntentId ||
+      cart.status === "paying" ||
+      cart.status === "completed");
+  const editsLocked = isLoading || !!pendingPayment || needsPaymentRecovery;
 
   const groups = useMemo(() => {
     // Add-on lines (WS-3) render in their own group after tickets; legacy
@@ -592,8 +715,7 @@ export function CheckoutReviewScreen() {
       lineItems
         .filter((lineItem) => lineItem.category === "admission")
         .reduce(
-          (sum, lineItem) =>
-            sum + lineItem.unitPriceCents * lineItem.quantity,
+          (sum, lineItem) => sum + lineItem.unitPriceCents * lineItem.quantity,
           0,
         ),
     [lineItems],
@@ -618,7 +740,13 @@ export function CheckoutReviewScreen() {
         promo: appliedPromo,
         quantity,
       }),
-    [subtotalCents, admissionSubtotalCents, promoterDiscountBps, appliedPromo, quantity],
+    [
+      subtotalCents,
+      admissionSubtotalCents,
+      promoterDiscountBps,
+      appliedPromo,
+      quantity,
+    ],
   );
   const fees = useMemo(
     () =>
@@ -646,12 +774,9 @@ export function CheckoutReviewScreen() {
     void promotersApi
       .getClaim(numericEventId)
       .then((claim) => {
-        if (!claim || usePromoterRefStore.getState().getRef(cartEventId!)) return;
-        setPromoterRef(
-          cartEventId!,
-          claim.code,
-          claim.customerDiscountBps,
-        );
+        if (!claim || usePromoterRefStore.getState().getRef(cartEventId!))
+          return;
+        setPromoterRef(cartEventId!, claim.code, claim.customerDiscountBps);
       })
       .catch((error) => {
         console.warn("[checkout-review] promoter claim hydrate failed:", error);
@@ -677,16 +802,29 @@ export function CheckoutReviewScreen() {
   }, [promoCode, appliedPromo, setAppliedPromo, setPromoError]);
 
   const handleApplyPromo = useCheckoutCode({
-    eventId: String(cart?.eventId ?? ""), scopeId: cart?.cartId ?? "",
-    enabled: !!cart && !isLoading && !pendingPayment, code: promoCode, applying: promoApplying,
+    eventId: String(cart?.eventId ?? ""),
+    scopeId: cart?.cartId ?? "",
+    enabled: !!cart && !isLoading && !pendingPayment,
+    code: promoCode,
+    applying: promoApplying,
     setCode: setPromoCode,
-    setPromo: (promo) => setAppliedPromo(promo ? { ...promo, eventId: String(cart?.eventId ?? "") } : null),
-    setError: setPromoError, setApplying: setPromoApplying,
+    setPromo: (promo) =>
+      setAppliedPromo(
+        promo ? { ...promo, eventId: String(cart?.eventId ?? "") } : null,
+      ),
+    setError: setPromoError,
+    setApplying: setPromoApplying,
   });
-  const codeReady = canContinueWithCheckoutCode(promoCode, appliedPromo, promoApplying, promoError);
+  const codeReady = canContinueWithCheckoutCode(
+    promoCode,
+    appliedPromo,
+    promoApplying,
+    promoError,
+  );
 
   const handleIncrement = useCallback(
     (lineItem: CartLineItem) => {
+      if (cartEditsLocked()) return;
       updateLineItemQuantity(lineItem.lineItemId, lineItem.quantity + 1);
     },
     [updateLineItemQuantity],
@@ -694,6 +832,7 @@ export function CheckoutReviewScreen() {
 
   const handleDecrement = useCallback(
     (lineItem: CartLineItem) => {
+      if (cartEditsLocked()) return;
       if (lineItem.quantity <= 1) {
         showToast("info", "Use remove to delete this item");
         return;
@@ -705,6 +844,7 @@ export function CheckoutReviewScreen() {
 
   const handleRemove = useCallback(
     (lineItem: CartLineItem) => {
+      if (cartEditsLocked()) return;
       removeLineItem(lineItem.lineItemId);
       showToast("success", "Removed from cart");
     },
@@ -712,15 +852,27 @@ export function CheckoutReviewScreen() {
   );
 
   const handleClearCart = useCallback(() => {
+    if (cartEditsLocked()) return;
     clearCart();
     showToast("success", "Cart cleared");
   }, [clearCart, showToast]);
+
+  const handleStartNewCart = useCallback(() => {
+    if (usePaymentsStore.getState().checkoutLoading) return;
+    setPendingPayment(null);
+    clearCart();
+    showToast(
+      "info",
+      "Cart cleared",
+      "Add tickets again to start a new order.",
+    );
+  }, [clearCart, setPendingPayment, showToast]);
 
   // Place-order: EXACT native mutation flow (createHold → checkout), then
   // confirm the returned Stripe PaymentIntent client secret on the web with
   // @stripe/stripe-js (web-safe; no @stripe/stripe-react-native).
   const handlePlaceOrder = useCallback(async () => {
-    if (!codeReady || isLoading) return;
+    if (!codeReady || cartEditsLocked()) return;
     if (!cart || lineItems.length === 0) {
       showToast("error", "Your cart is empty");
       return;
@@ -732,6 +884,16 @@ export function CheckoutReviewScreen() {
       return;
     }
 
+    const reviewedCart = snapshotReviewedCart(cart);
+    const requestedReviewKey = reviewedCartKey(reviewedCart);
+    const requireCurrentReview = () => {
+      if (
+        !mounted.current ||
+        reviewedCartKey(useCartStore.getState().cart) !== requestedReviewKey
+      ) {
+        throw new Error("Your cart changed. Review it before paying.");
+      }
+    };
     setCheckoutLoading(true);
     AppTrace.trace("CART", "cart_review_continue_pressed", {
       cartId: cart.cartId,
@@ -740,7 +902,9 @@ export function CheckoutReviewScreen() {
     });
 
     try {
-      const hold = await cartApi.createHold(cart);
+      requireCurrentReview();
+      const hold = await cartApi.createHold(reviewedCart);
+      requireCurrentReview();
       const holdExpiresAt = Date.parse(hold.holdExpiresAt);
       if (!Number.isFinite(holdExpiresAt)) {
         throw new Error("Could not verify cart hold");
@@ -757,12 +921,15 @@ export function CheckoutReviewScreen() {
         );
       } catch (err) {
         // No phone on file: show the field; the next press sends it.
-        if (isPhoneRequiredError(err)) useCheckoutPhoneStore.getState().markNeeded();
+        if (isPhoneRequiredError(err))
+          useCheckoutPhoneStore.getState().markNeeded();
         throw err;
       }
       // Past the phone check: the number is on file now.
       useCheckoutPhoneStore.getState().reset();
-      setPaymentIntent(payment.paymentIntentId);
+      if (payment.cartId !== reviewedCart.cartId) {
+        throw new Error("Could not verify the payment's cart.");
+      }
       AppTrace.trace("CART", "mixed_cart_payment_intent_ready", {
         cartId: cart.cartId,
         paymentIntentId: payment.paymentIntentId,
@@ -784,12 +951,23 @@ export function CheckoutReviewScreen() {
         throw new Error("Could not start payment. Please try again.");
       }
 
-      // Hand off to <CartPayForm> below. The card itself is collected there;
-      // confirming here is impossible — there is no card to confirm with yet.
+      // The request may finish after Back. Keep the immutable review so a
+      // return visit cannot edit/re-hold a cart with an already-created intent.
+      // A genuinely different cart must never receive this result.
+      if (useCartStore.getState().cart?.cartId !== reviewedCart.cartId) return;
+      if (
+        reviewedCartKey(useCartStore.getState().cart) === requestedReviewKey
+      ) {
+        setPaymentIntent(payment.paymentIntentId);
+      }
       setPendingPayment({
         clientSecret: payment.clientSecret,
         publishableKey: payment.publishableKey,
         paymentIntentId: payment.paymentIntentId,
+        reviewedCart,
+        reviewKey: requestedReviewKey,
+        totals: { ...payment.totals },
+        expiresAt,
       });
       return;
     } catch (error: unknown) {
@@ -805,13 +983,12 @@ export function CheckoutReviewScreen() {
         setAppliedPromo(null);
         setPromoError(message);
       }
-      showToast("error", "Checkout failed", message);
+      if (mounted.current) showToast("error", "Checkout failed", message);
     } finally {
       setCheckoutLoading(false);
     }
   }, [
     codeReady,
-    isLoading,
     cart,
     lineItems.length,
     fees.customer_charge_amount,
@@ -824,7 +1001,6 @@ export function CheckoutReviewScreen() {
     setPendingPayment,
     showToast,
   ]);
-
 
   const holdLabel =
     cart?.holdExpiresAt && cart.holdExpiresAt > Date.now()
@@ -845,24 +1021,32 @@ export function CheckoutReviewScreen() {
       >
         <button
           type="button"
-          onClick={() => router.back()}
+          disabled={isLoading}
+          onClick={() => {
+            if (!usePaymentsStore.getState().checkoutLoading) router.back();
+          }}
           aria-label="Go back"
           className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 active:scale-95"
         >
           <ArrowLeft size={20} className="text-white" />
         </button>
         <div className="min-w-0 flex-1">
-          <h1 className="text-[17px] font-semibold leading-tight">Review Order</h1>
+          <h1 className="text-[17px] font-semibold leading-tight">
+            Review Order
+          </h1>
           <p className="text-xs text-white/55">{holdLabel}</p>
         </div>
         <button
           type="button"
           onClick={handleClearCart}
           aria-label="Clear cart"
-          disabled={isEmpty}
+          disabled={isEmpty || editsLocked}
           className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 active:scale-95 disabled:opacity-40"
         >
-          <Trash2 size={18} className={isEmpty ? "text-white/30" : "text-rose-400"} />
+          <Trash2
+            size={18}
+            className={isEmpty ? "text-white/30" : "text-rose-400"}
+          />
         </button>
       </div>
 
@@ -879,7 +1063,9 @@ export function CheckoutReviewScreen() {
           </div>
         ) : (
           <>
-            {cart?.eventId ? <CheckoutEventWhen eventId={cart.eventId} /> : null}
+            {cart?.eventId ? (
+              <CheckoutEventWhen eventId={cart.eventId} />
+            ) : null}
 
             {/* Order summary — grouped line items */}
             {groups.map((group) => (
@@ -898,6 +1084,7 @@ export function CheckoutReviewScreen() {
                     <LineItemRow
                       key={lineItem.lineItemId}
                       lineItem={lineItem}
+                      disabled={editsLocked}
                       onIncrement={handleIncrement}
                       onDecrement={handleDecrement}
                       onRemove={handleRemove}
@@ -911,6 +1098,7 @@ export function CheckoutReviewScreen() {
             {cart?.eventId ? (
               <AddonUpsellSection
                 eventId={cart.eventId}
+                disabled={editsLocked}
                 eventTitle={metadataText(
                   lineItems[0]?.metadata,
                   ["eventTitle"],
@@ -919,7 +1107,7 @@ export function CheckoutReviewScreen() {
               />
             ) : null}
 
-            {promoterRef?.code ? (
+            {promoterRef?.code && !pendingPayment ? (
               <section
                 role="status"
                 className="mb-3 flex items-center justify-between rounded-2xl border border-[#8A40CF]/35 bg-[#8A40CF]/10 p-4"
@@ -948,6 +1136,7 @@ export function CheckoutReviewScreen() {
                     <Tag size={18} className="shrink-0 text-white/40" />
                     <input
                       value={promoCode}
+                      disabled={editsLocked}
                       onChange={(e) => setPromoCode(e.target.value)}
                       placeholder="Enter code"
                       aria-label="Promo or promoter code"
@@ -959,7 +1148,7 @@ export function CheckoutReviewScreen() {
                   <button
                     type="button"
                     onClick={handleApplyPromo}
-                    disabled={promoApplying || !promoCode.trim()}
+                    disabled={editsLocked || promoApplying || !promoCode.trim()}
                     className="h-11 shrink-0 rounded-xl border border-[#3FDCFF]/40 bg-[#3FDCFF]/10 px-4 text-sm font-semibold text-[#3FDCFF] active:scale-95 disabled:opacity-40"
                   >
                     {promoApplying ? "…" : appliedPromo ? "Applied" : "Apply"}
@@ -980,10 +1169,15 @@ export function CheckoutReviewScreen() {
               <div className="flex items-center justify-between py-1">
                 <span className="text-sm text-white/55">Subtotal</span>
                 <span className="text-sm font-semibold text-white/90">
-                  {formatCents(subtotalCents)}
+                  {formatCents(
+                    pendingPayment
+                      ? pendingPayment.totals.subtotalCents +
+                          (pendingPayment.totals.discountCents ?? 0)
+                      : subtotalCents,
+                  )}
                 </span>
               </div>
-              {promoterDiscountCents > 0 ? (
+              {!pendingPayment && promoterDiscountCents > 0 ? (
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm text-[#D8B4FE]">
                     Promoter · {promoterDiscountBps / 100}% off
@@ -993,7 +1187,7 @@ export function CheckoutReviewScreen() {
                   </span>
                 </div>
               ) : null}
-              {discountCents > 0 && appliedPromo ? (
+              {!pendingPayment && discountCents > 0 && appliedPromo ? (
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm text-[#3FDCFF]">
                     {promoLabel(appliedPromo.type, appliedPromo.value)}
@@ -1003,10 +1197,21 @@ export function CheckoutReviewScreen() {
                   </span>
                 </div>
               ) : null}
+              {pendingPayment &&
+              (pendingPayment.totals.discountCents ?? 0) > 0 ? (
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-sm text-[#3FDCFF]">Discount</span>
+                  <span className="text-sm font-semibold text-[#3FDCFF]">
+                    −{formatCents(pendingPayment.totals.discountCents!)}
+                  </span>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between py-1">
                 <span className="text-sm text-white/55">DVNT Service Fee</span>
                 <span className="text-sm font-semibold text-white/90">
-                  {formatCents(fees.buyer_fee)}
+                  {formatCents(
+                    pendingPayment?.totals.buyerFeeCents ?? fees.buyer_fee,
+                  )}
                 </span>
               </div>
               <div className="flex items-center justify-between py-1">
@@ -1017,9 +1222,14 @@ export function CheckoutReviewScreen() {
               </div>
               <div className="my-2 h-px bg-white/12" />
               <div className="flex items-center justify-between py-1">
-                <span className="text-base font-extrabold text-white">Total</span>
+                <span className="text-base font-extrabold text-white">
+                  Total
+                </span>
                 <span className="text-xl font-extrabold text-white">
-                  {formatCents(fees.customer_charge_amount)}
+                  {formatCents(
+                    pendingPayment?.totals.totalCents ??
+                      fees.customer_charge_amount,
+                  )}
                 </span>
               </div>
 
@@ -1027,34 +1237,79 @@ export function CheckoutReviewScreen() {
                   PaymentIntent has to exist before Stripe will mount a
                   PaymentElement against its client secret. */}
               {pendingPayment ? (
-                <Elements
-                  stripe={stripePromiseFor(pendingPayment.publishableKey)}
-                  options={{
-                    clientSecret: pendingPayment.clientSecret,
-                    appearance: { theme: "night", labels: "floating" },
-                  }}
-                >
-                  <CartPayForm
-                    totalLabel={formatCents(fees.customer_charge_amount)}
-                    onPaid={handlePaid}
-                  />
-                </Elements>
+                <>
+                  {pendingPayment.reviewKey !== reviewKey ? (
+                    <p role="alert" className="mt-4 text-sm text-amber-300">
+                      This cart changed after payment started. Start a new cart
+                      before paying.
+                    </p>
+                  ) : (
+                    <Elements
+                      key={pendingPayment.paymentIntentId}
+                      stripe={stripePromiseFor(pendingPayment.publishableKey)}
+                      options={{
+                        clientSecret: pendingPayment.clientSecret,
+                        appearance: { theme: "night", labels: "floating" },
+                      }}
+                    >
+                      <CartPayForm
+                        payment={pendingPayment}
+                        onPaid={handlePaid}
+                      />
+                    </Elements>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleStartNewCart}
+                    disabled={isLoading}
+                    className="mt-3 w-full text-sm text-white/60 disabled:opacity-40"
+                  >
+                    Start a new cart
+                  </button>
+                </>
+              ) : needsPaymentRecovery ? (
+                <div className="mt-4">
+                  <p role="alert" className="text-sm text-amber-300">
+                    Payment was already started for this cart. Check its status,
+                    or start a new cart to change your order.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      router.replace(
+                        `/feed/checkout/success?cartId=${encodeURIComponent(cart!.cartId)}`,
+                      )
+                    }
+                    disabled={isLoading}
+                    className="mt-3 w-full text-sm text-white/80"
+                  >
+                    View order status
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStartNewCart}
+                    disabled={isLoading}
+                    className="mt-3 w-full text-sm text-white/60"
+                  >
+                    Start a new cart
+                  </button>
+                </div>
               ) : (
                 <>
-                <div className="mt-4">
-                  <CheckoutPhoneField />
-                </div>
-                <button
-                  type="button"
-                  onClick={handlePlaceOrder}
-                  disabled={isEmpty || isLoading || !codeReady}
-                  className="mt-4 flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-[#3FDCFF] text-[#06070d] active:scale-[0.99] disabled:opacity-45"
-                >
-                  <CreditCard size={18} className="text-[#06070d]" />
-                  <span className="text-[15px] font-extrabold">
-                    {isLoading ? "Processing…" : "Continue to payment"}
-                  </span>
-                </button>
+                  <div className="mt-4">
+                    <CheckoutPhoneField />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePlaceOrder}
+                    disabled={isEmpty || isLoading || !codeReady}
+                    className="mt-4 flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-[#3FDCFF] text-[#06070d] active:scale-[0.99] disabled:opacity-45"
+                  >
+                    <CreditCard size={18} className="text-[#06070d]" />
+                    <span className="text-[15px] font-extrabold">
+                      {isLoading ? "Processing…" : "Continue to payment"}
+                    </span>
+                  </button>
                 </>
               )}
 

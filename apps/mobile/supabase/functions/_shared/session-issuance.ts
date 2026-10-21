@@ -4,14 +4,13 @@
  * checkout.session.async_payment_succeeded, metadata.type === "event_ticket")
  * and the reconcile-orders sweep. Extracted from stripe-webhook/index.ts.
  *
- * Idempotent on replay: the tickets upsert ignores duplicates on the
- * (stripe_checkout_session_id, order_index) partial unique index
- * (migration 20260915190000), so a second call inserts 0 rows and skips
- * the side effects (quantity_sold, capacity alerts, promo)
- * while still repairing order money-state and retrying unsent guest email.
+ * Ticket rows, inventory counters and hold conversion commit together through
+ * paid_ticket_issuance_atomic. Replays never repeat allocation; money-state and
+ * unsent guest email remain independently repairable after that transaction.
  */
 
 import { createSignedQrPayload } from "./hmac-qr.ts";
+import { issuePaidTicketsAtomically, paidTicketAmount } from "./paid-ticket-issuance.ts";
 import { maybeFireCapacityAlerts } from "./capacity-alerts.ts";
 import { incrementPromoUsage } from "./apply-promo-code.ts";
 import {
@@ -98,6 +97,7 @@ export interface SessionIssuanceResult {
   issued: number; // rows actually inserted this call
   alreadyIssued: boolean; // true when 0 inserted because they existed
   orderId: string | null;
+  terminal?: boolean;
 }
 
 export async function issueTicketsForCheckoutSession(
@@ -119,6 +119,8 @@ export async function issueTicketsForCheckoutSession(
   const isGuestPurchase = !userId && !!guestEmail;
   const quantity = parseInt(metadata.quantity) || 1;
   const amountCents = session.amount_total || 0;
+  const paymentIntentId = typeof session.payment_intent === "string"
+    ? session.payment_intent : session.payment_intent?.id;
   // Per-ticket attendee names for named tickets / group orders ("Ticket
   // N of M"). Optional JSON array in metadata.
   let attendeeNames: string[] = [];
@@ -132,11 +134,14 @@ export async function issueTicketsForCheckoutSession(
 
   // Resolve the order up front so tickets stamp the authoritative
   // order_id link (pre-migration rows used only the Stripe links).
-  const { data: orderRow } = await supabase
+  const { data: orderRow, error: orderError } = await supabase
     .from("orders")
     .select("id, ticket_email_status")
     .eq("stripe_checkout_session_id", session.id)
     .maybeSingle();
+
+  if (orderError) throw orderError;
+  if (!orderRow) throw new Error("Paid checkout order is not available yet");
 
   const ticketRows = [];
   for (let i = 0; i < quantity; i++) {
@@ -161,8 +166,8 @@ export async function issueTicketsForCheckoutSession(
       qr_token: qrToken,
       qr_payload: qrPayload,
       stripe_checkout_session_id: session.id,
-      stripe_payment_intent_id: session.payment_intent,
-      purchase_amount_cents: Math.round(amountCents / quantity),
+      stripe_payment_intent_id: paymentIntentId,
+      purchase_amount_cents: paidTicketAmount(amountCents, quantity, i),
       // Group-order position + per-ticket name (Phase 5.6.5a).
       order_index: i + 1,
       order_count: quantity,
@@ -171,53 +176,20 @@ export async function issueTicketsForCheckoutSession(
     });
   }
 
-  // Idempotent insert: the partial unique index on
-  // (stripe_checkout_session_id, order_index) makes a webhook retry or a
-  // reconcile-sweep replay insert 0 rows instead of double-issuing.
-  const { data: insertedTickets, error: ticketError } = await supabase
-    .from("tickets")
-    .upsert(ticketRows, {
-      onConflict: "stripe_checkout_session_id,order_index",
-      ignoreDuplicates: true,
-    })
-    .select("id, qr_token, guest_lookup_token");
-
-  // Convert inventory hold to prevent double-counting
-  await supabase
-    .from("ticket_holds")
-    .update({ status: "converted" })
-    .eq("payment_intent_id", session.id)
-    .eq("status", "active");
-
-  if (ticketError) {
-    console.error(`${logPrefix} Ticket insert error:`, ticketError);
-    throw ticketError;
+  const allocation = await issuePaidTicketsAtomically(supabase, {
+    orderId: orderRow.id,
+    ticketTypeId,
+    paymentIntentId,
+    checkoutSessionId: session.id,
+    amountCents,
+    ticketRows,
+  });
+  if (allocation.terminal) {
+    return { issued: 0, alreadyIssued: true, orderId: orderRow.id, terminal: true };
   }
-
-  const issued = insertedTickets?.length ?? 0;
+  const issued = allocation.issued;
 
   if (issued > 0) {
-    // Increment quantity_sold — only by rows actually inserted this call.
-    const { error: incError } = await supabase.rpc("increment_counter", {
-      table_name: "ticket_types",
-      column_name: "quantity_sold",
-      row_id: ticketTypeId,
-      amount: issued,
-    });
-
-    // Fallback if RPC doesn't exist: direct update
-    if (incError) {
-      const { data: tt } = await supabase
-        .from("ticket_types")
-        .select("quantity_sold")
-        .eq("id", ticketTypeId)
-        .single();
-      await supabase
-        .from("ticket_types")
-        .update({ quantity_sold: (tt?.quantity_sold || 0) + issued })
-        .eq("id", ticketTypeId);
-    }
-
     // Capacity milestone alerts (75 / 90 / 100 %) — idempotent
     await maybeFireCapacityAlerts(supabase, {
       eventId,
@@ -229,8 +201,6 @@ export async function issueTicketsForCheckoutSession(
     if (metadata.promo_code_id) {
       await incrementPromoUsage(supabase, metadata.promo_code_id);
     }
-
-
   }
 
   // ── Update order → paid + add timeline ────────
@@ -241,10 +211,10 @@ export async function issueTicketsForCheckoutSession(
     // Get payment method details from charge
     let pmBrand = null;
     let pmLast4 = null;
-    if (session.payment_intent) {
+    if (paymentIntentId) {
       try {
         const piRes = await fetch(
-          `https://api.stripe.com/v1/payment_intents/${session.payment_intent}`,
+          `https://api.stripe.com/v1/payment_intents/${paymentIntentId}`,
           {
             headers: {
               Authorization: `Bearer ${Deno.env.get("STRIPE_SECRET_KEY") || ""}`,
@@ -277,11 +247,11 @@ export async function issueTicketsForCheckoutSession(
       orderId: orderRow.id,
       status: "paid",
       eventCreatedAt,
-      stripePaymentIntentId: session.payment_intent ?? null,
+      stripePaymentIntentId: paymentIntentId,
       paymentMethodBrand: pmBrand,
       paymentMethodLast4: pmLast4,
       paidAt: new Date().toISOString(),
-    });
+    }, { throwOnError: true });
 
     // Delivery requires an authoritative paid order. Persist money-state first
     // on both first issuance and replay, otherwise delivery exits order_not_paid.

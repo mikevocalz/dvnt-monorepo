@@ -31,7 +31,9 @@ import {
   Search,
   UserPlus,
 } from "lucide-react";
-import { FormField, StickySaveBar, useDirtyGuard } from "@dvnt/ui";
+import { FormField, useDirtyGuard } from "@dvnt/ui";
+import { StickySaveBar } from "@dvnt/ui/sticky-save-bar-web";
+import { useVisualViewportBottom } from "@dvnt/app/components/use-visual-viewport-bottom.web";
 import { useEvent, useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
@@ -268,6 +270,8 @@ export function EventEditScreen() {
   }, [event, id]);
 
   const isDirty = s.hydratedId === id && s.title.trim().length > 0;
+  const saveBarRef = useRef<HTMLDivElement>(null);
+  useVisualViewportBottom(saveBarRef, isDirty);
   useDirtyGuard(isDirty);
 
   // ── Save (mirrors native handleSave: event row + tier CRUD diff) ──
@@ -610,7 +614,7 @@ export function EventEditScreen() {
 
   if (isLoading || s.hydratedId !== id) {
     return (
-      <div className="min-h-[100dvh] bg-[#06070d] text-white flex items-center justify-center">
+      <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#06070d] text-white flex items-center justify-center">
         <span className="text-sm text-white/50">Loading event…</span>
       </div>
     );
@@ -622,7 +626,7 @@ export function EventEditScreen() {
   const isOwner = !currentUser || !hostId || String(hostId) === String(currentUser.id);
   if (!isOwner) {
     return (
-      <div className="min-h-[100dvh] bg-[#06070d] text-white flex flex-col items-center justify-center gap-3 px-6">
+      <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#06070d] text-white flex flex-col items-center justify-center gap-3 px-6">
         <span className="text-sm text-white/60 text-center">
           You don&apos;t have permission to edit this event.
         </span>
@@ -637,7 +641,7 @@ export function EventEditScreen() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-[#06070d] text-white">
+    <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#06070d] text-white">
       {/* Sticky header */}
       <div
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
@@ -1078,6 +1082,13 @@ export function EventEditScreen() {
       </div>
 
       <StickySaveBar
+        viewportRef={saveBarRef}
+        style={{
+          top: "calc(var(--dvnt-visible-bottom, 100dvh) - var(--dvnt-tabbar-overlay-clearance, 0px) - env(safe-area-inset-bottom, 0px))",
+          bottom: "auto",
+          transform: "translateY(-100%)",
+          paddingBottom: 12,
+        }}
         visible={isDirty}
         onSave={handleSave}
         onCancel={() => router.back()}
@@ -1102,7 +1113,7 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
       style={{ borderColor }}
     >
       {/* Tier level selector */}
-      <div className="flex gap-1.5 mb-3">
+      <div className="flex flex-wrap gap-1.5 mb-3">
         {TIER_LEVELS.map((lvl) => {
           const selected = tier.tier === lvl;
           return (
@@ -1123,7 +1134,7 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
       </div>
 
       {/* Category selector */}
-      <div className="flex gap-1.5 mb-2">
+      <div className="flex flex-wrap gap-1.5 mb-2">
         {TICKET_TYPE_CATEGORIES.map((option) => {
           const selected = (tier.category || "admission") === option.value;
           return (
@@ -1210,7 +1221,7 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
       {/* Sale start */}
       <div className="flex items-center gap-2.5 bg-white/[0.05] rounded-lg px-2.5 py-2 mb-2.5">
         <Calendar size={14} className="text-white/40 shrink-0" />
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <span className="block text-[10px] font-bold tracking-[1.2px] text-white/50">
             SALE STARTS
           </span>
@@ -1242,7 +1253,7 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
 
       {/* Tier type — v2 enum (GA / VIP / Early Bird / Table / Group). */}
       <span className="block text-[11px] text-white/50 mb-1">Tier type</span>
-      <div className="flex gap-1.5 mb-2.5">
+      <div className="flex flex-wrap gap-1.5 mb-2.5">
         {TIER_TYPE_OPTIONS.map((o) => {
           const selected = (tier.tierType || "ga") === o.value;
           return (
@@ -1263,7 +1274,7 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
 
       {/* Visibility — public / hidden / locked (+ unlock code). */}
       <span className="block text-[11px] text-white/50 mb-1">Visibility</span>
-      <div className="flex gap-1.5 mb-1">
+      <div className="flex flex-wrap gap-1.5 mb-1">
         {TIER_VISIBILITY_OPTIONS.map((o) => {
           const selected = (tier.visibility || "public") === o.value;
           return (

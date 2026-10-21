@@ -1,0 +1,52 @@
+name: Ticket reliability contracts
+
+# Executable critical ticket tests, independent of optional sandbox secrets.
+# This is a CI check, not proof that repository branch protection requires it.
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'docs/workstreams/**'
+      - 'docs/ticketing/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/**'
+  push:
+    branches: [master, main]
+    paths:
+      - 'apps/mobile/**'
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'docs/workstreams/**'
+      - 'docs/ticketing/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ticket-reliability-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ticket-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm verify:issuance
+      - run: pnpm verify:release
+      - name: Guest, native, hosted, delivery, refund and check-in contracts
+        run: pnpm test:ticket-release

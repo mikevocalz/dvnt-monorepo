@@ -31,10 +31,25 @@ function fixture(options={}){
  quantity_total:100,quantity_sold:0,max_per_user:10,...options.tier}],orders:[],tickets:[],ticket_holds:[],order_timeline:[],
  organizer_accounts:[{host_id:'host',stripe_account_id:'acct_fixture',charges_enabled:true}],
  promo_codes:options.promos||[],event_promoters:options.promoters||[],promoter_attributions:[]};
- const writes=[],stripe=[],emails=[],usage=[],logs=[],profileCalls=[];let serial=0;
+ const writes=[],stripe=[],emails=[],usage=[],logs=[],profileCalls=[],qr=[];let serial=0;
  const db={rpc:async(fn,args)=>{
   writes.push({table:'rpc',fn,args});
   if(fn==='ticket_hold_create_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
+  if(fn==='guest_free_checkout_atomic'){
+   if(options.atomicError)return{data:null,error:options.atomicError};
+   if(options.atomicResult)return{data:options.atomicResult,error:null};
+   if(options.ticketInsertError)return{data:null,error:{message:'fixture atomic ticket insert failure'}};
+   // This stub is only for handler contracts. The real SQL/rollback/locking
+   // semantics are exercised by scripts/verify-guest-free-issuance.mjs.
+   const order={id:'row-'+(++serial),status:'paid',currency:'usd',...args.p_order};
+   delete order.expected_unit_price_cents;
+   const rows=args.p_ticket_rows.map((t,i)=>({...t,order_id:order.id,order_index:i+1,order_count:order.quantity}));
+   tables.orders.push(order);tables.tickets.push(...rows);
+   tables.ticket_holds.push({id:'hold-'+serial,ticket_type_id:args.p_ticket_type_id,quantity:order.quantity,status:'converted'});
+   tables.ticket_types.find(t=>t.id===args.p_ticket_type_id).quantity_sold+=order.quantity;
+   tables.order_timeline.push({order_id:order.id,type:'created'},{order_id:order.id,type:'payment_captured'});
+   return{data:{ok:true,idempotent:false,order_id:order.id,count:order.quantity,order},error:null};
+  }
   if(fn==='increment_promo_uses'){usage.push(args.p_promo_id);return{data:null,error:null}}
   throw Error('Unexpected RPC '+fn);
  },from:table=>{
@@ -77,7 +92,8 @@ function fixture(options={}){
   const full=path.resolve(file);if(cache.has(full))return cache.get(full);
   const exports={};cache.set(full,exports);
   const code=ts.transpileModule(fs.readFileSync(full,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  vm.runInNewContext(code,{exports,Request,Response,URL,URLSearchParams,TextEncoder,Date,crypto,console:{...console,error:(...args)=>logs.push(args)},
+  vm.runInNewContext(code,{exports,Request,Response,URL,URLSearchParams,TextEncoder,
+   Date:options.now==null?Date:class extends Date{constructor(...args){super(...(args.length?args:[options.now]))}static now(){return options.now}},crypto,console:{...console,error:(...args)=>logs.push(args)},
    Deno:{env:{get:k=>k==='STRIPE_SECRET_KEY'?(options.noStripe?'':'fixture-not-a-provider-key'):''},serve:fn=>{handler=fn}},
    fetch:async(url,opts)=>{
     assert.equal(new URL(url).hostname,'api.stripe.com');
@@ -86,7 +102,7 @@ function fixture(options={}){
    },require:name=>{
     if(options.entrypoint && name.endsWith('/verify-session.ts'))return{verifySession:async()=>options.unauthorized?null:'member-fixture'};
     if(name.startsWith('https://esm.sh/@supabase/'))return{createClient:()=>db};
-    if(name.endsWith('/hmac-qr.ts'))return{createSignedQrPayload:async()=>({qrToken:'fixture',qrPayload:'fixture'})};
+    if(name.endsWith('/hmac-qr.ts'))return{createSignedQrPayload:async()=>{qr.push(true);return{qrToken:'fixture',qrPayload:'fixture'}}};
     if(name.endsWith('/ticket-email-delivery.ts'))return{deliverTicketBundleEmail:async(...args)=>emails.push(args[1])};
     if(name.endsWith('/checkout-profile.ts'))return{recordCheckoutProfileIntake:async(...args)=>{profileCalls.push({kind:'intake',args})},provisionCheckoutProfile:async(...args)=>{profileCalls.push({kind:'provision',args});return null}};
     return load(path.resolve(path.dirname(full),name));
@@ -98,7 +114,7 @@ function fixture(options={}){
   const res=await handler(new Request('https://fixture.invalid/guest-checkout',{method,...(method==='POST'?{body:JSON.stringify(body)}:{})}));
   return {status:res.status,headers:res.headers,data:await res.json()};
  }
- return{tables,writes,stripe,emails,usage,logs,profileCalls,load,call,
+ return{tables,writes,stripe,emails,usage,logs,profileCalls,qr,load,call,
   quote:(body={})=>call({action:'quote',quote_request:{...selection,...body}}),
   pay:(body={})=>call({...selection,...body})};
 }

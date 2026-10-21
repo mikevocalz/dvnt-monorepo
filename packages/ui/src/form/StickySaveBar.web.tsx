@@ -1,8 +1,13 @@
 "use client";
 
+import type { CSSProperties, Ref } from "react";
+
 export interface StickySaveBarProps {
   /** Show the bar (typically === isDirty). When false, nothing renders. */
   visible: boolean;
+  /** Web editors can anchor the bar to their visual viewport. */
+  viewportRef?: Ref<HTMLDivElement>;
+  style?: CSSProperties;
   /** Save handler. */
   onSave: () => void;
   /** Discard/cancel handler — reverts the form. */
@@ -22,6 +27,8 @@ export interface StickySaveBarProps {
  */
 export function StickySaveBar({
   visible,
+  viewportRef,
+  style,
   onSave,
   onCancel,
   disabled,
@@ -32,6 +39,7 @@ export function StickySaveBar({
   if (!visible) return null;
   return (
     <div
+      ref={viewportRef}
       className="fixed inset-x-0 z-[1100] flex items-center justify-end gap-3 px-4 py-3 border-t border-white/10"
       style={{
         bottom: 0,
@@ -39,6 +47,7 @@ export function StickySaveBar({
         background: "rgba(8,10,18,0.72)",
         backdropFilter: "saturate(160%) blur(18px)",
         WebkitBackdropFilter: "saturate(160%) blur(18px)",
+        ...style,
       }}
       role="region"
       aria-label="Unsaved changes"

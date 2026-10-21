@@ -14,7 +14,6 @@ import { useCallback } from "react";
 import { initStripe } from "@stripe/stripe-react-native";
 import { useStripeSafe as useStripe } from "@dvnt/app/lib/safe-native-modules";
 import { supabase } from "@dvnt/app/lib/supabase/client";
-import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
@@ -39,17 +38,15 @@ interface CheckoutResult {
 
 export function useTicketCheckout() {
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
-  const showToast = useUIStore((s) => s.showToast);
   const setCheckoutLoading = usePaymentsStore((s) => s.setCheckoutLoading);
   const checkoutLoading = usePaymentsStore((s) => s.checkoutLoading);
 
   const checkout = useCallback(
     async (params: CheckoutParams): Promise<CheckoutResult> => {
       const { eventId, ticketTypeId, quantity, promoCode } = params;
-      // Same guard as the mixed-cart path: the flag existed and was exposed as
-      // `isLoading`, but nothing here read it, so de-duplication rested
-      // entirely on every caller remembering to disable its button.
-      if (checkoutLoading) {
+      // Read the synchronous store, not the render captured by useCallback.
+      // Two presses in one tick (or an older callback) must share one lock.
+      if (usePaymentsStore.getState().checkoutLoading) {
         return { success: false, error: "Checkout already in progress" };
       }
 
@@ -90,7 +87,8 @@ export function useTicketCheckout() {
             const ctx = await (error as any).context?.json?.();
             if (ctx?.error) msg = ctx.error;
             // No phone on file: show the field; the next tap sends it.
-            if (isPhoneRequiredError(ctx)) useCheckoutPhoneStore.getState().markNeeded();
+            if (isPhoneRequiredError(ctx))
+              useCheckoutPhoneStore.getState().markNeeded();
           } catch {}
           if (msg === "Failed to create payment") msg = error.message || msg;
           throw new Error(msg);
@@ -201,10 +199,7 @@ export function useTicketCheckout() {
             "  localizedMessage:",
             (presentError as any).localizedMessage,
           );
-          console.error(
-            "  declineCode:",
-            (presentError as any).declineCode,
-          );
+          console.error("  declineCode:", (presentError as any).declineCode);
           console.error(
             "  stripeErrorCode:",
             (presentError as any).stripeErrorCode,

@@ -13,6 +13,7 @@ import { canAccessEvent } from "../_shared/event-access.ts";
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { readCheckoutReplay, CHECKOUT_REPLAY_UNAVAILABLE } from "../_shared/checkout-replay.ts";
 import {
   computeFeesWithMode,
   MIN_TIER_PRICE_CENTS,
@@ -33,6 +34,7 @@ import {
 } from "../_shared/apply-promoter-code.ts";
 import { withSentry } from "../_shared/sentry.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { tierSaleAvailabilityError } from "../_shared/tier-sale-availability.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -199,31 +201,23 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
         ? idempotency_key
         : null;
 
-    // Replay short-circuit BEFORE any cap/inventory checks: a retried
-    // request would otherwise trip max_per_user on the tickets it already
-    // minted. Returns the SAME order's tickets, never a second issuance.
-    if (idemKey) {
-      const { data: existing } = await supabase
-        .from("orders")
-        .select("id")
-        .eq("idempotency_key", idemKey)
-        .maybeSingle();
-      if (existing) {
-        const { data: existingTickets } = await supabase
-          .from("tickets")
-          .select("id, qr_token")
-          .eq("order_id", existing.id);
-        return json({
-          tickets: existingTickets || [],
-          free: true,
-          order_id: existing.id,
-          idempotent: true,
-        });
-      }
-    }
-
     if (!event_id || !ticket_type_id) {
       return json({ error: "Missing required fields" }, 400);
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return json({ error: "Invalid quantity" }, 400);
+    }
+
+    // Replay is allowed before caps/cutoff, but only for this buyer's exact
+    // completed free purchase. An attempt key is never authentication.
+    const replayRequest = {
+      idempotencyKey: idemKey || "", eventId: Number(event_id),
+      ticketTypeId: ticket_type_id, quantity, userId: user_id, guestEmail: null,
+    };
+    if (idemKey) {
+      const replay = await readCheckoutReplay(supabase, replayRequest);
+      if (replay) return json(replay.body, replay.status);
     }
 
     // A signed-in buyer with no phone on file gives one before paying. It is
@@ -260,10 +254,6 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
       ? promoterCodeRaw
       : "";
 
-    if (!Number.isInteger(quantity) || quantity < 1) {
-      return json({ error: "Invalid quantity" }, 400);
-    }
-
     // ── Fetch ticket type (scoped to event to prevent cross-event manipulation) ──
     const { data: ticketType, error: ttError } = await supabase
       .from("ticket_types")
@@ -292,6 +282,11 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
         visibilityError === "tier_hidden" ? 404 : 403,
       );
     }
+
+    // Apply the same sale policy before paid checkout AND free/promo issuance.
+    // Visibility runs first so hidden tiers do not disclose their sale state.
+    const saleError = tierSaleAvailabilityError(ticketType);
+    if (saleError) return json(saleError, 400);
 
     // ── Availability ─────────────────────────────────────────
     // The real check is now the atomic one at the hold below
@@ -406,23 +401,8 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
         .single();
 
       if (freeOrderErr?.code === "23505" && idemKey) {
-        const { data: won } = await supabase
-          .from("orders")
-          .select("id")
-          .eq("idempotency_key", idemKey)
-          .maybeSingle();
-        if (won) {
-          const { data: wonTickets } = await supabase
-            .from("tickets")
-            .select("id, qr_token")
-            .eq("order_id", won.id);
-          return json({
-            tickets: wonTickets || [],
-            free: true,
-            order_id: won.id,
-            idempotent: true,
-          });
-        }
+        const replay = await readCheckoutReplay(supabase, replayRequest);
+        return json(replay?.body ?? CHECKOUT_REPLAY_UNAVAILABLE, replay?.status ?? 409);
       }
       if (freeOrderErr) throw freeOrderErr;
 

@@ -32,6 +32,7 @@ import {
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computePayoutReleaseAt } from "../_shared/business-days.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
+import { issuePaidTicketsAtomically, paidTicketAmount } from "../_shared/paid-ticket-issuance.ts";
 import { notifyEventOrganizers } from "../_shared/notify-event-organizers.ts";
 import { notifyNextWaitlister } from "../_shared/notify-waitlisters.ts";
 import { voidWalletPass } from "../_shared/wallet-push.ts";
@@ -318,9 +319,8 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           }
 
           // ── Issue tickets ────────────────────────────────
-          // Idempotent on (session_id, order_index); a replay or a
-          // reconcile-sweep issuance inserts 0 rows and only repairs
-          // order money-state + timeline.
+          // The paid allocation RPC serializes payment ownership, ticket rows,
+          // inventory and holds. Replays repair money-state/delivery only.
           await issueTicketsForCheckoutSession(supabase, session, {
             eventCreatedAt,
             logPrefix: "[stripe-webhook]",
@@ -467,37 +467,25 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           // to guest_email; the staff id stays on the order, never the
           // ticket.
           const door = parseDoorSaleMetadata(piMetadata);
+          // Hosted guest checkout also stamps event_ticket on its PI, but its
+          // full quantity/identity contract belongs to the Checkout Session.
+          // Never route that second event through native/door issuance.
+          if (!door.isDoorSale && piMetadata.guest_email && !piMetadata.user_id) {
+            console.log("[stripe-webhook] Hosted guest PI waits for session fulfillment:", pi.id);
+            break;
+          }
           const piUserId = door.isDoorSale ? null : piMetadata.user_id;
 
           // Resolve the order up front — tickets stamp the authoritative
           // order_id link and the email bundle needs the order.
-          const { data: piOrder } = await supabase
+          const { data: piOrder, error: piOrderError } = await supabase
             .from("orders")
             .select("id, ticket_email_status")
             .eq("stripe_payment_intent_id", pi.id)
             .maybeSingle();
 
-          // Check if tickets already issued (e.g. by checkout.session.completed)
-          const { count: piExistingCount } = await supabase
-            .from("tickets")
-            .select("*", { count: "exact", head: true })
-            .eq("stripe_payment_intent_id", pi.id);
-
-          if ((piExistingCount || 0) > 0) {
-            console.log(
-              "[stripe-webhook] Tickets already issued for PI:",
-              pi.id,
-            );
-            // Replay self-heal: if the first attempt's guest email never
-            // went out, retry it now. No-ops when already 'sent'.
-            if (door.isDoorSale && door.guestEmail && piOrder?.id) {
-              await deliverTicketBundleEmail(supabase, piOrder.id, {
-                kind: "retry",
-                logPrefix: "[stripe-webhook]",
-              });
-            }
-            break;
-          }
+          if (piOrderError) throw piOrderError;
+          if (!piOrder) throw new Error("Paid ticket order is not available yet");
 
           // Issue tickets with HMAC-signed QR payloads
           const piTicketRows = [];
@@ -524,9 +512,9 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
                   user_id: piUserId,
                   status: "active",
                   stripe_payment_intent_id: pi.id,
-                  purchase_amount_cents: Math.round(
-                    (pi.amount || 0) / piQuantity,
-                  ),
+                  purchase_amount_cents: paidTicketAmount(pi.amount, piQuantity, i),
+                  order_index: i + 1,
+                  order_count: piQuantity,
                 };
             piTicketRows.push({
               ...base,
@@ -537,47 +525,16 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             });
           }
 
-          const { data: piInsertedTickets, error: piTicketError } =
-            await supabase
-              .from("tickets")
-              .insert(piTicketRows)
-              .select("id, qr_token, guest_lookup_token");
-
-          if (piTicketError) {
-            console.error(
-              "[stripe-webhook] PI ticket insert error:",
-              piTicketError,
-            );
-            throw piTicketError;
-          }
-
-          // Door sale → ONE bundle email from the order's authoritative
-          // ticket rows. Delivery state persists on the order; a Resend
-          // failure is retryable, never a rollback of issued tickets.
-          if (door.isDoorSale && door.guestEmail && piOrder?.id) {
-            await deliverTicketBundleEmail(supabase, piOrder.id, {
-              kind: "fulfillment",
-              logPrefix: "[stripe-webhook]",
-            });
-          }
-
-          // Increment quantity_sold
-          const { data: piTt } = await supabase
-            .from("ticket_types")
-            .select("quantity_sold")
-            .eq("id", piTicketTypeId)
-            .single();
-          await supabase
-            .from("ticket_types")
-            .update({ quantity_sold: (piTt?.quantity_sold || 0) + piQuantity })
-            .eq("id", piTicketTypeId);
-
-          // Convert ticket hold to completed
-          await supabase
-            .from("ticket_holds")
-            .update({ status: "converted" })
-            .eq("payment_intent_id", pi.id)
-            .eq("status", "active");
+          const allocation = await issuePaidTicketsAtomically(supabase, {
+            orderId: piOrder.id,
+            ticketTypeId: piTicketTypeId,
+            paymentIntentId: pi.id,
+            checkoutSessionId: null,
+            amountCents: pi.amount,
+            ticketRows: piTicketRows,
+          });
+          if (allocation.terminal) break;
+          const piAlreadyIssued = allocation.duplicate;
 
           // Update order → paid + add timeline (order resolved above).
           const piOrderRow = piOrder;
@@ -613,21 +570,33 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
               paymentMethodBrand: piPmBrand,
               paymentMethodLast4: piPmLast4,
               paidAt: new Date().toISOString(),
-            });
+            }, { throwOnError: true });
 
-            await supabase.from("order_timeline").insert([
-              {
-                order_id: piOrderRow.id,
-                type: "payment_authorized",
-                label: "Payment authorized",
-              },
-              {
-                order_id: piOrderRow.id,
-                type: "payment_captured",
-                label: "Payment captured",
-                detail: `${piQuantity} ticket(s) issued`,
-              },
-            ]);
+            // The real delivery helper requires a persisted paid order.
+            // Retry unsent bundles after a crash, but never send refunded orders.
+            if (door.isDoorSale && door.guestEmail) {
+              await deliverTicketBundleEmail(supabase, piOrderRow.id, {
+                kind: piAlreadyIssued ? "retry" : "fulfillment",
+                logPrefix: "[stripe-webhook]",
+              });
+            }
+
+            if (!piAlreadyIssued) {
+              await supabase.from("order_timeline").insert([
+                {
+                  order_id: piOrderRow.id,
+                  type: "payment_authorized",
+                  label: "Payment authorized",
+                },
+                {
+                  order_id: piOrderRow.id,
+                  type: "payment_captured",
+                  label: "Payment captured",
+                  detail: `${piQuantity} ticket(s) issued`,
+                },
+              ]);
+
+            }
 
             // Promoter attribution + rev-share earning (WS-4) —
             // idempotent on replay.
@@ -639,7 +608,7 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           }
 
           console.log(
-            `[stripe-webhook] PI succeeded: issued ${piQuantity} tickets for event ${piEventId}`,
+            `[stripe-webhook] PI succeeded: ${piAlreadyIssued ? "recovered" : "issued"} ${piQuantity} tickets for event ${piEventId}`,
           );
         } else if (piMetadata.type === "ticket_upgrade") {
           // ── Upgrade existing ticket to a higher tier (PaymentSheet) ──
@@ -2096,10 +2065,11 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
     }
     // Completion marker for the dedup check above: a duplicate delivery is
     // only skippable once this write has happened.
-    await supabase
+    const { error: completionError } = await supabase
       .from("stripe_events")
       .update({ processed_at: new Date().toISOString() })
       .eq("event_id", event.id);
+    if (completionError) throw completionError;
 
     if (stripeFeeSyncRefs) {
       await syncOrderStripeProcessingFeeSafely(

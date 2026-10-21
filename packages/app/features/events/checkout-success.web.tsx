@@ -148,10 +148,20 @@ export function CheckoutSuccessScreen() {
   const copy = checkoutCopy(outcome);
 
   useEffect(() => {
-    if (statusQuery.data?.completed) {
+    // A return URL can point to an older paid order while a newer cart is
+    // already active. Complete only the cart whose status was actually read.
+    if (
+      statusQuery.data?.completed &&
+      useCartStore.getState().cart?.cartId === effectiveCartId
+    ) {
       markCompleted();
     }
-  }, [markCompleted, statusQuery.data?.completed]);
+  }, [
+    effectiveCartId,
+    storeCart?.cartId,
+    markCompleted,
+    statusQuery.data?.completed,
+  ]);
 
   const tickets = useMemo(
     () => statusQuery.data?.tickets ?? [],

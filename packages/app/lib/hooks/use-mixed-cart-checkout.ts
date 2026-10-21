@@ -4,7 +4,12 @@ import { toast } from "sonner-native";
 import { initStripe } from "@stripe/stripe-react-native";
 import { useStripeSafe as useStripe } from "@dvnt/app/lib/safe-native-modules";
 import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
+import type { CartCheckoutResponse } from "@dvnt/app/lib/contracts/dto";
 import { cartApi } from "@dvnt/app/lib/api/cart";
+import {
+  reviewedCartKey,
+  snapshotReviewedCart,
+} from "@dvnt/app/lib/checkout/reviewed-cart";
 import { useCartStore } from "@dvnt/app/lib/stores/cart";
 import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
@@ -19,6 +24,18 @@ interface MixedCartCheckoutResult {
   cancelled?: boolean;
 }
 
+// Keep client secrets in memory only. A cancelled sheet may reopen the exact
+// same intent, but must never refresh/rewrite a payment-bound cart's lines.
+let pendingNativePayment: {
+  cartId: string;
+  reviewKey: string;
+  payment: CartCheckoutResponse;
+  expiresAt: number;
+  confirmed?: boolean;
+} | null = null;
+const NEW_CART_MESSAGE =
+  "This cart already has a payment. Clear the cart and add tickets again to start a new order.";
+
 export function useMixedCartCheckout() {
   const router = useRouter();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
@@ -26,18 +43,17 @@ export function useMixedCartCheckout() {
     (state) => state.setCheckoutLoading,
   );
   const checkoutLoading = usePaymentsStore((state) => state.checkoutLoading);
-  const cart = useCartStore((state) => state.cart);
   const setHold = useCartStore((state) => state.setHold);
   const setPaymentIntent = useCartStore((state) => state.setPaymentIntent);
 
   const checkout = useCallback(async (): Promise<MixedCartCheckoutResult> => {
-    // A second press while the first is in flight would create a second hold
-    // and a second payment intent. The flag was already written here and read
-    // by callers to disable a button; nothing enforced it at the money path
-    // itself, so any caller that forgot could charge twice.
-    if (checkoutLoading) {
+    // Shared, synchronous lock: neither same-tick presses nor stale callbacks
+    // may create a second hold/PaymentSheet before React renders again.
+    if (usePaymentsStore.getState().checkoutLoading) {
       return { success: false, error: "Checkout already in progress" };
     }
+    const currentCart = useCartStore.getState().cart;
+    const cart = currentCart ? snapshotReviewedCart(currentCart) : null;
 
     if (!cart || cart.lineItems.length === 0) {
       toast.error("Your cart is empty");
@@ -51,6 +67,12 @@ export function useMixedCartCheckout() {
       return { success: false, error: phone.message };
     }
 
+    const reviewKey = reviewedCartKey(cart);
+    const requireCurrentCart = () => {
+      if (reviewedCartKey(useCartStore.getState().cart) !== reviewKey) {
+        throw new Error("Your cart changed. Review it before paying.");
+      }
+    };
     setCheckoutLoading(true);
     AppTrace.trace("CART", "mixed_cart_checkout_started", {
       cartId: cart.cartId,
@@ -59,49 +81,78 @@ export function useMixedCartCheckout() {
     });
 
     try {
-      const hold = await cartApi.createHold(cart);
-      const holdExpiresAt = Date.parse(hold.holdExpiresAt);
-      if (!Number.isFinite(holdExpiresAt)) {
-        throw new Error("Could not verify cart hold");
+      let saved =
+        pendingNativePayment?.cartId === cart.cartId
+          ? pendingNativePayment
+          : null;
+      if (saved && saved.reviewKey !== reviewKey)
+        throw new Error(NEW_CART_MESSAGE);
+      if (
+        !saved &&
+        (cart.paymentIntentId ||
+          cart.status === "paying" ||
+          cart.status === "completed")
+      ) {
+        throw new Error(NEW_CART_MESSAGE);
       }
-      setHold(holdExpiresAt);
-      AppTrace.trace("CART", "mixed_cart_hold_ready", {
-        cartId: cart.cartId,
-        holdExpiresAt,
-      });
+      if (!saved) {
+        const hold = await cartApi.createHold(cart);
+        const holdExpiresAt = Date.parse(hold.holdExpiresAt);
+        if (!Number.isFinite(holdExpiresAt))
+          throw new Error("Could not verify cart hold");
+        requireCurrentCart();
+        setHold(holdExpiresAt);
+        AppTrace.trace("CART", "mixed_cart_hold_ready", {
+          cartId: cart.cartId,
+          holdExpiresAt,
+        });
 
-      // Promoter attribution (WS-4): pending ?ref= for this cart's
-      // event, MMKV-persisted across the PaymentSheet round-trip.
-      let payment;
-      try {
-        payment = await cartApi.checkout(
-          cart.cartId,
-          undefined,
-          getPendingPromoterRef(cart.eventId),
-          phone.phone,
-        );
-      } catch (err) {
-        // No phone on file: show the field; the next tap sends it.
-        if (isPhoneRequiredError(err)) useCheckoutPhoneStore.getState().markNeeded();
-        throw err;
+        let payment;
+        try {
+          payment = await cartApi.checkout(
+            cart.cartId,
+            undefined,
+            getPendingPromoterRef(cart.eventId),
+            phone.phone,
+          );
+        } catch (err) {
+          if (isPhoneRequiredError(err))
+            useCheckoutPhoneStore.getState().markNeeded();
+          throw err;
+        }
+        if (payment.cartId !== cart.cartId)
+          throw new Error("Could not verify the payment's cart.");
+        useCheckoutPhoneStore.getState().reset();
+        const expiresAt =
+          payment.holdExpiresAt &&
+          Number.isFinite(Date.parse(payment.holdExpiresAt))
+            ? Date.parse(payment.holdExpiresAt)
+            : holdExpiresAt;
+        saved = { cartId: cart.cartId, reviewKey, payment, expiresAt };
+        pendingNativePayment = saved;
+        requireCurrentCart();
+        setPaymentIntent(payment.paymentIntentId);
+        AppTrace.trace("CART", "mixed_cart_payment_intent_ready", {
+          cartId: cart.cartId,
+          paymentIntentId: payment.paymentIntentId,
+          totalCents: payment.totals.totalCents,
+        });
       }
-      // Past the phone check: the number is on file now.
-      useCheckoutPhoneStore.getState().reset();
-      setPaymentIntent(payment.paymentIntentId);
-      AppTrace.trace("CART", "mixed_cart_payment_intent_ready", {
-        cartId: cart.cartId,
-        paymentIntentId: payment.paymentIntentId,
-        totalCents: payment.totals.totalCents,
-      });
-
-      const expiresAt =
-        payment.holdExpiresAt &&
-        Number.isFinite(Date.parse(payment.holdExpiresAt))
-          ? Date.parse(payment.holdExpiresAt)
-          : holdExpiresAt;
+      const { payment, expiresAt } = saved;
+      if (saved.confirmed) {
+        router.replace({
+          pathname: "/(protected)/checkout/success",
+          params: { cartId: cart.cartId },
+        } as any);
+        return {
+          success: true,
+          cartId: cart.cartId,
+          paymentIntentId: payment.paymentIntentId,
+        };
+      }
       if (expiresAt <= Date.now()) {
         throw new Error(
-          "Your reservation expired. Refresh your cart and try again.",
+          "Your reservation expired. Clear the cart and add tickets again to start a new order.",
         );
       }
 
@@ -172,6 +223,7 @@ export function useMixedCartCheckout() {
         throw new Error(initError.message || "Failed to initialize payment");
       }
 
+      requireCurrentCart();
       const { error: presentError } = await presentPaymentSheet();
       if (presentError) {
         if (presentError.code === "Canceled") {
@@ -201,6 +253,7 @@ export function useMixedCartCheckout() {
         paymentIntentId: payment.paymentIntentId,
       });
 
+      saved.confirmed = true;
       toast.success("Payment received");
       router.replace({
         pathname: "/(protected)/checkout/success",
@@ -224,7 +277,6 @@ export function useMixedCartCheckout() {
       setCheckoutLoading(false);
     }
   }, [
-    cart,
     initPaymentSheet,
     presentPaymentSheet,
     router,
