@@ -31,12 +31,12 @@ test("nothing is sent until the server asks, then a valid number is required", (
 test("each signed-in checkout path sends the phone and raises the field when asked", () => {
   const ticket = read("../hooks/use-ticket-checkout.ts");
   assert.match(ticket, /\.\.\.\(phone\.phone \? \{ phone: phone\.phone \} : \{\}\)/);
-  assert.match(ticket, /isPhoneRequiredError\(ctx\)\) useCheckoutPhoneStore\.getState\(\)\.markNeeded\(\)/);
+  assert.match(ticket, /isPhoneRequiredError\(ctx\)\)\s+useCheckoutPhoneStore\.getState\(\)\.markNeeded\(\)/);
 
   for (const rel of ["../hooks/use-mixed-cart-checkout.ts", "../../features/events/checkout-review.web.tsx"]) {
     const src = read(rel);
     assert.match(src, /cartApi\.checkout\([\s\S]{0,160}phone\.phone,?\s*\)/, rel);
-    assert.match(src, /isPhoneRequiredError\(err\)\) useCheckoutPhoneStore\.getState\(\)\.markNeeded\(\)/, rel);
+    assert.match(src, /isPhoneRequiredError\(err\)\)\s+useCheckoutPhoneStore\.getState\(\)\.markNeeded\(\)/, rel);
   }
   assert.match(read("../api/cart.ts"), /\.\.\.\(phone \? \{ phone \} : \{\}\)/);
 
