@@ -30,7 +30,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Real handler contracts, paid-path compatibility and replay behavior
-        run: node --test apps/mobile/supabase/functions/guest-checkout/atomic-free.test.cjs apps/mobile/supabase/functions/guest-checkout/access.test.cjs apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs
+        run: node --test apps/mobile/supabase/functions/guest-checkout/atomic-free.test.cjs apps/mobile/supabase/functions/guest-checkout/access.test.cjs apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs apps/mobile/supabase/functions/guest-checkout/sale-availability.test.cjs
       # A disposable local Postgres only. No project credentials/providers,
       # no production writes and no --allow-skip fallback.
       - name: Real multi-connection PostgreSQL capacity and rollback regressions

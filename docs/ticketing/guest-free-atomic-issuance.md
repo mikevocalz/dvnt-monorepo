@@ -62,3 +62,24 @@ same-key replay, cross-tier key conflicts, per-email caps, invalid QR rows,
 statement failures and transactional rollback. It fails if PostgreSQL is absent
 or cannot start, rather than treating an unexecuted test as a pass. The dedicated
 CI job runs the same harness without provider credentials.
+
+## Online tier sale eligibility
+
+The guest quote and checkout share the online tier-sale policy used by native
+and hosted checkout. Explicit non-`on_sale` states, the legacy sold-out flag,
+inactive tiers and invalid/out-of-window schedules are rejected before pricing,
+holds, Stripe calls, QR signing or issuance. Legacy null status/active/sold-out
+flags and absent windows remain compatible. Opening is inclusive; closing is
+exclusive. Existing visibility and event-wide cutoff policies are retained.
+
+The atomic free-issuance function repeats this policy under its tier lock,
+using wall time sampled after any lock wait. It therefore refuses a tier that
+was paused/sold out or whose sale ended while the request was waiting. Completed
+same-key orders remain no-write replays. This does not change already-reserved
+paid fulfillment, door/Terminal or staff-comp policies.
+
+The eligibility follow-on depends on the source in PRs #161 and #162. Its SQL
+delta updates the still-unreleased migration from #161; apply only the reviewed
+final migration through the separately authorized release process. If that
+migration has already been applied, prepare and review a new follow-on migration
+rather than assuming edits to an applied file will run again.
