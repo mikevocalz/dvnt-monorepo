@@ -32,6 +32,7 @@ import {
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computePayoutReleaseAt } from "../_shared/business-days.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
+import { issuePaidTicketsAtomically, paidTicketAmount } from "../_shared/paid-ticket-issuance.ts";
 import { notifyEventOrganizers } from "../_shared/notify-event-organizers.ts";
 import { notifyNextWaitlister } from "../_shared/notify-waitlisters.ts";
 import { voidWalletPass } from "../_shared/wallet-push.ts";
@@ -318,9 +319,8 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           }
 
           // ── Issue tickets ────────────────────────────────
-          // Idempotent on (session_id, order_index); a replay or a
-          // reconcile-sweep issuance inserts 0 rows and only repairs
-          // order money-state + timeline.
+          // The paid allocation RPC serializes payment ownership, ticket rows,
+          // inventory and holds. Replays repair money-state/delivery only.
           await issueTicketsForCheckoutSession(supabase, session, {
             eventCreatedAt,
             logPrefix: "[stripe-webhook]",
@@ -487,94 +487,54 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           if (piOrderError) throw piOrderError;
           if (!piOrder) throw new Error("Paid ticket order is not available yet");
 
-          // Check if tickets already issued (e.g. by checkout.session.completed)
-          const { count: piExistingCount, error: piCountError } = await supabase
-            .from("tickets")
-            .select("*", { count: "exact", head: true })
-            .eq("stripe_payment_intent_id", pi.id);
-
-          if (piCountError) throw piCountError;
-          if (piExistingCount == null) throw new Error("Paid ticket count unavailable");
-          if (piExistingCount > 0 && piExistingCount !== piQuantity) {
-            throw new Error("Paid ticket count does not match purchased quantity");
-          }
-          const piAlreadyIssued = (piExistingCount || 0) > 0;
-          // A retry with existing tickets must still repair money-state and
-          // delivery. Only issuance/inventory side effects are skipped.
-          if (!piAlreadyIssued) {
-            // Issue tickets with HMAC-signed QR payloads
-            const piTicketRows = [];
-            for (let i = 0; i < piQuantity; i++) {
-              const ticketUuid = crypto.randomUUID();
-              const { qrToken, qrPayload } = await createSignedQrPayload(
-                ticketUuid,
-                piEventId,
-              );
-              const base = door.isDoorSale && door.guestEmail
-                ? doorGuestTicketBase.build({
-                    eventId: piEventId,
-                    ticketTypeId: piTicketTypeId,
-                    guestEmail: door.guestEmail,
-                    guestName: door.guestName,
-                    paymentIntentId: pi.id,
-                    quantity: piQuantity,
-                    amountCents: pi.amount || 0,
-                    index: i,
-                  })
-                : {
-                    event_id: piEventId,
-                    ticket_type_id: piTicketTypeId,
-                    user_id: piUserId,
-                    status: "active",
-                    stripe_payment_intent_id: pi.id,
-                    purchase_amount_cents: Math.round(
-                      (pi.amount || 0) / piQuantity,
-                    ),
-                  };
-              piTicketRows.push({
-                ...base,
-                id: ticketUuid,
-                qr_token: qrToken,
-                qr_payload: qrPayload,
-                order_id: piOrder?.id ?? null,
-              });
-            }
-
-            const { data: piInsertedTickets, error: piTicketError } =
-              await supabase
-                .from("tickets")
-                .insert(piTicketRows)
-                .select("id, qr_token, guest_lookup_token");
-
-            if (piTicketError) {
-              console.error(
-                "[stripe-webhook] PI ticket insert error:",
-                piTicketError,
-              );
-              throw piTicketError;
-            }
-
-            // Increment quantity_sold
-            const { data: piTt } = await supabase
-              .from("ticket_types")
-              .select("quantity_sold")
-              .eq("id", piTicketTypeId)
-              .single();
-            await supabase
-              .from("ticket_types")
-              .update({ quantity_sold: (piTt?.quantity_sold || 0) + piQuantity })
-              .eq("id", piTicketTypeId);
-
+          // Issue tickets with HMAC-signed QR payloads
+          const piTicketRows = [];
+          for (let i = 0; i < piQuantity; i++) {
+            const ticketUuid = crypto.randomUUID();
+            const { qrToken, qrPayload } = await createSignedQrPayload(
+              ticketUuid,
+              piEventId,
+            );
+            const base = door.isDoorSale && door.guestEmail
+              ? doorGuestTicketBase.build({
+                  eventId: piEventId,
+                  ticketTypeId: piTicketTypeId,
+                  guestEmail: door.guestEmail,
+                  guestName: door.guestName,
+                  paymentIntentId: pi.id,
+                  quantity: piQuantity,
+                  amountCents: pi.amount || 0,
+                  index: i,
+                })
+              : {
+                  event_id: piEventId,
+                  ticket_type_id: piTicketTypeId,
+                  user_id: piUserId,
+                  status: "active",
+                  stripe_payment_intent_id: pi.id,
+                  purchase_amount_cents: paidTicketAmount(pi.amount, piQuantity, i),
+                  order_index: i + 1,
+                  order_count: piQuantity,
+                };
+            piTicketRows.push({
+              ...base,
+              id: ticketUuid,
+              qr_token: qrToken,
+              qr_payload: qrPayload,
+              order_id: piOrder?.id ?? null,
+            });
           }
 
-          // Conversion is replayable independently of insertion: a first
-          // attempt may have committed tickets then failed to convert its hold.
-          const { error: piHoldError } = await supabase
-            .from("ticket_holds")
-            .update({ status: "converted" })
-            .eq("payment_intent_id", pi.id)
-            .eq("status", "active");
-          if (piHoldError) throw piHoldError;
+          const allocation = await issuePaidTicketsAtomically(supabase, {
+            orderId: piOrder.id,
+            ticketTypeId: piTicketTypeId,
+            paymentIntentId: pi.id,
+            checkoutSessionId: null,
+            amountCents: pi.amount,
+            ticketRows: piTicketRows,
+          });
+          if (allocation.terminal) break;
+          const piAlreadyIssued = allocation.duplicate;
 
           // Update order → paid + add timeline (order resolved above).
           const piOrderRow = piOrder;

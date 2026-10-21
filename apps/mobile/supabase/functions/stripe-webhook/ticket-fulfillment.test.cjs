@@ -8,8 +8,8 @@ const { harness } = require('../_shared/payment-safety.test.cjs');
 function fixture(options = {}) {
   const order = { id: 'order', event_id: 1, status: options.status || 'payment_pending',
     guest_email: options.member ? null : 'buyer@example.test', quantity: 2,
-    total_cents: 1000, currency: 'usd', ticket_email_status: options.emailStatus || null,
-    stripe_payment_intent_id: 'pi_fixture' };
+    total_cents: options.amount || 1000, currency: 'usd', ticket_email_status: options.emailStatus || null,
+    stripe_payment_intent_id: 'pi_fixture', stripe_checkout_session_id: options.hostedSession ? 'cs_fixture' : null };
   const tickets = Array.from({ length: options.existing || 0 }, (_, i) => ({
     id: `ticket_${i}`, order_id: 'order', event_id: 1, ticket_type_id: 'tier',
     stripe_payment_intent_id: 'pi_fixture', status: 'active', qr_token: `qr_${i}`,
@@ -17,7 +17,7 @@ function fixture(options = {}) {
   }));
   const state = { moneyError: !!options.moneyError, countError: !!options.countError,
     orderError: !!options.orderError, missingOrder: !!options.missingOrder,
-    holdError: !!options.holdError, emailError: !!options.emailError, markerError: !!options.markerError };
+    holdError: !!options.holdError, allocationError: !!options.allocationError, emailError: !!options.emailError, markerError: !!options.markerError };
   const ops = [], sent = [], events = new Map();
   const db = {
     from(table) {
@@ -64,6 +64,14 @@ function fixture(options = {}) {
     },
     async rpc(name, args) {
       ops.push({ rpc: name, args });
+      if (name === 'paid_ticket_issuance_atomic') {
+        if (state.allocationError || state.countError || state.holdError) return { data: null, error: { message: 'atomic allocation unavailable' } };
+        if (order.status === 'refunded') return { data: { ok: true, terminal: true, duplicate: true, order_id: order.id, issued_count: 0, tickets: [] }, error: null };
+        if (tickets.length && tickets.length !== order.quantity) return { data: { ok: false, error: 'incomplete_issuance', needs_recovery: true }, error: null };
+        const duplicate = tickets.length > 0;
+        if (!duplicate) tickets.push(...args.p_ticket_rows);
+        return { data: { ok: true, duplicate, order_id: order.id, issued_count: duplicate ? 0 : args.p_ticket_rows.length, tickets }, error: null };
+      }
       if (name === 'upsert_order_money_state') {
         if (state.moneyError) return { data: null, error: { message: 'money unavailable' } };
         if (order.status === 'refunded') return { data: false, error: null };
@@ -75,6 +83,8 @@ function fixture(options = {}) {
   };
   const h = harness({ database: db, dependencyOverrides: {
     'order-state.ts': undefined,
+    'session-issuance.ts': undefined,
+    'checkout-profile.ts': { finalizeCheckoutProfile: async () => ({ status: 'none' }) },
     'send-resend-email.ts': { ticketConfirmation: data => ({ fixture: data }),
       sendResendEmail: async mail => {
         if (state.emailError) throw new Error('provider unavailable');
@@ -83,13 +93,18 @@ function fixture(options = {}) {
       } },
     'stripe-processing-fee.ts': { syncOrderStripeProcessingFeeSafely: async () => {} },
   } });
-  async function run(eventId = 'evt_fixture') {
+  async function run(eventId = 'evt_fixture', rail = options.hostedSession ? 'session' : 'pi') {
     const timestamp = Math.floor(Date.now() / 1000);
-    const body = JSON.stringify({ id: eventId, type: 'payment_intent.succeeded', created: timestamp,
-      data: { object: { id: 'pi_fixture', amount: 1000, metadata: {
-        type: 'event_ticket', event_id: '1', ticket_type_id: 'tier', quantity: '2',
-        ...(options.hostedGuest ? { guest_email: order.guest_email, quantity: undefined } : options.member ? { user_id: 'member' } : { is_door_sale: 'true', guest_email: order.guest_email }),
-      } } } });
+    const object = rail === 'session' || rail === 'async' ? {
+      id: 'cs_fixture', amount_total: order.total_cents, payment_status: 'paid', payment_intent: 'pi_fixture',
+      metadata: { type: 'event_ticket', event_id: '1', ticket_type_id: 'tier', quantity: '2',
+        ...(options.member ? { user_id: 'member' } : { guest_email: order.guest_email }) },
+    } : { id: 'pi_fixture', amount: order.total_cents, metadata: {
+      type: 'event_ticket', event_id: '1', ticket_type_id: 'tier', quantity: '2',
+      ...(options.hostedGuest ? { guest_email: order.guest_email, quantity: undefined } : options.member ? { user_id: 'member' } : { is_door_sale: 'true', guest_email: order.guest_email }),
+    } };
+    const type = rail === 'session' ? 'checkout.session.completed' : rail === 'async' ? 'checkout.session.async_payment_succeeded' : 'payment_intent.succeeded';
+    const body = JSON.stringify({ id: eventId, type, created: timestamp, data: { object } });
     const signature = createHmac('sha256', 'test').update(`${timestamp}.${body}`).digest('hex');
     return h.invoke('stripe-webhook', body, { 'stripe-signature': `t=${timestamp},v1=${signature}` });
   }
@@ -128,7 +143,7 @@ for (const existing of [0, 2]) test(`actual money RPC error keeps event retryabl
   assert.equal(f.sent.length, 1);
 });
 
-for (const key of ['orderError', 'missingOrder', 'countError']) test(`${key} cannot mint orphan or duplicate tickets`, async () => {
+for (const key of ['orderError', 'missingOrder', 'countError', 'allocationError']) test(`${key} cannot mint orphan or duplicate tickets`, async () => {
   const f = fixture({ [key]: true });
   assert.equal((await f.run()).status, 500);
   assert.equal(f.tickets.length, 0);
@@ -190,16 +205,59 @@ for (const existing of [0, 2]) test(`hosted guest PaymentIntent never enters nat
   assert.equal(f.ops.some(op => op.rpc === 'upsert_order_money_state'), false);
 });
 
-for (const existing of [0, 2]) test(`hold conversion error is retried without ticket reinsertion (${existing} existing tickets)`, async () => {
+for (const existing of [0, 2]) test(`atomic hold conversion error rolls back new tickets and remains retryable (${existing} existing tickets)`, async () => {
   const f = fixture({ existing, holdError: true });
   assert.equal((await f.run()).status, 500);
   assert.equal(f.events.get('evt_fixture').processed_at, null);
   assert.equal(f.order.status, 'payment_pending');
-  assert.equal(f.tickets.length, 2);
+  assert.equal(f.tickets.length, existing);
   f.state.holdError = false;
   assert.equal((await f.run()).status, 200);
-  assert.equal(f.ops.filter(op => op.table === 'ticket_holds' && op.kind === 'update').length, 2);
+  assert.equal(f.ops.filter(op => op.rpc === 'paid_ticket_issuance_atomic').length, 2);
+  assert.equal(f.ops.some(op => ['tickets', 'ticket_holds', 'ticket_types'].includes(op.table) && ['insert', 'update'].includes(op.kind)), false);
   assert.equal(f.tickets.length, 2);
   assert.equal(f.order.status, 'paid');
+  assert.equal(f.sent.length, 1);
+});
+
+for (const member of [false, true]) test(`${member ? 'native' : 'door'} paid tickets preserve remainder cents with no split allocation writes`, async () => {
+  const f = fixture({ member, amount: 1001 });
+  assert.equal((await f.run()).status, 200);
+  assert.deepEqual(f.tickets.map(row => row.purchase_amount_cents), [501, 500]);
+  const allocation = f.ops.find(op => op.rpc === 'paid_ticket_issuance_atomic');
+  assert.equal(allocation.args.p_amount_cents, 1001);
+  assert.equal(allocation.args.p_checkout_session_id, null);
+  assert.equal(f.ops.some(op => ['tickets', 'ticket_holds', 'ticket_types'].includes(op.table) && ['insert', 'update'].includes(op.kind)), false);
+});
+
+test('terminal paid replay skips money transition and delivery', async () => {
+  const f = fixture({ existing: 2, status: 'refunded' });
+  assert.equal((await f.run()).status, 200);
+  assert.equal(f.ops.some(op => op.rpc === 'upsert_order_money_state'), false);
+  assert.equal(f.sent.length, 0);
+});
+
+for (const rail of ['session', 'async']) for (const member of [false, true]) {
+  test(`signed hosted ${rail} ${member ? 'member' : 'guest'} uses real shared atomic issuer`, async () => {
+    const f = fixture({ hostedSession: true, member, amount: 1001 });
+    assert.equal((await f.run('evt_hosted', rail)).status, 200);
+    assert.equal(f.order.status, 'paid');
+    assert.deepEqual(f.tickets.map(row => row.purchase_amount_cents), [501, 500]);
+    assert.equal(f.sent.length, member ? 0 : 1);
+    assert.equal((await f.run('evt_hosted_retry', rail)).status, 200);
+    assert.equal(f.tickets.length, 2);
+    assert.equal(f.sent.length, member ? 0 : 1);
+    assert.equal(f.ops.some(op => ['tickets', 'ticket_holds', 'ticket_types'].includes(op.table) && ['insert', 'update'].includes(op.kind)), false);
+  });
+}
+test('signed hosted guest PI then session events issue exactly one full bundle', async () => {
+  const f = fixture({ hostedSession: true, hostedGuest: true });
+  assert.equal((await f.run('evt_pi', 'pi')).status, 200);
+  assert.equal(f.tickets.length, 0);
+  assert.equal((await f.run('evt_cs', 'session')).status, 200);
+  assert.equal(f.tickets.length, 2);
+  assert.equal((await f.run('evt_pi_replay', 'pi')).status, 200);
+  assert.equal((await f.run('evt_cs_replay', 'session')).status, 200);
+  assert.equal(f.tickets.length, 2);
   assert.equal(f.sent.length, 1);
 });
