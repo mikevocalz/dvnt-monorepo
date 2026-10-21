@@ -110,6 +110,18 @@
       "owner": "tickets",
       "kind": "test",
       "automation": "apps/mobile/supabase/functions/_shared/stripe-processing-fee.test.cjs"
+    },
+    {
+      "id": "ticket-free-self-service",
+      "owner": "tickets",
+      "kind": "command",
+      "automation": "test:ticket-self-service"
+    },
+    {
+      "id": "ticket-free-cancellation-atomic",
+      "owner": "tickets",
+      "kind": "command",
+      "automation": "test:ticket-cancellation-sql"
     }
   ],
   "releaseCandidateManual": [

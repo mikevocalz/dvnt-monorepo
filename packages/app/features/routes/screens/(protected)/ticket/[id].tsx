@@ -37,6 +37,7 @@ import {
 import { qk } from "@dvnt/app/lib/query/keys";
 import { ticketPath } from "@dvnt/app/lib/tickets/ticket-identity";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { getTicketSelfServiceAction, ticketSelfServiceCopy } from "@dvnt/app/lib/tickets/self-service-action";
 import {
   TicketHeroCard,
   TicketQRCode,
@@ -238,51 +239,56 @@ function ViewTicketScreenContent() {
     eventId,
   ]);
 
-  // Only show refund if event starts MORE than 24 hours from now
-  const refundEligible = React.useMemo(() => {
-    if (!dbTicket?.event_date) return false;
-    const msUntilEvent = new Date(dbTicket.event_date).getTime() - Date.now();
-    return msUntilEvent > 24 * 60 * 60 * 1000;
-  }, [dbTicket?.event_date]);
+  // Server eligibility includes original buyer, actual paid amount and policy.
+  const selfServiceAction = getTicketSelfServiceAction(dbTicket);
+  const actionCopy = ticketSelfServiceCopy(selfServiceAction, dbTicket?.category);
+  const actionIdentity = `${viewerId}:${dbTicket?.id ?? ""}`;
+  const currentActionIdentity = React.useRef(actionIdentity);
+  currentActionIdentity.current = actionIdentity;
+  const actionInFlight = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    currentActionIdentity.current = actionIdentity;
+    setRefundStep("idle");
+    return () => { currentActionIdentity.current = ""; };
+  }, [actionIdentity, setRefundStep]);
 
   const handleRefund = React.useCallback(async () => {
-    if (!dbTicket?.id || refundStep === "loading") return;
+    const action = getTicketSelfServiceAction(dbTicket);
+    if (!dbTicket?.id || !action || actionInFlight.current.has(actionIdentity)) return;
+    actionInFlight.current.add(actionIdentity);
     setRefundStep("loading");
-    const res =
-      dbTicket.cart_id && dbTicket.cart_line_item_id
-        ? await ticketsApi.requestLineRefund({
-            cartId: dbTicket.cart_id,
-            lineItemId: dbTicket.cart_line_item_id,
-          })
-        : await ticketsApi.requestRefund(dbTicket.id);
-    if ("error" in res && res.error) {
+    const copy = ticketSelfServiceCopy(action, dbTicket.category);
+    try {
+      const res = action === "cancel_free"
+        ? await ticketsApi.cancelFreeTicket(dbTicket.id)
+        : action === "refund_line"
+          ? await ticketsApi.requestLineRefund({
+              cartId: dbTicket.cart_id!,
+              lineItemId: dbTicket.cart_line_item_id!,
+            })
+          : await ticketsApi.requestRefund(dbTicket.id);
+      if (!res || typeof res !== "object" || !("ok" in res) || res.ok !== true || ("error" in res && res.error)) {
+        throw new Error(res && typeof res === "object" && "error" in res && res.error ? res.error : "The action could not be confirmed. Please try again.");
+      }
+      // A completed request must not dismiss or toast over another ticket/account.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.tickets.forEvent(viewerId, eventId) }),
+        queryClient.invalidateQueries({ queryKey: qk.tickets.mine(viewerId) }),
+        queryClient.invalidateQueries({ queryKey: ["events"] }),
+      ]);
+      if (currentActionIdentity.current !== actionIdentity) return;
+      showToast("success", copy.successTitle, ("message" in res && res.message) || copy.successMessage);
+      setRefundStep("idle");
+      router.back();
+    } catch (err: any) {
+      if (currentActionIdentity.current !== actionIdentity) return;
       setRefundStep("confirm");
-      showToast("error", "Refund failed", res.error);
-      return;
+      showToast("error", copy.errorTitle, err?.message || "Try again in a moment.");
+    } finally {
+      actionInFlight.current.delete(actionIdentity);
     }
-    const refundMessage = "message" in res ? res.message : undefined;
-    showToast(
-      "success",
-      "Ticket cancelled",
-      refundMessage || "Refund processed successfully",
-    );
-    await queryClient.invalidateQueries({
-      queryKey: qk.tickets.forEvent(viewerId, eventId),
-    });
-    await queryClient.invalidateQueries({
-      queryKey: qk.tickets.mine(viewerId),
-    });
-    router.back();
-  }, [
-    dbTicket?.cart_id,
-    dbTicket?.cart_line_item_id,
-    dbTicket?.id,
-    refundStep,
-    showToast,
-    queryClient,
-    eventId,
-    router,
-  ]);
+  }, [dbTicket, actionIdentity, viewerId, setRefundStep, showToast, queryClient, eventId, router]);
+
 
   // ── Wallet pass refresh detection ──
   // Detect if ticket was upgraded after wallet pass was created
@@ -851,8 +857,8 @@ function ViewTicketScreenContent() {
           {/* ── 3. ACCESS DETAILS ── */}
           <TicketAccessDetails ticket={ticket} />
 
-          {/* ── Danger Zone: Refund (only if >24h before event) ── */}
-          {ticket.status === "valid" && dbTicket && refundEligible && (
+          {/* ── Danger Zone: server-authorized cancellation or refund ── */}
+          {ticket.status === "valid" && dbTicket && selfServiceAction && (
             <View style={styles.dangerZone}>
               {refundStep === "idle" && (
                 <Pressable
@@ -863,7 +869,7 @@ function ViewTicketScreenContent() {
                   ]}
                 >
                   <TicketX size={15} color="#ef4444" />
-                  <Text style={styles.refundButtonText}>Request Refund</Text>
+                  <Text style={styles.refundButtonText}>{actionCopy.label}</Text>
                 </Pressable>
               )}
               {refundStep === "confirm" && (
@@ -874,14 +880,10 @@ function ViewTicketScreenContent() {
                   style={styles.refundConfirmCard}
                 >
                   <Text style={styles.refundConfirmTitle}>
-                    Cancel this ticket?
+                    {actionCopy.title}
                   </Text>
                   <Text style={styles.refundConfirmSub}>
-                    {dbTicket.cart_id && dbTicket.cart_line_item_id
-                      ? "This cancels every ticket or pass from this cart line. Other items from the same checkout stay active."
-                      : (dbTicket.purchase_amount_cents ?? 0) > 0
-                        ? "A refund will be issued to your original payment method. Funds typically appear within 5–10 business days."
-                        : "Your free ticket will be cancelled. This cannot be undone."}
+                    {actionCopy.body}
                   </Text>
                   <View style={styles.refundConfirmActions}>
                     <Pressable
@@ -903,7 +905,7 @@ function ViewTicketScreenContent() {
                 <View style={styles.refundLoadingRow}>
                   <ActivityIndicator size="small" color="#ef4444" />
                   <Text style={styles.refundLoadingText}>
-                    Processing refund...
+                    {actionCopy.loading}
                   </Text>
                 </View>
               )}

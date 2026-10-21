@@ -1,0 +1,41 @@
+name: Ticket self-service cancellation
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
+      - 'packages/app/features/events/ticket-detail.web.tsx'
+      - 'packages/app/features/routes/screens/(protected)/ticket/**'
+      - 'packages/app/lib/api/tickets.ts'
+      - 'packages/app/lib/api/ticket-cancel-contract.test.ts'
+      - 'packages/app/lib/tickets/**'
+      - 'scripts/test-ticket-self-service-dom.cjs'
+      - 'package.json'
+      - '.github/workflows/ticket-self-service.yml'
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cancellation-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated offline test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/ticket-actions" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.28.1 typescript@5.9.2 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 happy-dom@20.10.3 zod@4.6.5 pg@8.21.0
+      - name: Mounted web/native actions and real endpoint contracts
+        env:
+          NODE_PATH: ${{ runner.temp }}/ticket-actions/node_modules
+        run: npm run test:ticket-self-service
+      - name: Real PostgreSQL concurrency, lock contention and transaction rollback
+        env:
+          NODE_PATH: ${{ runner.temp }}/ticket-actions/node_modules
+        # A disposable local DB only, no project secrets and no skip fallback.
+        run: npm run test:ticket-cancellation-sql
