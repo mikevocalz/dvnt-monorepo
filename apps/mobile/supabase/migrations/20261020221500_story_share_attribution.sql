@@ -131,9 +131,11 @@ DECLARE
   v_message_id public.messages.id%TYPE;
   v_sender_avatar text;
 BEGIN
+  -- Legacy story audience policies are not a restricted-audience boundary.
+  -- Keep new attributed shares public-only without changing ordinary stories.
   IF NULLIF(p_auth_id, '') IS NULL OR p_operation_id IS NULL OR p_source_id IS NULL OR p_source_id <= 0
      OR p_source_type IS NULL OR p_source_type NOT IN ('post', 'event')
-     OR p_visibility IS NULL OR p_visibility NOT IN ('public', 'followers', 'close_friends') THEN
+     OR p_visibility IS DISTINCT FROM 'public' THEN
     RETURN jsonb_build_object('ok', false, 'code', 'validation_error', 'message', 'Invalid story share');
   END IF;
   SELECT * INTO v_sender FROM public.users WHERE auth_id = p_auth_id;

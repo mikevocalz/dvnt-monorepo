@@ -54,6 +54,25 @@ test('invalid identifiers/body/UUID/visibility fail before DB writes',async()=>{
   }
 });
 
+test('new shared stories allow only public visibility, refusing restricted audiences before RPC or writes',async()=>{
+  for(const type of ['post','event']) {
+    for(const visibility of ['followers','close_friends','private',null]) {
+      const h=createHarness();
+      const result=await h.call({sharedSource:{type,id:type==='post'?'101':'201'},operationId:op,visibility});
+      assert.equal(result.ok,false);
+      assert.equal(result.error.code,'validation_error');
+      assert.equal(result.error.message,'Shared stories must be public');
+      assert.deepEqual(h.state.rpc,[],'publication/DM/receipt transaction must never run');
+      assert.deepEqual(h.state.writes,[]);
+    }
+    for(const visibility of [undefined,'public']) {
+      const h=createHarness();
+      assert.equal((await h.call({sharedSource:{type,id:type==='post'?'101':'201'},operationId:op,visibility})).ok,true);
+      assert.equal(h.state.rpc[0].args.p_visibility,'public');
+    }
+  }
+});
+
 test('auth and verified-admission remain mandatory; RPC failures return failure without fallback publish/DM',async()=>{
   const body={sharedSource:{type:'post',id:'101'},operationId:op};
   for(const options of [{auth:null},{admission:'blocked'}]){const h=createHarness(options);assert.equal((await h.call(body)).ok,false);assert.equal(h.state.rpc.length,0)}
@@ -65,10 +84,13 @@ test('auth and verified-admission remain mandatory; RPC failures return failure 
 
 test('normal uploaded image/video story paths and overlays remain intact',async()=>{
   for(const mediaType of ['image','video']){
-    const h=createHarness();
-    const result=await h.call({mediaUrl:`https://fixture.invalid/story.${mediaType==='image'?'jpg':'mp4'}`,mediaType,storyOverlays:[{type:'text',content:'Original overlay',x:.5,y:.5}]});
-    assert.equal(result.ok,true);assert.equal(result.data.story.mediaType,mediaType);assert.equal(h.state.rpc.length,0);
-    assert.deepEqual(h.state.writes.map(x=>x.table),['media','stories','stories_stickers']);
+    for(const visibility of ['public','followers','close_friends']) {
+      const h=createHarness();
+      const result=await h.call({mediaUrl:`https://fixture.invalid/story.${mediaType==='image'?'jpg':'mp4'}`,mediaType,visibility,storyOverlays:[{type:'text',content:'Original overlay',x:.5,y:.5}]});
+      assert.equal(result.ok,true);assert.equal(result.data.story.mediaType,mediaType);assert.equal(h.state.rpc.length,0);
+      assert.deepEqual(h.state.writes.map(x=>x.table),['media','stories','stories_stickers']);
+      assert.equal(h.state.writes.find(x=>x.table==='stories').payload.visibility,visibility,'ordinary story audience stays unchanged');
+    }
   }
 });
 

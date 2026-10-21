@@ -52,13 +52,13 @@ test('migration reapplies; post and event persist canonical attribution and a si
   } finally { await db.close(); }
 });
 
-test('same operation and concurrent queued retries return identical result; changed source or audience conflicts', async () => {
+test('same operation and concurrent queued retries return identical result; changed source conflicts and nonpublic audience fails validation', async () => {
   const db = await fixture();
   try {
     const values = await Promise.all(Array.from({length:8},()=>share(db)));
     values.forEach(value=>assert.deepEqual(value,values[0]));
     assert.equal((await share(db,{id:103})).code,'idempotency_conflict');
-    assert.equal((await share(db,{visibility:'followers'})).code,'idempotency_conflict');
+    assert.equal((await share(db,{visibility:'followers'})).code,'validation_error');
     assert.deepEqual(await counts(db),{stories:1,messages:1,media:1,conversations:1,requests:1});
     await share(db,{id:103,op:uuid(2)});
     assert.equal((await counts(db)).conversations,1,'new share uses same existing two-person DM');
@@ -67,6 +67,36 @@ test('same operation and concurrent queued retries return identical result; chan
     assert.equal((await share(db)).story.sharedSource.author.username,'renamed-author','replay routes to the current canonical handle');
     assert.equal((await counts(db)).messages,2);
 
+  } finally { await db.close(); }
+});
+
+test('new attributed shares reject restricted audiences before any publication, DM or receipt writes', async () => {
+  const db = await fixture();
+  try {
+    const empty = {stories:0,messages:0,media:0,conversations:0,requests:0};
+    for (const source of [{type:'post',id:101},{type:'event',id:201}]) {
+      for (const visibility of ['followers','close_friends','private',null]) {
+        const result = await share(db,{...source,visibility});
+        assert.equal(result.ok,false,`${source.type}: ${visibility}`);
+        assert.equal(result.code,'validation_error');
+        assert.deepEqual(await counts(db),empty,'rejected audiences must not leave content, DMs, media, conversations or receipts');
+        assert.equal((await db.query('SELECT count(*)::int AS n FROM conversations_rels')).rows[0].n,0);
+      }
+    }
+    const published = await share(db);
+    assert.equal(published.ok,true,'a rejected operation can still be used for a valid public share');
+    assert.equal(published.story.visibility,'public');
+    assert.deepEqual(await counts(db),{stories:1,messages:1,media:1,conversations:1,requests:1});
+    for (const visibility of ['followers','close_friends']) {
+      assert.equal((await share(db,{visibility})).code,'validation_error');
+      assert.deepEqual(await counts(db),{stories:1,messages:1,media:1,conversations:1,requests:1},'retry cannot change the audience or create another notification');
+    }
+    // The new share gate does not rewrite legacy ordinary stories or policies.
+    for (const visibility of ['followers','close_friends']) {
+      const {rows:[ordinary]} = await db.query("INSERT INTO stories(author_id,expires_at,visibility) VALUES('fixture-sharer',now()+interval '1 day',$1) RETURNING visibility,shared_source",[visibility]);
+      assert.equal(ordinary.visibility,visibility);
+      assert.equal(ordinary.shared_source,null);
+    }
   } finally { await db.close(); }
 });
 

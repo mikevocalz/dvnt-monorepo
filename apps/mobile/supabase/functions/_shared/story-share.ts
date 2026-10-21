@@ -3,7 +3,7 @@ export interface StoryShareInput {
   sharedSource: { type: "post" | "event"; id: string };
   operationId: string;
   expectedViewerId?: string;
-  visibility: "public" | "followers" | "close_friends";
+  visibility: "public";
 }
 
 export type StoryShareValidation =
@@ -30,9 +30,11 @@ export function validateStoryShare(body: Record<string, unknown>): StoryShareVal
       !/^[1-9]\d{0,14}$/.test(body.expectedViewerId))) {
     return { ok: false, code: "validation_error", message: "expectedViewerId must be a positive user ID" };
   }
-  const visibility = body.visibility ?? "public";
-  if (visibility !== "public" && visibility !== "followers" && visibility !== "close_friends") {
-    return { ok: false, code: "validation_error", message: "Invalid story visibility" };
+  const visibility = body.visibility === undefined ? "public" : body.visibility;
+  // Legacy story audience policies do not enforce restricted audiences on the
+  // server. Until they do, new attributed shares must fail closed to public.
+  if (visibility !== "public") {
+    return { ok: false, code: "validation_error", message: "Shared stories must be public" };
   }
   return { ok: true, value: {
     sharedSource: { type, id }, operationId: body.operationId.toLowerCase(),

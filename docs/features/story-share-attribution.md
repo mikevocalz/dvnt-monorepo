@@ -20,6 +20,15 @@ select the acting account. The Better Auth session selects the sender, and the
 existing verified-admission gate still applies. The server ignores any source
 media, source author, title, overlays or message metadata supplied by the client.
 
+New attributed shares are public-only. Omitted visibility defaults to `public`;
+`followers`, `close_friends`, `private` and other nonpublic values are rejected
+by both edge validation and the publication RPC before any story, media,
+conversation, DM or operation receipt is written. A nonpublic retry is also
+rejected, never converted to public or used to recover an existing share.
+Legacy ordinary-story audience options and policies are unchanged. Restricted
+share audiences must not be enabled until server-side story-audience RLS is
+enforced and tested; client filtering is not that authorization boundary.
+
 Success returns `data.story` in the normal create-story shape, plus:
 
 - `story.sharedSource`: `{ type, id, author: { id, username, name, avatar }, title?, caption? }`.
@@ -122,8 +131,9 @@ client manufacture/modification of attributed stories and this server-owned
 message type even if legacy permissive client grants are present.
 
 A sender-scoped advisory lock serializes operations and the 30-new-shares/minute
-limit. An operation reused for a different source/audience, or already used for
-an ordinary message, returns `idempotency_conflict`. A lost acknowledgement
+limit. An operation reused for a different source, or already used for an
+ordinary message, returns `idempotency_conflict`; nonpublic audiences always
+return `validation_error`. A lost acknowledgement
 returns the same story/message IDs on retry. Deleted/expired shares are never
 resurrected; a newly unavailable source is not returned into the client cache.
 Concurrent shares to the same author use an exact two-person conversation. A
@@ -155,7 +165,8 @@ The SQL suite executes the real checked-in migration in isolated PGlite
 (PostgreSQL/WASM) against synthetic schema/data. It verifies canonical ownership,
 post/event/text cards, privacy/blocks/moderation, exact membership, rollback on
 injected publication/DM/receipt failures, operation recovery/conflicts, expired/
-deleted retry, client role guards and restrictive reads. PGlite queues parallel
+deleted retry, public-only share rejection without writes, unchanged ordinary
+story audiences, client role guards and restrictive reads. PGlite queues parallel
 calls on its single connection; production multi-connection contention is
 protected by explicit transaction locks and uniqueness constraints, not claimed
 as a multi-backend load test. The edge suite runs the real handlers with isolated
