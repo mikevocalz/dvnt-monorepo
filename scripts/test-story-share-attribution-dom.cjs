@@ -226,7 +226,8 @@ const {
     const group = f.toStoryViewerGroup(reloaded[0]);
     assert.equal(group.segments[0].isSourceCard, true);
     assert.equal(group.segments[0].url, f.SHARED_STORY_BACKDROP);
-    assert.equal(group.segments[1].sharedSource.author.id, "9");
+    assert.deepEqual(group.segments[0].sharedSource, source);
+    assert.deepEqual(group.segments[1].sharedSource, eventSource);
     assert.equal(
       f.parseStorySharedSource({
         ...source,
@@ -240,6 +241,10 @@ const {
         user: { id: "2", username: "viewer", authId: "auth2" },
       }),
     );
+    for (const [storyId, expectedSource] of [["101", source], ["102", eventSource]]) {
+      const playback = await f.storiesApi.getSharedStoryForPlayback(storyId, expectedSource, "2", () => true);
+      assert.deepEqual(playback.sharedSource, expectedSource, "fresh playback preserves every source and author field");
+    }
     await flush(() => f.open(reloaded));
     const attribution = () =>
       document.querySelector('[aria-label="Shared post by @original"]');
@@ -249,32 +254,27 @@ const {
     assert.ok(attribution().closest("[data-story-footer]"));
     assert.equal(attribution().querySelector('a[href="/feed/post/11"]').textContent.trim(), "View Post");
     assert.equal(document.querySelectorAll('button[aria-label^="React "]').length, 7);
-    assert.match(attribution().textContent, /Original Author/);
-    const profile = attribution().querySelector("a");
-    assert.equal(profile.getAttribute("href"), "/profile/original");
-    assert.equal(
-      profile.querySelector("img").getAttribute("src"),
-      source.author.avatar,
-    );
-    await flush(() =>
-      profile.querySelector("img").dispatchEvent(new window.Event("error")),
-    );
-    assert.equal(profile.querySelector("img").style.visibility, "hidden");
-    await flush(() => profile.click());
-    assert.equal(global.__routes.at(-1), "/profile/original");
-    assert.equal(global.__advances, 0);
-    assert.equal(f.useStoryViewerStore.getState().navigationClose, true);
-    await flush(() => f.open(reloaded));
+    assert.equal(attribution().textContent.trim(), "View Post", "only the source action is visible to another viewer");
+    assert.equal(attribution().querySelectorAll("a, button").length, 1);
+    assert.equal(attribution().querySelector("img"), null, "no footer avatar");
+    assert.equal(attribution().querySelector('a[href^="/profile/"]'), null, "no third action or hidden profile link");
+    assert.equal(attribution().matches("[data-story-source-actions]"), true);
+    assert.doesNotMatch(attribution().className, /rounded|border|bg-|backdrop|p-3/, "actions have no surrounding card presentation");
+    await flush(() => attribution().click());
+    assert.equal(global.__advances, 0, "empty footer space does not advance the story");
     await flush(() =>
       document.querySelector('a[href="/feed/post/11"]').click(),
     );
     assert.equal(global.__routes.at(-1), "/feed/post/11");
+    assert.equal(global.__advances, 0);
+    assert.equal(f.useStoryViewerStore.getState().navigationClose, true);
     await flush(() => f.open(reloaded));
     await flush(() => global.__player.onStoryChange(1));
     assert.ok(
       document.querySelector('[aria-label="Shared event by @original"]'),
     );
     assert.equal(document.querySelector('a[href="/e/22"]').textContent.trim(), "View Event");
+    assert.equal(document.querySelector('[data-story-source-actions]').textContent.trim(), "View Event", "event footer has no author or title row");
     assert.equal(document.querySelector('[aria-label="Shared event content"]'), null, "media events do not duplicate their flyer with a text card");
     await flush(() => document.querySelector('a[href="/e/22"]').click());
     assert.equal(global.__routes.at(-1), "/e/22");
@@ -286,7 +286,10 @@ const {
     await flush(() => f.open(reloaded));
     const viewers = () => document.querySelector('button[aria-label="See who viewed this story"]');
     assert.ok(viewers());
-    assert.equal(viewers().parentElement, attribution().querySelector('[data-story-source-actions]'));
+    assert.equal(viewers().parentElement, attribution());
+    assert.equal(attribution().querySelectorAll("a, button").length, 2, "owner has exactly two source-footer actions");
+    assert.equal(attribution().firstElementChild, viewers());
+    assert.equal(attribution().textContent.replace(/\s+/g, " ").trim(), "ViewersView Post");
     assert.equal(viewers().nextElementSibling.textContent.trim(), "View Post");
     assert.equal(document.querySelector('input[aria-label^="Reply to "]'), null);
     await flush(() => viewers().click());
@@ -329,7 +332,11 @@ const {
     );
     await flush(() => f.open(renamed));
     assert.equal(document.querySelector('a[href="/profile/original"]'), null);
-    assert.ok(document.querySelector('a[href="/profile/renamed"]'));
+    assert.equal(document.querySelector('a[href="/profile/renamed"]'), null);
+    assert.equal(document.querySelector('[data-story-source-actions]').getAttribute("aria-label"), "Shared post by @renamed", "fresh source identity remains accessible without a visible profile row");
+    assert.equal(renamed[0].items[0].sharedSource.author.id, "9");
+    assert.equal(renamed[0].items[0].sharedSource.author.name, "Updated Author");
+    assert.equal(renamed[0].items[0].sharedSource.author.avatar, source.author.avatar);
     global.__storyDb = (table) => {
       const result = originalDb(table);
       return table === "users"
@@ -632,7 +639,7 @@ const {
       "no client DM or conversation creation",
     );
     console.log(
-      "PASS story attribution DOM: real event action eligibility, source-only payload, single-flight, canonical cache, failed/retried UUID, reload/text media, bottom attribution, exact CTA labels, owner/guest viewer eligibility, seven reactions, per-segment author/profile/source links, fresh actor-bound playback, no cached media flash, revocation/expiry, account epochs and unmount isolation",
+      "PASS story attribution DOM: real event action eligibility, source-only payload, single-flight, canonical cache, failed/retried UUID, reload/text media, minimal footer actions, exact CTA labels, owner/guest viewer eligibility, seven reactions, preserved per-segment author metadata/source links, fresh actor-bound playback, no cached media flash, revocation/expiry, account epochs and unmount isolation",
     );
   } finally {
     if (app) await f.act(async () => app.unmount());
