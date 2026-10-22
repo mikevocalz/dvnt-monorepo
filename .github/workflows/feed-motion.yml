@@ -50,7 +50,8 @@ permissions:
 jobs:
   real-feed-playback:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # Allow slow hosted Ubuntu mirrors without skipping any playback assertions.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,11 +60,12 @@ jobs:
         with:
           node-version: '24'
       - name: Install isolated media test dependencies
+        timeout-minutes: 30
         run: |
           npm install --prefix "$RUNNER_TEMP/feed-motion" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.0.11 fake-indexeddb@6.2.6 zod@4.6.5 lucide-react@1.30.0 @electric-sql/pglite@0.3.15 @supabase/supabase-js@2.112.2
           npm install --prefix "$RUNNER_TEMP/image-manipulator" --legacy-peer-deps --ignore-scripts --no-audit --no-fund --no-save expo-image-manipulator@57.0.18
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=2 -o Acquire::http::Timeout=30 ffmpeg
           node "$RUNNER_TEMP/feed-motion/node_modules/playwright/cli.js" install --with-deps chrome
       - name: Playback policy, native component lifecycle and paired upload
         env:
