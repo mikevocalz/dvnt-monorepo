@@ -9,20 +9,18 @@
  *
  * Conventions: NativeWind interop is OFF, so Tailwind className lives only on
  * raw DOM tags; the RN-based ThreadedComment renders via react-native-web. The
- * comment list is a TanStack Virtual list (never FlatList on web). Composer is
- * pinned above the safe-area bottom like Instagram, revealed on demand exactly
- * like post-detail.web.
+ * comment list is a TanStack Virtual list (never FlatList on web). Composer stays in document flow below the list, with safe-area and
+ * navigation clearance, revealed on demand like post-detail.web.
  */
 "use client";
 
 import { useRef } from "react";
 import { useParams, useRouter } from "solito/navigation";
-import { Send, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useComments, useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
-import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
-import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useComments } from "@dvnt/app/lib/hooks/use-comments";
 import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
+import { WebCommentComposer } from "./ui/comment-composer.web";
 import { ThreadedComment } from "./ui/threaded-comment";
 
 const ESTIMATED_ROW = 140;
@@ -100,103 +98,6 @@ function CommentList({ postId }: { postId: string }) {
   );
 }
 
-/**
- * Composer pinned above the bottom safe-area (Instagram-style). Hidden until
- * the user taps a Reply (which calls setReplyTo → opens the composer), mirroring
- * the reveal-on-demand bar in post-detail.web. Draft + reply target live in the
- * shared comment-draft-store (Zustand, never useState).
- */
-function CommentComposer({ postId }: { postId: string }) {
-  const open = useCommentDraftStore((s) => s.open);
-  const text = useCommentDraftStore((s) => s.text);
-  const replyTo = useCommentDraftStore((s) => s.replyTo);
-  const setText = useCommentDraftStore((s) => s.setText);
-  const openComposer = useCommentDraftStore((s) => s.openComposer);
-  const reset = useCommentDraftStore((s) => s.reset);
-  const user = useAuthStore((s) => s.user);
-  const createComment = useCreateComment();
-  const guardVerified = useVerifiedGate();
-
-  // Verified-only: commenting needs a verified account. The draft stays put.
-  const submit = () => {
-    if (text.trim()) guardVerified("comment", submitNow);
-  };
-
-  const submitNow = () => {
-    const body = text.trim();
-    if (!body) return;
-    createComment.mutate({
-      post: postId,
-      text: body,
-      parent: replyTo?.commentId,
-      replyToCommentId: replyTo?.commentId,
-      authorUsername: user?.username,
-      authorId: user?.id,
-    });
-    reset();
-  };
-
-  // Closed: a single "Add a comment…" affordance pinned to the bottom that
-  // reveals the full input on tap.
-  if (!open) {
-    return (
-      <div
-        className="sticky bottom-0 z-20 mx-auto w-full max-w-2xl px-3"
-        style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 12px + var(--dvnt-tabbar-clearance))" }}
-      >
-        <button
-          onClick={() => openComposer()}
-          className="w-full rounded-2xl border border-white/12 bg-[#0b0d16]/95 px-4 py-3 text-left text-[15px] text-white/45 backdrop-blur"
-        >
-          Add a comment…
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="sticky bottom-0 z-20 mx-auto w-full max-w-2xl px-3"
-      style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 12px + var(--dvnt-tabbar-clearance))" }}
-    >
-      <div className="flex items-center justify-between rounded-t-xl bg-white/5 px-3 py-1.5 text-xs text-white/55">
-        <span>
-          {replyTo ? `Replying to @${replyTo.username}` : "Add a comment"}
-        </span>
-        <button onClick={reset} className="font-medium" aria-label="Close composer">
-          Close
-        </button>
-      </div>
-      <div className="flex items-center gap-2 rounded-b-2xl border border-white/12 bg-[#0b0d16]/95 px-3 py-2 backdrop-blur">
-        <input
-          autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={
-            replyTo ? `Reply to @${replyTo.username}…` : "Add a comment…"
-          }
-          aria-label={replyTo ? `Reply to ${replyTo.username}` : "Add a comment"}
-          className="flex-1 bg-transparent text-[15px] text-white outline-none placeholder:text-white/40"
-        />
-        <button
-          onClick={submit}
-          disabled={!text.trim()}
-          aria-label="Post comment"
-          className="text-[#3FDCFF] disabled:opacity-35"
-        >
-          <Send size={20} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function CommentsScreen() {
   const params = useParams();
   const router = useRouter();
@@ -232,7 +133,7 @@ export function CommentsScreen() {
           <CommentList postId={postId} />
         )}
 
-        <CommentComposer postId={postId} />
+        <WebCommentComposer postId={postId} />
       </main>
     </div>
   );

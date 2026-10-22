@@ -1,0 +1,41 @@
+name: Web comment composer
+on:
+  pull_request:
+    paths:
+      - 'packages/app/features/comments/**'
+      - 'packages/app/features/post/post-detail.web.tsx'
+      - 'packages/app/lib/stores/comment-draft-store.ts'
+      - 'scripts/test-comment-composer-browser.cjs'
+      - '.github/workflows/comment-composer.yml'
+permissions:
+  contents: read
+jobs:
+  comment-composer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated browser tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/comment-tests" --no-package-lock --no-save esbuild@0.28.2 react@19.2.3 react-dom@19.2.3 @tanstack/react-query@5.104.2 zustand@5.0.15 playwright@1.64.1 tailwindcss@4.3.3 react-native-web@0.21.2 lucide-react@1.30.0 @tanstack/react-virtual@3.14.2
+          "$RUNNER_TEMP/comment-tests/node_modules/.bin/playwright" install --with-deps ${{ matrix.browser }}
+      - name: Test composer without live data
+        env:
+          NODE_PATH: ${{ runner.temp }}/comment-tests/node_modules
+          COMMENT_BROWSER: ${{ matrix.browser }}
+          COMMENT_EVIDENCE_DIR: ${{ runner.temp }}/comment-evidence
+        run: node scripts/test-comment-composer-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: comment-composer-evidence-${{ matrix.browser }}
+          path: ${{ runner.temp }}/comment-evidence/*.png
