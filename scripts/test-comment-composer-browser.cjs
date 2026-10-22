@@ -78,7 +78,7 @@ const mocks = {
   assert.equal(await page.getByRole('button',{name:'Post comment',exact:true}).isDisabled(),true);
   await input.fill('   ');assert.equal(await page.getByRole('button',{name:'Post comment',exact:true}).isDisabled(),true);
   await input.fill('First line');await input.press('Shift+Enter');await input.type('Second line');assert.equal(await input.inputValue(),'First line\nSecond line');
-  await input.press('Escape');await input.waitFor({state:'detached'});assert.equal(await page.locator('#comment-trigger').evaluate(el=>el===document.activeElement),true);
+  await input.press('Escape');await input.waitFor({state:'detached'});await page.waitForFunction(()=>document.activeElement===document.querySelector('#comment-trigger'));
   await page.getByText('Reply',{exact:true}).click();const reply=page.getByRole('textbox',{name:'Reply to deviantevents',exact:true});await reply.waitFor();
   await page.screenshot({path:path.join(dir,`reply-${width}.png`),fullPage:true});
   await reply.fill('Keep my draft');await page.getByRole('button',{name:'Cancel reply',exact:true}).click();await input.waitFor();assert.equal(await input.inputValue(),'Keep my draft');

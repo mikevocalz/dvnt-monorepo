@@ -34,8 +34,21 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
   }, [context]);
 
   useEffect(() => {
+    if (open) return;
+    // Safari does not focus buttons on pointer click. Remember the actual opener
+    // before it changes the store, rather than restoring focus to document.body.
+    const rememberOpener = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) return;
+      const target = event.target.closest('button, [role="button"], [tabindex]');
+      if (target instanceof HTMLElement) returnFocus.current = target;
+    };
+    document.addEventListener("pointerdown", rememberOpener, true);
+    return () => document.removeEventListener("pointerdown", rememberOpener, true);
+  }, [open]);
+
+  useEffect(() => {
     if (!open) { wasOpen.current = false; return; }
-    if (!wasOpen.current && document.activeElement instanceof HTMLElement && document.activeElement !== inputRef.current) {
+    if (!wasOpen.current && document.activeElement instanceof HTMLElement && document.activeElement !== document.body && document.activeElement !== inputRef.current) {
       returnFocus.current = document.activeElement;
     }
     wasOpen.current = true;
@@ -77,13 +90,14 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
     });
   };
 
-  if (!open && hideWhenClosed) return null;
+  const bottomPadding = "calc(env(safe-area-inset-bottom, 0px) + 16px + var(--dvnt-tabbar-clearance, 0px))";
+  if (!open && hideWhenClosed) return <div aria-hidden="true" style={{ height: bottomPadding }} />;
   return (
     <section
       ref={composerRef}
       aria-label="Comment composer"
       className="relative mx-auto w-full max-w-2xl shrink-0 px-3 pt-3"
-      style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px + var(--dvnt-tabbar-clearance, 0px))" }}
+      style={{ paddingBottom: bottomPadding }}
     >
       {!open ? (
         <button ref={triggerRef} type="button" onClick={() => openComposer()} className="w-full rounded-2xl border border-white/12 bg-[#0b0d16] px-4 py-3 text-left text-base text-white/55">

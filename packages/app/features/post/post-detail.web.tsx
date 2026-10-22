@@ -373,9 +373,8 @@ export function PostDetailScreen() {
             </p>
           )}
         </section>
+        <WebCommentComposer postId={id} hideWhenClosed />
       </div>
-
-      <WebCommentComposer postId={id} hideWhenClosed />
       <Lightbox />
 
       {/* ⋯ action menu — kit Drawer (bottom sheet on web). */}
