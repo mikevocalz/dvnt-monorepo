@@ -1,5 +1,6 @@
+import { getSessionLifecycle } from "../auth/session-lifecycle";
 import { storedEventType, eventTypeUpdate } from "@dvnt/app/lib/events/event-type";
-import { supabase } from "../supabase/client";
+import { supabase, getBridgeRequestEpoch } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import {
   requireBetterAuthToken,
@@ -1044,10 +1045,18 @@ export const eventsApi = {
   /**
    * Update event (only host or co-organizer can update)
    */
-  async updateEvent(eventId: string, updates: any) {
+  async updateEvent(eventId: string, updates: any, expected?: { expectedAuthId?: string; expectedSessionEpoch?: number }) {
     try {
+      const epoch = expected?.expectedSessionEpoch ?? getSessionLifecycle().epoch;
       const authId = await getCurrentUserAuthId();
       if (!authId) throw new Error("Not authenticated");
+      const assertIdentity = () => {
+        if (!getSessionLifecycle().ready || getSessionLifecycle().epoch !== epoch ||
+          (expected?.expectedAuthId && expected.expectedAuthId !== authId) || getAuthIdFromStore() !== authId) {
+          throw new Error("Your account changed. Reopen the event before saving.");
+        }
+      };
+      assertIdentity();
 
       // Check if user is host or co-organizer
       const canEdit = await this.canEditEvent(eventId, authId);
@@ -1163,23 +1172,23 @@ export const eventsApi = {
       const publishError = publishAtError(nextPublishAt, nextStart);
       if (publishError) throw new Error(publishError);
 
-      // Ensure the Supabase JWT bridge is attached so PostgREST sees
-      // us as `authenticated` (not `anon`) — RLS on events_update_own
-      // only applies to the authenticated role, and a missing JWT
-      // produces a SILENT zero-row update that previously looked like
-      // a successful save.
-      try {
-        const { ensureSupabaseJwt } = await import("../auth/supabase-jwt");
-        await ensureSupabaseJwt();
-      } catch {
-        // Non-fatal: continue with whatever session the client has.
+      // Never attempt an authenticated write using an unresolved or other-account
+      // bridge. Recheck after async ownership/media work and before dispatch.
+      const { ensureSupabaseJwt } = await import("../auth/supabase-jwt");
+      assertIdentity();
+      if (!await ensureSupabaseJwt(authId)) {
+        throw new Error("We couldn't verify the active account. Your uploads are kept; sign in to the event owner's account and retry.");
       }
+      assertIdentity();
 
       const { data, error } = await supabase
         .from(DB.events.table)
         .update(updateData)
         .eq(DB.events.id, parseInt(eventId))
-        .select();
+        .select()
+        .setHeader("x-dvnt-bridge-epoch", getBridgeRequestEpoch());
+
+      assertIdentity();
 
       if (error) throw error;
       if (!Array.isArray(data) || data.length === 0) {
@@ -1187,7 +1196,7 @@ export const eventsApi = {
         // hard failure so the UI rolls back the optimistic patch and
         // shows the user a real error instead of a silent no-op.
         throw new Error(
-          "Save blocked. Sign out and back in, then try again — your session may have expired.",
+          "Save blocked: the active account could not update this event. Check that you are signed in as its owner or an editor, then retry.",
         );
       }
 

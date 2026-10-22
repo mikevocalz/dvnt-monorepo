@@ -4,6 +4,8 @@ import { storedEventType } from "@dvnt/app/lib/events/event-type";
  */
 
 import { Platform } from "react-native";
+import { getAuthIdFromStore } from "@dvnt/app/lib/auth/identity";
+import { getSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
 import { removeEventFromData } from "../events/event-cache";
 import {
   useQuery,
@@ -403,12 +405,24 @@ export function useUpdateEvent() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ eventId, updates }: { eventId: string; updates: any }) =>
-      eventsApiClient.updateEvent(eventId, updates),
+    mutationFn: ({ eventId, updates, expectedAuthId, expectedSessionEpoch }: {
+      eventId: string; updates: any; expectedAuthId?: string; expectedSessionEpoch?: number;
+    }) => eventsApiClient.updateEvent(eventId, updates, { expectedAuthId, expectedSessionEpoch }),
 
-    onMutate: async ({ eventId, updates }) => {
+    onMutate: async ({ eventId, updates, expectedAuthId, expectedSessionEpoch }) => {
+      const authId = expectedAuthId ?? getAuthIdFromStore();
+      const epoch = expectedSessionEpoch ?? getSessionLifecycle().epoch;
+      // A failed old-account request must never restore its optimistic snapshot
+      // into the new account's freshly cleared query cache (including A → B → A).
+      const isCurrent = () => !!authId && getAuthIdFromStore() === authId &&
+        getSessionLifecycle().ready && getSessionLifecycle().epoch === epoch;
+      const assertCurrent = () => {
+        if (!isCurrent()) throw new Error("Your sign-in changed. Reopen the event before saving.");
+      };
+      assertCurrent();
       const predicate = queryContainsEntity("event", eventId);
       await queryClient.cancelQueries({ predicate });
+      assertCurrent();
       const snapshot = snapshotMatchingQueries(queryClient, predicate);
       // Patch with derived fields included so the event card badge
       // ("26 / JUN") + time pill update instantly along with start_date.
@@ -418,14 +432,15 @@ export function useUpdateEvent() {
         eventId,
         buildEventCachePatch(updates),
       );
-      return { snapshot };
+      return { snapshot, isCurrent };
     },
 
     onError: (_err, _vars, ctx) => {
-      if (ctx?.snapshot) rollback(queryClient, ctx.snapshot);
+      if (ctx?.isCurrent() && ctx.snapshot) rollback(queryClient, ctx.snapshot);
     },
 
-    onSuccess: (result, { eventId }) => {
+    onSuccess: (result, { eventId }, ctx) => {
+      if (!ctx?.isCurrent()) return;
       // Replace optimistic with authoritative server data
       if (result) {
         const r = result as Record<string, unknown>;

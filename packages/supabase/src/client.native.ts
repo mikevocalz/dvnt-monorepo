@@ -1,7 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
-import * as SecureStore from "expo-secure-store";
-import { Platform } from "react-native";
 import { withFunctionObserver } from "./function-observer";
+import { createBridgeTransport } from "./bridge-transport";
 
 export { setFunctionResponseObserver } from "./function-observer";
 
@@ -25,57 +24,19 @@ if (!supabaseAnonKey) {
   );
 }
 
-// Custom storage adapter for expo-secure-store
-const ExpoSecureStoreAdapter = {
-  getItem: (key: string) => {
-    if (Platform.OS === "web") {
-      return typeof window !== "undefined" ? localStorage.getItem(key) : null;
-    }
-    return SecureStore.getItemAsync(key);
-  },
-  setItem: (key: string, value: string) => {
-    if (Platform.OS === "web") {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(key, value);
-      }
-      return;
-    }
-    SecureStore.setItemAsync(key, value);
-  },
-  removeItem: (key: string) => {
-    if (Platform.OS === "web") {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem(key);
-      }
-      return;
-    }
-    SecureStore.deleteItemAsync(key);
-  },
-};
-
+// Better Auth is the session authority on native too. Avoid asynchronous
+// GoTrue setSession: an old setSession completion can resurrect account A.
+const bridge = createBridgeTransport(supabaseAnonKey);
+export function setBridgeAccessToken(token: string | null) {
+  bridge.setToken(token);
+  // Explicit anon reset also supersedes pending Realtime auth callbacks.
+  void supabase.realtime.setAuth(token ?? supabaseAnonKey).catch(() => {
+    console.warn("[Supabase] Realtime credential update failed");
+  });
+}
+export const setBridgeTokenMinter = bridge.setMinter;
+export const getBridgeRequestEpoch = bridge.requestEpoch;
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    storage: ExpoSecureStoreAdapter as any,
-    autoRefreshToken: false,
-    persistSession: false,
-    detectSessionInUrl: false,
-  },
-  // Late-bound so any fetch instrumentation installed after this module still applies.
-  global: { fetch: withFunctionObserver((input, init) => fetch(input, init)) },
+  accessToken: bridge.accessToken,
+  global: { fetch: withFunctionObserver(bridge.guardFetch((input, init) => fetch(input, init))) },
 });
-
-// Native attaches the bridged JWT via supabase.auth.setSession (see the
-// supabase-jwt bridge). This no-op keeps the shared `{ setBridgeAccessToken }`
-// import resolvable on native; only the web client (accessToken option) uses it.
-export function setBridgeAccessToken(_token: string | null): void {}
-
-/**
- * Same no-op reason as above: native has a real GoTrue session, so there is no
- * bridged token to wait for and nothing to mint. Present only so the shared
- * import surface is identical on both platforms.
- */
-export function setBridgeTokenMinter(
-  _fn: (() => Promise<boolean>) | null,
-): void {}
-
-console.log("[Supabase] Client initialized (anon only)");

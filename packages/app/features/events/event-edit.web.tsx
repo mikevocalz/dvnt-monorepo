@@ -42,6 +42,10 @@ import {
   showsGuestList,
 } from "@dvnt/app/lib/events/event-visibility-copy";
 import { useEventGuestStore } from "@dvnt/app/lib/stores/event-guest-store";
+import { getAuthToken } from "@dvnt/app/lib/auth-client";
+import { getAuthIdFromStore } from "@dvnt/app/lib/auth/identity";
+import { getSessionLifecycle, subscribeSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { createEventSaveSession } from "@dvnt/app/lib/events/event-save-session";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
   ticketTypesApi,
@@ -137,6 +141,21 @@ export function EventEditScreen() {
   // Host ownership: only the event's host may edit (mirrors native's auth guard).
   const currentUser = useAuthStore((state) => state.user);
   const s = useEventEditStore();
+  const saveSession = useRef(createEventSaveSession());
+  useEffect(() => {
+    const unsubscribeSession = subscribeSessionLifecycle(() => saveSession.current.invalidate());
+    const unsubscribeAuth = useAuthStore.subscribe((next, previous) => {
+      if (next.user?.id !== previous.user?.id || next.user?.authId !== previous.user?.authId) {
+        saveSession.current.invalidate();
+        useEventEditStore.getState().reset();
+      }
+    });
+    return () => {
+      unsubscribeSession();
+      unsubscribeAuth();
+      saveSession.current.invalidate();
+    };
+  }, [id]);
   const flyerRef = useRef<HTMLInputElement>(null);
   const flyerPreparation = useEventFlyerPreparation(id);
   const [tierLoadFailed, setTierLoadFailed] = useState(false);
@@ -210,8 +229,14 @@ export function EventEditScreen() {
       eventImages: images,
     });
 
+    const hydrationAuthId = getAuthIdFromStore();
+    const hydrationEpoch = getSessionLifecycle().epoch;
+    const hydrationCurrent = () => screenMounted.current &&
+      useEventEditStore.getState().hydratedId === id &&
+      getAuthIdFromStore() === hydrationAuthId && getSessionLifecycle().epoch === hydrationEpoch;
     // Load ticket tiers
     ticketTypesApi.getByEvent(id).then((dbTiers) => {
+      if (!hydrationCurrent()) return;
       const activeTiers = dbTiers.filter(
         (t: any) => t.active !== false && t.is_active !== false,
       );
@@ -254,11 +279,12 @@ export function EventEditScreen() {
       // duplicate row at the default $0 instead of editing the priced one.
       // Say it failed and keep the section empty-but-explained.
       console.error("[EditEvent] Ticket tier load failed:", err);
-      setTierLoadFailed(true);
+      if (hydrationCurrent()) setTierLoadFailed(true);
     });
 
     // Load the add-on catalog (WS-3) — working copy + diff baseline.
     addonsApi.getByEvent(id).then((dbAddons) => {
+      if (!hydrationCurrent()) return;
       useEventEditStore.setState({
         addons: dbAddons.map((a) => addonRecordToDraft(a)),
         originalAddonIds: dbAddons.map((a) => a.id),
@@ -267,7 +293,7 @@ export function EventEditScreen() {
       console.error("[EditEvent] Add-on load failed:", err);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [event, id]);
+  }, [event, id, currentUser?.id, currentUser?.authId]);
 
   const isDirty = s.hydratedId === id && s.title.trim().length > 0;
   const saveBarRef = useRef<HTMLDivElement>(null);
@@ -297,9 +323,23 @@ export function EventEditScreen() {
       return;
     }
 
+    const expectedAuthId = getAuthIdFromStore();
+    const expectedSessionEpoch = getSessionLifecycle().epoch;
+    if (!expectedAuthId || !getSessionLifecycle().ready) {
+      showToast("error", "Sign in required", "Wait for sign-in to finish, then try again.");
+      return;
+    }
+    const saving = saveSession.current.begin(
+      JSON.stringify([id, expectedAuthId, expectedSessionEpoch]),
+      () => screenMounted.current && getAuthIdFromStore() === expectedAuthId &&
+        getSessionLifecycle().epoch === expectedSessionEpoch && getSessionLifecycle().ready,
+    );
     saveLock.current = true;
     setUploadPct(0);
     try {
+      const expectedAuthToken = await getAuthToken();
+      saving.assertCurrent();
+      if (!expectedAuthToken) throw new Error("Please sign in again before saving.");
       const allImages = s.eventImages;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -314,17 +354,16 @@ export function EventEditScreen() {
       // column, and `videoFlyerUrl` was never written at all — so an event's
       // video flyer could not be changed or removed, and the two columns
       // could end up describing different flyers.
-      const uploadIfLocal = async (
-        url: string | null | undefined,
-      ) => {
-        if (!url) return undefined;
-        if (!/^(blob:|data:|file:)/.test(url)) return url;
-        const up = await uploadToServer(url, "events", (p) => setUploadPct(p.percentage));
-        if (!up.success || !up.url) {
-          throw new Error(up.error || "Couldn't upload the flyer. Re-select it and try again.");
-        }
-        return up.url;
-      };
+      const uploadIfLocal = (url: string | null | undefined) =>
+        saving.upload(url, async (localUrl) => {
+          const up = await uploadToServer(localUrl, "events", (p) => {
+            if (saving.current()) setUploadPct(p.percentage);
+          }, { expectedAuthToken });
+          if (!up.success || !up.url) {
+            throw new Error(up.error || "Couldn't upload the flyer. Re-select it and try again.");
+          }
+          return up.url;
+        });
 
       // Upload owns real progress, cancellation and a bounded network timeout.
       const primaryUrl = await uploadIfLocal(s.flyerImage);
@@ -378,14 +417,16 @@ export function EventEditScreen() {
         updateData.images = hostedImages.slice(1).map((url) => ({ url }));
       }
 
+      saving.assertCurrent();
       // 1. Event row update — must finish before navigation
       try {
         await withTimeout(
-          updateEventMutation.mutateAsync({ eventId: id, updates: updateData }),
+          updateEventMutation.mutateAsync({ eventId: id, updates: updateData, expectedAuthId, expectedSessionEpoch }),
           20000,
           "event-update",
         );
       } catch (err: any) {
+        if (!saving.current()) return;
         showToast(
           "error",
           "Save Failed",
@@ -394,8 +435,10 @@ export function EventEditScreen() {
         return;
       }
 
+      saving.assertCurrent();
       // 2. Ticket tier creates / updates / deactivates
       const tierPromises = s.ticketTiers.map(async (tier) => {
+        saving.assertCurrent();
         const priceCents = Math.round(parseFloat(tier.priceDollars || "0") * 100);
         const qty = parseInt(tier.quantity || "100");
         const maxPerUser = parseInt(tier.maxPerOrder || "4");
@@ -461,6 +504,7 @@ export function EventEditScreen() {
       // 3. Add-on catalog creates / updates / removes (WS-3). requiresTierId
       // already holds ticket_types uuids in the edit flow (identity resolve).
       const addonPromises = s.addons.map(async (draft, i) => {
+        saving.assertCurrent();
         const params = draftAddonToCreateParams(draft, id, (tid) => tid, i);
         if (!params) return; // unnamed row — nothing to persist
         if (!draft.dbId) {
@@ -488,6 +532,7 @@ export function EventEditScreen() {
           15000,
           "addon-update",
         );
+        saving.assertCurrent();
         await withTimeout(
           addonsApi.syncVariants(
             draft.dbId,
@@ -535,6 +580,7 @@ export function EventEditScreen() {
           ...addonRemovePromises,
         ]);
       } catch (err: any) {
+        if (!saving.current()) return;
         console.error("[EditEvent] Tier/add-on sync error:", err);
         showToast(
           "warning",
@@ -543,6 +589,7 @@ export function EventEditScreen() {
         );
       }
 
+      saving.assertCurrent();
       showToast("success", "Saved", "Event updated successfully");
       // Go to the event, not `router.back()`. Back is wherever you came from,
       // and this screen is reachable by direct URL and from the host menu — so
@@ -550,11 +597,12 @@ export function EventEditScreen() {
       // worked. The event you edited is the only correct destination.
       if (screenMounted.current) router.push(`/feed/events/${id}`);
     } catch (error: any) {
+      if (!saving.current()) return;
       console.error("[EditEvent] Save error:", error);
       showToast("error", "Error", error?.message || "Failed to save changes");
     } finally {
       saveLock.current = false;
-      setUploadPct(null);
+      if (screenMounted.current) setUploadPct(null);
     }
   };
 

@@ -6,7 +6,12 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }
