@@ -10,8 +10,7 @@
  *
  * Conventions: NativeWind interop is OFF, so Tailwind className lives only on
  * raw DOM tags; the RN-based CommentRow renders via react-native-web. The reply
- * list is a TanStack Virtual list (never FlatList on web). Composer is pinned
- * above the safe-area bottom (Instagram-style), reply target + draft live in the
+ * list is a TanStack Virtual list (never FlatList on web). Composer stays in document flow below the list; reply target + draft live in the
  * shared comment-draft-store (Zustand, never useState). bg #06070d, accent
  * cyan #3FDCFF.
  */

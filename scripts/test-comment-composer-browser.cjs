@@ -7,12 +7,13 @@ const path = require('node:path');
 const http = require('node:http');
 const {build} = require('esbuild');
 const {compile} = require('tailwindcss');
-const {chromium} = require('playwright');
+const {chromium,webkit} = require('playwright');
 const root = path.resolve(__dirname, '..');
 const dir = process.env.COMMENT_EVIDENCE_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'dvnt-comments-'));
 fs.mkdirSync(dir,{recursive:true});
 const mocks = {
- '@dvnt/app/lib/hooks/use-comments': `import {useMutation} from '@tanstack/react-query'; export const useCreateComment=()=>useMutation({mutationFn:async data=>{window.calls.push(data);await new Promise(resolve=>window.release=resolve);if(window.fail)throw Error('offline fixture failure');return {id:'created'};}});`,
+ 'solito/navigation': `export const useParams=()=>({postId:'fixture-post',commentId:'17'});export const useRouter=()=>({back(){},push(){}});`,
+ '@dvnt/app/lib/hooks/use-comments': `import {useMutation} from '@tanstack/react-query'; const comment={id:'17',username:'deviantevents',text:'🔥🔥🔥',timeAgo:'12h',replies:[]};export const useComments=()=>({data:[comment],isLoading:false});export const useCommentThread=()=>({data:{parentComment:comment,replies:[]},isLoading:false});export const useCreateComment=()=>useMutation({mutationFn:async data=>{window.calls.push(data);await new Promise(resolve=>window.release=resolve);if(window.fail)throw Error('offline fixture failure');return {id:'created'};}});`,
  '@dvnt/app/lib/hooks/use-verified-gate': `export const useVerifiedGate=()=> (_action,run)=>{if(window.deferGate)window.finishGate=run;else if(!window.blocked)run()};`,
  '@dvnt/app/lib/stores/auth-store': `export const useAuthStore=s=>s({user:{id:'fixture-author',username:'viewer'}});`,
  '@dvnt/app/lib/hooks/use-comment-like-state': `export const useCommentLikeState=()=>({likesCount:1,hasLiked:false,toggle(){},isPending:false});`,
@@ -28,16 +29,18 @@ const mocks = {
  plugins:[{name:'offline-boundaries',setup(b){b.onResolve({filter:/.*/},args=>mocks[args.path]?{path:args.path,namespace:'mock'}:null);b.onLoad({filter:/.*/,namespace:'mock'},args=>({contents:mocks[args.path],loader:'tsx',resolveDir:root}));}}],
  stdin:{resolveDir:root,loader:'tsx',contents:`
  import React from 'react';import {createRoot} from 'react-dom/client';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
+ import {CommentsScreen} from './packages/app/features/comments/comments.web';import {CommentRepliesScreen} from './packages/app/features/comments/comment-replies.web';
  import {WebCommentComposer} from './packages/app/features/comments/ui/comment-composer.web';
  import {ThreadedComment} from './packages/app/features/comments/ui/threaded-comment';
  import {useCommentDraftStore} from './packages/app/lib/stores/comment-draft-store';
  const client=new QueryClient({defaultOptions:{mutations:{retry:false}}}); const root=createRoot(document.getElementById('root'));
- window.calls=[];window.draft=useCommentDraftStore;
+ window.calls=[];window.draft=useCommentDraftStore;window.cleanup=()=>{root.unmount();client.clear()};
  const comment={id:'17',username:'deviantevents',text:'🔥🔥🔥',timeAgo:'12h',replies:[]};
  window.mount=(parentCommentId,hideWhenClosed=false)=>root.render(<React.StrictMode><QueryClientProvider client={client}><main style={{maxWidth:600,margin:'auto'}}><div style={{height:380,background:'#12141d'}}>Post media fixture</div><button id="comment-trigger" onClick={()=>useCommentDraftStore.getState().openComposer()}>Comment</button><div id="comment-card"><ThreadedComment comment={comment} postId="fixture-post" onReply={(username,commentId)=>useCommentDraftStore.getState().setReplyTo({username,commentId})} onProfilePress={()=>{}}/></div><WebCommentComposer key={parentCommentId||'post'} postId="fixture-post" parentCommentId={parentCommentId} hideWhenClosed={hideWhenClosed}/></main></QueryClientProvider></React.StrictMode>);
+ window.mountScreen=kind=>root.render(<React.StrictMode><QueryClientProvider client={client}>{kind==='comments'?<CommentsScreen/>:<CommentRepliesScreen/>}</QueryClientProvider></React.StrictMode>);
  window.mount(undefined,true);`}});
  const tw=path.dirname(require.resolve('tailwindcss/package.json'));
- const source=fs.readFileSync(path.join(root,'packages/app/features/comments/ui/comment-composer.web.tsx'),'utf8');
+ const source=['ui/comment-composer.web.tsx','comments.web.tsx','comment-replies.web.tsx'].map(file=>fs.readFileSync(path.join(root,'packages/app/features/comments',file),'utf8')).join('\n');
  const compiler=await compile(fs.readFileSync(path.join(tw,'theme.css'),'utf8')+'\n'+fs.readFileSync(path.join(tw,'preflight.css'),'utf8')+'\n@tailwind utilities;');
  fs.writeFileSync(path.join(dir,'style.css'),compiler.build(source.match(/[a-zA-Z0-9_!@#%./:[\](),+*=&<>-]+/g)||[])+'body{background:#02030a;color:white;font-family:Arial;margin:0}');
 
@@ -57,12 +60,13 @@ const mocks = {
    w.draft.getState().openComposer({commentId:'17',username:'deviantevents'});w.draft.getState().setText('Keep across remount');const revision=w.draft.getState().revision;w.draft.getState().bindContext('fixture-post:comments');assert.equal(w.draft.getState().revision,revision);assert.equal(w.draft.getState().text,'Keep across remount');
    w.draft.getState().bindContext('another-post:comments');assert.equal(w.draft.getState().text,'');assert.equal(w.draft.getState().replyTo,null);
    console.log('PASS DOM: actual composer, deferred close guard, duplicate submission, failure/retry, context isolation and StrictMode-safe binding');
-  } finally {w.happyDOM.abort();w.close();}
-  return;
+  } finally {w.cleanup?.();await w.happyDOM.abort();w.close();}
+  process.exit(0);
  }
  server=http.createServer((req,res)=>{const file=req.url==='/app.js'?'app.js':req.url==='/style.css'?'style.css':null;if(file){res.setHeader('Content-Type',file.endsWith('js')?'text/javascript':'text/css');res.end(fs.readFileSync(path.join(dir,file)));}else res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/app.js"></script></body></html>');});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
- browser=await chromium.launch({headless:true,...(fs.existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{}),args:['--no-sandbox']});
+ const engine=process.env.COMMENT_BROWSER==='webkit'?webkit:chromium;
+ browser=await engine.launch({headless:true,...(engine===chromium?{...(fs.existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{}),args:['--no-sandbox']}: {})});
  for (const width of [360,393,1440]) {
   const page=await browser.newPage({viewport:{width,height:852}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort());
@@ -89,7 +93,10 @@ const mocks = {
   // Narrow viewport + keyboard-sized available height + tab-bar clearance.
   await page.evaluate(()=>document.documentElement.style.setProperty('--dvnt-tabbar-clearance','80px'));await page.setViewportSize({width,height:400});await page.getByRole('button',{name:'Add a reply…',exact:true}).click();await threadInput.waitFor();await threadInput.scrollIntoViewIfNeeded();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-  await page.screenshot({path:path.join(dir,`keyboard-${width}.png`),fullPage:true});assert.deepEqual(errors,[]);await page.close();
+  await page.screenshot({path:path.join(dir,`keyboard-${width}.png`),fullPage:true});
+  assert.equal(await page.locator('[aria-label="Comment composer"]').evaluate(el=>parseFloat(getComputedStyle(el).paddingBottom)>=96),true,'safe-area/tab-bar clearance reserves space');
+  for(const screen of ['comments','replies']){await page.evaluate(kind=>mountScreen(kind),screen);await page.getByText('Reply',{exact:true}).first().click();await page.getByRole('textbox',{name:'Reply to deviantevents',exact:true}).waitFor();const bottom=await page.getByText('Reply',{exact:true}).first().evaluate(el=>el.getBoundingClientRect().bottom);const top=await page.locator('[aria-label="Comment composer"]').evaluate(el=>el.getBoundingClientRect().top);assert(top>=bottom,'full-screen composer stays below reply controls');await page.screenshot({path:path.join(dir,`${screen}-${width}.png`),fullPage:true});}
+  assert.deepEqual(errors,[]);await page.close();
  }
  console.log('PASS: actual composer/rows at 360, 393 and 1440px; non-overlap, focus/close, cancel reply, whitespace, multiline, IME, admission, pending, failure/retry, thread payloads and keyboard-sized viewport. Evidence: '+dir);
  } finally {if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));}

@@ -9,9 +9,8 @@
  *
  * Conventions: NativeWind interop is OFF, so Tailwind className lives only on
  * raw DOM tags; the RN-based ThreadedComment renders via react-native-web. The
- * comment list is a TanStack Virtual list (never FlatList on web). Composer is
- * pinned above the safe-area bottom like Instagram, revealed on demand exactly
- * like post-detail.web.
+ * comment list is a TanStack Virtual list (never FlatList on web). Composer stays in document flow below the list, with safe-area and
+ * navigation clearance, revealed on demand like post-detail.web.
  */
 "use client";
 
