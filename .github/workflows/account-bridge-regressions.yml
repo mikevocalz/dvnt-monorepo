@@ -1,0 +1,35 @@
+name: Account bridge regressions
+on:
+  pull_request:
+    paths:
+      - 'packages/app/lib/auth/**'
+      - 'packages/app/lib/auth-client*'
+      - 'packages/app/lib/api/events.ts'
+      - 'packages/app/lib/hooks/use-events.ts'
+      - 'packages/app/lib/events/event-save-session*'
+      - 'packages/app/features/events/event-edit.web.tsx'
+      - 'packages/supabase/**'
+      - 'apps/mobile/lib/auth/supabase-jwt.ts'
+      - 'scripts/test-account-bridge-browser.cjs'
+      - '.github/workflows/account-bridge-regressions.yml'
+permissions:
+  contents: read
+jobs:
+  account-bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Account boundaries, mint races, transport and upload retries
+        run: node --test packages/app/lib/auth/account-token-cache.test.ts packages/app/lib/auth/account-bridge-cache.test.ts packages/app/lib/auth/session-cross-tab.test.ts packages/app/lib/events/event-save-session.test.ts packages/supabase/src/bridge-transport.test.ts
+      - name: Install isolated browser fixtures
+        run: |
+          npm install --prefix "$RUNNER_TEMP/dvnt-bridge" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.25.11 playwright@1.58.2 @supabase/supabase-js@2.112.2
+          node "$RUNNER_TEMP/dvnt-bridge/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Actual event API identity boundaries
+        run: NODE_PATH="$RUNNER_TEMP/dvnt-bridge/node_modules" node --test packages/app/lib/events/event-type-persistence.test.ts packages/app/lib/hooks/event-update-account-cache.test.ts
+      - name: Actual browser and Supabase requests across account changes
+        run: NODE_PATH="$RUNNER_TEMP/dvnt-bridge/node_modules" node scripts/test-account-bridge-browser.cjs

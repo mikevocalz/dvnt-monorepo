@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { withFunctionObserver } from "./function-observer";
+import { createBridgeTransport } from "./bridge-transport";
 
 export { setFunctionResponseObserver } from "./function-observer";
 
@@ -57,81 +58,17 @@ const supabaseAnonKey =
 // working even when the env var isn't wired.
 const clientKey = supabaseAnonKey;
 
-// SSR-safe: on the Next.js server `localStorage` is undefined. Guard every
-// access so supabase's session bootstrap / auto-refresh tick can't crash the
-// render with "Cannot read properties of undefined (reading 'getItem')".
-const hasLocalStorage = (): boolean => typeof localStorage !== "undefined";
-
-const LocalStorageAdapter = {
-  getItem: (key: string) => (hasLocalStorage() ? localStorage.getItem(key) : null),
-  setItem: (key: string, value: string) => {
-    if (hasLocalStorage()) localStorage.setItem(key, value);
-  },
-  removeItem: (key: string) => {
-    if (hasLocalStorage()) localStorage.removeItem(key);
-  },
-};
-
-// Better Auth owns sign-in; the supabase-jwt bridge mints a short-lived JWT.
-// We attach it via the `accessToken` option — the supported third-party-auth
-// integration — instead of supabase.auth.setSession().
-//
-// Why not setSession: setSession makes GoTrue validate the token against
-// /auth/v1/user (and, with autoRefresh, hit /token). A BRIDGED token is not a
-// real GoTrue session, so /auth/v1/user returns 400 and supabase-js silently
-// drops the session — every subsequent supabase.from(...) then goes out as
-// `anon`, so INSERTs (authenticated-only, e.g. events) 401 and event publish
-// fails fast. `accessToken` attaches the token per request with NO GoTrue
-// session, NO /auth/v1/user validation, and NO navigator.locks — exactly what a
-// non-Supabase auth source needs. When no token is set we return the anon key
-// so unauthenticated reads still work.
-let _bridgeToken: string | null = null;
-export function setBridgeAccessToken(token: string | null): void {
-  _bridgeToken = token;
+// The resolver validates the active Better Auth session on every request.
+const bridge = createBridgeTransport(clientKey);
+export function setBridgeAccessToken(token: string | null) {
+  bridge.setToken(token);
+  // Explicit anon reset also supersedes pending Realtime auth callbacks.
+  void supabase.realtime.setAuth(token ?? clientKey).catch(() => {
+    console.warn("[Supabase] Realtime credential update failed");
+  });
 }
-
-/**
- * Read the `exp` claim without verifying — we are not trusting this token, only
- * deciding whether it is worth sending. Returns null for anything unparseable.
- */
-function jwtExpiry(token: string): number | null {
-  try {
-    const payload = token.split(".")[1];
-    if (!payload) return null;
-    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
-    const exp = JSON.parse(json)?.exp;
-    return typeof exp === "number" ? exp : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The bridged token is minted by `supabase-jwt.ts`, which re-mints on a timer.
- * When that mint fails — the edge fn is cold, offline, or a privacy extension
- * kills the request — the LAST token stays attached here and every subsequent
- * PostgREST call goes out with a dead bearer and comes back 401. Callers like
- * `getNewestUsers` catch and return `[]`, so the symptom is a signed-in user
- * seeing empty sections ("No new profiles to discover right now") while a
- * signed-out visitor sees everything. Anon can read those tables; a rejected
- * JWT cannot.
- *
- * So: an expired token is worse than no token. Drop it and fall back to the
- * anon key, which is exactly the pre-bridge behaviour.
- *
- * ponytail: 30s of slack absorbs clock skew. This does not re-mint — that is
- * `ensureSupabaseJwt`'s job on its own timer; this only stops us sending a
- * bearer we already know is dead.
- */
-function usableBridgeToken(): string | null {
-  if (!_bridgeToken) return null;
-  const exp = jwtExpiry(_bridgeToken);
-  if (exp != null && exp - 30 <= Math.floor(Date.now() / 1000)) {
-    _bridgeToken = null;
-    return null;
-  }
-  return _bridgeToken;
-}
+export const setBridgeTokenMinter = bridge.setMinter;
+export const getBridgeRequestEpoch = bridge.requestEpoch;
 
 // Same-origin edge-function proxy (Next only — gated on the same env flag the
 // auth proxy uses; web-vite has no /api/fn rewrite). Cross-origin calls to
@@ -188,49 +125,9 @@ const proxiedFetch: typeof fetch = (input, init) => {
   return fetch(input as RequestInfo, init);
 };
 
-/**
- * How the client asks for a token it does not have yet.
- *
- * `_bridgeToken` is module state, so on a COLD page load it is null until
- * SiteChrome's effect has run and minted. Any read that fires before that goes
- * out with the anon key — which is invisible on public data and silently wrong
- * on private data: a private event's RPC returns null, TanStack caches the
- * null, nothing retries, and the screen shows "Loading…" forever. That is what
- * door staff hit opening a private event on a fresh load.
- *
- * `supabase-jwt.ts` registers its own `ensureSupabaseJwt` here, so the client
- * can wait for the mint already in flight rather than racing it. Registering
- * from the other side keeps this file free of any auth import.
- */
-type BridgeMinter = () => Promise<boolean>;
-let _mintBridgeToken: BridgeMinter | null = null;
-export function setBridgeTokenMinter(fn: BridgeMinter | null): void {
-  _mintBridgeToken = fn;
-}
-
-/**
- * A signed-in reader with no token yet waits once for the mint. Everyone else
- * — genuinely logged out, or mint unavailable — falls through to the anon key
- * immediately, which is the pre-bridge behaviour and still serves public data.
- */
-async function bridgeTokenOrAnon(): Promise<string> {
-  const existing = usableBridgeToken();
-  if (existing) return existing;
-  if (_mintBridgeToken) {
-    try {
-      await _mintBridgeToken();
-      const minted = usableBridgeToken();
-      if (minted) return minted;
-    } catch {
-      // Offline, cold edge fn, blocked request. Anon still reads public data.
-    }
-  }
-  return clientKey;
-}
-
 export const supabase = createClient(supabaseUrl, clientKey, {
-  accessToken: bridgeTokenOrAnon,
-  global: { fetch: withFunctionObserver(proxiedFetch) },
+  accessToken: bridge.accessToken,
+  global: { fetch: withFunctionObserver(bridge.guardFetch(proxiedFetch)) },
 });
 
-console.log("[Supabase] Web client initialized (accessToken bridge)");
+console.log("[Supabase] Web client initialized (account-bound bridge)");

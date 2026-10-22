@@ -49,9 +49,14 @@ export function createAccountTokenCache(options: {
       identity?.email?.toLowerCase() ?? null,
     ]);
     if (next !== owner) {
+      const hadOwner = owner !== undefined;
       owner = next;
       loginIdentity = null;
       invalidate();
+      if (hadOwner) options.onSessionBoundary?.({
+        ready: mutations === 0 && !signedOut,
+        authId: identity?.authId || (identity?.id && !/^\d+$/.test(identity.id) ? identity.id : undefined),
+      });
     }
     return identity;
   }
@@ -66,9 +71,10 @@ export function createAccountTokenCache(options: {
     return Boolean(identity.email && user.email && identity.email.toLowerCase() === user.email.toLowerCase());
   }
 
-  async function getToken(): Promise<string | null> {
+  async function getToken(forceRevalidate = false): Promise<string | null> {
     const identity = observeIdentity();
     if (mutations > 0 || signedOut) return null;
+    if (forceRevalidate) cached = null;
     if (cached && now() < cached.until) return cached.token;
     if (flight) return flight;
 

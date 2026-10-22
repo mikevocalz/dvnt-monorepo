@@ -3,7 +3,8 @@
  * Uses cookies + credentials:include — no expo-secure-store, no @better-auth/expo
  */
 
-import { publishSessionBoundary } from "./auth/session-lifecycle";
+import { publishSessionBoundary, subscribeSessionLifecycle, getSessionLifecycle } from "./auth/session-lifecycle";
+import { installSessionCrossTab } from "./auth/session-cross-tab";
 import { QueryClient } from "@tanstack/react-query";
 import { logAuth, type SignOutReason } from "./auth/auth-logger";
 // Better Auth client now lives in @dvnt/auth (PROMPT 0 §3); web plumbing stays here.
@@ -28,6 +29,32 @@ const tokenCache = createAccountTokenCache({
   onError: (error) => logAuth("AUTH_REFRESH_FAIL", { error: String(error) }),
   onSessionBoundary: publishSessionBoundary,
 });
+
+// Cookie changes in another tab must never leave this tab's cached token alive.
+// Revalidate through Better Auth; never adopt another tab's supplied identity.
+if (typeof window !== "undefined") {
+  const target = window as Window & { __dvntSessionBoundaryCleanup?: () => void };
+  target.__dvntSessionBoundaryCleanup?.();
+  target.__dvntSessionBoundaryCleanup = installSessionCrossTab({
+  target: window,
+  subscribe: subscribeSessionLifecycle,
+  revalidate: () => {
+    const lifecycle = getSessionLifecycle();
+    if (!lifecycle.ready) return;
+    // Returning from a file picker is not an account change. Only a failed
+    // identity check cancels editor work; successful same-account focus does not.
+    void tokenCache.getToken(true).then((token) => {
+      if (!token && getSessionLifecycle().epoch === lifecycle.epoch) {
+        publishSessionBoundary({ ready: true });
+      }
+    });
+  },
+  invalidate: () => {
+    tokenCache.invalidate();
+    publishSessionBoundary({ ready: getSessionLifecycle().ready });
+  },
+  });
+}
 
 // Both named methods and authClient.signIn.* pass through the same boundary.
 export const authClient = withAccountTokenInvalidation(baseAuthClient, tokenCache);

@@ -4,5 +4,6 @@ export {
   supabase,
   setBridgeAccessToken,
   setBridgeTokenMinter,
+  getBridgeRequestEpoch,
   setFunctionResponseObserver,
 } from "./client.web";
