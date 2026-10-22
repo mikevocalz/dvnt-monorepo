@@ -25,7 +25,7 @@ permissions:
 jobs:
   comment-composer:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -38,8 +38,11 @@ jobs:
         with:
           node-version: '24'
       - name: Install isolated browser tools
+        timeout-minutes: 30
         run: |
           npm install --prefix "$RUNNER_TEMP/comment-tests" --no-package-lock --no-save esbuild@0.28.2 react@19.2.3 react-dom@19.2.3 @tanstack/react-query@5.104.2 zustand@5.0.15 playwright@1.64.1 tailwindcss@4.3.3 react-native-web@0.21.2 lucide-react@1.30.0 @tanstack/react-virtual@3.14.2
+          # Bound slow Ubuntu mirrors without weakening browser coverage.
+          echo 'Acquire::Retries "3"; Acquire::http::Timeout "60"; Acquire::https::Timeout "60"; APT::Install-Recommends "false";' | sudo tee /etc/apt/apt.conf.d/99-comment-test-retries
           "$RUNNER_TEMP/comment-tests/node_modules/.bin/playwright" install --with-deps ${{ matrix.browser }}
       - name: Test GIF data and draft contracts
         run: node --test packages/app/lib/comments/comment-attachment.test.ts packages/app/features/comments/gif-attachment.test.ts apps/mobile/supabase/functions/_shared/comment-attachment.test.cjs apps/mobile/supabase/functions/add-comment/attachment.test.cjs apps/mobile/supabase/functions/get-post-comments/attachment.test.cjs

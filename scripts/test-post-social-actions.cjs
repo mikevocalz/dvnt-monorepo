@@ -15,6 +15,8 @@ const { build } = require(
 );
 const ROOT = path.resolve(__dirname, "..");
 const fixture = {
+  // Comment GIF search is a network boundary; keep the real composer mounted.
+  "@dvnt/app/features/stickers/api/klipy": `export const klipySearch=async()=>({results:[],source:"klipy"});`,
   "social-fixture": `import {create} from 'zustand';
     export const state={navigations:[],sent:[],stories:[],toasts:[],failSend:false,failStory:false,blocked:false,deferGate:false,gate:null,releaseSend:null,releaseStory:null};
     export const post={id:'11',kind:'media',caption:'A post',author:{id:'8',username:'author',avatar:'avatar.jpg'},likes:0,viewerHasLiked:false,media:[{type:'video',url:'video.mp4',thumbnail:'poster.jpg'}],comments:0};

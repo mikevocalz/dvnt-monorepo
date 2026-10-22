@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
+import { URL } from 'node:url';
 
 const attachment = {
   provider: 'klipy', id: 'wave', url: 'https://static.klipy.com/wave.gif',
