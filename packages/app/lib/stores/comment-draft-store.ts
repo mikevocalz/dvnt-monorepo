@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { CommentAttachment } from "../types/index";
 
 /**
  * Comment composer draft (web post detail). Per project rule, input state lives
@@ -12,6 +13,8 @@ interface CommentDraftState {
   revision: number;
   bindContext: (context: string) => void;
   text: string;
+  attachment: CommentAttachment | null;
+  setAttachment: (attachment: CommentAttachment | null) => void;
   replyTo: { commentId: string; username: string } | null;
   setOpen: (open: boolean) => void;
   openComposer: (replyTo?: CommentDraftState["replyTo"]) => void;
@@ -26,13 +29,15 @@ export const useCommentDraftStore = create<CommentDraftState>((set) => ({
   revision: 0,
   bindContext: (context) => set((state) => state.context === context ? state : {
     context, revision: state.revision + 1,
-    ...(state.context === null ? {} : { open: false, text: "", replyTo: null }),
+    ...(state.context === null ? {} : { open: false, text: "", attachment: null, replyTo: null }),
   }),
   text: "",
+  attachment: null,
+  setAttachment: (attachment) => set((state) => ({ attachment, revision: state.revision + 1 })),
   replyTo: null,
   setOpen: (open) => set((state) => ({ open, revision: state.revision + 1 })),
   openComposer: (replyTo = null) => set((state) => ({ open: true, replyTo, revision: state.revision + 1 })),
   setText: (text) => set((state) => ({ text, revision: state.revision + 1 })),
   setReplyTo: (replyTo) => set((state) => ({ replyTo, open: true, revision: state.revision + 1 })),
-  reset: () => set((state) => ({ text: "", replyTo: null, open: false, revision: state.revision + 1 })),
+  reset: () => set((state) => ({ text: "", attachment: null, replyTo: null, open: false, revision: state.revision + 1 })),
 }));

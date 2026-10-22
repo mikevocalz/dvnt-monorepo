@@ -7,6 +7,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
+import { normalizeCommentAttachment, type CommentAttachment } from "../_shared/comment-attachment.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -43,6 +45,7 @@ interface CommentNode {
   username: string;
   avatar: string;
   text: string;
+  attachment: CommentAttachment | null;
   timeAgo: string;
   createdAt: string;
   likes: number;
@@ -116,7 +119,7 @@ Deno.serve(async (req) => {
     }
 
     const selectColumns =
-      "id, post_id, content, likes_count, created_at, parent_id, root_id, depth, author:author_id(id, username, first_name, avatar:avatar_id(url))";
+      "id, post_id, content, attachment, likes_count, created_at, parent_id, root_id, depth, author:author_id(id, username, first_name, avatar:avatar_id(url))";
 
     let rootRows: any[] = [];
     let replyRows: any[] = [];
@@ -228,6 +231,7 @@ Deno.serve(async (req) => {
       username: row.author?.username || "unknown",
       avatar: row.author?.avatar?.url || "",
       text: row.content || "",
+      attachment: normalizeCommentAttachment(row.attachment),
       timeAgo: formatTimeAgo(row.created_at),
       createdAt: row.created_at,
       likes: Number(row.likes_count) || 0,

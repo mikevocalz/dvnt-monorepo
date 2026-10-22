@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useMemo } from "react";
+import { create } from "zustand";
+import { CommentGif, CommentGifPicker } from "./comment-gif.web";
 import { Send } from "lucide-react";
 import { useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
 import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
@@ -13,7 +15,12 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
   parentCommentId?: string;
   hideWhenClosed?: boolean;
 }) {
-  const { open, text, replyTo, setText, setReplyTo, openComposer, reset, bindContext } = useCommentDraftStore();
+  const { open, text, attachment, setAttachment, replyTo, setText, setReplyTo, openComposer, reset, bindContext } = useCommentDraftStore();
+  const usePicker = useMemo(() => create<{ open: boolean }>(() => ({ open: false })), []);
+  const pickerOpen = usePicker(s => s.open);
+  const gifButtonRef = useRef<HTMLButtonElement>(null);
+  const closePicker = () => { usePicker.setState({ open: false }); requestAnimationFrame(() => gifButtonRef.current?.focus()); };
+  useEffect(() => { usePicker.setState({ open: false }); }, [open, postId, parentCommentId]);
   const user = useAuthStore((s) => s.user);
   const mutation = useCreateComment();
   const guardVerified = useVerifiedGate();
@@ -26,7 +33,8 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
   const mounted = useRef(true);
   const label = parentCommentId ? "Add a reply" : "Add a comment";
 
-  const context = `${postId}:${parentCommentId || "comments"}`;
+  const actorId = user?.id;
+  const context = `${actorId || "anonymous"}:${postId}:${parentCommentId || "comments"}`;
   useLayoutEffect(() => { bindContext(context); }, [context, bindContext]);
   useEffect(() => {
     mounted.current = true;
@@ -68,14 +76,15 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
   };
 
   const submit = () => {
-    if (!postId || !text.trim() || sending.current || mutation.isPending) return;
+    if (!postId || (!text.trim() && !attachment) || sending.current || mutation.isPending) return;
     const revision = useCommentDraftStore.getState().revision;
     guardVerified("comment", () => {
       const current = useCommentDraftStore.getState();
-      if (!mounted.current || !current.open || current.context !== context || current.revision !== revision || sending.current) return;
+      if (!mounted.current || useAuthStore.getState().user?.id !== actorId || !current.open || current.context !== context || current.revision !== revision || sending.current) return;
       sending.current = true;
       mutation.mutate({
         post: postId, text: text.trim(),
+        ...(attachment ? { attachment } : {}),
         parent: parentCommentId || replyTo?.commentId,
         replyToCommentId: replyTo?.commentId || parentCommentId,
         authorUsername: user?.username, authorId: user?.id,
@@ -112,6 +121,7 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
               <button type="button" disabled={mutation.isPending} onClick={close} aria-label="Close composer" className="min-h-9 font-medium disabled:opacity-40">Close</button>
             </div>
           </div>
+          {attachment && <div className="px-3"><CommentGif attachment={attachment} preview /><button type="button" disabled={mutation.isPending} onClick={() => setAttachment(null)} className="pb-2 text-sm text-white/65">Remove GIF</button></div>}
           <div className="flex items-end gap-2 px-3 py-3">
             <textarea
               ref={inputRef} rows={2} value={text} disabled={mutation.isPending}
@@ -126,10 +136,12 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
               className="min-w-0 flex-1 resize-y bg-transparent text-base text-white outline-none placeholder:text-white/40 disabled:opacity-60"
               style={{ minHeight: 48, maxHeight: 160 }}
             />
-            <button type="submit" disabled={!text.trim() || mutation.isPending} aria-label={parentCommentId || replyTo ? "Post reply" : "Post comment"} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[#3FDCFF] focus-visible:outline focus-visible:outline-2 disabled:opacity-35">
+            <button ref={gifButtonRef} type="button" aria-label="Add GIF" aria-expanded={pickerOpen} disabled={mutation.isPending} onClick={() => usePicker.setState({ open: !pickerOpen })} className="h-11 rounded-lg px-2 text-sm font-bold text-white/65">GIF</button>
+            <button type="submit" disabled={(!text.trim() && !attachment) || mutation.isPending} aria-label={parentCommentId || replyTo ? "Post reply" : "Post comment"} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[#3FDCFF] focus-visible:outline focus-visible:outline-2 disabled:opacity-35">
               <Send size={20} />
             </button>
           </div>
+          {pickerOpen && !mutation.isPending && <CommentGifPicker onClose={closePicker} onSelect={gif => { setAttachment(gif); closePicker(); }} />}
           {mutation.isPending && <p role="status" className="px-3 pb-3 text-sm text-white/60">Posting…</p>}
           {mutation.isError && <p role="alert" className="px-3 pb-3 text-sm text-rose-300">Could not post. Your draft is saved here. Try again.</p>}
         </form>

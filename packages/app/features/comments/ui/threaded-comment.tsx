@@ -1,3 +1,5 @@
+import { CommentGif } from "./comment-gif";
+import type { CommentAttachment } from "@dvnt/app/lib/types";
 import { memo, useCallback } from "react";
 import { DeleteCommentAction } from "./delete-comment-action";
 import { View, Text, Pressable, StyleSheet } from "react-native";
@@ -40,6 +42,7 @@ export interface CommentData {
   username: string;
   avatar?: string;
   text: string;
+  attachment?: CommentAttachment | null;
   timeAgo?: string;
   createdAt?: string;
   likes?: number;
@@ -162,6 +165,8 @@ export function CommentRow({
             [styles.body, variant === "reply" && styles.replyBody],
             onProfilePress,
           )}
+
+          {comment.attachment && <CommentGif attachment={comment.attachment} />}
 
           <View style={styles.actions}>
             <CommentLikeButton

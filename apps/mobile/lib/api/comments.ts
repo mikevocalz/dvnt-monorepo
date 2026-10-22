@@ -1,5 +1,6 @@
 import { supabase } from "../supabase/client";
-import type { Comment } from "@/lib/types";
+import { useAuthStore } from "../stores/auth-store";
+import type { Comment, CommentAttachment } from "@/lib/types";
 import { getBetterAuthToken, requireBetterAuthToken } from "../auth/identity";
 import {
   buildTwoLevelCommentThreads,
@@ -64,18 +65,35 @@ export const commentsApi = {
     content: string,
     parentId?: string,
     replyToCommentId?: string,
+    attachment?: CommentAttachment | null,
+    expectedAuthorId?: string,
   ) {
+    // Bind token refresh to the initiating actor, including callers without an
+    // explicit author. Remember every transition so A -> B -> A cannot revive it.
+    const actorId = expectedAuthorId ?? useAuthStore.getState().user?.id;
+    let identityChanged = false;
+    const unsubscribe = useAuthStore.subscribe((state) => {
+      if (state.user?.id !== actorId) identityChanged = true;
+    });
+    const assertActor = () => {
+      if (!actorId || identityChanged || useAuthStore.getState().user?.id !== actorId) {
+        throw new Error("Your account changed. Please try posting again.");
+      }
+    };
     try {
       console.log("[Comments] addComment via Edge Function, postId:", postId);
 
+      assertActor();
       const token = await requireBetterAuthToken();
       const postIdInt = parseInt(postId);
+      assertActor();
 
       const { data, error } =
         await supabase.functions.invoke<AddCommentResponse>("add-comment", {
           body: {
             postId: postIdInt,
             content,
+            ...(attachment ? { attachment } : {}),
             ...(parentId ? { parentId: parseInt(parentId, 10) } : {}),
             ...(replyToCommentId
               ? { replyToCommentId: parseInt(replyToCommentId, 10) }
@@ -99,6 +117,8 @@ export const commentsApi = {
     } catch (error) {
       console.error("[Comments] addComment error:", error);
       throw error;
+    } finally {
+      unsubscribe();
     }
   },
 
@@ -108,6 +128,7 @@ export const commentsApi = {
   async createComment(data: {
     post: string;
     text: string;
+    attachment?: CommentAttachment | null;
     parent?: string;
     replyToCommentId?: string;
     authorUsername?: string;
@@ -119,6 +140,8 @@ export const commentsApi = {
       data.text,
       data.parent,
       data.replyToCommentId,
+      data.attachment,
+      data.authorId,
     );
   },
 
