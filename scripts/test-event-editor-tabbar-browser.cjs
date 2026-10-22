@@ -22,7 +22,7 @@ const mocks = {
   '@legendapp/list/react-native': `export const LegendList=()=>null;`,
   '@dvnt/supabase': `export const supabase={};`,
   'solito/navigation': `export const usePathname = () => window.editorFixture?.path || '/feed/events/create'; export const useParams=()=>({id:'fixture-event'}); export const useRouter=()=>({push:path=>window.editorFixture.navigate(path),replace:path=>window.editorFixture.navigate(path),back:()=>history.back()});`,
-  '@dvnt/app/lib/stores/auth-store': `const state={user:{id:'fixture-owner',username:'member'},isAuthenticated:true,_hasHydrated:true}; export const useAuthStore=selector=>selector(state); useAuthStore.getState=()=>state;`,
+  '@dvnt/app/lib/stores/auth-store': `const state={user:{id:'fixture-owner',username:'member'},isAuthenticated:true,_hasHydrated:true}; export const useAuthStore=selector=>selector(state); useAuthStore.getState=()=>state; useAuthStore.subscribe=()=>()=>{};`,
   '@dvnt/app/lib/stores/ui-store': `export const useUIStore=selector=>selector({showToast:()=>{}});`,
   '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage={getItem:()=>null,setItem:()=>{},removeItem:()=>{}};`,
   '@dvnt/app/lib/hooks/use-events': `const event={id:'fixture-event',hostId:'fixture-owner',title:'Fixture edit event',startDate:'2026-12-31T20:00:00Z',event_tz:'America/New_York',location:'Test venue',category:'party',price:0,visibility:'public'}; export const useEvent=()=>({data:event,isLoading:false}); export const useCreateEvent=()=>({isPending:false,mutateAsync:async()=>{throw Error('publishing forbidden in layout test')}}); export const useUpdateEvent=useCreateEvent;`,
