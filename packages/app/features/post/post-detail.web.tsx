@@ -23,8 +23,7 @@ import {
 } from "lucide-react";
 import { UserAvatar } from "@dvnt/app/components/ui/avatar";
 import { usePost, useDeletePost } from "@dvnt/app/lib/hooks/use-posts";
-import { useComments, useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
-import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
+import { useComments } from "@dvnt/app/lib/hooks/use-comments";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import {
   useToggleBookmark,
@@ -42,6 +41,7 @@ import {
   usePostDetailUIStore,
   useLikesSheet,
 } from "@dvnt/app/lib/stores/post-detail-ui-store";
+import { WebCommentComposer } from "@dvnt/app/features/comments/ui/comment-composer.web";
 import { ThreadedComment } from "@dvnt/app/features/comments";
 import { Lightbox } from "@dvnt/app/components/lightbox.web";
 import { Dialog, Drawer } from "@dvnt/ui";
@@ -353,7 +353,7 @@ export function PostDetailScreen() {
         ) : null}
 
         {/* Threaded comments (Instagram-style). */}
-        <section className="border-t border-white/10 pt-2 pb-28" aria-label="Comments">
+        <section className="border-t border-white/10 pt-2 pb-3" aria-label="Comments">
           {comments && comments.length > 0 ? (
             comments.map((c) => (
               <ThreadedComment
@@ -375,7 +375,7 @@ export function PostDetailScreen() {
         </section>
       </div>
 
-      <CommentComposer postId={id} />
+      <WebCommentComposer postId={id} hideWhenClosed />
       <Lightbox />
 
       {/* ⋯ action menu — kit Drawer (bottom sheet on web). */}
@@ -509,72 +509,4 @@ async function sharePostLink(postId: string, caption: string) {
   } catch {
     // user cancelled / unsupported — no-op
   }
-}
-
-function CommentComposer({ postId }: { postId: string }) {
-  const open = useCommentDraftStore((s) => s.open);
-  const text = useCommentDraftStore((s) => s.text);
-  const replyTo = useCommentDraftStore((s) => s.replyTo);
-  const setText = useCommentDraftStore((s) => s.setText);
-  const reset = useCommentDraftStore((s) => s.reset);
-  const user = useAuthStore((s) => s.user);
-  const createComment = useCreateComment();
-  const guardVerified = useVerifiedGate();
-
-  // Hidden until the user taps the comment button (or Reply) — mirrors the
-  // mobile comment sheet, adapted to web as a reveal-on-demand bar.
-  if (!open) return null;
-
-  // Verified-only: commenting needs a verified account. The draft stays put.
-  const submit = () => {
-    if (text.trim()) guardVerified("comment", submitNow);
-  };
-
-  const submitNow = () => {
-    const body = text.trim();
-    if (!body) return;
-    createComment.mutate({
-      post: postId,
-      text: body,
-      parent: replyTo?.commentId,
-      replyToCommentId: replyTo?.commentId,
-      authorUsername: user?.username,
-      authorId: user?.id,
-    });
-    reset();
-  };
-
-  return (
-    <div className="sticky bottom-[100px] z-20 mx-auto max-w-[600px] px-3">
-      <div className="flex items-center justify-between px-3 py-1.5 text-xs text-white/55 bg-white/5 rounded-t-xl">
-        <span>{replyTo ? `Replying to @${replyTo.username}` : "Add a comment"}</span>
-        <button onClick={reset} className="font-medium" aria-label="Close composer">
-          Close
-        </button>
-      </div>
-      <div className="flex items-center gap-2 px-3 py-2 border border-white/12 bg-[#0b0d16]/95 backdrop-blur rounded-b-2xl">
-        <input
-          autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={replyTo ? `Reply to @${replyTo.username}…` : "Add a comment…"}
-          className="flex-1 bg-transparent text-[15px] text-white placeholder:text-white/40 outline-none"
-        />
-        <button
-          onClick={submit}
-          disabled={!text.trim()}
-          aria-label="Post comment"
-          className="text-[#3EA4E5] disabled:opacity-35"
-        >
-          <Send size={20} />
-        </button>
-      </div>
-    </div>
-  );
 }
