@@ -39,6 +39,7 @@ const mocks = {
   '@dvnt/app/lib/api/users': `export const usersApi={searchUsers:async()=>[]};`,
   '@dvnt/app/lib/api/events': `export const eventsApi={};`,
   '@dvnt/app/lib/api/event-drafts': `export const eventDraftsApi={saveCurrent:async()=>({revision:1})};`,
+  '@dvnt/app/lib/auth-client': `export const getAuthToken=async()=>{throw Error('network forbidden in layout test')};`,
   '@dvnt/app/lib/auth/identity': `export const getAuthIdFromStore=()=> 'fixture-owner'; export const requireBetterAuthToken=()=> {throw Error('network forbidden')};`,
   '@dvnt/app/lib/stores/event-guest-store': `import {create} from 'zustand'; export const useEventGuestStore=create(()=>({guests:[],results:[],search:'',loading:false,load:async()=>{},reset:()=>{}}));`,
   '@dvnt/ui': `export {FormField} from '${root}/packages/ui/src/form/FormField.web'; export {StickySaveBar} from '${root}/packages/ui/src/form/StickySaveBar.web'; export const useDirtyGuard=()=>{}; export {VenueSearchInput} from '${root}/packages/ui/src/VenueSearchInput';`,
@@ -76,6 +77,7 @@ const mocks = {
     const candidates=sources.flatMap(p=>read(p).match(/[a-zA-Z0-9_!@#%./:[\](),+*=&<>-]+/g)||[]);
     const compiler=await compile(fs.readFileSync(path.join(tw,'theme.css'),'utf8')+'\n'+fs.readFileSync(path.join(tw,'preflight.css'),'utf8')+'\n@tailwind utilities important;\n'+plain);
     fs.writeFileSync(path.join(dir,'style.css'),compiler.build(candidates));
+    if (process.argv.includes('--build-only')) { console.log('PASS: production editor fixture and CSS bundle'); return; }
     server=http.createServer((req,res)=>{ const file=req.url==='/app.js'?'app.js':req.url==='/style.css'?'style.css':null;
       if(file){res.setHeader('Content-Type',file.endsWith('js')?'text/javascript':'text/css');res.end(fs.readFileSync(path.join(dir,file)));return;}
       res.setHeader('Content-Type','text/html');res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/app.js"></script></body></html>');});
