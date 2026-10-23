@@ -8,6 +8,7 @@ CREATE TABLE public.comments (
 );
 INSERT INTO public.comments (content) VALUES ('Existing text before migration');
 \ir ../apps/mobile/supabase/migrations/20261022231502_comment_gif_attachment.sql
+\ir ../apps/mobile/supabase/migrations/20261023012510_comment_gif_static2_cdn.sql
 
 DO $$
 DECLARE
@@ -24,6 +25,7 @@ BEGIN
   INSERT INTO public.comments (content) VALUES ('Old client text');
   INSERT INTO public.comments (content, attachment) VALUES ('GIF', valid), ('Caption and GIF', valid);
   INSERT INTO public.comments (content, attachment) VALUES ('GIF', valid || '{"provider":"noto","url":"https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.gif","previewUrl":"https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.gif"}'::jsonb);
+  INSERT INTO public.comments (content, attachment) VALUES ('Static2 GIF', valid || '{"url":"https://static2.klipy.com/a.gif","previewUrl":"https://static2.klipy.com/p.webp"}'::jsonb);
   -- A direct write of valid metadata is permitted without changing existing policy.
   UPDATE public.comments SET attachment=valid WHERE content='Old client text';
 
@@ -40,6 +42,9 @@ BEGIN
     valid || '{"extra":{"nested":true}}'::jsonb,
     valid || '{"url":"http://static.klipy.com/a.gif"}'::jsonb,
     valid || '{"url":"https://static.klipy.com.evil.test/a.gif"}'::jsonb,
+    valid || '{"url":"https://static2.klipy.com.evil.test/a.gif"}'::jsonb,
+    valid || '{"url":"https://static3.klipy.com/a.gif"}'::jsonb,
+    valid || '{"url":"https://static12.klipy.com/a.gif"}'::jsonb,
     valid || '{"url":"https://user@static.klipy.com/a.gif"}'::jsonb,
     valid || '{"url":"https://static.klipy.com:8443/a.gif"}'::jsonb,
     valid || '{"url":"https://static.klipy.com/a.mp4"}'::jsonb,
@@ -59,7 +64,7 @@ BEGIN
     END;
     case_count := case_count + 1;
   END LOOP;
-  IF (SELECT count(*) FROM public.comments) <> 5 THEN
+  IF (SELECT count(*) FROM public.comments) <> 6 THEN
     RAISE EXCEPTION 'failed inserts leaked rows';
   END IF;
   IF (SELECT attachment FROM public.comments WHERE content='Old client text') <> valid THEN

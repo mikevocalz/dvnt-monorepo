@@ -47,7 +47,7 @@ export function isCommentGif(attachment: CommentAttachment): boolean {
           /^\/s\/e\/notoemoji\/latest\/[a-f0-9_]+\/512\.gif$/.test(url.pathname)
         );
       return (
-        ["static.klipy.com", "static1.klipy.com"].includes(url.hostname) &&
+        ["static.klipy.com", "static1.klipy.com", "static2.klipy.com"].includes(url.hostname) &&
         /\.(gif|webp|png|jpe?g)$/i.test(url.pathname)
       );
     } catch {

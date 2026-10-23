@@ -126,8 +126,6 @@ export function CommentGifPicker({
   const request = useRef<AbortController | null>(null);
   const generation = useRef(0);
   const input = useRef<HTMLInputElement>(null);
-  const picker = useRef<HTMLElement>(null);
-  const settledQuery = useRef<string | null>(null);
   const load = async (next?: string) => {
     request.current?.abort();
     const controller = new AbortController();
@@ -170,9 +168,7 @@ export function CommentGifPicker({
   };
   useEffect(() => {
     input.current?.focus({ preventScroll: true });
-    const frame = requestAnimationFrame(() => picker.current?.scrollIntoView({ block: "nearest" }));
     return () => {
-      cancelAnimationFrame(frame);
       generation.current++;
       request.current?.abort();
     };
@@ -184,18 +180,9 @@ export function CommentGifPicker({
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
   }, [state.query, state.revision]);
-  useEffect(() => {
-    const key = `${state.revision}:${state.query}`;
-    if (state.loading || settledQuery.current === key) return;
-    settledQuery.current = key;
-    // The initial loading row is shorter than the loaded gallery. Keep the
-    // expanded picker visible, but never jump again for pagination or refocus.
-    const frame = requestAnimationFrame(() => picker.current?.scrollIntoView({ block: "nearest" }));
-    return () => cancelAnimationFrame(frame);
-  }, [state.loading, state.query, state.revision]);
   return (
     <section
-      ref={picker}
+      data-comment-gif-picker
       aria-label="Choose a GIF"
       className="border-t border-white/10 p-3"
       onKeyDown={(event) => {
@@ -220,7 +207,7 @@ export function CommentGifPicker({
             useGifState.setState({ query: event.target.value })
           }
           className="min-h-11 min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-2 text-base text-white focus-visible:outline focus-visible:outline-2"
-          placeholder="Search GIFs"
+          placeholder="Search KLIPY"
         />
         <button
           type="button"
@@ -231,7 +218,7 @@ export function CommentGifPicker({
           Close
         </button>
       </div>
-      <div className="overflow-y-auto overscroll-contain" style={{ maxHeight: "min(256px, 40dvh)" }} aria-busy={state.loading}>
+      <div data-comment-gif-gallery className="overflow-y-auto overscroll-contain" style={{ maxHeight: "var(--comment-gif-gallery-height, min(256px, 40dvh))" }} aria-busy={state.loading}>
         <div className="grid grid-cols-2 items-start gap-2 sm:grid-cols-3">
           {state.items.map((item) => (
             <button
