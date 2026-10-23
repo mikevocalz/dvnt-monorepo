@@ -141,6 +141,9 @@ async function checkMobileGifQuality(page, width) {
  await page.evaluate(() => {draft.getState().setAttachment(fixtureGif);window.fail=true});
  const before = await page.evaluate(() => calls.length);
  await post.click(); await page.waitForFunction(n => calls.length === n+1,before);
+ // React Query notifies React after mutationFn starts. Await the rendered
+ // pending state before inspecting controls; the request remains unresolved.
+ await composer.locator('form[aria-busy="true"]').waitFor();
  assert.equal(await post.isDisabled(),true); assert.equal(await close.isDisabled(),true); assert.equal(await add.isDisabled(),true);
  assert.equal(await page.getByRole('button',{name:'Remove GIF',exact:true}).isDisabled(),true); assert.equal(await input.isDisabled(),true);
  await composer.locator('form').evaluate(el => el.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
@@ -158,7 +161,17 @@ async function checkMobileGifQuality(page, width) {
   await page.evaluate(() => {draft.getState().reset();mount(undefined,true)});
   await page.locator('#comment-trigger').click(); await add.click(); await search.fill('gallery');
   await page.getByRole('button',{name:'Choose Wide celebration',exact:true}).waitFor();
-  await search.scrollIntoViewIfNeeded(); await noHorizontalOverflow(page,`${size.kind} picker`);
+  await page.waitForFunction(() => {
+   const gallery = document.querySelector('[aria-label="Choose a GIF"] [aria-busy]');
+   if (!gallery) return false;
+   const rect = gallery.getBoundingClientRect();
+   return rect.top >= 0 && rect.bottom <= innerHeight;
+  });
+  for (const control of [search,page.getByRole('button',{name:'Close GIF picker',exact:true})]) {
+   const rect = await control.boundingBox();
+   assert(rect && rect.y >= 0 && rect.y + rect.height <= size.height, 'short picker keeps search and Close visible with gallery');
+  }
+  await noHorizontalOverflow(page,`${size.kind} picker`);
   const geometry = await results.evaluate(el => ({height:el.clientHeight,viewport:innerHeight}));
   assert(geometry.height <= geometry.viewport*.4+1,'short picker scroll region leaves room for controls');
   await screenshot(`${size.kind}-picker-viewport`,false);

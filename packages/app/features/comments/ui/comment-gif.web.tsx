@@ -127,6 +127,7 @@ export function CommentGifPicker({
   const generation = useRef(0);
   const input = useRef<HTMLInputElement>(null);
   const picker = useRef<HTMLElement>(null);
+  const settledQuery = useRef<string | null>(null);
   const load = async (next?: string) => {
     request.current?.abort();
     const controller = new AbortController();
@@ -183,6 +184,15 @@ export function CommentGifPicker({
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
   }, [state.query, state.revision]);
+  useEffect(() => {
+    const key = `${state.revision}:${state.query}`;
+    if (state.loading || settledQuery.current === key) return;
+    settledQuery.current = key;
+    // The initial loading row is shorter than the loaded gallery. Keep the
+    // expanded picker visible, but never jump again for pagination or refocus.
+    const frame = requestAnimationFrame(() => picker.current?.scrollIntoView({ block: "nearest" }));
+    return () => cancelAnimationFrame(frame);
+  }, [state.loading, state.query, state.revision]);
   return (
     <section
       ref={picker}
@@ -222,7 +232,7 @@ export function CommentGifPicker({
         </button>
       </div>
       <div className="overflow-y-auto overscroll-contain" style={{ maxHeight: "min(256px, 40dvh)" }} aria-busy={state.loading}>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-2 items-start gap-2 sm:grid-cols-3">
           {state.items.map((item) => (
             <button
               key={`${item.provider}:${item.id}`}
