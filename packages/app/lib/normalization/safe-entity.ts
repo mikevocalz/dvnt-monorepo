@@ -1,3 +1,4 @@
+import { sanitizeEventAttendance } from "@dvnt/app/lib/events/event-attendee-visibility";
 import { storedEventType } from "@dvnt/app/lib/events/event-type";
 /**
  * Safe Entity Normalization
@@ -225,6 +226,8 @@ export interface SafeEvent {
   month?: string;
   time?: string;
   category?: string;
+  lynkRoomId?: string | null;
+  showAttendees?: boolean | null;
   likes?: number;
   isLiked?: boolean;
   locationLat?: number;
@@ -248,6 +251,7 @@ export interface SafeEvent {
 }
 
 export function normalizeEvent(event: any | null | undefined): SafeEvent {
+  if (event) event = sanitizeEventAttendance(event);
   if (!event || !event.id) {
     return {
       id: "",
@@ -280,6 +284,8 @@ export function normalizeEvent(event: any | null | undefined): SafeEvent {
     month: event.month,
     time: event.time,
     category: storedEventType(event),
+    lynkRoomId: event.lynk_room_id !== undefined ? event.lynk_room_id : event.lynkRoomId ?? null,
+    showAttendees: event.show_attendees !== undefined ? event.show_attendees : event.showAttendees ?? null,
     likes: event.likes || 0,
     isLiked: event.isLiked || false,
     locationLat: event.locationLat,

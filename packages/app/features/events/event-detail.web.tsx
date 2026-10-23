@@ -1,3 +1,4 @@
+import { useEventAttendeePrivacy } from "@dvnt/app/lib/hooks/use-event-attendee-privacy";
 import { EVENT_FLYER_ASPECT } from "@dvnt/app/lib/events/flyer-layout";
 import { useCheckoutCode } from "./use-checkout-code.web";
 import { canContinueWithCheckoutCode } from "@dvnt/app/lib/payments/checkout-code";
@@ -342,6 +343,7 @@ export function EventDetailScreen() {
   const { data: full } = eventQuery;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const e = (full ?? listPreview) as any;
+  const showGoing = useEventAttendeePrivacy(resolvedId ? String(resolvedId) : undefined, e);
 
   // Cover dominant color: db value if the edge fn already set it, else extract
   // on-device (video → thumbnail frame) and persist via set-event-color so this
@@ -991,7 +993,7 @@ export function EventDetailScreen() {
       ),
     );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const attendeeAvatars: any[] = Array.isArray(e.attendeeAvatars)
+  const attendeeAvatars: any[] = showGoing && Array.isArray(e.attendeeAvatars)
     ? e.attendeeAvatars
     : [];
   // Normalized for GoingAccordion — the RPC has shipped the photo URL under
@@ -2095,22 +2097,15 @@ export function EventDetailScreen() {
             </Section>
           ) : null}
 
-          {/* Attendees — members-only; logged-out sees a blurred teaser.
-
-              Always rendered. The gate used to be
-              `going > 0 || attendeeAvatars.length > 0 || !isAuthenticated`,
-              which dropped the whole section for a SIGNED-IN viewer the moment
-              an event had no RSVPs yet — so a logged-out visitor saw more of
-              the page than a member did, and the section went missing exactly
-              when the event most needed a "be the first" nudge. Native never
-              had this hole: GoingAccordion renders unconditionally and says
-              "0 going". */}
+          {/* Hidden protected events have no section, identity teaser, or prompt. */}
+          {showGoing ? (
           <Section title="Who's going" Icon={Users}>
               {going > 0 || goingAttendees.length > 0 || !isAuthenticated ? (
                 // Same accordion as native: face pile + "N going", tap expands
                 // to the full attendee grid. Logged-out gets the blurred
                 // teaser + sign-in nudge from inside the component.
                 <GoingAccordion
+                  event={e}
                   id={eventId}
                   eventId={eventId}
                   visibility={e.visibility}
@@ -2135,6 +2130,7 @@ export function EventDetailScreen() {
                 </p>
               )}
             </Section>
+          ) : null}
 
           {/* Who All Over There — ephemeral event moments (ticket holders + host) */}
           <WhoAllOverThere eventId={eventId} canUpload={isHost || hasTicket} />

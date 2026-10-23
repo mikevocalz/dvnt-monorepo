@@ -1,0 +1,44 @@
+name: Event attendee privacy
+on:
+  pull_request:
+    paths:
+      - 'packages/app/**'
+      - 'apps/web/src/app/(frontend)/design/page.tsx'
+      - 'scripts/test-guest-event-purchase.cjs'
+      - 'apps/mobile/supabase/functions/bootstrap-events/**'
+      - 'apps/mobile/supabase/functions/create-event/**'
+      - 'apps/mobile/supabase/functions/event-drafts/**'
+      - 'apps/mobile/supabase/functions/_shared/event-attendee-visibility.ts'
+      - 'apps/mobile/supabase/migrations/*sensitive_event_attendee_privacy*'
+      - 'scripts/test-event-attend*'
+      - 'scripts/fixtures/event-attendee-privacy/**'
+      - '.github/workflows/event-attendee-privacy.yml'
+permissions:
+  contents: read
+jobs:
+  privacy-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated synthetic fixture dependencies
+        run: npm install --prefix "$RUNNER_TEMP/attendee-privacy" --ignore-scripts --no-audit --no-fund --no-save @electric-sql/pglite@0.3.7 typescript@5.9.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 jsdom@26.1.0 @tanstack/react-query@5.101.0
+      - name: Database boundaries, service responses, organizer controls, and client caches
+        run: |
+          NODE_PATH="$RUNNER_TEMP/attendee-privacy/node_modules" node --test --test-concurrency=2 \
+            scripts/test-event-attendee-privacy-sql.cjs \
+            scripts/test-event-attendance-organizer.cjs \
+            scripts/test-guest-event-purchase.cjs \
+            apps/mobile/supabase/functions/bootstrap-events/index.test.cjs \
+            apps/mobile/supabase/functions/create-event/index.test.cjs \
+            apps/mobile/supabase/functions/event-drafts/index.test.cjs \
+            packages/app/lib/events/event-attendee-*.test.ts \
+            packages/app/lib/events/event-type*.test.ts \
+            packages/app/features/events/create/event-form.test.ts \
+            packages/app/lib/hooks/event-update-account-cache.test.ts \
+            packages/app/lib/auth/account-bridge-cache.test.ts

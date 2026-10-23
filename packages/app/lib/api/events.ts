@@ -1,3 +1,4 @@
+import { canShowEventAttendees } from "../events/event-attendee-visibility";
 import { getSessionLifecycle } from "../auth/session-lifecycle";
 import { storedEventType, eventTypeUpdate } from "@dvnt/app/lib/events/event-type";
 import { supabase, getBridgeRequestEpoch } from "../supabase/client";
@@ -318,7 +319,7 @@ export const eventsApi = {
       const mapped = filterDiscoverableEvents((data as any[]) || []).map((event: any) => {
         const zone = listRowZoneFields(event);
         const dateParts = formatEventDate(event.start_date, zone);
-        const avatars = Array.isArray(event.attendee_avatars)
+        const avatars = canShowEventAttendees(event) && Array.isArray(event.attendee_avatars)
           ? event.attendee_avatars
           : [];
         const totalCount = Math.max(
@@ -341,13 +342,14 @@ export const eventsApi = {
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           images: parseJsonbArray(event.images),
           youtubeVideoUrl: event.youtube_video_url || null,
-          lynkRoomId: event.lynk_room_id || null,
           price: Number(event.price) || 0,
           likes: Number(event.likes_count) || 0,
           isLiked: event.is_liked || false,
           attendees: avatars.length > 0 ? avatars : totalCount,
           totalAttendees: totalCount,
           category: storedEventType(event),
+          lynkRoomId: event.lynk_room_id || null,
+          showAttendees: event.show_attendees === true,
           // Surface status so the feed card can render the CANCELLED
           // badge. RPC now returns this; we just pass it through.
           status: event.status || undefined,
@@ -419,7 +421,7 @@ export const eventsApi = {
       const mapped = filterDiscoverableEvents((data as any[]) || []).map((event: any) => {
         const zone = listRowZoneFields(event);
         const dateParts = formatEventDate(event.start_date, zone);
-        const avatars = Array.isArray(event.attendee_avatars)
+        const avatars = canShowEventAttendees(event) && Array.isArray(event.attendee_avatars)
           ? event.attendee_avatars
           : [];
         const totalCount = Math.max(
@@ -439,18 +441,19 @@ export const eventsApi = {
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           images: parseJsonbArray(event.images),
           youtubeVideoUrl: event.youtube_video_url || null,
-          lynkRoomId: event.lynk_room_id || null,
           price: Number(event.price) || 0,
           likes: Number(event.likes_count) || 0,
           isLiked: event.is_liked || false,
           attendees: avatars.length > 0 ? avatars : totalCount,
           totalAttendees: totalCount,
           category: storedEventType(event),
+          lynkRoomId: event.lynk_room_id || null,
+          showAttendees: event.show_attendees === true,
           status: event.status || undefined,
           cancelledAt: event.cancelled_at || undefined,
           event_tz: zone.event_tz,
           isOnline: zone.is_online,
-          friendsGoing: event.friends_going || 0,
+          friendsGoing: canShowEventAttendees(event) ? event.friends_going || 0 : 0,
           host: {
             username: event.host_username || "unknown",
             avatar: event.host_avatar || "",
@@ -535,6 +538,8 @@ export const eventsApi = {
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           category: storedEventType(event),
+          lynkRoomId: event.lynk_room_id || null,
+          showAttendees: event.show_attendees === true,
           price: Number(event[DB.events.price]) || 0,
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           status: event.status || undefined,
@@ -591,6 +596,8 @@ export const eventsApi = {
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           category: storedEventType(event),
+          lynkRoomId: event.lynk_room_id || null,
+          showAttendees: event.show_attendees === true,
           price: Number(event[DB.events.price]) || 0,
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           status: event.status || undefined,
@@ -672,6 +679,8 @@ export const eventsApi = {
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           category: storedEventType(event),
+          lynkRoomId: event.lynk_room_id || null,
+          showAttendees: event.show_attendees === true,
           price: Number(event[DB.events.price]) || 0,
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           host: {
@@ -754,10 +763,9 @@ export const eventsApi = {
       // visibility hid the guest list from the host and from the people
       // actually going, while get_event_detail shipped it to anyone holding the
       // link anyway.
-      const { data: avatarsJson } = await supabase.rpc(
-        "get_event_attendee_avatars",
-        { p_event_id: parseInt(id) },
-      );
+      const { data: avatarsJson } = canShowEventAttendees(ev)
+        ? await supabase.rpc("get_event_attendee_avatars", { p_event_id: parseInt(id) })
+        : { data: [] };
       const attendeeAvatars = Array.isArray(avatarsJson) ? avatarsJson : [];
 
       return {
@@ -775,6 +783,7 @@ export const eventsApi = {
         youtubeVideoUrl: ev.youtube_video_url || null,
         // Sneaky Lynk room this event is hosted in (video_rooms.uuid).
         lynkRoomId: ev.lynk_room_id || null,
+        showAttendees: ev.show_attendees === true,
         price: Number(ev.price) || 0,
         likes: Number(data.likes_count) || 0,
         isLiked: data.is_liked || false,
@@ -1026,6 +1035,8 @@ export const eventsApi = {
         attendees: 0,
         totalAttendees: 0,
         category: storedEventType(data),
+        lynkRoomId: data.lynk_room_id || null,
+        showAttendees: data.show_attendees === true,
         likes: 0,
         host: {
           username: "You",
@@ -1108,6 +1119,10 @@ export const eventsApi = {
       if (typeof updates.isHidden === "boolean") updateData.is_hidden = updates.isHidden;
       if (updates.publishAt !== undefined)
         updateData.publish_at = updates.publishAt || null;
+      if (updates.showAttendees !== undefined) {
+        if (typeof updates.showAttendees !== "boolean") throw new Error("Attendee visibility must be a boolean");
+        updateData.show_attendees = updates.showAttendees;
+      }
       if (updates.category !== undefined)
         Object.assign(updateData, eventTypeUpdate(updates.category));
       if (updates.visibility !== undefined)
@@ -1756,6 +1771,8 @@ export const eventsApi = {
           image: resolveEventImage(event),
           flyerVideoUrl: resolveFlyerVideoUrl(event),
           category: storedEventType(event),
+          lynkRoomId: event.lynk_room_id || null,
+          showAttendees: event.show_attendees === true,
           price: Number(event[DB.events.price]) || 0,
           attendees: Number(event[DB.events.totalAttendees]) || 0,
           host: {

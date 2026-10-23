@@ -1,3 +1,4 @@
+import { canShowEventAttendees } from "./event-attendee-visibility.ts";
 import { storedEventType, eventTypeUpdate } from "./event-type.ts";
 import { URL } from "node:url";
 import test from 'node:test';
@@ -42,7 +43,7 @@ function fixture() {
       return q;
     },
   };
-  const context: any = {storedEventType,eventTypeUpdate,exports:{},console:{log(){},error(){},warn(){}},require:()=>({ensureSupabaseJwt:async()=>bridgeReady}),DB,supabase,
+  const context: any = {storedEventType,eventTypeUpdate,canShowEventAttendees,exports:{},console:{log(){},error(){},warn(){}},require:()=>({ensureSupabaseJwt:async()=>bridgeReady}),DB,supabase,
     getSessionLifecycle:()=>({ready:true,epoch}),getBridgeRequestEpoch:()=>String(epoch),getCurrentUserAuthId:async()=>authId,getAuthIdFromStore:()=>authId,getCurrentUserIdSync:()=>1,
     formatEventDate:()=>({}),resolveEventImage:()=>null,resolveFlyerVideoUrl:()=>null,parseJsonbArray:()=>[],
     endsBeforeStart:()=>false,publishAtError:()=>null,filterPubliclyListableEvents:(rows: any)=>rows,enrichEventsWithTierPrices:async(rows: any)=>rows,
@@ -72,7 +73,7 @@ test('a rejected edit does not report success or replace the last persisted type
 test('bootstrap actual formatter preserves canonical type over legacy category',()=>{
   const source=fs.readFileSync(new URL('../../../../apps/mobile/supabase/functions/bootstrap-events/index.ts',import.meta.url),'utf8');
   const body=source.slice(source.indexOf('    const formattedEvents = events.map'),source.indexOf('    const elapsed =',source.indexOf('    const formattedEvents = events.map')));
-  const context:any={events:[{id:1,title:'Party',category:'music',event_type:'party'},{id:2,title:'Legacy',category:'music',event_type:null}],hostsMap:new Map(),attendeesMap:new Map(),exports:{}};
+  const context:any={canShowEventAttendees,events:[{id:1,title:'Party',category:'music',event_type:'party'},{id:2,title:'Legacy',category:'music',event_type:null}],hostsMap:new Map(),attendeesMap:new Map(),exports:{}};
   vm.runInNewContext(ts.transpileModule(body+'\nexports.rows=formattedEvents;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,context);
   assert.equal(context.exports.rows[0].category,'party');assert.equal(context.exports.rows[0].event_type,'party');
   assert.equal(context.exports.rows[1].category,'music');assert.equal(context.exports.rows[1].event_type,null);

@@ -38,7 +38,7 @@ function safeClientPayload(input: unknown): Record<string, unknown> | null {
   const allowed = [
     "title","description","location","locationData","eventImages","tags",
     "eventDate","endDate","ticketPrice","maxAttendees","youtubeUrl",
-    "attachLynkRoom","ticketingEnabled","visibility","ageRestriction",
+    "attachLynkRoom","showAttendees","ticketingEnabled","visibility","ageRestriction",
     "isOnline","dressCode","doorPolicy","lineup","perks","ticketTiers",
     "addons","coOrganizers","guests","flyerImage","flyerMediaType","flyerFallbackImage",
     "eventType","disclaimers","isNsfw","currentStep","scheduleNeedsReview",
@@ -327,6 +327,8 @@ async function duplicatePayload(db: any, authId: string, eventId: number) {
     maxAttendees: event.max_attendees == null ? "" : String(event.max_attendees),
     youtubeUrl: event.youtube_video_url || "",
     attachLynkRoom: false,
+    // A duplicated event is new: never silently copy attendance disclosure.
+    showAttendees: false,
     ticketingEnabled: Boolean(event.ticketing_enabled),
     visibility: event.visibility === "private" || event.visibility === "link_only" ? event.visibility : "public",
     ageRestriction: ["18+","21+"].includes(event.age_restriction) ? event.age_restriction : "none",

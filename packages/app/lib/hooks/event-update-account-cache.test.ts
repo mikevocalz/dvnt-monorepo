@@ -20,6 +20,7 @@ function fixture() {
   let epoch = 1;
   let ready = true;
   let data = 'account-a-original';
+  let privacyRevision = 0;
   const writes: string[] = [];
   let cancel: () => Promise<void> = async () => {};
   const client = {
@@ -35,6 +36,8 @@ function fixture() {
     propagateEntity: (_client: any, _type: string, _id: string, patch: any) => { data = patch.title; writes.push('propagate'); },
     buildEventCachePatch: (updates: any) => updates,
     storedEventType: () => 'other',
+    getEventAttendanceRevision: () => privacyRevision,
+    advanceEventAttendanceRevision: () => ++privacyRevision,
     eventKeys: { detail: (id: string) => ['events', id], all: ['events'] },
   };
   vm.runInNewContext(compiled, context);
@@ -43,6 +46,7 @@ function fixture() {
     data: () => data,
     switchTo(id: string | null) { authId = id; epoch++; data = `${id}-cache`; },
     setReady(value: boolean) { ready = value; },
+    newerPrivacyDecision() { privacyRevision++; data = 'private-current'; },
     deferCancel() {
       let finish!: () => void;
       cancel = () => new Promise<void>(resolve => { finish = resolve; });
@@ -122,4 +126,31 @@ test('pending authentication blocks both cache callback types', async () => {
   f.callbacks.onError(new Error(), input, ctx);
   f.callbacks.onSuccess({ title: 'stale' }, input, ctx);
   assert.deepEqual(f.writes, ['propagate']);
+});
+
+
+test('a newer realtime privacy decision beats older mutation rollback and success', async () => {
+  for (const outcome of ['error', 'success']) {
+    const f = fixture();
+    const input = vars();
+    const ctx = await f.callbacks.onMutate(input);
+    f.newerPrivacyDecision();
+    if (outcome === 'error') f.callbacks.onError(new Error('Old edit failed'), input, ctx);
+    else f.callbacks.onSuccess({ title: 'Old success' }, input, ctx);
+    assert.equal(f.data(), 'private-current');
+    assert.deepEqual(f.writes, ['propagate', 'invalidate']);
+  }
+});
+
+
+test('privacy change during awaited cancellation prevents a stale optimistic patch', async () => {
+  const f = fixture();
+  const finish = f.deferCancel();
+  const pending = f.callbacks.onMutate(vars());
+  f.newerPrivacyDecision(); finish();
+  const ctx = await pending;
+  assert.deepEqual(f.writes, []);
+  assert.equal(f.data(), 'private-current');
+  f.callbacks.onError(new Error(), vars(), ctx);
+  assert.equal(f.data(), 'private-current');
 });

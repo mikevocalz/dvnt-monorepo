@@ -30,6 +30,7 @@ function snapshotCurrentDraft(): Record<string, unknown> {
     maxAttendees: s.maxAttendees,
     youtubeUrl: s.youtubeUrl,
     attachLynkRoom: s.attachLynkRoom,
+    showAttendees: s.showAttendees === true,
     ticketingEnabled: s.ticketingEnabled,
     visibility: s.visibility,
     ageRestriction: s.ageRestriction,
@@ -135,7 +136,11 @@ export const eventDraftsApi = {
       action: "duplicate_event",
       eventId,
     });
-    useCreateEventStore.getState().loadServerDraft(data.draft.payload as any, {
+    // A duplicate is a new event, not renewed consent to expose its attendees.
+    useCreateEventStore.getState().loadServerDraft({
+      ...data.draft.payload,
+      showAttendees: false,
+    } as any, {
       id: data.draft.id,
       revision: data.draft.revision,
     });

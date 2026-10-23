@@ -204,6 +204,10 @@ Deno.serve(async (req) => {
       if (existing.data) return jsonResponse(req, { ok: true, data: { event: existing.data, replayed: true } });
     }
 
+    if (body.showAttendees != null && typeof body.showAttendees !== "boolean") {
+      return errorResponse(req, "validation_error", "Attendee visibility must be a boolean", 400);
+    }
+
     const title = text(body.title);
     const startDate = text(body.date) || text(body.startDate);
     const location = text(body.location) || (body.isOnline === true ? "Online" : null);
@@ -280,6 +284,10 @@ Deno.serve(async (req) => {
       return errorResponse(req, "validation_error", "Pick a valid event type", 400);
     }
     if (eventType) insertPayload.event_type = eventType;
+    // Only explicit organizer opt-in opens protected event attendance. Ordinary
+    // types ignore the setting and never retain a latent opt-in for a later edit.
+    insertPayload.show_attendees = (eventType === "sex_party" || !!insertPayload.lynk_room_id)
+      && body.showAttendees === true;
     const category = normalizeCategory(categoryInput);
     if (category) insertPayload.category = category;
     if (ageRestriction === "18+" || ageRestriction === "21+" || ageRestriction === "none") {

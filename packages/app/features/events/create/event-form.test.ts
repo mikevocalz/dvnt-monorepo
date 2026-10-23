@@ -70,3 +70,21 @@ test("Event Type reaches the server independently of secondary tags", () => {
   assert.equal(payload.category, "game_night");
   assert.equal(payload.event_type, "game_night");
 });
+
+
+test("protected event publish payloads default attendee profiles off", () => {
+  for (const eventType of ["sex_party", "virtual_session", "party"] as const) {
+    for (const attachLynkRoom of [false, true]) {
+      assert.equal(buildEventInsert(draft({ eventType, attachLynkRoom })).showAttendees, false);
+      assert.equal(buildEventInsert(draft({ eventType, attachLynkRoom, showAttendees: null })).showAttendees, false);
+      assert.equal(buildEventInsert(draft({ eventType, attachLynkRoom, showAttendees: false })).showAttendees, false);
+      assert.equal(buildEventInsert(draft({ eventType, attachLynkRoom, showAttendees: true })).showAttendees, true);
+    }
+  }
+});
+
+test("attendee visibility accepts only literal boolean true", () => {
+  for (const showAttendees of ["true", 1, {}, []]) {
+    assert.equal(buildEventInsert(draft({ eventType: "sex_party", showAttendees: showAttendees as unknown as boolean })).showAttendees, false);
+  }
+});

@@ -1,3 +1,4 @@
+import { sanitizeEventAttendance } from "@dvnt/app/lib/events/event-attendee-visibility";
 /**
  * Predicate-based cache propagation.
  *
@@ -49,7 +50,7 @@ export function patchEntityInQueryData(
 
   // 1. Single entity at top level
   if (matches(data, entityType, idStr)) {
-    return { ...data, ...patch };
+    return applyEntityPatch(data, patch, entityType, idStr);
   }
 
   // 2. Single entity wrapped in { ok, ...entity, ... }
@@ -57,7 +58,7 @@ export function patchEntityInQueryData(
     // 2a. Nested entity reference (e.g. ticket.event matches event)
     const nestedKey = nestedKeyFor(entityType);
     if (nestedKey && data[nestedKey] && matches(data[nestedKey], entityType, idStr)) {
-      return { ...data, [nestedKey]: { ...data[nestedKey], ...patch } };
+      return { ...data, [nestedKey]: applyEntityPatch(data[nestedKey], patch, entityType, idStr) };
     }
 
     // 2b. Infinite-query shape: { pages, pageParams }
@@ -74,7 +75,7 @@ export function patchEntityInQueryData(
     for (const field of LIST_FIELDS) {
       if (Array.isArray(data[field])) {
         const patched = data[field].map((item: any) =>
-          matches(item, entityType, idStr) ? { ...item, ...patch } : item,
+          matches(item, entityType, idStr) ? applyEntityPatch(item, patch, entityType, idStr) : item,
         );
         if (patched.some((it: any, i: number) => it !== data[field][i])) {
           return { ...data, [field]: patched };
@@ -88,12 +89,24 @@ export function patchEntityInQueryData(
   // 3. Flat array
   if (Array.isArray(data)) {
     const patched = data.map((item: any) =>
-      matches(item, entityType, idStr) ? { ...item, ...patch } : item,
+      matches(item, entityType, idStr) ? applyEntityPatch(item, patch, entityType, idStr) : item,
     );
     return patched.some((it, i) => it !== data[i]) ? patched : data;
   }
 
   return data;
+}
+
+function applyEntityPatch(entity: any, patch: Record<string, unknown>, entityType: EntityType, idStr: string): any {
+  // A ticket may match by event_id; patch its embedded event, not the ticket
+  // envelope, or stale attendee profiles survive in nested event caches.
+  if (entityType === "event" && entity.event && typeof entity.event === "object") {
+    // A ticket id can numerically collide with an unrelated event id.
+    if (!matches(entity.event, entityType, idStr)) return entity;
+    return { ...entity, event: sanitizeEventAttendance({ ...entity.event, ...patch }) };
+  }
+  const updated = { ...entity, ...patch };
+  return entityType === "event" ? sanitizeEventAttendance(updated) : updated;
 }
 
 const LIST_FIELDS = [
@@ -116,7 +129,7 @@ function patchPageData(
   for (const field of LIST_FIELDS) {
     if (Array.isArray(page[field])) {
       const newList = page[field].map((item: any) =>
-        matches(item, entityType, idStr) ? { ...item, ...patch } : item,
+        matches(item, entityType, idStr) ? applyEntityPatch(item, patch, entityType, idStr) : item,
       );
       if (newList.some((it: any, i: number) => it !== page[field][i])) {
         return { ...page, [field]: newList };

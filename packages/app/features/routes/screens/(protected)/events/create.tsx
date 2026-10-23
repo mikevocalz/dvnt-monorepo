@@ -117,6 +117,7 @@ import {
   sortPromoTemplates,
 } from "@dvnt/app/features/events/create/event-form";
 import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
+import { EventAttendanceField } from "@dvnt/app/components/event/event-attendance-field.native";
 import { EventPublicationField } from "@dvnt/app/features/events/ui/event-publication-field";
 import {
   publishAtError,
@@ -236,6 +237,8 @@ function CreateEventScreenContent() {
   const youtubeUrl = useCreateEventStore((s) => s.youtubeUrl);
   const setYoutubeUrl = useCreateEventStore((s) => s.setYoutubeUrl);
   const attachLynkRoom = useCreateEventStore((s) => s.attachLynkRoom);
+  const showAttendees = useCreateEventStore((s) => s.showAttendees);
+  const setShowAttendees = useCreateEventStore((s) => s.setShowAttendees);
   const setAttachLynkRoom = useCreateEventStore((s) => s.setAttachLynkRoom);
   const isSubmitting = useCreateEventStore((s) => s.isSubmitting);
   const setIsSubmitting = useCreateEventStore((s) => s.setIsSubmitting);
@@ -826,6 +829,7 @@ function CreateEventScreenContent() {
         endDate: schedule.endIso || undefined,
         visibility,
         isHidden,
+        showAttendees: showAttendees === true,
         publishAt: publishAtIso ?? undefined,
         ageRestriction: ageRestriction !== "none" ? ageRestriction : undefined,
         dressCode: dressCode.trim() || undefined,
@@ -1669,6 +1673,12 @@ function CreateEventScreenContent() {
                 </View>
               </View>
 
+              <EventAttendanceField
+                eventType={eventType}
+                lynkRoomId={attachLynkRoom ? "draft-room" : null}
+                showAttendees={showAttendees}
+                onChange={setShowAttendees}
+              />
               <EventPublicationField
                 isHidden={isHidden}
                 onHiddenChange={setIsHidden}

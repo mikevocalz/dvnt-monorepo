@@ -1,3 +1,4 @@
+import { canShowEventAttendees, type AttendanceEventSource } from "@dvnt/app/lib/events/event-attendee-visibility";
 import React, { memo, useCallback } from "react";
 import {
   View,
@@ -19,6 +20,7 @@ const AVATAR_RADIUS = 8; // rounded-square, not circle
 const AVATAR_OVERLAP = 10;
 
 interface SocialProofRowProps {
+  event: AttendanceEventSource;
   attendees: EventAttendee[];
   totalCount: number | { image?: string; initials?: string }[];
   followingCount?: number;
@@ -139,7 +141,11 @@ const AttendeeListModal = memo(function AttendeeListModal({
   );
 });
 
-export const SocialProofRow = memo(function SocialProofRow({
+export const SocialProofRow = memo(function SocialProofRow(props: SocialProofRowProps) {
+  return canShowEventAttendees(props.event) ? <VisibleSocialProofRow {...props} /> : null;
+});
+
+const VisibleSocialProofRow = memo(function VisibleSocialProofRow({
   attendees,
   totalCount,
   followingCount,

@@ -89,6 +89,8 @@ export interface EventFormDraft {
   youtubeUrl: string;
   /** Host this event inside a Sneaky Lynk room (created on publish). */
   attachLynkRoom: boolean;
+  /** Attendee profiles are opt-in for protected events; legacy drafts default off. */
+  showAttendees?: boolean | null;
   ticketingEnabled: boolean;
   ticketPrice: string;
   maxAttendees: string;
@@ -235,6 +237,7 @@ export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {})
     maxAttendees: Number.isFinite(maxAttendees as number) ? maxAttendees : undefined,
     visibility: d.visibility,
     isHidden: d.isHidden === true,
+    showAttendees: d.showAttendees === true,
     publishAt: publishAtLocalToInstant(d.publishAt, schedule.eventTz) ?? undefined,
     isOnline: d.isOnline,
     image: media.image,

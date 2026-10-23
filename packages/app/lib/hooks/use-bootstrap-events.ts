@@ -1,3 +1,5 @@
+import { sanitizeEventAttendance } from "@dvnt/app/lib/events/event-attendee-visibility";
+import { getSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
 import { storedEventType } from "@dvnt/app/lib/events/event-type";
 /**
  * Bootstrap Events Hook
@@ -9,23 +11,15 @@ import { storedEventType } from "@dvnt/app/lib/events/event-type";
  */
 
 import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, isCancelledError } from "@tanstack/react-query";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { isFeatureEnabled } from "@dvnt/app/lib/feature-flags";
 import { bootstrapApi, type BootstrapEventsResponse } from "@dvnt/app/lib/api/bootstrap";
 import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
 import { useScreenTrace } from "@dvnt/app/lib/perf/screen-trace";
 
-function hydrateFromEventsBootstrap(
-  queryClient: ReturnType<typeof useQueryClient>,
-  data: BootstrapEventsResponse,
-) {
-  // Seed the events list cache
-  queryClient.setQueryData(eventKeys.list(), data.events.map(event => ({ ...event, category: storedEventType(event) })));
-
-  console.log(
-    `[BootstrapEvents] Hydrated cache: ${data.events.length} events`,
-  );
+function bootstrapEventsForCache(data: BootstrapEventsResponse) {
+  return data.events.map(event => sanitizeEventAttendance({ ...event, category: storedEventType(event) }));
 }
 
 export function useBootstrapEvents() {
@@ -48,10 +42,26 @@ export function useBootstrapEvents() {
       return;
     }
 
-    bootstrapApi.events({ userId }).then((data) => {
-      if (!data) return;
-      hydrateFromEventsBootstrap(queryClient, data);
-      trace.markUsable();
+    const session = getSessionLifecycle();
+    // Own the request through QueryClient so realtime privacy changes and
+    // account-boundary cancellation can discard even the initial response.
+    void queryClient.fetchQuery({
+      queryKey: eventKeys.list(),
+      retry: false,
+      queryFn: async () => {
+        const data = await bootstrapApi.events({ userId });
+        const current = getSessionLifecycle();
+        if (!current.ready || current.epoch !== session.epoch ||
+          String(useAuthStore.getState().user?.id ?? "") !== String(userId)) {
+          throw new Error("Event bootstrap account changed");
+        }
+        if (!data) throw new Error("Event bootstrap unavailable");
+        return bootstrapEventsForCache(data);
+      },
+    }).then(() => {
+      if (getSessionLifecycle().epoch === session.epoch) trace.markUsable();
+    }).catch((error) => {
+      if (!isCancelledError(error)) console.warn("[BootstrapEvents] Request discarded:", error);
     });
   }, [enabled, userId, queryClient, trace]);
 
