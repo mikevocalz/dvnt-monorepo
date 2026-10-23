@@ -52,8 +52,8 @@ const fixture = `
     host:{id:'fixture-host',username:'community',avatar:'./fixture-avatar.svg'},location:'Brooklyn, NY',
     fullDate:'2099-06-20T23:00:00Z',event_tz:'America/New_York',lineup:['Local selectors'],perks:[],attendees:[]};
   export const useFixture=create(()=>({event,tiers,authenticated:false}));
-  export const f=window.fixture={checkouts:[],rsvps:[],routes:[],storyShares:[],ui:useEventDetailUiStore,
-    configure:patch=>useFixture.setState(patch),configureTickets:tiers=>useFixture.setState(s=>({tiers,event:{...s.event,ticketTiers:tiers}})),reset:()=>{useEventDetailUiStore.getState().reset();f.checkouts=[];f.rsvps=[];f.routes=[];f.storyShares=[];useFixture.setState({event,tiers,authenticated:false})}};
+  export const f=window.fixture={checkouts:[],rsvps:[],routes:[],storyShares:[],attendancePrivacy:[],ui:useEventDetailUiStore,
+    configure:patch=>useFixture.setState(patch),configureTickets:tiers=>useFixture.setState(s=>({tiers,event:{...s.event,ticketTiers:tiers}})),reset:()=>{useEventDetailUiStore.getState().reset();f.checkouts=[];f.rsvps=[];f.routes=[];f.storyShares=[];f.attendancePrivacy=[];useFixture.setState({event,tiers,authenticated:false})}};
   export const store=state=>Object.assign((select=s=>s)=>select(state),{getState:()=>state});
   export const guestCheckout=store({open:false,email:'',eventId:'42',tierId:'',requestKey:'fixture',quantity:1,
     discountCode:'',trackedPromoterCode:'',codeDraft:'',quoteRevision:0,patch:noop,
@@ -94,7 +94,8 @@ const boundaries = new Map([
   ['@dvnt/app/lib/stores/create-event-store', `import {store} from 'fixture';export const useCreateEventStore=store({});`],
   ['@dvnt/app/lib/stores/cart', `import {store} from 'fixture';export const useCartStore=store({});`],
   ['@dvnt/app/lib/stores/checkout-profile-store', `import {store,noop} from 'fixture';export const useCheckoutProfileStore=store({reset:noop});`],
-  ['@dvnt/app/lib/stores/event-attendees-store', `import {store,noop} from 'fixture';const empty={rows:[],lastPageSize:0,loading:false};export const selectAttendees=()=>()=>empty;export const useEventAttendeesStore=store({seed:noop,loadMore:noop});`],
+  // Keep the real privacy hook and accordion; fixture only the paged service store.
+  ['@dvnt/app/lib/stores/event-attendees-store', `import {store,noop,f} from 'fixture';const empty={rows:[],lastPageSize:0,loading:false};export const selectAttendees=()=>()=>empty;export const useEventAttendeesStore=store({seed:noop,loadMore:noop,setAllowed:(eventId,allowed)=>f.attendancePrivacy.push({eventId,allowed})});`],
   ['@dvnt/app/lib/api/promoters', `export const promotersApi={getClaim:async()=>null};`],
   ['@dvnt/app/lib/api/events', `export const eventsApi={};`],
   ['@dvnt/app/lib/api/ticket-types', `import {useFixture} from 'fixture';export const ticketTypesApi={getByEvent:async()=>useFixture.getState().tiers};`],
@@ -160,6 +161,8 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
         const until=async predicate=>{for(let i=0;i<200;i++){if(predicate())return;await new Promise(r=>setTimeout(r,10))}throw Error('DOM smoke did not render '+screen+': '+errors.join('; '))};
         if(screen==='event'){
           await until(()=>dom.window.document.querySelector('[data-testid="event-purchase"]'));
+          await until(()=>dom.window.fixture.attendancePrivacy.some(row=>row.eventId==='42'&&row.allowed===true));
+          assert.equal(errors.length,0,'actual privacy hook and accordion mount without boundary errors');
           const button=id=>dom.window.document.querySelector('[data-testid="ticket-tier-'+id+'"]');
           assert.equal(button(PAID).getAttribute('aria-pressed'),'true');
           button(FREE).click();await until(()=>button(FREE).getAttribute('aria-pressed')==='true');
@@ -221,6 +224,8 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       await page.goto(origin+'/public/events/42');
       const purchase=page.getByTestId('event-purchase');
       await purchase.waitFor();await tick(page);
+      assert.equal(await page.evaluate(()=>window.fixture.attendancePrivacy.some(row=>row.eventId==='42'&&row.allowed===true)),true,'real privacy hook keeps ordinary event attendance enabled');
+      assert.equal(evidence.errors.length,0,'actual privacy hook and accordion mount without boundary errors');
       assert.equal(await purchase.count(),1,'one purchase group');
       assert.equal(await page.getByRole('heading',{name:'Tickets',exact:true}).count(),1,'one Tickets section');
       assert.equal(await page.getByTestId('event-purchase-action').count(),1,'one primary purchase CTA');
