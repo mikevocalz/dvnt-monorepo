@@ -1,0 +1,34 @@
+name: Comment update lockdown
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/migrations/**comments_client_update_lockdown.sql'
+      - 'scripts/verify-comment-update-lockdown.mjs'
+      - '.github/workflows/comment-update-lockdown.yml'
+permissions:
+  contents: read
+jobs:
+  comment-update-lockdown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated SQL tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql
+          npm install --prefix "$RUNNER_TEMP/comment-sql" --no-package-lock --no-save pg@8.16.3
+          ln -s "$RUNNER_TEMP/comment-sql/node_modules" node_modules
+      - name: Verify real roles and RLS in disposable PostgreSQL
+        run: node scripts/verify-comment-update-lockdown.mjs
+      - name: Ensure missing migration is caught
+        run: |
+          if node scripts/verify-comment-update-lockdown.mjs --skip-migration; then
+            echo 'ERROR: regression did not catch missing migration'
+            exit 1
+          fi
