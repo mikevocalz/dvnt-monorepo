@@ -36,20 +36,20 @@ export function CommentGif({
   const { playing, failed } = useGifState();
   if (!isCommentGif(attachment))
     return <span className="text-sm text-white/60">GIF unavailable</span>;
-  const width = Math.min(attachment.width, 240);
+  const width = Math.max(44, Math.min(attachment.width, 240));
   const height = Math.min((width * attachment.height) / attachment.width, 280);
   return (
     <figure className="my-2 max-w-full" style={{ width }}>
       {failed ? (
         <div
           role="status"
-          className="rounded-xl bg-white/5 p-3 text-sm text-white/60"
+          className="break-words rounded-xl bg-white/5 p-3 text-sm text-white/60 [overflow-wrap:anywhere]"
         >
           GIF unavailable: {attachment.title}
         </div>
       ) : reduced && !playing && !interactive ? (
         <div
-          className="rounded-xl bg-white/10 p-3 text-sm text-white"
+          className="break-words rounded-xl bg-white/10 p-3 text-sm text-white [overflow-wrap:anywhere]"
           style={{ minHeight: 80 }}
         >
           {attachment.title}
@@ -57,8 +57,8 @@ export function CommentGif({
       ) : reduced && !playing ? (
         <button
           type="button"
-          className="w-full rounded-xl bg-white/10 p-3 text-sm text-white"
-          style={{ minHeight: Math.min(height, 120) }}
+          className="min-h-11 min-w-11 w-full break-words rounded-xl bg-white/10 p-3 text-sm text-white [overflow-wrap:anywhere] focus-visible:outline focus-visible:outline-2"
+          style={{ minHeight: Math.max(44, Math.min(height, 120)) }}
           onClick={() => useGifState.setState({ playing: true })}
         >
           Play GIF: {attachment.title}
@@ -85,7 +85,7 @@ export function CommentGif({
       {reduced && playing && !failed && (
         <button
           type="button"
-          className="text-xs text-white/65"
+          className="min-h-11 min-w-11 rounded-lg px-2 text-sm text-white/65 focus-visible:outline focus-visible:outline-2"
           onClick={() => useGifState.setState({ playing: false })}
         >
           Stop GIF
@@ -126,6 +126,7 @@ export function CommentGifPicker({
   const request = useRef<AbortController | null>(null);
   const generation = useRef(0);
   const input = useRef<HTMLInputElement>(null);
+  const picker = useRef<HTMLElement>(null);
   const load = async (next?: string) => {
     request.current?.abort();
     const controller = new AbortController();
@@ -168,7 +169,9 @@ export function CommentGifPicker({
   };
   useEffect(() => {
     input.current?.focus({ preventScroll: true });
+    const frame = requestAnimationFrame(() => picker.current?.scrollIntoView({ block: "nearest" }));
     return () => {
+      cancelAnimationFrame(frame);
       generation.current++;
       request.current?.abort();
     };
@@ -182,6 +185,7 @@ export function CommentGifPicker({
   }, [state.query, state.revision]);
   return (
     <section
+      ref={picker}
       aria-label="Choose a GIF"
       className="border-t border-white/10 p-3"
       onKeyDown={(event) => {
@@ -205,19 +209,19 @@ export function CommentGifPicker({
           onChange={(event) =>
             useGifState.setState({ query: event.target.value })
           }
-          className="min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-2 text-white"
+          className="min-h-11 min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-2 text-base text-white focus-visible:outline focus-visible:outline-2"
           placeholder="Search GIFs"
         />
         <button
           type="button"
           onClick={onClose}
           aria-label="Close GIF picker"
-          className="text-sm text-white/65"
+          className="min-h-11 min-w-11 rounded-lg px-2 text-sm text-white/65 focus-visible:outline focus-visible:outline-2"
         >
           Close
         </button>
       </div>
-      <div className="max-h-64 overflow-y-auto" aria-busy={state.loading}>
+      <div className="overflow-y-auto overscroll-contain" style={{ maxHeight: "min(256px, 40dvh)" }} aria-busy={state.loading}>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {state.items.map((item) => (
             <button
@@ -225,7 +229,7 @@ export function CommentGifPicker({
               type="button"
               aria-label={`Choose ${item.title}`}
               onClick={() => onSelect(item)}
-              className="min-w-0 rounded-lg border border-white/10 p-1 text-left focus-visible:outline focus-visible:outline-2"
+              className="min-h-11 min-w-0 rounded-lg border border-white/10 p-1 text-left focus-visible:outline focus-visible:outline-2"
             >
               <CommentGif attachment={item} preview interactive={false} />
             </button>
@@ -246,6 +250,7 @@ export function CommentGifPicker({
             GIFs could not load.{" "}
             <button
               type="button"
+              className="min-h-11 min-w-11 rounded-lg px-2 font-medium underline focus-visible:outline focus-visible:outline-2"
               onClick={() =>
                 useGifState.setState((s) => ({ revision: s.revision + 1 }))
               }
@@ -258,7 +263,7 @@ export function CommentGifPicker({
           <button
             type="button"
             onClick={() => void load(state.next)}
-            className="w-full py-3 text-sm text-white"
+            className="min-h-11 w-full rounded-lg py-3 text-sm text-white focus-visible:outline focus-visible:outline-2"
           >
             Load more GIFs
           </button>

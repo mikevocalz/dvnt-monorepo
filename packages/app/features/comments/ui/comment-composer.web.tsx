@@ -117,11 +117,11 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
           <div className="flex min-w-0 items-center justify-between gap-3 border-b border-white/10 bg-[#171923] px-3 py-2 text-sm text-white/65">
             <span className="min-w-0 break-words">{replyTo ? `Replying to @${replyTo.username}` : label}</span>
             <div className="flex shrink-0 items-center gap-3">
-              {replyTo && <button type="button" disabled={mutation.isPending} onClick={() => setReplyTo(null)} className="min-h-9 disabled:opacity-40">Cancel reply</button>}
-              <button type="button" disabled={mutation.isPending} onClick={close} aria-label="Close composer" className="min-h-9 font-medium disabled:opacity-40">Close</button>
+              {replyTo && <button type="button" disabled={mutation.isPending} onClick={() => setReplyTo(null)} className="min-h-11 min-w-11 rounded-lg px-1 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">Cancel reply</button>}
+              <button type="button" disabled={mutation.isPending} onClick={close} aria-label="Close composer" className="min-h-11 min-w-11 rounded-lg px-1 font-medium focus-visible:outline focus-visible:outline-2 disabled:opacity-40">Close</button>
             </div>
           </div>
-          {attachment && <div className="px-3"><CommentGif attachment={attachment} preview /><button type="button" disabled={mutation.isPending} onClick={() => setAttachment(null)} className="pb-2 text-sm text-white/65">Remove GIF</button></div>}
+          {attachment && <div className="px-3"><CommentGif attachment={attachment} preview /><button type="button" disabled={mutation.isPending} onClick={() => setAttachment(null)} className="min-h-11 min-w-11 rounded-lg px-2 text-sm text-white/65 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">Remove GIF</button></div>}
           <div className="flex items-end gap-2 px-3 py-3">
             <textarea
               ref={inputRef} rows={2} value={text} disabled={mutation.isPending}
@@ -136,7 +136,7 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
               className="min-w-0 flex-1 resize-y bg-transparent text-base text-white outline-none placeholder:text-white/40 disabled:opacity-60"
               style={{ minHeight: 48, maxHeight: 160 }}
             />
-            <button ref={gifButtonRef} type="button" aria-label="Add GIF" aria-expanded={pickerOpen} disabled={mutation.isPending} onClick={() => usePicker.setState({ open: !pickerOpen })} className="h-11 rounded-lg px-2 text-sm font-bold text-white/65">GIF</button>
+            <button ref={gifButtonRef} type="button" aria-label="Add GIF" aria-expanded={pickerOpen} disabled={mutation.isPending} onClick={() => usePicker.setState({ open: !pickerOpen })} className="h-11 min-w-11 shrink-0 rounded-lg px-2 text-sm font-bold text-white/65 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">GIF</button>
             <button type="submit" disabled={(!text.trim() && !attachment) || mutation.isPending} aria-label={parentCommentId || replyTo ? "Post reply" : "Post comment"} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[#3FDCFF] focus-visible:outline focus-visible:outline-2 disabled:opacity-35">
               <Send size={20} />
             </button>
