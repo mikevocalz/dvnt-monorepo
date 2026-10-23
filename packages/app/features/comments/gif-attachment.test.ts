@@ -64,3 +64,13 @@ test("malformed dimensions and oversized metadata cannot be selected", () => {
   assert.equal(isCommentGif({ ...valid, title: "x".repeat(201) }), false);
   assert.equal(commentGifFromItem({ ...item, media_formats: {} }), null);
 });
+
+test("all three documented Klipy CDN hosts work, unrelated numbered hosts do not", () => {
+  const valid = commentGifFromItem(item, "klipy")!;
+  for (const host of ["static.klipy.com", "static1.klipy.com", "static2.klipy.com"]) {
+    assert.equal(isCommentGif({ ...valid, url: `https://${host}/a.gif`, previewUrl: `https://${host}/p.webp` }), true);
+  }
+  for (const host of ["static3.klipy.com", "static12.klipy.com", "static2.klipy.com.evil.test"]) {
+    assert.equal(isCommentGif({ ...valid, url: `https://${host}/a.gif` }), false);
+  }
+});

@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { create } from "zustand";
 import { CommentGif, CommentGifPicker } from "./comment-gif.web";
+import { watchCommentComposerViewport } from "./comment-composer-viewport.web";
 import { Send } from "lucide-react";
 import { useCreateComment } from "@dvnt/app/lib/hooks/use-comments";
 import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
@@ -19,7 +20,7 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
   const usePicker = useMemo(() => create<{ open: boolean }>(() => ({ open: false })), []);
   const pickerOpen = usePicker(s => s.open);
   const gifButtonRef = useRef<HTMLButtonElement>(null);
-  const closePicker = () => { usePicker.setState({ open: false }); requestAnimationFrame(() => gifButtonRef.current?.focus()); };
+  const closePicker = () => { usePicker.setState({ open: false }); requestAnimationFrame(() => gifButtonRef.current?.focus({ preventScroll: true })); };
   useEffect(() => { usePicker.setState({ open: false }); }, [open, postId, parentCommentId]);
   const user = useAuthStore((s) => s.user);
   const mutation = useCreateComment();
@@ -64,6 +65,11 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
     composerRef.current?.scrollIntoView({ block: "nearest" });
   }, [open, replyTo?.commentId]);
 
+  useEffect(() => {
+    if (!open || !composerRef.current) return;
+    return watchCommentComposerViewport(composerRef.current);
+  }, [open]);
+
   const close = () => {
     if (sending.current) return;
     reset();
@@ -99,7 +105,7 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
     });
   };
 
-  const bottomPadding = "calc(env(safe-area-inset-bottom, 0px) + 16px + var(--dvnt-tabbar-clearance, 0px))";
+  const bottomPadding = "calc(env(safe-area-inset-bottom, 0px) + 16px + var(--dvnt-tabbar-clearance, 0px) + var(--comment-keyboard-clearance, 0px))";
   if (!open && hideWhenClosed) return <div aria-hidden="true" style={{ height: bottomPadding }} />;
   return (
     <section

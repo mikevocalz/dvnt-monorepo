@@ -9,7 +9,7 @@ export interface CommentAttachment {
   title: string;
 }
 
-const KLIPY_HOSTS = new Set(["static.klipy.com", "static1.klipy.com"]);
+const KLIPY_HOSTS = new Set(["static.klipy.com", "static1.klipy.com", "static2.klipy.com"]);
 const KEYS = new Set([
   "provider",
   "id",

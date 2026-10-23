@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const {execFileSync} = require('node:child_process');
+const keyboardBaseline = process.argv.includes('--keyboard-baseline');
 const {build} = require('esbuild');
 const {compile} = require('tailwindcss');
 const {chromium,webkit} = require('playwright');
@@ -67,6 +69,90 @@ async function loadedImage(locator) {
  await locator.evaluate(image => image.decode());
  assert(await locator.evaluate(image => image.naturalWidth > 1 && image.naturalHeight > 1), 'visible GIF fixture must decode at its real dimensions');
 }
+// This models OS keyboard visualViewport events while keeping the layout
+// viewport unchanged. It is not a physical-device keyboard emulation.
+async function checkVisualViewportKeyboard(page, width, baseline = false) {
+ await page.evaluate(() => {
+  window.originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+  const viewport = Object.assign(new EventTarget(), {height:innerHeight,width:innerWidth,offsetTop:0,offsetLeft:0,scale:1,pageTop:scrollY});
+  Object.defineProperty(window,'visualViewport',{configurable:true,value:viewport});
+  window.keyboardScrolls = [];
+  window.originalScrollBy = window.scrollBy;
+  window.scrollBy = (...args) => {keyboardScrolls.push(args);return originalScrollBy.apply(window,args)};
+  const shade = document.createElement('div');
+  shade.id='keyboard-occlusion';shade.ariaHidden='true';
+  shade.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;pointer-events:none;background:#202332;border-top:1px solid #667;color:white;font:14px Arial;padding:12px;box-sizing:border-box;display:none';
+  shade.textContent='Synthetic keyboard occlusion (not a device keyboard)';document.body.append(shade);
+  window.setKeyboardViewport = (height,offsetTop=0) => {
+   Object.assign(viewport,{height,offsetTop});
+   shade.style.display=height<innerHeight?'block':'none';shade.style.top=(height+offsetTop)+'px';
+   viewport.dispatchEvent(new Event('resize'));viewport.dispatchEvent(new Event('scroll'));
+  };
+ });
+ const measure = () => page.evaluate(() => {
+  const rect = selector => {const r=document.querySelector(selector)?.getBoundingClientRect();return r?{top:r.top,bottom:r.bottom,height:r.height}:null};
+  const view={height:visualViewport.height,top:visualViewport.offsetTop,bottom:visualViewport.offsetTop+visualViewport.height};
+  return {layoutHeight:innerHeight,view,textarea:rect('textarea'),picker:rect('[aria-label="Choose a GIF"]'),search:rect('[aria-label="Search GIFs"]'),gallery:rect('[aria-label="Choose a GIF"] [aria-busy]'),clearance:document.querySelector('[aria-label="Comment composer"]')?.style.getPropertyValue('--comment-keyboard-clearance'),active:document.activeElement?.getAttribute('aria-label'),scrolls:keyboardScrolls.length};
+ });
+ const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+ const waitVisible = selector => page.waitForFunction(selector => {
+  const target=document.querySelector(selector);if(!target)return false;
+  const r=target.getBoundingClientRect();return r.top>=visualViewport.offsetTop+7 && r.bottom<=visualViewport.offsetTop+visualViewport.height-7;
+ },selector);
+ const measurements = [];
+ await page.locator('#comment-trigger').click();
+ const input=page.getByRole('textbox',{name:'Add a comment',exact:true});await input.fill('Keyboard draft stays intact');
+ await page.evaluate(()=>setKeyboardViewport(320,80));await settle();
+ if(!baseline) await waitVisible('textarea');
+ measurements.push({state:'textarea-keyboard',...await measure()});
+ await page.screenshot({path:path.join(dir,`keyboard-${baseline?'baseline-':''}textarea-${width}.png`)});
+ await page.getByRole('button',{name:'Add GIF',exact:true}).click();
+ const search=page.getByRole('textbox',{name:'Search GIFs',exact:true});await search.fill('gallery');
+ await page.getByRole('button',{name:'Choose Celebration 12',exact:true}).waitFor();
+ await page.evaluate(()=>setKeyboardViewport(300,40));await settle();
+ if(!baseline) await waitVisible('[aria-label="Choose a GIF"]');
+ const keyboard=await measure();measurements.push({state:'picker-keyboard',...keyboard});
+ assert.equal(keyboard.layoutHeight,852,'OS keyboard case must not resize innerHeight/dvh');
+ await page.screenshot({path:path.join(dir,`keyboard-${baseline?'baseline-':''}picker-${width}.png`)});
+ if(baseline) {
+  assert(measurements[0].textarea.bottom>measurements[0].view.bottom,'baseline plain textarea reproduces keyboard clipping');
+  assert(keyboard.picker.bottom>keyboard.view.bottom || keyboard.search.top<keyboard.view.top,'baseline picker reproduces visual viewport clipping');
+  fs.writeFileSync(path.join(dir,`keyboard-baseline-geometry-${width}.json`),JSON.stringify(measurements,null,2));
+  return;
+ }
+ assert.equal(keyboard.active,'Search GIFs','viewport resize preserves search focus');
+ assert(keyboard.gallery.height<=121,'gallery uses visualViewport height, not unchanged dvh');
+ assert.equal(await input.inputValue(),'Keyboard draft stays intact');
+ // Offset-only scroll, not a resize: keyboard/browser panning must be handled.
+ await page.evaluate(()=>{visualViewport.offsetTop=180;document.querySelector('#keyboard-occlusion').style.top='480px';visualViewport.dispatchEvent(new Event('scroll'))});
+ await waitVisible('[aria-label="Choose a GIF"]');
+ measurements.push({state:'offset-only-pan',...await measure()});
+ const before=await page.evaluate(()=>keyboardScrolls.length);
+ await page.evaluate(()=>{visualViewport.pageTop+=80;for(let i=0;i<8;i++)visualViewport.dispatchEvent(new Event('scroll'))});await settle();
+ assert.equal(await page.evaluate(()=>keyboardScrolls.length),before,'unchanged viewport scroll events do not create a correction loop');
+ await page.evaluate(()=>setKeyboardViewport(852));await waitVisible('[aria-label="Choose a GIF"]');
+ await page.waitForFunction(()=>document.querySelector('[aria-label="Comment composer"]').style.getPropertyValue('--comment-keyboard-clearance')==='0px');
+ assert.equal(await search.evaluate(el=>el===document.activeElement),true,'keyboard dismissal does not blur search');
+ measurements.push({state:'keyboard-dismissed',...await measure()});
+ // Select without a Playwright auto-scroll that could hide application bugs.
+ await page.evaluate(()=>{setKeyboardViewport(300,40);document.querySelector('[aria-label="Choose Wide celebration"]').click()});
+ await page.getByRole('region',{name:'Choose a GIF',exact:true}).waitFor({state:'detached'});
+ await input.evaluate(el=>el.focus({preventScroll:true}));await waitVisible('textarea');
+ assert.equal(await input.inputValue(),'Keyboard draft stays intact');
+ assert.equal(await page.evaluate(()=>draft.getState().attachment.id),'wide');
+ measurements.push({state:'selected-gif-textarea',...await measure()});
+ await page.screenshot({path:path.join(dir,`keyboard-selected-textarea-${width}.png`)});
+ await page.getByRole('button',{name:'Close composer',exact:true}).evaluate(el=>el.click());await input.waitFor({state:'detached'});await settle();
+ const closed=await page.evaluate(()=>keyboardScrolls.length);
+ await page.evaluate(()=>setKeyboardViewport(280,0));await settle();
+ assert.equal(await page.evaluate(()=>keyboardScrolls.length),closed,'dismissed composer detaches keyboard handling');
+ fs.writeFileSync(path.join(dir,`keyboard-geometry-${width}.json`),JSON.stringify(measurements,null,2));
+ await page.evaluate(()=>{
+  Object.defineProperty(window,'visualViewport',originalVisualViewport);window.scrollBy=originalScrollBy;
+  document.querySelector('#keyboard-occlusion').remove();delete window.setKeyboardViewport;
+ });
+}
+
 async function checkMobileGifQuality(page, width) {
  const screenshot = async (state, fullPage = true) => page.screenshot({ path: path.join(dir, `mobile-${state}-${width}.png`), fullPage });
  await page.setViewportSize({width,height:852});
@@ -202,7 +288,7 @@ async function checkMobileGifQuality(page, width) {
  resolveExtensions:['.web.tsx','.web.ts','.tsx','.ts','.jsx','.js','.json'],
  nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),
  alias:{'@dvnt/app':path.join(root,'packages/app'),'react-native':'react-native-web','lucide-react-native':'lucide-react'},
- plugins:[{name:'offline-boundaries',setup(b){b.onResolve({filter:/.*/},args=>mocks[args.path]?{path:args.path,namespace:'mock'}:null);b.onLoad({filter:/.*/,namespace:'mock'},args=>({contents:mocks[args.path],loader:'tsx',resolveDir:root}));}}],
+ plugins:[{name:'offline-boundaries',setup(b){if(keyboardBaseline)b.onLoad({filter:/comment-(?:composer|gif)\.web\.tsx$/},args=>({contents:execFileSync('git',['show','a1946d10:'+path.relative(root,args.path)],{cwd:root,encoding:'utf8'}),loader:'tsx',resolveDir:path.dirname(args.path)}));b.onResolve({filter:/.*/},args=>mocks[args.path]?{path:args.path,namespace:'mock'}:null);b.onLoad({filter:/.*/,namespace:'mock'},args=>({contents:mocks[args.path],loader:'tsx',resolveDir:root}));}}],
  stdin:{resolveDir:root,loader:'tsx',contents:`
  import React from 'react';import {createRoot} from 'react-dom/client';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
  import {CommentsScreen} from './packages/app/features/comments/comments.web';import {CommentRepliesScreen} from './packages/app/features/comments/comment-replies.web';
@@ -260,10 +346,11 @@ async function checkMobileGifQuality(page, width) {
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const engine=process.env.COMMENT_BROWSER==='webkit'?webkit:chromium;
  browser=await engine.launch({headless:true,...(engine===chromium?{...(fs.existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{}),args:['--no-sandbox']}: {})});
- for (const width of [320,360,393,430,1440]) {
+ for (const width of keyboardBaseline?[393]:[320,360,393,430,1440]) {
   const page=await browser.newPage({viewport:{width,height:852},isMobile:width<=430,hasTouch:width<=430});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.request().resourceType()==='image'?route.fulfill({contentType:'image/gif',body:gifFixtures[new URL(route.request().url()).pathname.includes('tall')?'tall':new URL(route.request().url()).pathname.includes('wide')?'wide':'normal']}):route.abort());
   await page.goto('http://127.0.0.1:'+server.address().port);
+  if(width<=430){await checkVisualViewportKeyboard(page,width,keyboardBaseline);if(keyboardBaseline){assert.deepEqual(errors,[]);await page.close();continue;}}
   await page.locator('#comment-trigger').click();const input=page.getByRole('textbox',{name:'Add a comment',exact:true});await input.waitFor();
   assert.equal(await input.evaluate(el=>el===document.activeElement),true,'composer receives focus');
   const geometry=await page.evaluate(()=>({card:document.querySelector('#comment-card').getBoundingClientRect().bottom,composer:document.querySelector('[aria-label="Comment composer"]').getBoundingClientRect().top,overflow:document.documentElement.scrollWidth>innerWidth}));
@@ -316,6 +403,7 @@ async function checkMobileGifQuality(page, width) {
   if(width<=430) await checkMobileGifQuality(page,width);
   assert.deepEqual(errors,[]);await page.close();
  }
- console.log('PASS: actual composer/rows at 320, 360, 393, 430 and 1440px; non-overlap, focus/close, cancel reply, whitespace, multiline, IME, admission, pending, failure/retry, thread payloads, keyboard-sized viewport, GIF picker/search/pagination/fallback/stale results, GIF-only/text+GIF, revision-safe drafts, saved rendering, visible two-frame GIFs, scrollable gallery, loading/error screenshots, long captions/targets, tall/wide media, 44px composer/picker controls, reduced motion, short/landscape viewports and configured CSS clearance. Evidence: '+dir);
+ if(keyboardBaseline){console.log('PASS negative control: merged a1946d10 clips plain textarea and GIF picker with visualViewport-only keyboard events. Evidence: '+dir);return;}
+ console.log('PASS: visualViewport-only keyboard resize/pan/recovery/cleanup and actual composer/rows at 320, 360, 393, 430 and 1440px; non-overlap, focus/close, cancel reply, whitespace, multiline, IME, admission, pending, failure/retry, thread payloads, keyboard-sized viewport, GIF picker/search/pagination/fallback/stale results, GIF-only/text+GIF, revision-safe drafts, saved rendering, visible two-frame GIFs, scrollable gallery, loading/error screenshots, long captions/targets, tall/wide media, 44px composer/picker controls, reduced motion, short/landscape viewports and configured CSS clearance. Evidence: '+dir);
  } finally {if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1});

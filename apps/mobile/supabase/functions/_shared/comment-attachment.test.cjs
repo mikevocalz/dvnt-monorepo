@@ -38,3 +38,11 @@ test('canonicalizes standard HTTPS ports and hostname case before persistence', 
   const result = normalizeCommentAttachment({ ...gif, url: 'https://STATIC.KLIPY.COM:443/ii/a.gif' });
   assert.equal(result.url, 'https://static.klipy.com/ii/a.gif');
 });
+
+test('documented static2 CDN accepted without wildcard expansion', () => {
+  const valid = { ...gif, url: 'https://static2.klipy.com/a.gif', previewUrl: 'https://static2.klipy.com/p.webp' };
+  assert.deepEqual(normalizeCommentAttachment(valid), valid);
+  for (const host of ['static3.klipy.com','static12.klipy.com','static2.klipy.com.evil.test']) {
+    assert.equal(normalizeCommentAttachment({ ...gif, url: `https://${host}/a.gif` }), null);
+  }
+});
