@@ -1,8 +1,20 @@
+/** Provider-hosted animation metadata. Comment GIFs are not uploaded or rehosted. */
+export type CommentAttachment = {
+  provider: "klipy" | "noto";
+  id: string;
+  url: string;
+  previewUrl: string;
+  width: number;
+  height: number;
+  title: string;
+};
+
 export type Comment = {
   id: string;
   username: string;
   avatar: string;
   text: string;
+  attachment?: CommentAttachment | null;
   timeAgo: string;
   createdAt?: string;
   likes: number;

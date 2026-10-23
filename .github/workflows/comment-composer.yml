@@ -5,14 +5,27 @@ on:
       - 'packages/app/features/comments/**'
       - 'packages/app/features/post/post-detail.web.tsx'
       - 'packages/app/lib/stores/comment-draft-store.ts'
+      - 'packages/app/lib/comments/**'
+      - 'packages/app/lib/api/comments.ts'
+      - 'packages/app/lib/hooks/use-comments.ts'
+      - 'packages/app/lib/types/index.ts'
+      - 'packages/app/features/stickers/api/klipy.ts'
+      - 'apps/mobile/supabase/functions/_shared/comment-attachment*'
+      - 'apps/mobile/supabase/functions/add-comment/**'
+      - 'apps/mobile/supabase/functions/get-post-comments/**'
+      - 'apps/mobile/supabase/migrations/*comment*'
+      - 'apps/mobile/lib/api/comments.ts'
+      - 'apps/mobile/lib/hooks/use-comments.ts'
+      - 'apps/mobile/lib/types/index.ts'
       - 'scripts/test-comment-composer-browser.cjs'
+      - 'scripts/test-comment-gif-migration.sql'
       - '.github/workflows/comment-composer.yml'
 permissions:
   contents: read
 jobs:
   comment-composer:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -25,9 +38,14 @@ jobs:
         with:
           node-version: '24'
       - name: Install isolated browser tools
+        timeout-minutes: 30
         run: |
           npm install --prefix "$RUNNER_TEMP/comment-tests" --no-package-lock --no-save esbuild@0.28.2 react@19.2.3 react-dom@19.2.3 @tanstack/react-query@5.104.2 zustand@5.0.15 playwright@1.64.1 tailwindcss@4.3.3 react-native-web@0.21.2 lucide-react@1.30.0 @tanstack/react-virtual@3.14.2
+          # Bound slow Ubuntu mirrors without weakening browser coverage.
+          echo 'Acquire::Retries "3"; Acquire::http::Timeout "60"; Acquire::https::Timeout "60"; APT::Install-Recommends "false";' | sudo tee /etc/apt/apt.conf.d/99-comment-test-retries
           "$RUNNER_TEMP/comment-tests/node_modules/.bin/playwright" install --with-deps ${{ matrix.browser }}
+      - name: Test GIF data and draft contracts
+        run: node --test packages/app/lib/comments/comment-attachment.test.ts packages/app/features/comments/gif-attachment.test.ts apps/mobile/supabase/functions/_shared/comment-attachment.test.cjs apps/mobile/supabase/functions/add-comment/attachment.test.cjs apps/mobile/supabase/functions/get-post-comments/attachment.test.cjs
       - name: Test composer without live data
         env:
           NODE_PATH: ${{ runner.temp }}/comment-tests/node_modules
@@ -39,3 +57,34 @@ jobs:
         with:
           name: comment-composer-evidence-${{ matrix.browser }}
           path: ${{ runner.temp }}/comment-evidence/*.png
+  comment-gif-migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: isolated-test-only
+          POSTGRES_DB: comment_gif_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install PostgreSQL client
+        run: command -v psql || (sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y postgresql-client)
+      - name: Apply and test migration in isolated fixture database
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: isolated-test-only
+          PGDATABASE: comment_gif_test
+        run: psql -X -v ON_ERROR_STOP=1 -f scripts/test-comment-gif-migration.sql

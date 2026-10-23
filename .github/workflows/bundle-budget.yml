@@ -47,6 +47,9 @@ jobs:
       # empty sets without one, which shrinks prerendered routes but not the
       # chunk graph the budgets measure.
       - name: Build web
+        env:
+          # Keep webpack below the hosted runner memory limit, above Node's default heap.
+          NODE_OPTIONS: --max-old-space-size=6144
         run: pnpm --filter web build
 
       - name: Check First Load JS budgets

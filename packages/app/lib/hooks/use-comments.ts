@@ -9,6 +9,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { useCallback } from "react";
+import { useAuthStore } from "../stores/auth-store";
 import { commentsApi as commentsApiClient } from "@dvnt/app/lib/api/comments";
 import type { Comment, Post } from "@dvnt/app/lib/types";
 import { postKeys } from "@dvnt/app/lib/hooks/use-posts";
@@ -273,6 +274,8 @@ function applyCommentDelta(
 type CreateCommentInput = Parameters<typeof commentsApiClient.createComment>[0];
 
 interface CreateCommentContext {
+  isCurrent: () => boolean;
+  unsubscribe: () => void;
   previousQueries: ReturnType<QueryClient["getQueriesData"]>;
   previousThreadQueries: ReturnType<QueryClient["getQueriesData"]>;
   previousCount: number | undefined;
@@ -282,15 +285,19 @@ interface CreateCommentContext {
 async function runCreateCommentOnMutate(
   queryClient: QueryClient,
   newComment: CreateCommentInput,
-): Promise<CreateCommentContext> {
+  assertCurrent: () => void,
+): Promise<Omit<CreateCommentContext, "isCurrent" | "unsubscribe">> {
+  assertCurrent();
   await queryClient.cancelQueries({
     queryKey: commentKeys.byPost(newComment.post),
   });
+  assertCurrent();
 
   if (newComment.parent) {
     await queryClient.cancelQueries({
       queryKey: commentKeys.thread(newComment.post, newComment.parent),
     });
+    assertCurrent();
   }
 
   const previousQueries = queryClient.getQueriesData<Comment[]>({
@@ -312,6 +319,7 @@ async function runCreateCommentOnMutate(
     username: newComment.authorUsername || "You",
     avatar: "",
     text: newComment.text,
+    attachment: newComment.attachment ?? null,
     timeAgo: "Just now",
     createdAt,
     likes: 0,
@@ -403,9 +411,22 @@ export function useCreateComment() {
       }
     },
     onMutate: async (newComment): Promise<CreateCommentContext> => {
+      const actorId = newComment.authorId ?? useAuthStore.getState().user?.id;
+      let identityChanged = false;
+      const unsubscribe = useAuthStore.subscribe((state) => {
+        if (state.user?.id !== actorId) identityChanged = true;
+      });
+      const isCurrent = () => !!actorId && !identityChanged && useAuthStore.getState().user?.id === actorId;
+      const assertCurrent = () => {
+        if (!isCurrent()) throw new Error("Your account changed. Please try posting again.");
+      };
       try {
-        return await runCreateCommentOnMutate(queryClient, newComment);
+        const context = await runCreateCommentOnMutate(queryClient, newComment, assertCurrent);
+        assertCurrent();
+        return { ...context, isCurrent, unsubscribe };
       } catch (err) {
+        // Never turn a stale-actor rejection into permission to dispatch a write.
+        if (!isCurrent()) { unsubscribe(); throw err; }
         // If ANY optimistic-cache update throws, never let it take down
         // the whole mutation — the server call should still go through.
         // Log in dev; return a no-op context so onError/onSettled still
@@ -413,6 +434,8 @@ export function useCreateComment() {
         if (__DEV__)
           console.error("[useCreateComment] onMutate swallowed:", err);
         return {
+          isCurrent,
+          unsubscribe,
           previousQueries: [],
           previousThreadQueries: [],
           previousCount: undefined,
@@ -421,6 +444,7 @@ export function useCreateComment() {
       }
     },
     onError: (_error, newComment, context) => {
+      if (!context?.isCurrent()) return;
       context?.previousQueries?.forEach(([queryKey, data]) => {
         queryClient.setQueryData(queryKey, data);
       });
@@ -439,7 +463,10 @@ export function useCreateComment() {
         );
       }
     },
-    onSettled: (_, __, variables) => {
+    onSettled: (_, __, variables, context) => {
+      const isCurrent = context?.isCurrent();
+      context?.unsubscribe();
+      if (!isCurrent) return;
       queryClient.invalidateQueries({
         queryKey: commentKeys.byPost(variables.post),
         refetchType: "active",

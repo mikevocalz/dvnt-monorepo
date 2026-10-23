@@ -9,6 +9,8 @@ import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { checkRateLimit, WRITE_LIMIT } from "../_shared/rate-limit.ts";
 
+import { normalizeCommentInput } from "../_shared/comment-attachment.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -92,7 +94,8 @@ Deno.serve(async (req) => {
 
     let body: {
       postId: number;
-      content: string;
+      content?: string;
+      attachment?: unknown;
       parentId?: number | null;
       replyToCommentId?: number | null;
     };
@@ -102,6 +105,9 @@ Deno.serve(async (req) => {
       return errorResponse("validation_error", "Invalid JSON body");
     }
 
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return errorResponse("validation_error", "Invalid JSON body");
+    }
     const { postId, content, parentId, replyToCommentId } = body;
     if (!postId || typeof postId !== "number") {
       return errorResponse(
@@ -110,13 +116,8 @@ Deno.serve(async (req) => {
         400,
       );
     }
-    if (
-      !content ||
-      typeof content !== "string" ||
-      content.trim().length === 0
-    ) {
-      return errorResponse("validation_error", "content is required");
-    }
+    const input = normalizeCommentInput(content, body.attachment);
+    if (!input.ok) return errorResponse("validation_error", input.message);
 
     // Get user's integer ID (auto-provision if needed)
     const userData = await resolveOrProvisionUser(
@@ -194,7 +195,8 @@ Deno.serve(async (req) => {
         parent_id: normalizedParentId,
         root_id: rootId,
         depth,
-        content: content.trim(),
+        content: input.content,
+        attachment: input.attachment,
       })
       .select()
       .single();
@@ -250,7 +252,7 @@ Deno.serve(async (req) => {
       const mentionRegex = /@(\w+)/g;
       const mentions: string[] = [];
       let match;
-      while ((match = mentionRegex.exec(content)) !== null) {
+      while ((match = mentionRegex.exec(input.mentionText)) !== null) {
         if (!mentions.includes(match[1])) mentions.push(match[1]);
       }
 
@@ -300,6 +302,7 @@ Deno.serve(async (req) => {
           rootId: comment.root_id ? String(comment.root_id) : null,
           depth: Number(comment.depth) || 0,
           content: comment.content,
+          attachment: input.attachment,
           createdAt: comment.created_at,
           author: {
             id: String(userData.id),

@@ -38,6 +38,7 @@ function mapComment(comment: Comment): CommentData {
     username: comment.username,
     avatar: comment.avatar,
     text: comment.text,
+    attachment: comment.attachment,
     timeAgo: comment.timeAgo,
     createdAt: comment.createdAt,
     likes: comment.likes,
