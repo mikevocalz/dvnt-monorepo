@@ -5,6 +5,7 @@ on:
       - 'packages/app/**'
       - 'apps/mobile/supabase/**'
       - 'scripts/test-member-map*'
+      - 'scripts/verify-port-parity.mjs'
       - 'scripts/fixtures/member-map/**'
       - '.github/workflows/member-map-privacy.yml'
       - 'pnpm-lock.yaml'
