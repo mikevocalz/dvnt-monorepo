@@ -42,6 +42,8 @@ const all = [
 ];
 const past = [event(401, 'Past Archive', { date: '2000-01-01T20:00:00Z', fullDate: '2000-01-01T20:00:00Z' })];
 const forYou = [event(501, 'Personalized Night', { locationLat: 40.7128, locationLng: -74.006 })];
+const longTitle = 'Harbor community celebration with live music, local artists, dancing and late-night conversations at the waterfront venue';
+const crowded = [event(601, longTitle), ...Array.from({ length: 7 }, (_, i) => event(602 + i, `Additional mapped event ${i + 1}`))];
 const rawLocation = e => ({
   id: e.id, title: e.title, visibility: e.visibility || 'public',
   is_hidden: e.isHidden || false, publish_at: e.publishAt || null,
@@ -158,7 +160,7 @@ async function bundle() {
 
 (async () => {
   let browser, server, page;
-  const errors = [], browserConsole = [], failedRequests = [], blockedRequests = [], mapRequests = [], geolocationCalls = [], viewportEvidence = [], fixedViewportEvidence = [], checks = [];
+  const errors = [], browserConsole = [], failedRequests = [], blockedRequests = [], mapRequests = [], geolocationCalls = [], viewportEvidence = [], fixedViewportEvidence = [], longTitleEvidence = [], checks = [];
   let embedMode = 'success';
   const check = name => { checks.push(name); console.log('PASS', name); };
   try {
@@ -253,13 +255,13 @@ async function bundle() {
     assert.equal(await src(), 'https://maps.google.com/maps?q=37.7599,-122.4148&z=15&output=embed');
     await page.getByRole('button', { name: 'View event', exact: true }).click();
     await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
-    assert.equal(new URL(page.url()).pathname, '/public/events/102');
+    assert.equal(new URL(page.url()).pathname, '/feed/events/102');
     await page.goBack(); await waitVenues(4);
     assert.equal(await toggle().getAttribute('aria-pressed'), 'true');
     await page.goForward(); await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
-    assert.equal(new URL(page.url()).pathname, '/public/events/102');
+    assert.equal(new URL(page.url()).pathname, '/feed/events/102');
     await page.goBack(); await waitVenues(4);
-    check('venue selection updates actual iframe source; stable id route and browser Back/Forward');
+    check('venue selection updates actual iframe source; authenticated stable id member route and browser Back/Forward');
 
     await search().fill('Harbor'); await waitVenues(2);
     await select('Harbor Afterparty').click();
@@ -269,14 +271,14 @@ async function bundle() {
     assert.equal(await src(), sameLocation, 'same coordinates remain the same place, but selected event id changes');
     await page.getByRole('button', { name: 'View event', exact: true }).click();
     await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
-    assert.equal(new URL(page.url()).pathname, '/public/events/101');
+    assert.equal(new URL(page.url()).pathname, '/feed/events/101');
     await page.goBack(); await waitVenues(2);
     assert.equal(await search().inputValue(), 'Harbor');
     await select('Harbor Afterparty').focus(); await page.keyboard.press('Space');
     assert.equal(await select('Harbor Afterparty').getAttribute('aria-pressed'), 'true');
     await page.getByRole('button', { name: 'View event', exact: true }).click();
     await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
-    assert.equal(new URL(page.url()).pathname, '/public/events/103');
+    assert.equal(new URL(page.url()).pathname, '/feed/events/103');
     await page.goBack(); await waitVenues(2);
     check('keyboard selectors, coincident venues retain distinct event IDs, search survives navigation');
 
@@ -312,9 +314,11 @@ async function bundle() {
     await search().fill(''); await waitVenues(4);
     await select('Equator Zero').click();
     assert.equal(await src(), 'https://maps.google.com/maps?q=0,0&z=15&output=embed');
-    await page.getByRole('button', { name: 'For You', exact: true }).click(); await waitVenues(1);
+    await page.getByRole('button', { name: 'For You', exact: true }).click();
+    await page.locator('button[data-event-id="501"]').waitFor(); await waitVenues(1);
     assert.equal(await venues().first().textContent(), 'Personalized Night');
-    await page.getByRole('button', { name: 'Past', exact: true }).click(); await waitVenues(1);
+    await page.getByRole('button', { name: 'Past', exact: true }).click();
+    await page.locator('button[data-event-id="401"]').waitFor(); await waitVenues(1);
     assert.equal(await venues().first().textContent(), 'Past Archive');
     await page.getByRole('button', { name: 'All', exact: true }).click(); await waitVenues(4);
     await page.getByRole('button', { name: 'Upcoming', exact: true }).click(); await waitVenues(4);
@@ -383,6 +387,15 @@ async function bundle() {
     await page.evaluate(() => window.mapFixture.setAuthenticated(false));
     await toggle().click(); await waitVenues(4);
     assert.equal(await page.getByRole('button', { name: 'Toggle spicy events' }).count(), 0);
+    await select('Mission Night').click();
+    await page.getByRole('button', { name: 'View event', exact: true }).click();
+    await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/public/events/102', 'guests use the public stable-id event route');
+    await page.goBack(); await waitVenues(4);
+    assert.equal(await toggle().getAttribute('aria-pressed'), 'true', 'guest Back returns to the open map');
+    assert.equal(await select('Mission Night').getAttribute('aria-pressed'), 'true', 'guest Back preserves the selected event');
+    assert.equal(await src(), 'https://maps.google.com/maps?q=37.7599,-122.4148&z=15&output=embed');
+    check('guest View event uses public stable-id route and Back restores the selected venue');
     assert.equal(await frame().getAttribute('allow'), null, 'iframe must not request geolocation permission');
     assert.deepEqual(await page.evaluate(() => window.geolocationCalls), []);
     assert.deepEqual(geolocationCalls, [], 'no scenario may request device location');
@@ -415,12 +428,48 @@ async function bundle() {
       fixedViewportEvidence.push({ viewport, before, after: await geometry() });
     }
     check('fresh fixed-viewport geometry and separate viewport/iframe/full-page capture evidence');
+
+    // A capped flex-column list must scroll, not shrink multi-line selector
+    // buttons until their titles overflow into adjacent event targets.
+    for (const viewport of [{ width: 320, height: 568 }, { width: 393, height: 852 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }]) {
+      await openPage(viewport);
+      await page.evaluate(data => window.mapFixture.setData(data), { all: crowded, locations: crowded.map(rawLocation) });
+      await toggle().click(); await waitVenues(crowded.length);
+      await fit(`${viewport.width}px crowded map selectors`);
+      const selectorList = page.locator('[aria-label="Events with map locations"]');
+      const geometry = await selectorList.evaluate(el => ({
+        height: el.clientHeight, scrollHeight: el.scrollHeight, overflowY: getComputedStyle(el).overflowY,
+        buttons: [...el.querySelectorAll('button[data-event-id]')].map(button => {
+          const range = document.createRange(); range.selectNodeContents(button);
+          return { id: button.dataset.eventId, height: button.getBoundingClientRect().height,
+            clientHeight: button.clientHeight, scrollHeight: button.scrollHeight,
+            textLines: range.getClientRects().length };
+        }),
+      }));
+      assert.equal(geometry.overflowY, 'auto', 'crowded venue selectors must remain scrollable');
+      assert.ok(geometry.height <= 257 && geometry.scrollHeight > geometry.height, 'eight selectors must overflow the capped list, not compress to fit');
+      assert.equal(geometry.buttons.length, 8);
+      for (const button of geometry.buttons) {
+        assert.ok(button.height >= 44, `selector ${button.id} retains its minimum touch target`);
+        assert.ok(button.scrollHeight <= button.clientHeight + 1, `selector ${button.id} must contain its full title: ${JSON.stringify(button)}`);
+      }
+      assert.ok(geometry.buttons[0].textLines >= 2 && geometry.buttons[0].height > 44, 'long title must wrap onto multiple lines without shrinking its button');
+      await select(crowded.at(-1).title).focus(); await page.keyboard.press('Space');
+      assert.equal(await select(crowded.at(-1).title).getAttribute('aria-pressed'), 'true', 'last overflowing selector stays keyboard-accessible');
+      await select(longTitle).focus(); await page.keyboard.press('Enter');
+      assert.equal(await select(longTitle).getAttribute('aria-pressed'), 'true', 'multi-line selector remains independently selectable');
+      await selectorList.evaluate(el => { el.scrollTop = 0; });
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await selectorList.screenshot({ path: path.join(dir, `long-title-selectors-${viewport.width}.png`) });
+      longTitleEvidence.push({ viewport, ...geometry });
+    }
+    check('eight-row scroll list preserves multi-line selector height and keyboard selection at all four widths');
     assert.deepEqual(blockedRequests, [], 'unexpected network boundary request');
     assert.deepEqual(errors, [], 'browser uncaught errors');
     check('guest mode, zero geolocation calls and no private location in any provider request');
     fs.writeFileSync(path.join(dir, 'results.json'), JSON.stringify({
       status: 'passed', commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
-      browser: engine.name(), checks, viewportEvidence, fixedViewportEvidence, mapRequests: mapRequests.length, errors, blockedRequests,
+      browser: engine.name(), checks, viewportEvidence, fixedViewportEvidence, longTitleEvidence, mapRequests: mapRequests.length, errors, blockedRequests,
       scope: 'Actual production EventsListScreen, selected-venue EventsMap, Zustand, React Query and CSS; synthetic data/auth/router and deterministic Google iframe network boundaries. API contract uses real source with mocked Supabase transport. Does not prove live provider, deployed route, database access rules or physical mobile behavior.',
     }, null, 2));
     console.log('PASS web Events map browser regressions. Evidence:', dir);

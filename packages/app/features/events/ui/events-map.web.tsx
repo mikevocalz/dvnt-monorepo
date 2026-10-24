@@ -77,7 +77,7 @@ export default function EventsMap({ events, onClose, onOpenEvent }: {
               ) : null}
               <div className="max-h-64 overflow-y-auto flex flex-col gap-2" aria-label="Events with map locations">
                 {pins.map((pin) => (
-                  <button key={pin.id} data-event-id={pin.id} onClick={() => setSelectedId(pin.id)} aria-pressed={selected?.id === pin.id} className={`min-h-11 text-left px-3 py-2 rounded-xl border break-words ${selected?.id === pin.id ? "border-[#379ED8] bg-[#379ED8]/15" : "border-white/10 bg-white/[0.03]"}`}>
+                  <button key={pin.id} data-event-id={pin.id} onClick={() => setSelectedId(pin.id)} aria-pressed={selected?.id === pin.id} className={`shrink-0 min-h-11 text-left px-3 py-2 rounded-xl border break-words ${selected?.id === pin.id ? "border-[#379ED8] bg-[#379ED8]/15" : "border-white/10 bg-white/[0.03]"}`}>
                     {pin.title}
                   </button>
                 ))}

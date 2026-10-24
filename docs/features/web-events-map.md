@@ -3,7 +3,8 @@
 The Map button beside Events search switches between the normal list and a venue
 map. Search, tabs, filters, and spicy-content preferences use the same filtered
 results in both views. Choose an event in the map's selector to show its venue;
-View event opens the stable numeric public event route. Back retains map mode
+View event opens the stable numeric member event route when signed in and the
+public event route for guests. Back retains map mode
 and the selected event. List view or Escape returns to the normal results.
 
 ## Provider and scope
