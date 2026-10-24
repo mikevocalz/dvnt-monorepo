@@ -8,11 +8,21 @@ let trustedHydration = false;
 let durabilityError: string | null = null;
 export function locationDurabilityError() { return durabilityError; }
 // Emergency server withdrawal must still run if local disk is full/unavailable.
-const withdrawalStorage: typeof mmkvStorage = mmkvStorage && {
-  getItem: (name) => mmkvStorage.getItem(name),
-  removeItem: (name) => mmkvStorage.removeItem(name),
+const withdrawalStorage: NonNullable<typeof mmkvStorage> = {
+  getItem: (name) => {
+    if (!mmkvStorage) throw new Error("Location privacy storage is unavailable");
+    return mmkvStorage.getItem(name);
+  },
+  removeItem: (name) => {
+    if (!mmkvStorage) throw new Error("Location privacy storage is unavailable");
+    return mmkvStorage.removeItem(name);
+  },
   setItem: (name, value) => {
     // Never erase unreadable denial records with an empty fallback snapshot.
+    if (!mmkvStorage) {
+      durabilityError = "Privacy preference could not be saved on this device. Keep the app open and retry turning location off before restarting.";
+      return;
+    }
     if (!trustedHydration) return;
     try { mmkvStorage.setItem(name, value); durabilityError = null; }
     catch { durabilityError = "Privacy preference could not be saved on this device. Keep the app open and retry turning location off before restarting."; }

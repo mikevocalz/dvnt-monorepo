@@ -24,7 +24,8 @@ CREATE INDEX member_map_presence_expiry_idx ON public.member_map_presence(expire
 ALTER TABLE public.member_map_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.member_map_presence ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.member_map_settings,public.member_map_presence FROM PUBLIC,anon,authenticated;
-GRANT SELECT,INSERT,UPDATE,DELETE ON public.member_map_settings,public.member_map_presence TO service_role;
+GRANT SELECT,INSERT,UPDATE,DELETE ON public.member_map_settings TO service_role;
+GRANT SELECT,INSERT,UPDATE,DELETE ON public.member_map_presence TO service_role;
 
 -- Serialize legacy writes with master-off, so old clients cannot resurrect GPS.
 CREATE FUNCTION public.member_map_guard_legacy_presence() RETURNS trigger
