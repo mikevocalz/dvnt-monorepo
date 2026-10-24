@@ -255,13 +255,13 @@ async function bundle() {
     assert.equal(await src(), 'https://maps.google.com/maps?q=37.7599,-122.4148&z=15&output=embed');
     await page.getByRole('button', { name: 'View event', exact: true }).click();
     await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
-    assert.equal(new URL(page.url()).pathname, '/public/events/102');
+    assert.equal(new URL(page.url()).pathname, '/feed/events/102');
     await page.goBack(); await waitVenues(4);
     assert.equal(await toggle().getAttribute('aria-pressed'), 'true');
     await page.goForward(); await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
-    assert.equal(new URL(page.url()).pathname, '/public/events/102');
+    assert.equal(new URL(page.url()).pathname, '/feed/events/102');
     await page.goBack(); await waitVenues(4);
-    check('venue selection updates actual iframe source; stable id route and browser Back/Forward');
+    check('venue selection updates actual iframe source; authenticated stable id member route and browser Back/Forward');
 
     await search().fill('Harbor'); await waitVenues(2);
     await select('Harbor Afterparty').click();
@@ -271,14 +271,14 @@ async function bundle() {
     assert.equal(await src(), sameLocation, 'same coordinates remain the same place, but selected event id changes');
     await page.getByRole('button', { name: 'View event', exact: true }).click();
     await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
-    assert.equal(new URL(page.url()).pathname, '/public/events/101');
+    assert.equal(new URL(page.url()).pathname, '/feed/events/101');
     await page.goBack(); await waitVenues(2);
     assert.equal(await search().inputValue(), 'Harbor');
     await select('Harbor Afterparty').focus(); await page.keyboard.press('Space');
     assert.equal(await select('Harbor Afterparty').getAttribute('aria-pressed'), 'true');
     await page.getByRole('button', { name: 'View event', exact: true }).click();
     await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
-    assert.equal(new URL(page.url()).pathname, '/public/events/103');
+    assert.equal(new URL(page.url()).pathname, '/feed/events/103');
     await page.goBack(); await waitVenues(2);
     check('keyboard selectors, coincident venues retain distinct event IDs, search survives navigation');
 
@@ -385,6 +385,15 @@ async function bundle() {
     await page.evaluate(() => window.mapFixture.setAuthenticated(false));
     await toggle().click(); await waitVenues(4);
     assert.equal(await page.getByRole('button', { name: 'Toggle spicy events' }).count(), 0);
+    await select('Mission Night').click();
+    await page.getByRole('button', { name: 'View event', exact: true }).click();
+    await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/public/events/102', 'guests use the public stable-id event route');
+    await page.goBack(); await waitVenues(4);
+    assert.equal(await toggle().getAttribute('aria-pressed'), 'true', 'guest Back returns to the open map');
+    assert.equal(await select('Mission Night').getAttribute('aria-pressed'), 'true', 'guest Back preserves the selected event');
+    assert.equal(await src(), 'https://maps.google.com/maps?q=37.7599,-122.4148&z=15&output=embed');
+    check('guest View event uses public stable-id route and Back restores the selected venue');
     assert.equal(await frame().getAttribute('allow'), null, 'iframe must not request geolocation permission');
     assert.deepEqual(await page.evaluate(() => window.geolocationCalls), []);
     assert.deepEqual(geolocationCalls, [], 'no scenario may request device location');

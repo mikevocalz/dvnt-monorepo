@@ -445,7 +445,7 @@ export function EventsListScreen() {
         <div className="mt-5">
           {showMapView ? (
             <Suspense fallback={<p role="status" className="py-16 text-center text-white/60">Loading map…</p>}>
-              <EventsMap events={filtered} onClose={closeMap} onOpenEvent={(id) => router.push(`/public/events/${encodeURIComponent(id)}`)} />
+              <EventsMap events={filtered} onClose={closeMap} onOpenEvent={(id) => router.push(`${isAuthenticated ? "/feed/events" : "/public/events"}/${encodeURIComponent(id)}`)} />
             </Suspense>
           ) : (isLoading ||
             (activeTab === 1 && forYouLoading) ||
