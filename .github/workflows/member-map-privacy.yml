@@ -1,0 +1,45 @@
+name: Member map privacy
+on:
+  pull_request:
+    paths:
+      - 'packages/app/**'
+      - 'apps/mobile/supabase/**'
+      - 'scripts/test-member-map*'
+      - 'scripts/fixtures/member-map/**'
+      - '.github/workflows/member-map-privacy.yml'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: member-map-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  privacy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Install isolated pinned test tools
+        run: >-
+          npm install --prefix "$RUNNER_TEMP/member-map" --ignore-scripts --no-audit --no-fund --no-save
+          typescript@5.9.2 @electric-sql/pglite@0.3.10 esbuild@0.28.1
+          react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @tanstack/react-query@5.101.0
+          playwright@1.56.1 tailwindcss@4.3.3 @vis.gl/react-google-maps@1.8.3
+      - name: SQL privacy and edge request boundaries
+        env:
+          NODE_PATH: ${{ runner.temp }}/member-map/node_modules
+        run: node --test scripts/test-member-map-sql.cjs apps/mobile/supabase/functions/member-map/index.test.cjs apps/mobile/supabase/functions/member-proximity/master-location.test.cjs apps/mobile/supabase/functions/places-autocomplete/location-policy.test.cjs
+      - name: Client consent and stale-result policies
+        run: node --test packages/app/lib/location/*.test.ts packages/app/features/events/ui/member-map-render-policy.test.ts
+      - name: Install Chromium
+        run: node "$RUNNER_TEMP/member-map/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Renderer and controls
+        env:
+          NODE_PATH: ${{ runner.temp }}/member-map/node_modules
+        run: |
+          node scripts/test-member-map-renderer.cjs
+          node scripts/test-member-map-controls.cjs
