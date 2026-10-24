@@ -18,3 +18,6 @@ Service-only RLS tables and invoker RPCs; independent versioned consent; expiry 
 
 ## Verification
 Focused SQL/edge/policy/browser tests plus existing Events regression. Fixtures do not prove live Google configuration or physical native behavior. Full workspace typecheck and CI required before readiness. No live migration, credentials or deployment in this draft.
+
+## Withdrawal recovery
+Only owner-scoped negative withdrawal intent is persisted, never coordinates or positive consent. Failed withdrawal stays locally off across settings-fetch failures, reload and account changes until a confirmed explicit mutation. Persistence errors must not prevent emergency server revoke; the UI warns to keep the app open and retry if local durability fails. If both local persistence and server withdrawal fail, overall device-location preferences cannot be guaranteed after restart. Avatar GPS additionally requires explicit consent or Update my location once per session/account; fetched server-on settings and an existing OS grant alone do not restart avatar updates.
