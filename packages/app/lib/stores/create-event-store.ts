@@ -8,6 +8,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
+import { isSensitiveAttendanceEvent } from "@dvnt/app/lib/events/event-attendee-visibility";
 import { deviceTimeZone, normalizeTimeZone } from "@dvnt/app/lib/events/event-zone";
 import type { DraftAddon } from "@dvnt/app/features/events/create/addon-form";
 
@@ -155,6 +156,8 @@ interface DraftFields {
   maxAttendees: string;
   youtubeUrl: string;
   attachLynkRoom: boolean;
+  /** Explicit organizer opt-in; missing and null legacy values stay off. */
+  showAttendees: boolean | null;
   ticketingEnabled: boolean;
   visibility: VisibilityOption;
   /** E06: hidden from everyone but host, co-hosts, invitees, ticket holders. */
@@ -250,6 +253,7 @@ interface CreateEventActions {
   setMaxAttendees: (v: string) => void;
   setYoutubeUrl: (v: string) => void;
   setAttachLynkRoom: (v: boolean) => void;
+  setShowAttendees: (v: boolean) => void;
   setTicketingEnabled: (v: boolean) => void;
   setVisibility: (v: VisibilityOption) => void;
   setIsHidden: (v: boolean) => void;
@@ -346,6 +350,7 @@ const DRAFT_DEFAULTS: DraftFields = {
   maxAttendees: "",
   youtubeUrl: "",
   attachLynkRoom: false,
+  showAttendees: false,
   ticketingEnabled: false,
   visibility: "public",
   isHidden: false,
@@ -418,7 +423,13 @@ export const useCreateEventStore = create<CreateEventState>()(
       setTicketPrice: (v) => set({ ticketPrice: v }),
       setMaxAttendees: (v) => set({ maxAttendees: v }),
       setYoutubeUrl: (v) => set({ youtubeUrl: v }),
-      setAttachLynkRoom: (v) => set({ attachLynkRoom: v }),
+      setAttachLynkRoom: (v) => set((s) => ({
+        attachLynkRoom: v,
+        // Linking an ordinary event must not inherit a past opt-in.
+        ...(!isSensitiveAttendanceEvent({ eventType: s.eventType, lynkRoomId: s.attachLynkRoom ? "draft-room" : null }) && v
+          ? { showAttendees: false } : {}),
+      })),
+      setShowAttendees: (v) => set({ showAttendees: v === true }),
       setTicketingEnabled: (v) => set({ ticketingEnabled: v }),
       setVisibility: (v) => set({ visibility: v }),
       setIsHidden: (v) => set({ isHidden: v }),
@@ -435,7 +446,12 @@ export const useCreateEventStore = create<CreateEventState>()(
       setFlyerImage: (v) => set({ flyerImage: v }),
       setFlyerMediaType: (v) => set({ flyerMediaType: v }),
       setFlyerFallbackImage: (v) => set({ flyerFallbackImage: v }),
-      setEventType: (v) => set({ eventType: v }),
+      setEventType: (v) => set((s) => ({
+        eventType: v,
+        ...(!isSensitiveAttendanceEvent({ eventType: s.eventType, lynkRoomId: s.attachLynkRoom ? "draft-room" : null }) &&
+          isSensitiveAttendanceEvent({ eventType: v, lynkRoomId: s.attachLynkRoom ? "draft-room" : null })
+          ? { showAttendees: false } : {}),
+      })),
       setDisclaimers: (v) => set({ disclaimers: v }),
       setIsNsfw: (v) => set({ isNsfw: v }),
       setServerDraftMeta: (id, revision) =>
@@ -447,6 +463,7 @@ export const useCreateEventStore = create<CreateEventState>()(
           ...DRAFT_DEFAULTS,
           ...UI_DEFAULTS,
           ...payload,
+          showAttendees: payload.showAttendees === true,
           // A duplicated draft carries its source event's zone. A draft saved
           // without one (or with a zone Intl does not know) falls back to this
           // device's zone, which is what its wall clock was typed in.
@@ -620,7 +637,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         if (Array.isArray(p.eventImages)) {
           p.eventImages = p.eventImages.filter((u) => !dead(u));
         }
-        return { ...current, ...p };
+        return { ...current, ...p, showAttendees: p.showAttendees === true };
       },
       partialize: (state) => ({
         clientRequestId: state.clientRequestId,
@@ -641,6 +658,7 @@ export const useCreateEventStore = create<CreateEventState>()(
         maxAttendees: state.maxAttendees,
         youtubeUrl: state.youtubeUrl,
         attachLynkRoom: state.attachLynkRoom,
+        showAttendees: state.showAttendees === true,
         ticketingEnabled: state.ticketingEnabled,
         visibility: state.visibility,
         isHidden: state.isHidden,

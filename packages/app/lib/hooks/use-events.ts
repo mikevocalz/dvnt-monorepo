@@ -1,4 +1,7 @@
-import { storedEventType } from "@dvnt/app/lib/events/event-type";
+import { advanceEventAttendanceRevision, getEventAttendanceRevision } from "@dvnt/app/lib/events/event-attendee-revision";
+import { canShowEventAttendees, isSensitiveAttendanceEvent } from "@dvnt/app/lib/events/event-attendee-visibility";
+import { useEventAttendeesStore } from "@dvnt/app/lib/stores/event-attendees-store";
+import { storedEventType, eventTypeUpdate } from "@dvnt/app/lib/events/event-type";
 /**
  * React Query hooks for events
  */
@@ -89,6 +92,8 @@ export interface Event {
   /** The signed-in user hosts this event (My Events rows only). */
   isHost?: boolean;
   category?: string;
+  lynkRoomId?: string | null;
+  showAttendees?: boolean | null;
   likes?: number;
   isLiked?: boolean;
   locationLat?: number;
@@ -346,7 +351,25 @@ function buildEventCachePatch(updates: any): Record<string, unknown> {
   if (updates.price !== undefined) patch.price = updates.price;
   if (updates.maxAttendees !== undefined)
     patch.max_attendees = updates.maxAttendees;
-  if (updates.category !== undefined) patch.category = updates.category;
+  if (updates.category !== undefined) {
+    patch.category = updates.category;
+    Object.assign(patch, eventTypeUpdate(updates.category));
+  }
+  if (updates.lynkRoomId !== undefined) {
+    patch.lynk_room_id = updates.lynkRoomId || null;
+    patch.lynkRoomId = updates.lynkRoomId || null;
+  }
+  if (updates.showAttendees === undefined && isSensitiveAttendanceEvent({
+    eventType: updates.category, lynkRoomId: updates.lynkRoomId,
+  })) {
+    // No inherited opt-in when an edit makes an ordinary event protected.
+    patch.show_attendees = false;
+    patch.showAttendees = false;
+  }
+  if (updates.showAttendees !== undefined) {
+    patch.show_attendees = updates.showAttendees === true;
+    patch.showAttendees = updates.showAttendees === true;
+  }
   if (updates.visibility !== undefined) patch.visibility = updates.visibility;
   if (updates.ageRestriction !== undefined)
     patch.age_restriction = updates.ageRestriction;
@@ -420,9 +443,17 @@ export function useUpdateEvent() {
         if (!isCurrent()) throw new Error("Your sign-in changed. Reopen the event before saving.");
       };
       assertCurrent();
+      const privacyRevision = updates.showAttendees !== undefined || updates.category !== undefined || updates.lynkRoomId !== undefined
+        ? advanceEventAttendanceRevision(eventId)
+        : getEventAttendanceRevision(eventId);
       const predicate = queryContainsEntity("event", eventId);
-      await queryClient.cancelQueries({ predicate });
+      await queryClient.cancelQueries({ predicate }, { revert: false });
       assertCurrent();
+      // A realtime decision may arrive while cancellation yields. Never apply
+      // this older optimistic patch over it; the server result will refetch.
+      if (privacyRevision !== getEventAttendanceRevision(eventId)) {
+        return { snapshot: [], isCurrent, privacyRevision };
+      }
       const snapshot = snapshotMatchingQueries(queryClient, predicate);
       // Patch with derived fields included so the event card badge
       // ("26 / JUN") + time pill update instantly along with start_date.
@@ -432,15 +463,29 @@ export function useUpdateEvent() {
         eventId,
         buildEventCachePatch(updates),
       );
-      return { snapshot, isCurrent };
+      if (updates.showAttendees !== undefined || updates.category !== undefined || updates.lynkRoomId !== undefined) {
+        const updated = queryClient.getQueryData<Event>(eventKeys.detail(eventId));
+        if (updated) useEventAttendeesStore.getState().setAllowed(eventId, canShowEventAttendees(updated));
+      }
+      return { snapshot, isCurrent, privacyRevision };
     },
 
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.isCurrent() && ctx.snapshot) rollback(queryClient, ctx.snapshot);
+    onError: (_err, { eventId }, ctx) => {
+      if (!ctx?.isCurrent()) return;
+      if (ctx.privacyRevision !== getEventAttendanceRevision(eventId)) {
+        // A newer opt-out beats a failed older edit's saved snapshot.
+        queryClient.invalidateQueries({ predicate: queryContainsEntity("event", eventId) });
+        return;
+      }
+      if (ctx.snapshot) rollback(queryClient, ctx.snapshot);
     },
 
     onSuccess: (result, { eventId }, ctx) => {
       if (!ctx?.isCurrent()) return;
+      if (ctx.privacyRevision !== getEventAttendanceRevision(eventId)) {
+        queryClient.invalidateQueries({ predicate: queryContainsEntity("event", eventId) });
+        return;
+      }
       // Replace optimistic with authoritative server data
       if (result) {
         const r = result as Record<string, unknown>;
@@ -462,6 +507,8 @@ export function useUpdateEvent() {
             price: r.price,
             maxAttendees: r.max_attendees,
             category: storedEventType(r),
+            lynkRoomId: r.lynk_room_id,
+            showAttendees: r.show_attendees,
             visibility: r.visibility,
             ageRestriction: r.age_restriction,
             dressCode: r.dress_code,

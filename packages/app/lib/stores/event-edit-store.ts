@@ -1,7 +1,8 @@
 /**
- * Event Edit Store — transient Zustand store for the WEB event editor.
+ * Event Edit Store — transient Zustand store for the event editor.
  *
- * Mirrors the local component state of the native editor
+ * The native editors share the type/link/attendee-privacy fields here. Other
+ * fields mirror the local component state of the native editor
  * (`(protected)/events/[id]/edit.tsx`). NOT persisted (editing an existing
  * row, not a resumable draft). Holds every editable field + the local ticket
  * tier array, plus the bookkeeping needed to compute dirty-state and the
@@ -9,12 +10,27 @@
  */
 
 import { create } from "zustand";
+import { isSensitiveAttendanceEvent, type AttendanceEventSource } from "@dvnt/app/lib/events/event-attendee-visibility";
 import type { TicketTypeCategory } from "@dvnt/app/lib/api/ticket-types";
 import type { TierType, TierVisibility } from "@dvnt/app/lib/tickets/pricing";
 import {
   newDraftAddon,
   type DraftAddon,
 } from "@dvnt/app/features/events/create/addon-form";
+
+/** Hydrate every editor from the same authoritative raw/normalized aliases.
+ * Explicit raw null clears stale client aliases; only literal true is consent. */
+export function eventAttendanceEditFields(event: AttendanceEventSource) {
+  const canonicalType = event.event_type !== undefined ? event.event_type : event.eventType;
+  const type = typeof canonicalType === "string" && canonicalType.length > 0 ? canonicalType : event.category;
+  const room = event.lynk_room_id !== undefined ? event.lynk_room_id : event.lynkRoomId;
+  const setting = event.show_attendees !== undefined ? event.show_attendees : event.showAttendees;
+  return {
+    category: typeof type === "string" ? type : "",
+    lynkRoomId: typeof room === "string" && room.trim().length > 0 ? room : null,
+    showAttendees: setting === true,
+  };
+}
 
 export const TIER_LEVELS = ["free", "ga", "vip", "table"] as const;
 export type TierLevel = (typeof TIER_LEVELS)[number];
@@ -67,6 +83,8 @@ interface EventEditState {
   price: string;
   maxAttendees: string;
   category: string;
+  lynkRoomId: string | null;
+  showAttendees: boolean | null;
   visibility: string;
   /** E06: hidden from everyone but host, co-hosts, invitees, ticket holders. */
   isHidden: boolean;
@@ -106,6 +124,7 @@ interface EventEditState {
   setPrice: (v: string) => void;
   setMaxAttendees: (v: string) => void;
   setCategory: (v: string) => void;
+  setShowAttendees: (v: boolean) => void;
   setVisibility: (v: string) => void;
   setIsHidden: (v: boolean) => void;
   setPublishAt: (v: string) => void;
@@ -146,6 +165,8 @@ const initial = {
   price: "",
   maxAttendees: "",
   category: "",
+  lynkRoomId: null as string | null,
+  showAttendees: false,
   visibility: "public",
   isHidden: false,
   publishAt: "",
@@ -178,7 +199,14 @@ export const useEventEditStore = create<EventEditState>((set) => ({
   setDateError: (v) => set({ dateError: v }),
   setPrice: (v) => set({ price: v }),
   setMaxAttendees: (v) => set({ maxAttendees: v }),
-  setCategory: (v) => set({ category: v }),
+  setCategory: (v) => set((s) => ({
+    category: v,
+    // An ordinary event becoming protected needs a new, deliberate opt-in.
+    ...(!isSensitiveAttendanceEvent({ eventType: s.category, lynkRoomId: s.lynkRoomId }) &&
+      isSensitiveAttendanceEvent({ eventType: v, lynkRoomId: s.lynkRoomId })
+      ? { showAttendees: false } : {}),
+  })),
+  setShowAttendees: (v) => set({ showAttendees: v === true }),
   setVisibility: (v) => set({ visibility: v }),
   setIsHidden: (v) => set({ isHidden: v }),
   setPublishAt: (v) => set({ publishAt: v }),
@@ -238,6 +266,6 @@ export const useEventEditStore = create<EventEditState>((set) => ({
   setAddons: (v) =>
     set((s) => ({ addons: typeof v === "function" ? v(s.addons) : v })),
 
-  hydrate: (data) => set({ ...initial, ...data }),
+  hydrate: (data) => set({ ...initial, ...data, showAttendees: data.showAttendees === true }),
   reset: () => set({ ...initial }),
 }));

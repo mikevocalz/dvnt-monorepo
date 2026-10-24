@@ -140,7 +140,7 @@ export default function DesignPreview() {
         ../deviant GoingAccordion — purple container, face pile + "N going" + chevron, 5-col grid expand. Logged-out = blur + "Sign in to see who&apos;s going".
       </p>
       <div style={{ maxWidth: 460, margin: '0 auto' }}>
-        <GoingAccordion id="demo" attendees={ATTENDEES} totalCount={42} />
+        <GoingAccordion event={{ category: "party" }} id="demo" attendees={ATTENDEES} totalCount={42} />
       </div>
 
       <h2
@@ -160,7 +160,7 @@ export default function DesignPreview() {
         </div>
         <h3 style={{ margin: 0, fontFamily: 'SpaceGrotesk, system-ui, sans-serif', fontWeight: 800, fontSize: 24, color: color.text, textTransform: 'uppercase' }}>Midnight Aura</h3>
         <p style={{ margin: '4px 0 14px', color: color.textDim, fontSize: 14 }}>Fri Jun 20 · 10pm · Elsewhere, Brooklyn</p>
-        <GoingAccordion id="detail" attendees={ATTENDEES} totalCount={42} />
+        <GoingAccordion event={{ category: "party" }} id="detail" attendees={ATTENDEES} totalCount={42} />
         <div style={{ height: 14 }} />
         <div style={{ display: 'flex', overflowX: 'auto', paddingBottom: 8 }}>
           {TIER_CARDS.map((t) => (

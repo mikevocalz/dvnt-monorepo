@@ -1,3 +1,4 @@
+import { useEventAttendeePrivacy } from "@dvnt/app/lib/hooks/use-event-attendee-privacy";
 import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 import {
   View,
@@ -652,6 +653,7 @@ function EventDetailScreenContent() {
   // NORMALIZATION: Create safeEvent with guaranteed non-null values
   // This prevents crashes if TanStack Query updates eventData to null during render
   const safeEvent = useMemo(() => normalizeEvent(eventData), [eventData]);
+  const showGoing = useEventAttendeePrivacy(eventId, safeEvent);
 
   // Derive reviews + comments from batch payload
   const reviews = normalizeArray(safeEvent?.topReviews);
@@ -2433,8 +2435,11 @@ function EventDetailScreenContent() {
             )}
 
           {/* ── 3. GOING — expandable attendees grid ─────────────── */}
-          <View style={s.section}>
+          {showGoing ? <View style={s.section}>
             <GoingAccordion
+              event={safeEvent}
+              eventId={eventId}
+              visibility={(eventData as any)?.visibility}
               attendees={realAttendees}
               totalCount={
                 typeof event.attendees === "number"
@@ -2444,7 +2449,7 @@ function EventDetailScreenContent() {
               isLoggedIn={true}
               onAttendeePress={handleAttendeePress}
             />
-          </View>
+          </View> : null}
 
           {/* ── Hosted by — organizer card (posh-style) ──────────── */}
           <OrganizerCard eventId={eventId} />

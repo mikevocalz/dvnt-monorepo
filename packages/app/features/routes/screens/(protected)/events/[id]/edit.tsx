@@ -61,9 +61,11 @@ import { useEventGuestStore } from "@dvnt/app/lib/stores/event-guest-store";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { Progress } from "@dvnt/app/components/ui/progress";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
-import { eventsApi, formatEventDate } from "@dvnt/app/lib/api/events";
+import { eventsApi } from "@dvnt/app/lib/api/events";
 import { resolveEventSchedule } from "@dvnt/app/features/events/create/event-form";
 import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
+import { EventAttendanceField } from "@dvnt/app/components/event/event-attendance-field.native";
+import { useEventEditStore, eventAttendanceEditFields } from "@dvnt/app/lib/stores/event-edit-store";
 import { EventPublicationField } from "@dvnt/app/features/events/ui/event-publication-field";
 import {
   publishAtError,
@@ -155,7 +157,11 @@ function EditEventScreenContent() {
   // V2 fields
   const [price, setPrice] = useState("");
   const [maxAttendees, setMaxAttendees] = useState("");
-  const [category, setCategory] = useState("");
+  const category = useEventEditStore((s) => s.category);
+  const setCategory = useEventEditStore((s) => s.setCategory);
+  const lynkRoomId = useEventEditStore((s) => s.lynkRoomId);
+  const showAttendees = useEventEditStore((s) => s.showAttendees);
+  const setShowAttendees = useEventEditStore((s) => s.setShowAttendees);
   const [visibility, setVisibility] = useState("public");
   // E06: hide, or schedule going public (typed wall clock, device-local ISO).
   const [isHidden, setIsHidden] = useState(false);
@@ -292,7 +298,10 @@ function EditEventScreenContent() {
         // V2 fields
         setPrice(ev.price != null ? String(ev.price) : "");
         setMaxAttendees(ev.maxAttendees != null ? String(ev.maxAttendees) : "");
-        setCategory(ev.category || "");
+        useEventEditStore.getState().hydrate({
+          hydratedId: String(id),
+          ...eventAttendanceEditFields(ev),
+        });
         setVisibility(ev.visibility || "public");
         setIsHidden((ev as any).isHidden === true);
         setPublishAt(publishAtInstantToLocal((ev as any).publishAt, tz));
@@ -378,7 +387,8 @@ function EditEventScreenContent() {
       price !== (od.price != null ? String(od.price) : "") ||
       maxAttendees !==
         (od.maxAttendees != null ? String(od.maxAttendees) : "") ||
-      category !== (od.category || "") ||
+      category !== eventAttendanceEditFields(od).category ||
+      (showAttendees === true) !== eventAttendanceEditFields(od).showAttendees ||
       visibility !== (od.visibility || "public") ||
       isHidden !== ((od as any).isHidden === true) ||
       publishAtLocalToInstant(publishAt, schedule.eventTz) !== ((od as any).publishAt ?? null) ||
@@ -401,6 +411,7 @@ function EditEventScreenContent() {
     price,
     maxAttendees,
     category,
+    showAttendees,
     visibility,
     isHidden,
     publishAt,
@@ -646,6 +657,7 @@ function EditEventScreenContent() {
         category: category || undefined,
         visibility,
         isHidden,
+        showAttendees: showAttendees === true,
         publishAt: publishAtLocalToInstant(publishAt, schedule.eventTz),
         dressCode: dressCode || undefined,
         doorPolicy: doorPolicy || undefined,
@@ -675,115 +687,11 @@ function EditEventScreenContent() {
         updateData.images = allImages.slice(1).map((url) => ({ url }));
       }
 
-      // ── Optimistic update: patch cache + navigate back immediately ──
-      const detailKey = ["events", "detail", id];
-      const previousDetail = queryClient.getQueryData(detailKey);
-
-      // Build optimistic patch matching EventDetail shape.
-      // Includes derived date/month/time so the detail screen's date
-      // pill updates the instant the user taps back — without waiting
-      // on the useUpdateEvent mutation's onMutate to compute them.
-      const dateParts = updateData.startDate
-        ? formatEventDate(updateData.startDate as string, {
-            event_tz: schedule.eventTz,
-          })
-        : null;
-      const optimisticPatch: Record<string, unknown> = {
-        title: updateData.title,
-        description: updateData.description,
-        location: updateData.location,
-        fullDate: updateData.startDate,
-        endDate: updateData.endDate || null,
-        event_tz: schedule.eventTz,
-        price: updateData.price,
-        maxAttendees: updateData.maxAttendees,
-        category: updateData.category || null,
-        visibility: updateData.visibility,
-        dressCode: updateData.dressCode || null,
-        doorPolicy: updateData.doorPolicy || null,
-        lineup: updateData.lineup
-          ? String(updateData.lineup)
-              .split(",")
-              .map((s: string) => s.trim())
-          : null,
-        perks: updateData.perks
-          ? String(updateData.perks)
-              .split(",")
-              .map((s: string) => s.trim())
-          : null,
-        youtubeVideoUrl: updateData.youtubeVideoUrl || null,
-        ticketingEnabled: updateData.ticketingEnabled,
-        ...(dateParts
-          ? {
-              date: dateParts.date,
-              month: dateParts.month,
-              time: dateParts.time,
-            }
-          : {}),
-      };
-      if (updateData.locationLat != null) {
-        optimisticPatch.locationLat = updateData.locationLat;
-        optimisticPatch.locationLng = updateData.locationLng;
-        optimisticPatch.locationName = updateData.locationName;
-      }
-      if (allImages.length > 0) {
-        optimisticPatch.image = allImages[0];
-        optimisticPatch.images = allImages.slice(1).map((url) => ({
-          type: "image",
-          url,
-        }));
-      }
-
-      // Patch ticket tiers too — buyers see the new price immediately
-      // without waiting for a refetch. Existing tiers keep their server
-      // id; new tiers get a temp id until the create promise resolves.
-      const optimisticTiers = ticketTiers.map((t) => ({
-        id: t.id || `temp_${t.name}_${Date.now()}`,
-        event_id: parseInt(id, 10),
-        name: t.name || "General Admission",
-        description: t.description || null,
-        category: t.category || "admission",
-        price_cents: Math.round(parseFloat(t.priceDollars || "0") * 100),
-        currency: "usd",
-        quantity_total: parseInt(t.quantity || "100", 10),
-        quantity_sold: 0,
-        max_per_user: parseInt(t.maxPerOrder || "4", 10),
-        is_active: true,
-        tier: t.tier || "ga",
-      }));
-      optimisticPatch.ticketTiers = optimisticTiers;
-
-      // Merge into cached detail
-      queryClient.setQueryData(detailKey, (old: any) =>
-        old ? { ...old, ...optimisticPatch } : old,
-      );
-
-      // Also patch any list caches that contain this event
-      queryClient.setQueriesData<any[]>({ queryKey: ["events"] }, (old) => {
-        if (!old || !Array.isArray(old)) return old;
-        return old.map((e) =>
-          String(e.id) === String(id) ? { ...e, ...optimisticPatch } : e,
-        );
-      });
-
-      // ── Persist EVERYTHING to the server before navigating back ──
-      //
-      // The previous version was "optimistic + fire-and-forget": showed
-      // the success toast and ran router.back() immediately, then fired
-      // the mutation in the background. That raced with the detail
-      // screen's `refetchOnMount: "always"` config — the refetch often
-      // landed BEFORE the mutation completed, returning stale server
-      // data that overwrote the optimistic patch. From the host's
-      // point of view, the edits "disappeared" the moment they
-      // navigated back. Confirmed in production on event 36 (Caliente)
-      // where ticketing_enabled toggle, lineup, perks, max_attendees,
-      // and category never persisted across the round-trip.
-      //
-      // Fix: await all server mutations BEFORE router.back(). The
-      // optimistic patch still paints instantly and provides a
-      // perceived-fast UX during the network round-trip; the await
-      // guarantees the cache and server agree before the user lands
-      // on the detail screen.
+      // useUpdateEvent owns the only optimistic patch and rollback. It sanitizes
+      // attendee identities and guards snapshots against newer privacy revisions.
+      // A second screen-level snapshot could restore profiles after a realtime
+      // opt-out, so do not patch detail/list caches or roll them back here.
+      // Await the event and tier writes before navigating to the saved event.
 
       // 1. Event row update — must finish before navigation
       try {
@@ -792,11 +700,8 @@ function EditEventScreenContent() {
           updates: updateData,
         });
       } catch (err: any) {
-        // Roll back the hand-rolled detail patch (the mutation hook
-        // rolls back its own snapshot via onError).
-        if (previousDetail) {
-          queryClient.setQueryData(detailKey, previousDetail);
-        }
+        // The shared mutation handles revision-aware rollback. Only revalidate
+        // here; a newer privacy choice must never be replaced with an old row.
         queryClient.invalidateQueries({ queryKey: ["events"] });
         showToast(
           "error",
@@ -865,7 +770,7 @@ function EditEventScreenContent() {
 
       // 3. Invalidate so the detail screen, host dashboard, ticket
       //    detail screens etc. refresh against the now-authoritative
-      //    server state (temp_* tier ids get replaced with real ids).
+      //    server state, including the newly persisted ticket tier changes.
       queryClient.invalidateQueries({ queryKey: ["events", "detail", id] });
       queryClient.invalidateQueries({ queryKey: ["events"] });
       queryClient.invalidateQueries({ queryKey: ["tickets", "types", id] });
@@ -900,6 +805,7 @@ function EditEventScreenContent() {
     price,
     maxAttendees,
     category,
+    showAttendees,
     visibility,
     dressCode,
     doorPolicy,
@@ -1495,6 +1401,12 @@ function EditEventScreenContent() {
               {eventVisibilityCopy(visibility).helper}
             </Text>
           </View>
+          <EventAttendanceField
+            eventType={category}
+            lynkRoomId={lynkRoomId}
+            showAttendees={showAttendees}
+            onChange={setShowAttendees}
+          />
           <EventPublicationField
             isHidden={isHidden}
             onHiddenChange={setIsHidden}

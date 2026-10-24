@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { VenueSearchInput } from "@dvnt/ui";
 import { EventZonePickerWeb } from "@dvnt/app/features/events/ui/event-zone-picker.web";
+import { EventAttendanceField } from "@dvnt/app/components/event/event-attendance-field.web";
 import { EventPublicationFieldWeb } from "@dvnt/app/features/events/ui/event-publication-picker.web";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
 import {
@@ -205,6 +206,7 @@ export function CreateEventScreen() {
         maxAttendees: state.maxAttendees,
         youtubeUrl: state.youtubeUrl,
         attachLynkRoom: state.attachLynkRoom,
+        showAttendees: state.showAttendees === true,
         ticketingEnabled: state.ticketingEnabled,
         visibility: state.visibility,
         ageRestriction: state.ageRestriction,
@@ -1292,6 +1294,12 @@ export function CreateEventScreen() {
                   {eventVisibilityCopy(s.visibility).helper}
                 </p>
               </Field>
+              <EventAttendanceField
+                eventType={s.eventType}
+                lynkRoomId={s.attachLynkRoom ? "draft-room" : null}
+                showAttendees={s.showAttendees}
+                onChange={s.setShowAttendees}
+              />
               <EventPublicationFieldWeb
                 isHidden={s.isHidden}
                 onHiddenChange={s.setIsHidden}

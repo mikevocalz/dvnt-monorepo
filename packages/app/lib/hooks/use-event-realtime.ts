@@ -1,3 +1,7 @@
+import { advanceEventAttendanceRevision, getEventAttendanceRevision } from "@dvnt/app/lib/events/event-attendee-revision";
+import { canShowEventAttendees, sanitizeEventAttendance } from "@dvnt/app/lib/events/event-attendee-visibility";
+import { useEventAttendeesStore } from "@dvnt/app/lib/stores/event-attendees-store";
+import { propagateEntity, queryContainsEntity } from "@dvnt/app/lib/cache/propagate";
 import { realtimeEventType } from "@dvnt/app/lib/events/event-type";
 /**
  * useEventRealtime — subscribe to live changes for a single event
@@ -9,7 +13,7 @@ import { realtimeEventType } from "@dvnt/app/lib/events/event-type";
  *
  * Used by the event detail screen. Cards in lists rely on this
  * indirectly: if a list is showing the event, the broader
- * eventKeys.all invalidation catches it.
+ * entity-predicate invalidation catches it.
  */
 
 import { useEffect } from "react";
@@ -19,6 +23,32 @@ import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
 import { formatEventDate } from "@dvnt/app/lib/api/events";
 import { isDiscoverableEvent } from "@dvnt/app/lib/events/event-discovery";
+
+/** Apply privacy changes immediately, before the detail refetch finishes. */
+async function applyRealtimeAttendeePrivacy(queryClient: ReturnType<typeof useQueryClient>, eventId: string, row: Record<string, any>): Promise<boolean> {
+  const patch: Record<string, unknown> = {};
+  if (row.event_type !== undefined) patch.event_type = row.event_type;
+  if (row.category !== undefined) patch.category = row.category;
+  if (row.lynk_room_id !== undefined) {
+    patch.lynk_room_id = row.lynk_room_id;
+    patch.lynkRoomId = row.lynk_room_id;
+  }
+  if (row.show_attendees !== undefined) {
+    patch.show_attendees = row.show_attendees;
+    patch.showAttendees = row.show_attendees;
+  }
+  if (!Object.keys(patch).length) return true;
+  const revision = advanceEventAttendanceRevision(eventId);
+  // Invalidation alone does not cancel an initial query with no data. Cancel
+  // detail AND lists first so a pre-opt-out response cannot repopulate them.
+  const cancellation = queryClient.cancelQueries({ predicate: queryContainsEntity("event", eventId) }, { revert: false });
+  propagateEntity(queryClient, "event", eventId, patch);
+  const cached = queryClient.getQueryData<any>(eventKeys.detail(eventId));
+  if (cached) useEventAttendeesStore.getState().setAllowed(eventId, canShowEventAttendees(cached));
+  else if (!canShowEventAttendees(row)) useEventAttendeesStore.getState().setAllowed(eventId, false);
+  await cancellation;
+  return getEventAttendanceRevision(eventId) === revision;
+}
 
 const TICKET_TYPES_KEY = (id: string) => ["tickets", "types", id] as const;
 
@@ -40,11 +70,9 @@ export function useEventRealtime(eventId: string | undefined): void {
           table: "events",
           filter: `id=eq.${evIdInt}`,
         },
-        () => {
-          queryClient.invalidateQueries({
-            queryKey: eventKeys.detail(eventId),
-          });
-          queryClient.invalidateQueries({ queryKey: eventKeys.all });
+        async (payload) => {
+          if (!await applyRealtimeAttendeePrivacy(queryClient, eventId, payload.new as Record<string, any>)) return;
+          queryClient.invalidateQueries({ predicate: queryContainsEntity("event", eventId) });
         },
       )
       .on(
@@ -163,14 +191,14 @@ export function useEventsFeedRealtime(enabled = true): void {
           schema: "public",
           table: "events",
         },
-        (payload) => {
+        async (payload) => {
           const next = payload.new as Record<string, any>;
           if (!next?.id) return;
           const targetId = String(next.id);
+          if (!await applyRealtimeAttendeePrivacy(queryClient, targetId, next)) return;
 
-          // Patch in-place across every events list cache. Don't
-          // invalidate the whole feed — would cause a flicker /
-          // reorder. Patch the cards we have.
+          // Patch in-place across every events list cache before restarting
+          // canceled reads. Existing cards update without a loading flash.
           //
           // IMPORTANT: this must cover every field a feed card renders.
           // The earlier version patched only 6 fields and silently dropped
@@ -199,9 +227,7 @@ export function useEventsFeedRealtime(enabled = true): void {
                 return filtered.length !== old.length ? filtered : old;
               },
             );
-            queryClient.invalidateQueries({
-              queryKey: eventKeys.detail(targetId),
-            });
+            queryClient.invalidateQueries({ predicate: queryContainsEntity("event", targetId) });
             return;
           }
           queryClient.setQueriesData<any[]>(
@@ -212,7 +238,7 @@ export function useEventsFeedRealtime(enabled = true): void {
               const patched = old.map((e) => {
                 if (String(e?.id) !== targetId) return e;
                 changed = true;
-                return {
+                return sanitizeEventAttendance({
                   ...e,
                   title: next.title ?? e.title,
                   description: next.description ?? e.description,
@@ -247,6 +273,9 @@ export function useEventsFeedRealtime(enabled = true): void {
                   price: next.price ?? e.price,
                   maxAttendees: next.max_attendees ?? e.maxAttendees,
                   category: realtimeEventType(next, e.category),
+                  ...(next.event_type !== undefined ? { event_type: next.event_type } : {}),
+                  ...(next.lynk_room_id !== undefined ? { lynk_room_id: next.lynk_room_id, lynkRoomId: next.lynk_room_id } : {}),
+                  ...(next.show_attendees !== undefined ? { show_attendees: next.show_attendees, showAttendees: next.show_attendees } : {}),
                   visibility: next.visibility ?? e.visibility,
                   ageRestriction: next.age_restriction ?? e.ageRestriction,
                   dressCode: next.dress_code ?? e.dressCode,
@@ -266,16 +295,15 @@ export function useEventsFeedRealtime(enabled = true): void {
                         time: dateParts.time,
                       }
                     : {}),
-                };
+                });
               });
               return changed ? patched : old;
             },
           );
 
-          // Detail cache for that event also gets a soft invalidate
-          queryClient.invalidateQueries({
-            queryKey: eventKeys.detail(targetId),
-          });
+          // Restart the exact canceled set, including initial list reads and
+          // ticket/search queries embedding this event, not only event keys.
+          queryClient.invalidateQueries({ predicate: queryContainsEntity("event", targetId) });
         },
       )
       // DELETE — yank the event out of every list cache. Catches hard

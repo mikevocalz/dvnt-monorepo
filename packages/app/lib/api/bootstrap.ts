@@ -145,6 +145,8 @@ export interface BootstrapEventsResponse {
     title: string;
     category?: string;
     event_type?: string | null;
+    lynkRoomId?: string | null;
+    showAttendees?: boolean | null;
     description: string;
     date: string;
     month: string;

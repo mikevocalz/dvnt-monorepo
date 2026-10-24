@@ -1,5 +1,6 @@
 "use client";
 
+import { canShowEventAttendees, type AttendanceEventSource } from "@dvnt/app/lib/events/event-attendee-visibility";
 import { useCallback, useEffect } from "react";
 import { create } from "zustand";
 import { Lock, ChevronDown } from "lucide-react";
@@ -36,6 +37,7 @@ const useExpandStore = create<{ open: Record<string, boolean>; toggle: (id: stri
 }));
 
 export interface GoingAccordionProps {
+  event: AttendanceEventSource;
   /** Stable id (event id) for the expand state. */
   id: string;
   attendees: EventAttendee[];
@@ -68,12 +70,18 @@ function Tile({ a, size }: { a: EventAttendee; size: number }) {
   );
 }
 
-export function GoingAccordion({ id, attendees, totalCount, isLoggedIn, restricted, onAttendeePress, onRequireAuth, eventId, visibility }: GoingAccordionProps) {
+export function GoingAccordion(props: GoingAccordionProps) {
+  const allowed = canShowEventAttendees(props.event);
+  const setAllowed = useEventAttendeesStore((s) => s.setAllowed);
+  useEffect(() => { if (props.eventId) setAllowed(props.eventId, allowed); }, [props.eventId, allowed, setAllowed]);
+  return allowed ? <VisibleGoingAccordion {...props} /> : null;
+}
+
+function VisibleGoingAccordion({ event, id, attendees, totalCount, isLoggedIn, restricted, onAttendeePress, onRequireAuth, eventId, visibility }: GoingAccordionProps) {
   const authed = useAuthStore((s) => s.isAuthenticated);
   const loggedIn = (isLoggedIn ?? authed) && !restricted;
   const expanded = useExpandStore((s) => !!s.open[id]);
   const toggle = useExpandStore((s) => s.toggle);
-  const preview = attendees.slice(0, 4);
 
   // Same store the native accordion pages through, so both platforms reach the
   // same end of the same list. `attendees` is only the first screenful the
@@ -82,21 +90,22 @@ export function GoingAccordion({ id, attendees, totalCount, isLoggedIn, restrict
   const seed = useEventAttendeesStore((s) => s.seed);
   const loadMore = useEventAttendeesStore((s) => s.loadMore);
   useEffect(() => {
-    if (eventId && attendees.length > 0) seed(eventId, attendees);
-  }, [eventId, attendees, seed]);
-  const rows = eventId ? paged.rows : attendees;
+    if (eventId) seed(eventId, attendees, event);
+  }, [eventId, attendees, seed, event]);
+  const rows = eventId ? (attendees.length > 0 ? paged.rows : []) : attendees;
+  const preview = rows.slice(0, 4);
   const canLoadMore =
-    !!eventId &&
+    attendees.length > 0 && !!eventId &&
     hasMoreAttendees({ loaded: rows.length, totalCount, lastPageSize: paged.lastPageSize });
   const onScroll = useCallback(
     (ev: React.UIEvent<HTMLDivElement>) => {
       if (!eventId || !canLoadMore || paged.loading) return;
       const el = ev.currentTarget;
       if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
-        void loadMore(eventId, visibility);
+        void loadMore(eventId, visibility, event);
       }
     },
-    [eventId, canLoadMore, paged.loading, loadMore, visibility],
+    [eventId, canLoadMore, paged.loading, loadMore, visibility, event],
   );
 
   // Paging cannot wait for a scroll that will never happen. The detail RPC
@@ -111,8 +120,8 @@ export function GoingAccordion({ id, attendees, totalCount, isLoggedIn, restrict
   // failed request stops it instead of spinning.
   useEffect(() => {
     if (!expanded || !eventId || !canLoadMore || paged.loading) return;
-    void loadMore(eventId, visibility);
-  }, [expanded, eventId, canLoadMore, paged.loading, loadMore, visibility]);
+    void loadMore(eventId, visibility, event);
+  }, [expanded, eventId, canLoadMore, paged.loading, loadMore, visibility, event]);
 
   const container: React.CSSProperties = {
     background: "rgba(138,64,207,0.08)",

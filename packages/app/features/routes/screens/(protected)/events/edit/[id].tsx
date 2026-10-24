@@ -1,3 +1,5 @@
+import { EventAttendanceField } from "@dvnt/app/components/event/event-attendance-field.native";
+import { useEventEditStore, eventAttendanceEditFields } from "@dvnt/app/lib/stores/event-edit-store";
 import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
@@ -34,6 +36,7 @@ function EditEventScreenContent() {
   const eventId = id ? String(id) : "";
 
   const [event, setEvent] = useState<any>(null);
+  const attendance = useEventEditStore();
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -65,6 +68,10 @@ function EditEventScreenContent() {
       if (!eventData) throw new Error("Event not found");
 
       setEvent(eventData);
+      useEventEditStore.getState().hydrate({
+        hydratedId: eventId,
+        ...eventAttendanceEditFields(eventData),
+      });
       setTitle(eventData.title || "");
       setDescription(eventData.description || "");
       setLocationData(eventData.location ? { name: eventData.location } : null);
@@ -100,6 +107,7 @@ function EditEventScreenContent() {
         updates: {
           title,
           description,
+          showAttendees: attendance.showAttendees === true,
           location: locationData?.name || undefined,
           startDate: eventDate.toISOString(),
           price: ticketPrice ? parseFloat(ticketPrice) : undefined,
@@ -429,6 +437,13 @@ function EditEventScreenContent() {
             className="rounded-lg border border-border bg-background px-4 py-3 text-foreground"
           />
         </View>
+
+        <EventAttendanceField
+          eventType={attendance.category}
+          lynkRoomId={attendance.lynkRoomId}
+          showAttendees={attendance.showAttendees}
+          onChange={attendance.setShowAttendees}
+        />
 
         {/* Delete Button */}
         <Pressable

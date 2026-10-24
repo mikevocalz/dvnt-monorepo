@@ -1,3 +1,4 @@
+import { canShowEventAttendees, type AttendanceEventSource } from "@dvnt/app/lib/events/event-attendee-visibility";
 import React, { memo, useCallback, useEffect } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Image } from "expo-image";
@@ -26,6 +27,7 @@ const COLS = 5;
 const GRID_HEIGHT = 300;
 
 interface GoingAccordionProps {
+  event: AttendanceEventSource;
   attendees: EventAttendee[];
   totalCount: number;
   isLoggedIn?: boolean;
@@ -86,7 +88,15 @@ const AvatarTile = memo(function AvatarTile({
   );
 });
 
-export const GoingAccordion = memo(function GoingAccordion({
+export const GoingAccordion = memo(function GoingAccordion(props: GoingAccordionProps) {
+  const allowed = canShowEventAttendees(props.event);
+  const setAllowed = useEventAttendeesStore((s) => s.setAllowed);
+  useEffect(() => { if (props.eventId) setAllowed(props.eventId, allowed); }, [props.eventId, allowed, setAllowed]);
+  return allowed ? <VisibleGoingAccordion {...props} /> : null;
+});
+
+const VisibleGoingAccordion = memo(function VisibleGoingAccordion({
+  event,
   attendees,
   totalCount,
   isLoggedIn = true,
@@ -104,19 +114,19 @@ export const GoingAccordion = memo(function GoingAccordion({
   const seed = useEventAttendeesStore((s) => s.seed);
   const loadMore = useEventAttendeesStore((s) => s.loadMore);
   useEffect(() => {
-    if (eventId && attendees.length > 0) seed(eventId, attendees);
-  }, [eventId, attendees, seed]);
-  const rows = eventId ? paged.rows : attendees;
+    if (eventId) seed(eventId, attendees, event);
+  }, [eventId, attendees, seed, event]);
+  const rows = eventId ? (attendees.length > 0 ? paged.rows : []) : attendees;
   const canLoadMore =
-    !!eventId &&
+    attendees.length > 0 && !!eventId &&
     hasMoreAttendees({
       loaded: rows.length,
       totalCount,
       lastPageSize: paged.lastPageSize,
     });
   const onEndReached = useCallback(() => {
-    if (eventId && canLoadMore && !paged.loading) loadMore(eventId, visibility);
-  }, [eventId, canLoadMore, paged.loading, loadMore, visibility]);
+    if (eventId && canLoadMore && !paged.loading) loadMore(eventId, visibility, event);
+  }, [eventId, canLoadMore, paged.loading, loadMore, visibility, event]);
 
   // The list is measured while the panel is collapsed, so onEndReached cannot
   // be relied on to prime the first page. The web port hit exactly this: the
@@ -128,8 +138,8 @@ export const GoingAccordion = memo(function GoingAccordion({
   // this, so it walks to the end and a failed request stops it.
   useEffect(() => {
     if (!expanded || !eventId || !canLoadMore || paged.loading) return;
-    loadMore(eventId, visibility);
-  }, [expanded, eventId, canLoadMore, paged.loading, loadMore, visibility]);
+    loadMore(eventId, visibility, event);
+  }, [expanded, eventId, canLoadMore, paged.loading, loadMore, visibility, event]);
 
   const toggle = useCallback(() => {
     const next = !expanded;

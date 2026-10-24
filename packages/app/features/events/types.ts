@@ -17,6 +17,7 @@ export interface EventDetail {
   youtubeVideoUrl?: string | null;
   /** `video_rooms.uuid` of the Sneaky Lynk this event is hosted in. */
   lynkRoomId?: string | null;
+  showAttendees?: boolean | null;
   price: number;
   likes?: number;
   attendees: number;

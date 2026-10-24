@@ -139,3 +139,21 @@ test('old category clients remain compatible, unknown values fail without silent
   assert.equal(result.error.code, 'validation_error');
   assert.equal(h.rows.length, 0);
 });
+
+
+test('protected event attendance defaults off; only a boolean organizer opt-in enables it', async () => {
+  for (const kind of [{event_type:'sex_party'}, {event_type:'virtual_session',lynkRoomId:'00000000-0000-4000-8000-000000000003'}]) {
+    for (const showAttendees of [undefined,null,false,true]) {
+      const result=await harness().publish({...draft,...kind,showAttendees});
+      assert.equal(result.ok,true);
+      assert.equal(result.data.event.show_attendees,showAttendees===true);
+      assert.equal(result.data.event.host_id,'deviant');
+    }
+    const h=harness();const result=await h.publish({...draft,...kind,showAttendees:'true'});
+    assert.equal(result.ok,false);assert.equal(h.rows.length,0);
+  }
+});
+test('ordinary creation cannot retain a latent attendance opt-in for future type changes',async()=>{
+  const result=await harness().publish({...draft,event_type:'party',showAttendees:true});
+  assert.equal(result.ok,true);assert.equal(result.data.event.show_attendees,false);
+});

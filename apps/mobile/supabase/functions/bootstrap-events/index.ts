@@ -15,6 +15,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { canShowEventAttendees, attendeeVisibleEventIds } from "../_shared/event-attendee-visibility.ts";
 import { verifySession } from "../_shared/verify-session.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -110,16 +111,18 @@ Deno.serve(async (req: Request) => {
 
     // ── 3. Batch-fetch RSVP attendees with avatars ────────────────────
     const eventIds = events.map((e: any) => e.id);
+    const sessionUserId = await verifySession(supabase, req);
+    const visibleAttendeeEventIds = await attendeeVisibleEventIds(supabase, events, sessionUserId);
     const attendeesMap = new Map<
       number,
       { image: string; initials: string }[]
     >();
 
-    const { data: rsvps } = await supabase
+    const { data: rsvps } = visibleAttendeeEventIds.length ? await supabase
       .from("event_rsvps")
       .select("event_id, user_id")
-      .in("event_id", eventIds)
-      .eq("status", "going");
+      .in("event_id", visibleAttendeeEventIds)
+      .eq("status", "going") : { data: [] };
 
     if (rsvps && rsvps.length > 0) {
       const rsvpAuthIds = [...new Set(rsvps.map((r: any) => r.user_id))];
@@ -168,23 +171,12 @@ Deno.serve(async (req: Request) => {
     // the body. This function reads with the service role, so a client-supplied
     // id would let anyone read another user's RSVP state. No valid session =
     // anonymous viewer (public events, no viewer RSVP state).
-    let intUserId: number | null = null;
-    const sessionUserId = await verifySession(supabase, req);
-    if (sessionUserId) {
-      const { data: userRow } = await supabase
-        .from("users")
-        .select("id")
-        .eq("auth_id", sessionUserId)
-        .single();
-      intUserId = userRow?.id ?? null;
-    }
-
     const viewerRsvps: Record<string, string> = {};
-    if (intUserId) {
+    if (sessionUserId) {
       const { data: viewerRsvpRows } = await supabase
         .from("event_rsvps")
         .select("event_id, status")
-        .eq("user_id", intUserId)
+        .eq("user_id", sessionUserId)
         .in("event_id", eventIds);
 
       (viewerRsvpRows || []).forEach((r: any) => {
@@ -196,7 +188,7 @@ Deno.serve(async (req: Request) => {
     const formattedEvents = events.map((event: any) => {
       const host = hostsMap.get(event.host_id);
       const d = event.start_date ? new Date(event.start_date) : null;
-      const rsvpAttendees = attendeesMap.get(event.id) || [];
+      const rsvpAttendees = canShowEventAttendees(event) ? attendeesMap.get(event.id) || [] : [];
       const totalCount = Math.max(
         Number(event.total_attendees) || 0,
         rsvpAttendees.length,
@@ -207,6 +199,8 @@ Deno.serve(async (req: Request) => {
         title: event.title,
         category: event.event_type || event.category || undefined,
         event_type: event.event_type || null,
+        lynkRoomId: event.lynk_room_id || null,
+        showAttendees: event.show_attendees === true,
         description: event.description,
         date: d ? d.getDate().toString().padStart(2, "0") : "--",
         month: d

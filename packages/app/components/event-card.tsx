@@ -1,3 +1,4 @@
+import { canShowEventAttendees } from "@dvnt/app/lib/events/event-attendee-visibility";
 import { eventTypeLabel } from "@dvnt/app/lib/events/event-type";
 import { LinearGradient } from "@dvnt/app/components/ui/html";
 import { View, Text, Pressable } from "react-native";
@@ -57,7 +58,8 @@ export function EventCard({
     await translateTitleFn();
   }, [translateTitleFn]);
 
-  const attendeePreview = Array.isArray(event.attendees) ? event.attendees : [];
+  const showAttendeeProfiles = canShowEventAttendees(event);
+  const attendeePreview = showAttendeeProfiles && Array.isArray(event.attendees) ? event.attendees : [];
   const totalAttendees =
     typeof event.totalAttendees === "number"
       ? event.totalAttendees
@@ -175,8 +177,8 @@ export function EventCard({
               className="absolute inset-0"
             />
 
-            {/* Attendees */}
-            <View className="absolute top-4 left-4 flex-row items-center">
+            {/* Attendees: no faces or teaser for hidden protected events. */}
+            {showAttendeeProfiles ? <View className="absolute top-4 left-4 flex-row items-center">
               {attendeePreview.slice(0, 3).map((attendee: any, idx: number) => (
                 <View
                   key={idx}
@@ -205,7 +207,7 @@ export function EventCard({
                   +{Math.max(totalAttendees - attendeePreview.slice(0, 3).length, 0)}
                 </Text>
               </View>
-            </View>
+            </View> : null}
 
             {/* Date Badge */}
             <Motion.View

@@ -59,6 +59,7 @@ import {
 } from "@dvnt/app/lib/tickets/pricing";
 import {
   useEventEditStore,
+  eventAttendanceEditFields,
   TIER_LEVELS,
   type LocalTicketTier,
 } from "@dvnt/app/lib/stores/event-edit-store";
@@ -70,6 +71,7 @@ import {
 import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web";
 import { resolveEventSchedule } from "@dvnt/app/features/events/create/event-form";
 import { EventZonePickerWeb } from "@dvnt/app/features/events/ui/event-zone-picker.web";
+import { EventAttendanceField } from "@dvnt/app/components/event/event-attendance-field.web";
 import { EventPublicationFieldWeb } from "@dvnt/app/features/events/ui/event-publication-picker.web";
 import {
   publishAtError,
@@ -214,7 +216,7 @@ export function EventEditScreen() {
       endDate: ev.endDate ? zonedIsoToLocalIso(ev.endDate, eventTz) || null : null,
       price: ev.price != null ? String(ev.price) : "",
       maxAttendees: ev.maxAttendees != null ? String(ev.maxAttendees) : "",
-      category: ev.category || "",
+      ...eventAttendanceEditFields(ev),
       visibility: ev.visibility || "public",
       dressCode: ev.dressCode || "",
       doorPolicy: ev.doorPolicy || "",
@@ -390,6 +392,7 @@ export function EventEditScreen() {
         endDate: schedule.endIso || undefined,
         eventTz: schedule.eventTz,
         isHidden: s.isHidden,
+        showAttendees: s.showAttendees === true,
         publishAt: publishAtLocalToInstant(s.publishAt, schedule.eventTz),
         price: s.price ? parseFloat(s.price) : 0,
         maxAttendees: s.maxAttendees ? parseInt(s.maxAttendees) : undefined,
@@ -978,6 +981,12 @@ export function EventEditScreen() {
               {eventVisibilityCopy(s.visibility).helper}
             </p>
           </FormField>
+          <EventAttendanceField
+            eventType={s.category}
+            lynkRoomId={s.lynkRoomId}
+            showAttendees={s.showAttendees}
+            onChange={s.setShowAttendees}
+          />
           <div className="mb-4">
             <EventPublicationFieldWeb
               isHidden={s.isHidden}

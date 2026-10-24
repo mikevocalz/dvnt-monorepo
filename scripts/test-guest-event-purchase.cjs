@@ -33,6 +33,7 @@ function load(file) {
   return exports;
 }
 const ui = load(path.join(ROOT, 'packages/app/lib/stores/event-detail-ui-store.ts')).useEventDetailUiStore;
+const attendeePrivacy = load(path.join(ROOT, 'packages/app/lib/events/event-attendee-visibility.ts'));
 const mocks = {};
 // Render unrelated page furniture as empty components, then explicitly supply
 // every hook/data dependency touched by the purchase and missing-event paths.
@@ -64,6 +65,8 @@ app('lib/hooks/use-events', {
   useToggleEventLike: () => ({ mutate: noop }),
   useRsvpEvent: () => ({ isPending: false, mutate: (value) => scenario.memberRsvps.push(value) }),
 });
+app('lib/hooks/use-event-attendee-privacy', { useEventAttendeePrivacy: (_id, event) => attendeePrivacy.canShowEventAttendees(event) });
+app('components/event/GoingAccordion.web', { GoingAccordion: ({ attendees }) => React.createElement('div', null, attendees.map(a => a.username).join(', ')) });
 app('lib/hooks/use-event-title-route', { useEventTitleRoute: () => ({ ...scenario.indexQuery, routingIndex: !scenario.indexQuery.isError && !scenario.indexQuery.isFetching ? scenario.indexQuery.data : undefined }) });
 app('lib/hooks/use-tickets', {
   useTicketTypes: () => scenario.tiersQuery,
@@ -433,4 +436,26 @@ test('share-token route keeps its token identity even when the public index is u
   await render();
   assert.equal(scenario.resolvedIds.at(-1), '42');
   assert.match(document.body.textContent, /Synthetic public event/);
+});
+
+
+test('actual detail screen omits the entire Who’s Going section for default-hidden protected events', async () => {
+  for (const protection of [{ category: 'sex_party' }, { category: 'party', lynkRoomId: 'fixture-room' }]) {
+    for (const isAuthenticated of [false, true]) {
+      scenario.auth = { isAuthenticated, user: isAuthenticated ? { id: 'member', username: 'viewer' } : null };
+      scenario.eventQuery = query({ ...fixtureEvent, ...protection, showAttendees: null, attendeeAvatars: [{ id: 'private', username: 'private-person', avatar: 'https://fixture.invalid/private.jpg' }], totalAttendees: 1 });
+      await render();
+      assert.doesNotMatch(document.body.textContent, /Who's going|private-person|Be the first to RSVP|Sign in to see who/);
+      assert.equal(document.querySelector('img[src*="private.jpg"]'), null);
+    }
+  }
+});
+
+test('actual detail screen preserves ordinary sections and explicit organizer opt-in', async () => {
+  for (const event of [{ category: 'party', showAttendees: false }, { category: 'virtual_session', showAttendees: false }, { category: 'sex_party', showAttendees: true }, { category: 'party', lynkRoomId: 'fixture-room', showAttendees: true }]) {
+    scenario.eventQuery = query({ ...fixtureEvent, ...event, attendeeAvatars: [{ id: 'visible', username: 'visible-person' }], totalAttendees: 1 });
+    await render();
+    assert.match(document.body.textContent, /Who's going/);
+    assert.match(document.body.textContent, /visible-person/);
+  }
 });
