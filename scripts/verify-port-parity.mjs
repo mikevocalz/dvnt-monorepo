@@ -313,8 +313,25 @@ function extractWiring(rawSrc) {
     .length;
   // domain hooks = use<Something> calls that aren't React/RN/router built-ins.
   // These carry the data wiring (useEvents, usePost, useToggleBookmark, …).
+  // Expo's useImage decodes presentation assets, not product/domain data.
+  // Match the exact named import and its local binding, never the hook name
+  // globally: a first-party useImage (including beside an aliased Expo import)
+  // must still be checked. Remove only the import specifier before scanning.
+  const presentationBindings = new Set();
+  const domainSrc = src.replace(
+    /import\s*\{([^}]+)\}\s*from\s*["']expo-image["']/g,
+    (statement, specifiers) => statement.replace(specifiers,
+      specifiers.split(",").filter((specifier) => {
+        const match = specifier.trim().match(/^useImage(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+        if (!match) return true;
+        presentationBindings.add(match[1] || "useImage");
+        return false;
+      }).join(",")),
+  );
   const domainHooks = new Set(
-    [...usedHooks].filter((h) => !BUILTIN_HOOKS.has(h)),
+    [...domainSrc.matchAll(/\buse[A-Z][A-Za-z0-9]+\b/g)]
+      .map((m) => m[0])
+      .filter((h) => !BUILTIN_HOOKS.has(h) && !presentationBindings.has(h)),
   );
   // explicit react-query key literals: useQuery({ queryKey: ["events", …] })
   const queryKeys = new Set();
