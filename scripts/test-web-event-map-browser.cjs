@@ -158,7 +158,7 @@ async function bundle() {
 
 (async () => {
   let browser, server, page;
-  const errors = [], browserConsole = [], failedRequests = [], blockedRequests = [], mapRequests = [], geolocationCalls = [], viewportEvidence = [], checks = [];
+  const errors = [], browserConsole = [], failedRequests = [], blockedRequests = [], mapRequests = [], geolocationCalls = [], viewportEvidence = [], fixedViewportEvidence = [], checks = [];
   let embedMode = 'success';
   const check = name => { checks.push(name); console.log('PASS', name); };
   try {
@@ -198,13 +198,14 @@ async function bundle() {
       }
       blockedRequests.push(url.href); return route.abort('blockedbyclient');
     });
-    const openPage = async () => {
+    const openPage = async (viewport) => {
       // Independent scenarios get a fresh document/page. Browser Back/Forward
       // assertions below deliberately stay within the same page. Reusing a
       // WebKit page after cross-origin iframe teardown can stall navigation.
       const previous = page;
       page = await context.newPage();
       await previous?.close();
+      if (viewport) await page.setViewportSize(viewport);
       page.setDefaultTimeout(10000);
       page.on('pageerror', error => errors.push(error.message));
       page.on('console', message => { if (message.type() === 'error') browserConsole.push(message.text()); });
@@ -389,12 +390,37 @@ async function bundle() {
       const coordinate = new URL(url).searchParams.get('q');
       assert.equal(['-33.9,151.2', '-34.6,-58.4', '51.5,0.1'].includes(coordinate), false, 'private coordinates never enter an iframe URL');
     }
+    // Independent fixed-device captures distinguish application geometry from
+    // Chromium's resized out-of-process iframe/full-page capture behavior.
+    // Keep every earlier resize assertion and screenshot as separate evidence.
+    for (const viewport of [{ width: 320, height: 568 }, { width: 393, height: 852 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }]) {
+      await openPage(viewport);
+      await search().fill('Harbor'); await toggle().click(); await waitVenues(2);
+      await select('Harbor Afterparty').click(); await fit(`${viewport.width}px fixed map`);
+      const embedded = await (await frame().elementHandle()).contentFrame();
+      await embedded.getByText('Synthetic venue map', { exact: true }).waitFor();
+      await embedded.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await frame().scrollIntoViewIfNeeded();
+      const geometry = async () => ({
+        outer: await frame().evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, containerWidth: el.parentElement.getBoundingClientRect().width })),
+        inner: await embedded.evaluate(() => ({ width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth, bodyWidth: document.body.getBoundingClientRect().width, contentWidth: document.body.firstElementChild.getBoundingClientRect().width })),
+      });
+      const before = await geometry();
+      assert.ok(Math.abs(before.outer.width - before.outer.containerWidth) <= 1);
+      assert.ok(Math.abs(before.outer.width - before.inner.width) <= 1);
+      assert.ok(Math.abs(before.outer.width - before.inner.bodyWidth) <= 1);
+      await page.screenshot({ path: path.join(dir, `fixed-${viewport.width}-viewport.png`) });
+      await frame().screenshot({ path: path.join(dir, `fixed-${viewport.width}-iframe.png`) });
+      await page.screenshot({ path: path.join(dir, `fixed-${viewport.width}-fullpage.png`), fullPage: true });
+      fixedViewportEvidence.push({ viewport, before, after: await geometry() });
+    }
+    check('fresh fixed-viewport geometry and separate viewport/iframe/full-page capture evidence');
     assert.deepEqual(blockedRequests, [], 'unexpected network boundary request');
     assert.deepEqual(errors, [], 'browser uncaught errors');
     check('guest mode, zero geolocation calls and no private location in any provider request');
     fs.writeFileSync(path.join(dir, 'results.json'), JSON.stringify({
       status: 'passed', commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
-      browser: engine.name(), checks, viewportEvidence, mapRequests: mapRequests.length, errors, blockedRequests,
+      browser: engine.name(), checks, viewportEvidence, fixedViewportEvidence, mapRequests: mapRequests.length, errors, blockedRequests,
       scope: 'Actual production EventsListScreen, selected-venue EventsMap, Zustand, React Query and CSS; synthetic data/auth/router and deterministic Google iframe network boundaries. API contract uses real source with mocked Supabase transport. Does not prove live provider, deployed route, database access rules or physical mobile behavior.',
     }, null, 2));
     console.log('PASS web Events map browser regressions. Evidence:', dir);
