@@ -314,9 +314,11 @@ async function bundle() {
     await search().fill(''); await waitVenues(4);
     await select('Equator Zero').click();
     assert.equal(await src(), 'https://maps.google.com/maps?q=0,0&z=15&output=embed');
-    await page.getByRole('button', { name: 'For You', exact: true }).click(); await waitVenues(1);
+    await page.getByRole('button', { name: 'For You', exact: true }).click();
+    await page.locator('button[data-event-id="501"]').waitFor(); await waitVenues(1);
     assert.equal(await venues().first().textContent(), 'Personalized Night');
-    await page.getByRole('button', { name: 'Past', exact: true }).click(); await waitVenues(1);
+    await page.getByRole('button', { name: 'Past', exact: true }).click();
+    await page.locator('button[data-event-id="401"]').waitFor(); await waitVenues(1);
     assert.equal(await venues().first().textContent(), 'Past Archive');
     await page.getByRole('button', { name: 'All', exact: true }).click(); await waitVenues(4);
     await page.getByRole('button', { name: 'Upcoming', exact: true }).click(); await waitVenues(4);
