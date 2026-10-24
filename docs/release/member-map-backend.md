@@ -50,7 +50,9 @@ migration and edge functions have been released. Do not silently turn old users 
    invoker functions. Tables have RLS with no anon/authenticated grants.
 2. Verify the prerequisites above, then apply reviewed
    `20261024164346_member_map_explicit_consent.sql` to the existing backend and
-   deploy `member-map` and updated `member-proximity`.
+   deploy `member-map`, updated `member-proximity`, and updated
+   `places-autocomplete` together. The Places update is required so Overall OFF
+   suppresses IP-derived location bias as well as device GPS.
 3. Confirm service RPC/schema availability and local clients' fail-closed behavior,
    using only explicitly consenting synthetic test accounts.
 4. Release clients only after the backend gate is confirmed.
