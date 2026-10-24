@@ -1,3 +1,4 @@
+import { invalidateEventMapLocation } from "@dvnt/app/lib/events/event-map-cache";
 import { advanceEventAttendanceRevision, getEventAttendanceRevision } from "@dvnt/app/lib/events/event-attendee-revision";
 import { canShowEventAttendees, sanitizeEventAttendance } from "@dvnt/app/lib/events/event-attendee-visibility";
 import { useEventAttendeesStore } from "@dvnt/app/lib/stores/event-attendees-store";
@@ -71,6 +72,7 @@ export function useEventRealtime(eventId: string | undefined): void {
           filter: `id=eq.${evIdInt}`,
         },
         async (payload) => {
+          invalidateEventMapLocation(queryClient, eventId);
           if (!await applyRealtimeAttendeePrivacy(queryClient, eventId, payload.new as Record<string, any>)) return;
           queryClient.invalidateQueries({ predicate: queryContainsEntity("event", eventId) });
         },
@@ -195,6 +197,7 @@ export function useEventsFeedRealtime(enabled = true): void {
           const next = payload.new as Record<string, any>;
           if (!next?.id) return;
           const targetId = String(next.id);
+          invalidateEventMapLocation(queryClient, targetId);
           if (!await applyRealtimeAttendeePrivacy(queryClient, targetId, next)) return;
 
           // Patch in-place across every events list cache before restarting
@@ -319,6 +322,7 @@ export function useEventsFeedRealtime(enabled = true): void {
           const old = payload.old as Record<string, any>;
           if (!old?.id) return;
           const targetId = String(old.id);
+          invalidateEventMapLocation(queryClient, targetId);
           queryClient.setQueriesData<any[]>(
             { queryKey: eventKeys.all },
             (cache) => {

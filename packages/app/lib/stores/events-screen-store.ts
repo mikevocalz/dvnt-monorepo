@@ -36,6 +36,8 @@ interface EventsScreenState {
   setFilterSheetVisible: (visible: boolean) => void;
 
   // Map view
+  selectedMapEventId: string | null;
+  setSelectedMapEventId: (id: string | null) => void;
   showMapView: boolean;
   toggleMapView: () => void;
   setShowMapView: (visible: boolean) => void;
@@ -98,6 +100,8 @@ export const useEventsScreenStore = create<EventsScreenState>((set, get) => ({
   filterSheetVisible: false,
   setFilterSheetVisible: (visible) => set({ filterSheetVisible: visible }),
 
+  selectedMapEventId: null,
+  setSelectedMapEventId: (selectedMapEventId) => set({ selectedMapEventId }),
   showMapView: false,
   toggleMapView: () => set((s) => ({ showMapView: !s.showMapView })),
   setShowMapView: (visible) => set({ showMapView: visible }),

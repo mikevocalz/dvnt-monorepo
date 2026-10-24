@@ -1,3 +1,4 @@
+import { invalidateEventMapLocation } from "./event-map-cache.ts";
 import { URL } from "node:url";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -80,7 +81,7 @@ function realtime(client: any) {
   const channel = { on: (_kind: string, filter: any, callback: any) => { listeners.push({ filter, callback }); return channel; }, subscribe: () => channel };
   const revision = revisionTracker();
   const fns = loadFunctions("../hooks/use-event-realtime.ts", ["applyRealtimeAttendeePrivacy", "useEventRealtime", "useEventsFeedRealtime"], {
-    ...revision, canShowEventAttendees, sanitizeEventAttendance, propagateEntity, queryContainsEntity, eventKeys,
+    ...revision, canShowEventAttendees, sanitizeEventAttendance, propagateEntity, queryContainsEntity, eventKeys, invalidateEventMapLocation,
     useEventAttendeesStore: { getState: () => ({ setAllowed: (_id: string, value: boolean) => allowed.push(value) }) },
     useQueryClient: () => client, useEffect: (fn: () => void) => fn(), freshChannel: () => channel,
     supabase: { removeChannel() {} }, realtimeEventType, formatEventDate: () => null,
@@ -233,4 +234,33 @@ test("persisted query caches predating attendee privacy are invalidated", () => 
   const source = readFileSync(new URL("../query-persistence.ts", import.meta.url), "utf8");
   assert.match(source, /buster: "v12"/);
   assert.match(source, /currentVersion = "v12"/);
+});
+
+
+test("event map realtime revocation cancels old coordinates and preserves unrelated map caches", async () => {
+  for (const initial of [true, false]) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    const key = ["events-map", ["1"]];
+    const unrelated = ["events-map", ["2"]];
+    const venue = { id: "1", location_lat: 40, location_lng: -73 };
+    client.setQueryData(unrelated, [{ id: "2" }]);
+    if (!initial) client.setQueryData(key, [venue]);
+    let finish!: (value: unknown) => void;
+    let calls = 0;
+    const seen: string[] = [];
+    const observer = new QueryObserver(client, { queryKey: key, staleTime: 0,
+      queryFn: () => ++calls === 1 ? new Promise(resolve => { finish = resolve; }) : Promise.resolve([]),
+    });
+    const unsubscribe = observer.subscribe((result: any) => { if (result.data) seen.push(JSON.stringify(result.data)); });
+    const before = seen.length;
+    invalidateEventMapLocation(client, "1");
+    assert.equal(JSON.stringify(client.getQueryData(key) || []).includes("location_lat"), false);
+    finish([venue]);
+    await tick();
+    assert.equal(calls, 2);
+    assert.deepEqual(client.getQueryData(key), []);
+    assert.deepEqual(client.getQueryData(unrelated), [{id:"2"}]);
+    assert.equal(seen.slice(before).some(value => value.includes("location_lat")), false);
+    unsubscribe(); client.clear();
+  }
 });
