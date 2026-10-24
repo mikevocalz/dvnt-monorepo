@@ -1,3 +1,5 @@
+import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
+import { locationAllowedFor, useLocationAccessStore } from "@dvnt/app/lib/stores/location-access-store";
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useRouter } from 'solito/navigation';
@@ -59,6 +61,7 @@ function Chip({
 }
 
 export function WelcomeScreen() {
+  const locationAccess = useLocationSettings();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const updateUser = useAuthStore((s) => s.updateUser);
@@ -148,7 +151,12 @@ export function WelcomeScreen() {
     setSaving(false);
   };
 
-  const enableLocation = () => {
+  const enableLocation = async () => {
+    const owner = useAuthStore.getState().user?.authId;
+    await locationAccess.setOverall(true);
+    if (!locationAllowedFor(owner)) return;
+    const generation = useLocationAccessStore.getState().generation;
+    const allowed = () => useAuthStore.getState().user?.authId === owner && locationAllowedFor(owner) && useLocationAccessStore.getState().generation === generation;
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       toast.error('Location unavailable', { description: 'Your browser does not support location.' });
       return;
@@ -156,6 +164,7 @@ export function WelcomeScreen() {
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
+        if (!allowed()) { setLocating(false); return; }
         const { latitude, longitude } = pos.coords;
         const { setDeviceLocation, setLocationMode, setActiveCity } =
           useEventsLocationStore.getState();
@@ -173,6 +182,7 @@ export function WelcomeScreen() {
               nearest = c;
             }
           }
+          if (!allowed()) { setLocating(false); return; }
           if (nearest) setActiveCity(nearest);
           toast.success(nearest ? `Showing events near ${nearest.name}` : 'Location enabled');
         } catch {

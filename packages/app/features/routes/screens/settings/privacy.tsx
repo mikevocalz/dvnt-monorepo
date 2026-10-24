@@ -16,6 +16,7 @@ import {
   useUpdatePrivacySettings,
   type PrivacySettings,
 } from "@dvnt/app/lib/hooks/use-user-settings";
+import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { CityVisibilityCard } from "@dvnt/app/features/settings/ui/CityVisibilityCard";
 import { CITY_VISIBILITY_COPY } from "@dvnt/app/lib/stores/city-discovery-visibility";
 
@@ -146,6 +147,7 @@ export default function PrivacyScreen() {
             {CITY_VISIBILITY_COPY.sectionTitle}
           </Text>
           <CityVisibilityCard />
+          <LocationControls />
 
           <View className="mt-2 rounded-xl border border-primary/20 bg-primary/5 p-4">
             <Text className="text-sm text-muted-foreground">

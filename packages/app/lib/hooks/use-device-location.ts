@@ -7,19 +7,23 @@
  * of a stale persisted city.
  */
 
+import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { locationAllowedFor, useLocationAccessStore } from "@dvnt/app/lib/stores/location-access-store";
 import { useCallback } from "react";
 import * as Location from "expo-location";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 
 export function useDeviceLocation() {
+  const access = useLocationSettings();
   const deviceLat = useEventsLocationStore((s) => s.deviceLat);
   const deviceLng = useEventsLocationStore((s) => s.deviceLng);
   const setDeviceLocation = useEventsLocationStore((s) => s.setDeviceLocation);
   const setLocationMode = useEventsLocationStore((s) => s.setLocationMode);
   const showToast = useUIStore((s) => s.showToast);
 
-  const isAvailable = deviceLat != null && deviceLng != null;
+  const isAvailable = access.enabled && deviceLat != null && deviceLng != null;
 
   /**
    * Requests foreground location permission (if not yet granted), fetches the
@@ -27,6 +31,9 @@ export function useDeviceLocation() {
    * Returns true on success, false if permission was denied.
    */
   const requestLocation = useCallback(async (): Promise<boolean> => {
+    const owner = useAuthStore.getState().user?.authId;
+    const generation = useLocationAccessStore.getState().generation;
+    if (!locationAllowedFor(owner)) { showToast("info", "Location is off", "Enable Use device location in Privacy settings first."); return false; }
     try {
       let permission = await Location.getForegroundPermissionsAsync();
 
@@ -51,9 +58,11 @@ export function useDeviceLocation() {
         return false;
       }
 
+      if (useAuthStore.getState().user?.authId !== owner || !locationAllowedFor(owner) || useLocationAccessStore.getState().generation !== generation) return false;
       const loc = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
+      if (useAuthStore.getState().user?.authId !== owner || !locationAllowedFor(owner) || useLocationAccessStore.getState().generation !== generation) return false;
       setDeviceLocation(loc.coords.latitude, loc.coords.longitude);
       setLocationMode("device");
       return true;
@@ -64,5 +73,5 @@ export function useDeviceLocation() {
     }
   }, [setDeviceLocation, setLocationMode, showToast]);
 
-  return { deviceLat, deviceLng, isAvailable, requestLocation };
+  return { deviceLat: access.enabled ? deviceLat : null, deviceLng: access.enabled ? deviceLng : null, isAvailable, requestLocation };
 }

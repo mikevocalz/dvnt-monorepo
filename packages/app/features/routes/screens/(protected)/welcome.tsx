@@ -1,3 +1,5 @@
+import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
+import { locationAllowedFor, useLocationAccessStore } from "@dvnt/app/lib/stores/location-access-store";
 import { useEffect } from "react";
 import {
   View,
@@ -111,6 +113,7 @@ function Chip({
 }
 
 export default function WelcomeScreen() {
+  const locationAccess = useLocationSettings();
   const user = useAuthStore((s) => s.user);
   const updateUser = useAuthStore((s) => s.updateUser);
   const showToast = useUIStore((s) => s.showToast);
@@ -183,6 +186,11 @@ export default function WelcomeScreen() {
   };
 
   const enableLocation = async () => {
+    const owner = useAuthStore.getState().user?.authId;
+    await locationAccess.setOverall(true);
+    if (!locationAllowedFor(owner)) return;
+    const generation = useLocationAccessStore.getState().generation;
+    const allowed = () => useAuthStore.getState().user?.authId === owner && locationAllowedFor(owner) && useLocationAccessStore.getState().generation === generation;
     s.setLocating(true);
     try {
       const perm = await Location.requestForegroundPermissionsAsync();
@@ -193,9 +201,11 @@ export default function WelcomeScreen() {
         finish();
         return;
       }
+      if (!allowed()) { s.setLocating(false); return; }
       const loc = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
+      if (!allowed()) { s.setLocating(false); return; }
       const { latitude, longitude } = loc.coords;
       const { setDeviceLocation, setLocationMode, setActiveCity } =
         useEventsLocationStore.getState();
@@ -211,6 +221,7 @@ export default function WelcomeScreen() {
           nearest = c;
         }
       }
+      if (!allowed()) { s.setLocating(false); return; }
       if (nearest) setActiveCity(nearest);
       markStep("profile.location", "done");
       showToast(

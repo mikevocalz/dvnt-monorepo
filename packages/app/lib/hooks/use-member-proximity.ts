@@ -1,3 +1,5 @@
+import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
+import { locationAllowedFor } from "@dvnt/app/lib/stores/location-access-store";
 import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { memberProximityApi } from "@dvnt/app/lib/api/member-proximity";
@@ -28,6 +30,7 @@ export const memberProximityKeys = {
  * A queued revocation cannot be overwritten by an older in-flight publish.
  */
 export function useSyncMemberProximityPresence() {
+  const locationAccess = useLocationSettings();
   const authId = useAuthStore((s) => s.user?.authId);
   const storedGrant = useEventsLocationStore((s) => s.cityVisibility);
   const storedPreciseGrant = useEventsLocationStore(
@@ -63,7 +66,7 @@ export function useSyncMemberProximityPresence() {
         typeof lat === "number" && Number.isFinite(lat) && Math.abs(lat) <= 90 &&
         typeof lng === "number" && Number.isFinite(lng) && Math.abs(lng) <= 180;
 
-      if (consentForThisAccount && liveGrant && validCoords &&
+      if (locationAllowedFor(authId) && consentForThisAccount && liveGrant && validCoords &&
           verification?.state === "approved") {
         await memberProximityApi.publish({
           latitude: lat,
@@ -87,6 +90,7 @@ export function useSyncMemberProximityPresence() {
     longitude,
     verification?.state,
     isLoading,
+    locationAccess.enabled,
   ]);
 }
 

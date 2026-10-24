@@ -1,3 +1,6 @@
+import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { locationAllowedFor, useLocationAccessStore } from "@dvnt/app/lib/stores/location-access-store";
 import { useEffect, useRef } from "react";
 import * as Location from "expo-location";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
@@ -15,11 +18,16 @@ import type { City } from "@dvnt/app/lib/stores/events-location-store";
  * Never prompts the user — only uses already-granted permission.
  */
 export function useBootLocation() {
+  const access = useLocationSettings();
   const didRun = useRef(false);
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    if (!access.enabled) { didRun.current = false; return; }
     if (didRun.current) return;
+    const owner = useAuthStore.getState().user?.authId;
+    const generation = useLocationAccessStore.getState().generation;
+    const allowed = () => locationAllowedFor(owner) && useAuthStore.getState().user?.authId === owner && useLocationAccessStore.getState().generation === generation;
     didRun.current = true;
 
     (async () => {
@@ -38,10 +46,12 @@ export function useBootLocation() {
         }
 
         console.log("[BootLocation] Permission granted — fetching coords");
+        if (!allowed()) return;
         const loc = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
 
+        if (!allowed()) return;
         const { latitude, longitude } = loc.coords;
         const { setDeviceLocation, setLocationMode, setActiveCity } =
           useEventsLocationStore.getState();
@@ -59,6 +69,7 @@ export function useBootLocation() {
           });
         }
 
+        if (!allowed()) return;
         // Try to find nearest DB city (within ~50km / ~0.5 deg)
         let nearest: City | null = null;
         let minDist = Infinity;
@@ -82,10 +93,12 @@ export function useBootLocation() {
 
         // Reverse geocode to get actual city name from coords
         try {
+          if (!allowed()) return;
           const [geo] = await Location.reverseGeocodeAsync({
             latitude,
             longitude,
           });
+          if (!allowed()) return;
           if (geo?.city) {
             console.log("[BootLocation] Reverse geocoded city:", geo.city);
             // Check if a DB city matches the geocoded name
@@ -114,7 +127,7 @@ export function useBootLocation() {
         }
 
         // Last resort: use nearest DB city regardless of distance
-        if (nearest) {
+        if (nearest && allowed()) {
           console.log(
             "[BootLocation] Fallback to nearest DB city:",
             nearest.name,
@@ -125,5 +138,5 @@ export function useBootLocation() {
         console.warn("[BootLocation] Failed:", err);
       }
     })();
-  }, [queryClient]);
+  }, [queryClient, access.enabled]);
 }

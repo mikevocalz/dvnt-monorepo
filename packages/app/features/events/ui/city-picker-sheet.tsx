@@ -20,6 +20,10 @@ import {
 import { MapPin, Search, Navigation, Clock, Check } from "lucide-react-native";
 import { GlassSheetBackground } from "@dvnt/app/components/sheets/glass-sheet-background";
 import * as Location from "expo-location";
+import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { locationAllowedFor, useLocationAccessStore } from "@dvnt/app/lib/stores/location-access-store";
+import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import * as Haptics from "expo-haptics";
 import { useCities, useCitySearch } from "@dvnt/app/lib/hooks/use-cities";
 import {
@@ -36,6 +40,7 @@ export const CityPickerSheet: React.FC<CityPickerSheetProps> = ({
   visible,
   onDismiss,
 }) => {
+  useLocationSettings();
   const sheetRef = useRef<BottomSheetModal>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [requestingLocation, setRequestingLocation] = useState(false);
@@ -78,6 +83,9 @@ export const CityPickerSheet: React.FC<CityPickerSheetProps> = ({
   );
 
   const handleUseDeviceLocation = useCallback(async () => {
+    const owner = useAuthStore.getState().user?.authId;
+    const generation = useLocationAccessStore.getState().generation;
+    if (!locationAllowedFor(owner)) { useUIStore.getState().showToast("info", "Location is off", "Enable Use device location in Privacy settings first."); return; }
     setRequestingLocation(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -85,9 +93,11 @@ export const CityPickerSheet: React.FC<CityPickerSheetProps> = ({
         setRequestingLocation(false);
         return;
       }
+      if (useAuthStore.getState().user?.authId !== owner || !locationAllowedFor(owner) || useLocationAccessStore.getState().generation !== generation) return;
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
+      if (useAuthStore.getState().user?.authId !== owner || !locationAllowedFor(owner) || useLocationAccessStore.getState().generation !== generation) return;
       setDeviceLocation(location.coords.latitude, location.coords.longitude);
       setLocationMode("device");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

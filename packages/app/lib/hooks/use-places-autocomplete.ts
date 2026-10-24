@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Platform } from "react-native";
+import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import type {
@@ -21,40 +21,6 @@ function isFiniteCoord(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-async function requestDeviceBias(): Promise<PlacesBias | null> {
-  if (Platform.OS === "web") {
-    if (typeof navigator === "undefined" || !navigator.geolocation) return null;
-    return new Promise((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        (position) =>
-          resolve({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            radiusMeters: 50_000,
-          }),
-        () => resolve(null),
-        { enableHighAccuracy: false, maximumAge: 10 * 60 * 1000, timeout: 2500 },
-      );
-    });
-  }
-
-  try {
-    const ExpoLocation = await import("expo-location");
-    const permission = await ExpoLocation.requestForegroundPermissionsAsync();
-    if (permission.status !== "granted") return null;
-    const position = await ExpoLocation.getCurrentPositionAsync({
-      accuracy: ExpoLocation.Accuracy.Balanced,
-    });
-    return {
-      latitude: position.coords.latitude,
-      longitude: position.coords.longitude,
-      radiusMeters: 50_000,
-    };
-  } catch {
-    return null;
-  }
-}
-
 interface UsePlacesAutocompleteOptions {
   value?: string;
   onLocationSelect?: (location: PlacesLocationData) => void;
@@ -69,10 +35,10 @@ export function usePlacesAutocomplete({
   debounceMs = 280,
   origin = null,
 }: UsePlacesAutocompleteOptions = {}) {
+  const access = useLocationSettings();
   const activeCity = useEventsLocationStore((s) => s.activeCity);
   const deviceLat = useEventsLocationStore((s) => s.deviceLat);
   const deviceLng = useEventsLocationStore((s) => s.deviceLng);
-  const setDeviceLocation = useEventsLocationStore((s) => s.setDeviceLocation);
 
   const [input, setInput] = useState(value);
   const [predictions, setPredictions] = useState<PlacesPrediction[]>([]);
@@ -80,7 +46,6 @@ export function usePlacesAutocomplete({
   const [isSelecting, setIsSelecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [deviceBias, setDeviceBias] = useState<PlacesBias | null>(null);
   const requestIdRef = useRef(0);
   const suppressLookupRef = useRef(false);
   const sessionTokenRef = useRef<string | null>(null);
@@ -92,26 +57,6 @@ export function usePlacesAutocomplete({
     }
   }, [input, value]);
 
-  useEffect(() => {
-    if (
-      activeCity ||
-      (isFiniteCoord(deviceLat) && isFiniteCoord(deviceLng)) ||
-      deviceBias
-    ) {
-      return;
-    }
-
-    let cancelled = false;
-    requestDeviceBias().then((bias) => {
-      if (cancelled || !bias) return;
-      setDeviceBias(bias);
-      setDeviceLocation(bias.latitude, bias.longitude);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeCity, deviceBias, deviceLat, deviceLng, setDeviceLocation]);
-
   const locationBias = useMemo<PlacesBias | null>(() => {
     if (activeCity) {
       return {
@@ -120,20 +65,19 @@ export function usePlacesAutocomplete({
         radiusMeters: 50_000,
       };
     }
-    if (isFiniteCoord(deviceLat) && isFiniteCoord(deviceLng)) {
+    if (access.enabled && isFiniteCoord(deviceLat) && isFiniteCoord(deviceLng)) {
       return { latitude: deviceLat, longitude: deviceLng, radiusMeters: 50_000 };
     }
-    if (deviceBias) return deviceBias;
     // No city, no device location — send null so the edge fn biases to the
     // user's approximate location via their IP instead of a hardcoded default
     // (which used to pin everyone to LA — an NYC user got LA venues).
     return null;
-  }, [activeCity, deviceBias, deviceLat, deviceLng]);
+  }, [activeCity, access.enabled, deviceLat, deviceLng]);
 
   // Depend on the numbers, not the object, so a caller passing a fresh
   // { latitude, longitude } literal each render does not refire the search.
-  const originLat = origin?.latitude;
-  const originLng = origin?.longitude;
+  const originLat = access.enabled ? origin?.latitude : undefined;
+  const originLng = access.enabled ? origin?.longitude : undefined;
 
   const resetSession = useCallback(() => {
     sessionTokenRef.current = null;
@@ -170,6 +114,7 @@ export function usePlacesAutocomplete({
           input: query,
           sessionToken: ensureSession(),
           locationBias,
+          allowIpBias: access.enabled,
           ...(isFiniteCoord(originLat) && isFiniteCoord(originLng)
             ? { origin: { latitude: originLat, longitude: originLng } }
             : {}),
@@ -186,7 +131,7 @@ export function usePlacesAutocomplete({
       }
       setIsLoading(false);
     },
-    [ensureSession, locationBias, originLat, originLng],
+    [ensureSession, locationBias, originLat, originLng, access.enabled],
   );
 
   useEffect(() => {
