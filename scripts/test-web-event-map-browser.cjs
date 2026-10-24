@@ -168,11 +168,11 @@ async function bundle() {
     server = http.createServer((req, res) => {
       const filename = ['/app.js', '/app.css', '/style.css'].includes(req.url) ? req.url.slice(1) : null;
       if (filename) {
-        res.setHeader('Content-Type', filename.endsWith('.js') ? 'text/javascript' : 'text/css');
+        res.setHeader('Content-Type', filename.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8');
         res.end(fs.existsSync(path.join(dir, filename)) ? fs.readFileSync(path.join(dir, filename)) : ''); return;
       }
-      res.setHeader('Content-Type', 'text/html');
-      res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script src="/app.js"></script></body></html>');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.end('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script src="/app.js"></script></body></html>');
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -194,7 +194,7 @@ async function bundle() {
       if (url.hostname === 'maps.google.com' && url.pathname === '/maps') {
         mapRequests.push(url.href);
         if (embedMode === 'error') return route.abort('failed');
-        return route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body style="margin:0;background:#172331;color:#afc4d5;font:16px system-ui;display:grid;place-items:center;min-height:100vh"><div style="text-align:center"><p style="font-size:40px">⌖</p><p>Synthetic venue map</p><p>Provider rendering is not tested here.</p></div></body></html>' });
+        return route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#172331;color:#afc4d5;font:16px system-ui;display:grid;place-items:center;min-height:100vh"><div style="text-align:center"><p style="font-size:40px">⌖</p><p>Synthetic venue map</p><p>Provider rendering is not tested here.</p></div></body></html>' });
       }
       blockedRequests.push(url.href); return route.abort('blockedbyclient');
     });
