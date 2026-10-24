@@ -64,7 +64,7 @@ async function verifyApiBoundary() {
   // Execute the real API module with only the Supabase transport replaced.
   const result = await build({
     entryPoints: [path.join(root, 'packages/app/lib/api/event-map.ts')],
-    bundle: true, platform: 'node', format: 'cjs', write: false,
+    bundle: true, platform: 'node', format: 'cjs', write: false, tsconfigRaw: {},
     plugins: [{ name: 'supabase-boundary', setup(b) {
       b.onResolve({ filter: /supabase\/client$/ }, () => ({ path: 'supabase-boundary', namespace: 'mock' }));
       b.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: 'export const supabase = globalThis.__eventMapSupabase;' }));
@@ -158,7 +158,7 @@ async function bundle() {
 
 (async () => {
   let browser, server, page;
-  const errors = [], blockedRequests = [], mapRequests = [], geolocationCalls = [], checks = [];
+  const errors = [], browserConsole = [], failedRequests = [], blockedRequests = [], mapRequests = [], geolocationCalls = [], checks = [];
   let embedMode = 'success';
   const check = name => { checks.push(name); console.log('PASS', name); };
   try {
@@ -201,6 +201,8 @@ async function bundle() {
     page = await context.newPage();
     page.setDefaultTimeout(10000);
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') browserConsole.push(message.text()); });
+    page.on('requestfailed', request => failedRequests.push({ url: request.url(), failure: request.failure()?.errorText }));
     const openPage = async () => {
       await page.goto(`${origin}/feed/events`);
       await page.getByRole('heading', { name: 'Events', exact: true }).waitFor();
@@ -383,7 +385,17 @@ async function bundle() {
     }, null, 2));
     console.log('PASS web Events map browser regressions. Evidence:', dir);
   } catch (error) {
-    if (page) { console.error('Failure page:', await page.locator('body').innerText().catch(() => '')); await page.screenshot({ path: path.join(dir, 'failure.png'), fullPage: true }).catch(() => {}); }
+    console.error('Browser errors:', JSON.stringify(errors));
+    console.error('Browser console:', JSON.stringify(browserConsole));
+    console.error('Failed requests:', JSON.stringify(failedRequests));
+    console.error('Blocked requests:', JSON.stringify(blockedRequests));
+    fs.writeFileSync(path.join(dir, 'results.json'), JSON.stringify({ status: 'failed', checks, error: String(error), errors, browserConsole, failedRequests, blockedRequests }, null, 2));
+    if (page) {
+      console.error('Failure page URL:', page.url());
+      console.error('Failure page HTML:', (await page.content().catch(() => '')).slice(0, 3000));
+      console.error('Failure page:', await page.locator('body').innerText().catch(() => ''));
+      await page.screenshot({ path: path.join(dir, 'failure.png'), fullPage: true }).catch(() => {});
+    }
     throw error;
   } finally {
     await browser?.close(); await new Promise(resolve => server ? server.close(resolve) : resolve());
