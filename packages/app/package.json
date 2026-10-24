@@ -366,7 +366,8 @@
     "typegpu": "^0.12.5",
     "yjs": "^13.6.31",
     "zod": "4.5.0",
-    "zustand": "^5.0.12"
+    "zustand": "^5.0.12",
+    "@vis.gl/react-google-maps": "1.8.3"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

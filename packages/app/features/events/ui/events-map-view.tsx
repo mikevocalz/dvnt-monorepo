@@ -8,6 +8,7 @@
  */
 
 import { useRef } from "react";
+import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
 import { DvntMap } from "@dvnt/app/components/map";
 import type { DvntMapMarker } from "@dvnt/app/components/map";
 import type { MapViewport } from "@dvnt/app/lib/hooks/use-event-map-controller";
@@ -25,6 +26,7 @@ export function EventsMapView({
   onMarkerPress,
   maskColor,
 }: EventsMapViewProps) {
+  const { enabled: locationEnabled } = useLocationSettings();
   // Stabilize the center tuple — prevents a new array reference on every render
   // from triggering DvntMap's cameraPosition useMemo and the subsequent effect.
   const centerRef = useRef<[number, number]>([viewport.centerLng, viewport.centerLat]);
@@ -41,7 +43,7 @@ export function EventsMapView({
       zoom={viewport.zoom}
       markers={markers}
       onMarkerPress={onMarkerPress}
-      showUserLocation
+      showUserLocation={locationEnabled}
       showControls={false}
       cornerRadius={12}
       maskColor={maskColor}

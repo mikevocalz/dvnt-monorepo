@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
 import { eventMapApi } from "@dvnt/app/lib/api/event-map";
 import { eventMapIds, eventMapPins, eventListAllowsMap, eventMapEmbedUrl, eventMapDirectionsUrl, type EventMapPin } from "@dvnt/app/lib/events/event-map";
 
+const MemberMap = lazy(() => import("./member-map.web"));
+
 export default function EventsMap({ events, onClose, onOpenEvent }: {
   events: Event[];
   onClose: () => void;
   onOpenEvent: (id: string) => void;
 }) {
+  const [mode, setMode] = useState<"events" | "people">("events");
   // A restrictive realtime list patch wins immediately over the last metadata
   // read. Missing policy fields are resolved by the fresh server-filtered query.
   const eligibleEvents = events.filter((event) => eventListAllowsMap(event));
@@ -46,11 +49,15 @@ export default function EventsMap({ events, onClose, onOpenEvent }: {
       <div className="flex items-center justify-between gap-3 p-4">
         <div className="min-w-0">
           <h2 className="text-lg font-bold">Events map</h2>
-          <p className="text-sm text-white/60">Select an event to view its venue. No people’s locations.</p>
+          <p className="text-sm text-white/60">Select an event venue or explore opt-in nearby people.</p>
         </div>
         <button onClick={onClose} className="shrink-0 min-h-11 px-3 rounded-xl bg-white/10 text-sm font-semibold" aria-label="Show event list">List view</button>
       </div>
-      {locations.isPending && ids.length > 0 ? (
+      <div className="px-4 pb-4 flex gap-2" role="group" aria-label="Map mode">
+        <button className="min-h-11 rounded-xl px-4 border border-white/15" aria-pressed={mode === "events"} onClick={() => setMode("events")}>Event venues</button>
+        <button className="min-h-11 rounded-xl px-4 border border-white/15" aria-pressed={mode === "people"} onClick={() => setMode("people")}>Nearby people</button>
+      </div>
+      {mode === "people" ? <Suspense fallback={<p role="status" className="p-4">Loading nearby people…</p>}><MemberMap /></Suspense> : locations.isPending && ids.length > 0 ? (
         <p role="status" className="p-8 text-center text-white/60">Loading event locations…</p>
       ) : locations.isError ? (
         <div className="p-8 text-center" role="alert">
