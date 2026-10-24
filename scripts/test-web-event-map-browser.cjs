@@ -158,7 +158,7 @@ async function bundle() {
 
 (async () => {
   let browser, server, page;
-  const errors = [], browserConsole = [], failedRequests = [], blockedRequests = [], mapRequests = [], geolocationCalls = [], checks = [];
+  const errors = [], browserConsole = [], failedRequests = [], blockedRequests = [], mapRequests = [], geolocationCalls = [], viewportEvidence = [], checks = [];
   let embedMode = 'success';
   const check = name => { checks.push(name); console.log('PASS', name); };
   try {
@@ -198,13 +198,18 @@ async function bundle() {
       }
       blockedRequests.push(url.href); return route.abort('blockedbyclient');
     });
-    page = await context.newPage();
-    page.setDefaultTimeout(10000);
-    page.on('pageerror', error => errors.push(error.message));
-    page.on('console', message => { if (message.type() === 'error') browserConsole.push(message.text()); });
-    page.on('requestfailed', request => failedRequests.push({ url: request.url(), failure: request.failure()?.errorText }));
     const openPage = async () => {
-      await page.goto(`${origin}/feed/events`);
+      // Independent scenarios get a fresh document/page. Browser Back/Forward
+      // assertions below deliberately stay within the same page. Reusing a
+      // WebKit page after cross-origin iframe teardown can stall navigation.
+      const previous = page;
+      page = await context.newPage();
+      await previous?.close();
+      page.setDefaultTimeout(10000);
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('console', message => { if (message.type() === 'error') browserConsole.push(message.text()); });
+      page.on('requestfailed', request => failedRequests.push({ url: request.url(), failure: request.failure()?.errorText }));
+      await page.goto(`${origin}/feed/events`, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.getByRole('heading', { name: 'Events', exact: true }).waitFor();
     };
     const toggle = () => page.getByRole('button', { name: 'Show events map', exact: true });
@@ -278,6 +283,15 @@ async function bundle() {
       await page.setViewportSize(viewport);
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       await fit(`${viewport.width}px map`);
+      const geometry = await frame().evaluate(el => ({ frameWidth: el.getBoundingClientRect().width, containerWidth: el.parentElement.getBoundingClientRect().width }));
+      assert.ok(Math.abs(geometry.frameWidth - geometry.containerWidth) <= 1, 'venue iframe fills its real map container');
+      assert.ok(geometry.frameWidth > 200, 'venue iframe cannot collapse into a narrow strip');
+      // The embedded document renders in a separate browser process. Wait for
+      // its own resized viewport and paint, not only the parent animation frame.
+      const embedded = await (await frame().elementHandle()).contentFrame();
+      await embedded.waitForFunction(width => Math.abs(innerWidth - width) <= 1, geometry.frameWidth);
+      await embedded.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      viewportEvidence.push({ viewport, ...geometry, innerWidth: await embedded.evaluate(() => innerWidth) });
       await page.screenshot({ path: path.join(dir, `map-${viewport.width}.png`), fullPage: true });
     }
     check('320/393/768/1440px real CSS, shrinking search, 16px input and screenshots');
@@ -380,7 +394,7 @@ async function bundle() {
     check('guest mode, zero geolocation calls and no private location in any provider request');
     fs.writeFileSync(path.join(dir, 'results.json'), JSON.stringify({
       status: 'passed', commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
-      browser: engine.name(), checks, mapRequests: mapRequests.length, errors, blockedRequests,
+      browser: engine.name(), checks, viewportEvidence, mapRequests: mapRequests.length, errors, blockedRequests,
       scope: 'Actual production EventsListScreen, selected-venue EventsMap, Zustand, React Query and CSS; synthetic data/auth/router and deterministic Google iframe network boundaries. API contract uses real source with mocked Supabase transport. Does not prove live provider, deployed route, database access rules or physical mobile behavior.',
     }, null, 2));
     console.log('PASS web Events map browser regressions. Evidence:', dir);
