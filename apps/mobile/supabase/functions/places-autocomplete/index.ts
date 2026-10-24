@@ -63,8 +63,8 @@ async function resolveBias(body: Record<string, unknown>, ip: string | null) {
   let longitude = toFiniteNumber(candidate?.longitude);
   const radius = toFiniteNumber(candidate?.radiusMeters) ?? DEFAULT_RADIUS_METERS;
 
-  // No client-supplied location → geolocate by the caller's IP.
-  if (latitude == null || longitude == null) {
+  // Infer location from IP only when the client explicitly allows it.
+  if ((latitude == null || longitude == null) && body.allowIpBias === true) {
     const ipBias = await ipGeoBias(ip);
     if (ipBias) {
       latitude = ipBias.latitude;
