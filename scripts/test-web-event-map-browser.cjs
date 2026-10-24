@@ -1,0 +1,443 @@
+#!/usr/bin/env node
+// Real EventsListScreen, selected-venue EventsMap, Zustand store, React Query and
+// production CSS. Only network/auth/router boundaries use synthetic fixtures.
+// Google iframe responses are deterministic HTML, NOT live-provider evidence.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const http = require('node:http');
+const { execFileSync } = require('node:child_process');
+const vm = require('node:vm');
+const { build } = require('esbuild');
+const { compile } = require('tailwindcss');
+const { chromium, webkit } = require('playwright');
+const root = path.resolve(__dirname, '..');
+const dir = process.env.EVENT_MAP_EVIDENCE_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'dvnt-web-event-map-'));
+fs.mkdirSync(dir, { recursive: true });
+const read = p => fs.readFileSync(path.join(root, p), 'utf8');
+const future = '2099-10-24T20:00:00Z';
+const event = (id, title, extra = {}) => ({
+  id: String(id), title, description: 'Synthetic browser fixture', date: future,
+  fullDate: future, event_tz: 'America/Los_Angeles', location: 'Fixture venue',
+  image: '', price: 0, attendees: 0, totalAttendees: 12,
+  host: { id: 'fixture-host', username: 'fixture-host', avatar: '' },
+  category: 'party', locationLat: 37.7749, locationLng: -122.4194, ...extra,
+});
+const all = [
+  event(101, 'Harbor Lights', { location: 'Harbor room' }),
+  event(102, 'Mission Night', { locationLat: 37.7599, locationLng: -122.4148 }),
+  event(103, 'Harbor Afterparty', { location: 'Harbor room' }), // same coordinates
+  event(104, 'Equator Zero', { locationLat: 0, locationLng: 0 }),
+  event(201, 'Hidden venue', { isHidden: true, locationLat: -33.9, locationLng: 151.2 }),
+  event(202, 'Private venue', { visibility: 'private', locationLat: -34.6, locationLng: -58.4 }),
+  event(203, 'Unlisted venue', { visibility: 'link_only', locationLat: 51.5, locationLng: 0.1 }),
+  event(204, 'Scheduled venue', { publishAt: '2099-12-31T23:59:59Z' }),
+  event(205, 'Draft venue', { status: 'draft' }),
+  event(206, 'Cancelled venue', { status: 'cancelled' }),
+  event(207, 'Unverified venue'),
+  event(301, 'Online session', { isOnline: true }),
+  event(302, 'No coordinates', { locationLat: undefined, locationLng: undefined }),
+  event(303, 'Invalid coordinates', { locationLat: 123, locationLng: -190 }),
+];
+const past = [event(401, 'Past Archive', { date: '2000-01-01T20:00:00Z', fullDate: '2000-01-01T20:00:00Z' })];
+const forYou = [event(501, 'Personalized Night', { locationLat: 40.7128, locationLng: -74.006 })];
+const rawLocation = e => ({
+  id: e.id, title: e.title, visibility: e.visibility || 'public',
+  is_hidden: e.isHidden || false, publish_at: e.publishAt || null,
+  status: e.status || 'active', is_online: e.isOnline || false,
+  location_type: e.isOnline ? 'virtual' : 'physical', location: e.location,
+  location_name: e.location, location_lat: e.locationLat ?? null,
+  location_lng: e.locationLng ?? null,
+});
+const fixtureData = { all, past, forYou, locations: [...all, ...past, ...forYou].filter(e => e.id !== '207').map(rawLocation) };
+const mocks = {
+  'solito/navigation': `export const usePathname=()=>window.mapFixture.path; export const useRouter=()=>({push:p=>window.mapFixture.navigate(p),replace:p=>window.mapFixture.navigate(p,true),back:()=>history.back()});`,
+  '@dvnt/app/lib/stores/auth-store': `import {useSyncExternalStore} from 'react'; const subscribe=cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)}; const current=()=>({isAuthenticated:window.mapFixture.authenticated,_hasHydrated:true,user:{id:'fixture-user'}}); export const useAuthStore=selector=>useSyncExternalStore(subscribe,()=>selector(current())); useAuthStore.getState=current;`,
+  '@dvnt/app/lib/hooks/use-events': `import {useSyncExternalStore} from 'react'; const subscribe=cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)}; const useData=k=>({data:useSyncExternalStore(subscribe,()=>window.mapFixture.data[k]),isLoading:false}); export const useEvents=()=>useData('all'); export const usePastEvents=()=>useData('past'); export const useForYouEvents=()=>useData('forYou'); export const useToggleEventLike=()=>({mutate:()=>{throw Error('write forbidden in map fixture')}});`,
+  '@dvnt/app/lib/hooks/use-event-realtime': `export const useEventsFeedRealtime=()=>{};`,
+  '@dvnt/app/lib/hooks/use-promotions': `const ids=new Set(); export const useSpotlightFeed=()=>({data:[]}); export const usePromotedEventIds=()=>({data:ids});`,
+  '@dvnt/app/lib/api/event-map': `export const eventMapApi={getLocations:async ids=>{const f=window.mapFixture;f.locationRequests.push([...ids]);if(f.locationError)throw Error('Synthetic location API failure');if(f.locationDelay)await new Promise(r=>setTimeout(r,f.locationDelay));return f.data.locations.filter(e=>ids.map(String).includes(String(e.id)));}};`,
+};
+
+async function verifyApiBoundary() {
+  // Execute the real API module with only the Supabase transport replaced.
+  const result = await build({
+    entryPoints: [path.join(root, 'packages/app/lib/api/event-map.ts')],
+    bundle: true, platform: 'node', format: 'cjs', write: false, tsconfigRaw: {},
+    plugins: [{ name: 'supabase-boundary', setup(b) {
+      b.onResolve({ filter: /supabase\/client$/ }, () => ({ path: 'supabase-boundary', namespace: 'mock' }));
+      b.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: 'export const supabase = globalThis.__eventMapSupabase;' }));
+    } }],
+  });
+  let queries = [], failBatch = -1;
+  const supabase = { from(table) {
+    const record = { table, filters: [], ids: [], projection: null, signal: null };
+    const builder = {
+      select(projection) { record.projection = projection; return builder; },
+      in(column, ids) { record.column = column; record.ids = ids; return builder; },
+      or(filter) { record.filters.push(filter); return builder; },
+      abortSignal(signal) { record.signal = signal; return builder; },
+      then(resolve, reject) {
+        queries.push(record);
+        return Promise.resolve({ data: record.ids.map(id => ({ id })), error: queries.length === failBatch ? { message: 'Synthetic query error' } : null }).then(resolve, reject);
+      },
+    };
+    return builder;
+  } };
+  const module = { exports: {} };
+  vm.runInNewContext(result.outputFiles[0].text, { module, exports: module.exports, __eventMapSupabase: supabase });
+  const { eventMapApi } = module.exports;
+  const signal = new AbortController().signal;
+  const ids = Array.from({ length: 205 }, (_, i) => String(i + 1));
+  const rows = await eventMapApi.getLocations(ids, signal);
+  assert.equal(rows.length, 205);
+  assert.deepEqual(queries.map(q => q.ids.length), [100, 100, 5]);
+  for (const query of queries) {
+    assert.equal(query.table, 'events'); assert.equal(query.column, 'id');
+    assert.equal(query.signal, signal, 'each metadata batch must propagate cancellation');
+    assert.equal(query.projection, 'id,title,visibility,is_hidden,publish_at,status,is_online,location_type,location,location_name,location_lat,location_lng');
+    assert.equal(query.filters.length, 6);
+    assert.ok(query.filters.includes('visibility.is.null,visibility.eq.public'));
+    assert.ok(query.filters.includes('is_hidden.is.null,is_hidden.eq.false'));
+    assert.ok(query.filters.some(f => /^publish_at\.is\.null,publish_at\.lte\.\d{4}-\d{2}-\d{2}T/.test(f)));
+    assert.ok(query.filters.includes('status.is.null,status.in.(active,postponed)'));
+    assert.ok(query.filters.includes('is_online.is.null,is_online.eq.false'));
+    assert.ok(query.filters.includes('location_type.is.null,location_type.neq.virtual'));
+  }
+  queries = [];
+  await eventMapApi.getLocations(['1', '1', '0', '-1', '', 'not-an-id', '9007199254740992']);
+  assert.equal(queries.length, 1);
+  assert.deepEqual(Array.from(queries[0].ids), ['1']);
+  queries = [];
+  assert.equal((await eventMapApi.getLocations([])).length, 0);
+  assert.equal(queries.length, 0);
+  failBatch = 2;
+  await assert.rejects(eventMapApi.getLocations(ids), /Event locations could not be loaded/);
+  assert.equal(queries.length, 2, 'failed batch aborts subsequent requests and rejects, rather than returning partial data');
+}
+
+async function bundle() {
+  await build({
+    bundle: true, jsx: 'automatic', tsconfigRaw: {}, platform: 'browser', format: 'iife',
+    outfile: path.join(dir, 'app.js'), loader: { '.png': 'dataurl', '.svg': 'dataurl' },
+    nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean),
+    resolveExtensions: ['.web.tsx', '.web.ts', '.tsx', '.ts', '.jsx', '.js', '.json'],
+    alias: { '@dvnt/app': path.join(root, 'packages/app'), 'react-native': 'react-native-web' },
+    plugins: [{ name: 'map-boundaries', setup(b) {
+      b.onResolve({ filter: /.*/ }, args => {
+        const key = mocks[args.path] ? args.path : Object.keys(mocks).find(k => k.startsWith('@dvnt/app/') && args.path === path.join(root, 'packages/app', k.slice('@dvnt/app/'.length)));
+        if (key) return { path: key, namespace: 'mock' };
+      });
+      b.onLoad({ filter: /.*/, namespace: 'mock' }, args => ({ contents: mocks[args.path], loader: 'tsx', resolveDir: root }));
+    } }],
+    stdin: { resolveDir: root, loader: 'tsx', contents: `
+      import React,{useState,useEffect} from 'react'; import {createRoot} from 'react-dom/client';
+      import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
+      import {EventsListScreen} from './packages/app/features/events/events-list.web';
+      import {useEventsScreenStore} from './packages/app/lib/stores/events-screen-store';
+      const data=${JSON.stringify(fixtureData)};
+      const queryClient=new QueryClient({defaultOptions:{queries:{retry:false,refetchOnWindowFocus:false}}});
+      const f=window.mapFixture={path:location.pathname,data,authenticated:true,locationError:false,locationDelay:0,locationRequests:[],store:useEventsScreenStore,queryClient};
+      f.setData=patch=>{f.data={...f.data,...patch};queryClient.clear();dispatchEvent(new Event('fixturechange'));};
+      f.setAuthenticated=value=>{f.authenticated=value;dispatchEvent(new Event('fixturechange'));};
+      function App(){const [route,setRoute]=useState(location.pathname);f.path=route;
+        f.navigate=(p,replace=false)=>{history[replace?'replaceState':'pushState']({},'',p);setRoute(p);};
+        useEffect(()=>{const pop=()=>setRoute(location.pathname);addEventListener('popstate',pop);return()=>removeEventListener('popstate',pop)},[]);
+        return <QueryClientProvider client={queryClient}>{route==='/feed/events'?<EventsListScreen/>:<main><h1>Event route fixture</h1><p data-route>{route}</p><button onClick={()=>history.back()}>Back to events</button></main>}</QueryClientProvider>;
+      }createRoot(document.getElementById('root')).render(<React.StrictMode><App/></React.StrictMode>);` },
+  });
+  // Same Tailwind theme/preflight/important utilities and global brand CSS as web.
+  const tw = path.dirname(require.resolve('tailwindcss/package.json'));
+  const globals = read('apps/web/src/app/(frontend)/globals.css');
+  const sources = ['packages/app/features/events/events-list.web.tsx', 'packages/app/features/events/ui/events-map.web.tsx'];
+  const candidates = sources.flatMap(p => read(p).match(/[a-zA-Z0-9_!@#%./:[\](),+*=&<>-]+/g) || []);
+  const compiler = await compile(fs.readFileSync(path.join(tw, 'theme.css'), 'utf8') + '\n' + fs.readFileSync(path.join(tw, 'preflight.css'), 'utf8') + '\n@tailwind utilities important;\n' + globals.slice(globals.indexOf('/* ── Deviant brand tokens')));
+  fs.writeFileSync(path.join(dir, 'style.css'), compiler.build(candidates));
+}
+
+(async () => {
+  let browser, server, page;
+  const errors = [], browserConsole = [], failedRequests = [], blockedRequests = [], mapRequests = [], geolocationCalls = [], viewportEvidence = [], fixedViewportEvidence = [], checks = [];
+  let embedMode = 'success';
+  const check = name => { checks.push(name); console.log('PASS', name); };
+  try {
+    await verifyApiBoundary(); check('actual location API projection, admission filters, batch limit, abort signal and fail-closed errors');
+    await bundle();
+    if (process.argv.includes('--build-only')) { console.log('PASS production Events screen + selected-venue iframe fixture bundle'); return; }
+    server = http.createServer((req, res) => {
+      const filename = ['/app.js', '/app.css', '/style.css'].includes(req.url) ? req.url.slice(1) : null;
+      if (filename) {
+        res.setHeader('Content-Type', filename.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8');
+        res.end(fs.existsSync(path.join(dir, filename)) ? fs.readFileSync(path.join(dir, filename)) : ''); return;
+      }
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.end('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script src="/app.js"></script></body></html>');
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    if (process.argv.includes('--serve')) { console.log(`Synthetic fixture: ${origin}/feed/events`); await new Promise(() => {}); }
+    const engine = process.env.EVENT_MAP_BROWSER === 'webkit' ? webkit : chromium;
+    browser = await engine.launch({ headless: true, ...(engine === chromium ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox'] } : {}) });
+    const context = await browser.newContext({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 1, reducedMotion: 'reduce' });
+    await context.exposeBinding('reportFixtureGeolocation', (_source, name) => geolocationCalls.push(name));
+    await context.addInitScript(() => {
+      window.geolocationCalls = [];
+      Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
+        getCurrentPosition(...args) { window.geolocationCalls.push('getCurrentPosition'); window.reportFixtureGeolocation('getCurrentPosition'); args[1]?.({ code: 1, message: 'Forbidden in event-only map fixture' }); },
+        watchPosition() { window.geolocationCalls.push('watchPosition'); window.reportFixtureGeolocation('watchPosition'); return 1; }, clearWatch() {},
+      } });
+    });
+    await context.route('**/*', async route => {
+      const url = new URL(route.request().url());
+      if (url.origin === origin) return route.continue();
+      if (url.hostname === 'maps.google.com' && url.pathname === '/maps') {
+        mapRequests.push(url.href);
+        if (embedMode === 'error') return route.abort('failed');
+        return route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#172331;color:#afc4d5;font:16px system-ui;display:grid;place-items:center;min-height:100vh"><div style="text-align:center"><p style="font-size:40px">⌖</p><p>Synthetic venue map</p><p>Provider rendering is not tested here.</p></div></body></html>' });
+      }
+      blockedRequests.push(url.href); return route.abort('blockedbyclient');
+    });
+    const openPage = async (viewport) => {
+      // Independent scenarios get a fresh document/page. Browser Back/Forward
+      // assertions below deliberately stay within the same page. Reusing a
+      // WebKit page after cross-origin iframe teardown can stall navigation.
+      const previous = page;
+      page = await context.newPage();
+      await previous?.close();
+      if (viewport) await page.setViewportSize(viewport);
+      page.setDefaultTimeout(10000);
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('console', message => { if (message.type() === 'error') browserConsole.push(message.text()); });
+      page.on('requestfailed', request => failedRequests.push({ url: request.url(), failure: request.failure()?.errorText }));
+      await page.goto(`${origin}/feed/events`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.getByRole('heading', { name: 'Events', exact: true }).waitFor();
+    };
+    const toggle = () => page.getByRole('button', { name: 'Show events map', exact: true });
+    const search = () => page.getByPlaceholder('Search events, venues, hosts…');
+    const frame = () => page.locator('iframe[title^="Event location: "]');
+    const venues = () => page.locator('button[data-event-id]');
+    const waitVenues = count => page.waitForFunction(n => document.querySelectorAll('button[data-event-id]').length === n, count);
+    const src = () => frame().getAttribute('src');
+    const select = title => page.getByRole('button', { name: title, exact: true });
+    const fit = async label => {
+      const result = await page.evaluate(() => {
+        const w = document.documentElement.clientWidth;
+        // The production tabs intentionally scroll horizontally on narrow
+        // screens; other controls must remain inside the viewport.
+        const nodes = [...document.querySelectorAll('input,button,iframe')].filter(el => !el.closest('.overflow-x-auto'));
+        return { width: w, scrollWidth: document.documentElement.scrollWidth, controls: nodes.filter(el => {
+          const r = el.getBoundingClientRect(); return r.width > 0 && (r.left < -1 || r.right > w + 1);
+        }).map(el => ({ label: el.getAttribute('aria-label') || el.textContent, rect: el.getBoundingClientRect().toJSON() })) };
+      });
+      assert.ok(result.scrollWidth <= result.width + 1, `${label}: horizontal document overflow ${JSON.stringify(result)}`);
+      assert.deepEqual(result.controls, [], `${label}: offscreen controls`);
+      assert.ok(await search().evaluate(el => parseFloat(getComputedStyle(el).fontSize)) >= 16, 'search must not trigger mobile focus zoom');
+    };
+    await openPage();
+    assert.equal(await toggle().getAttribute('aria-pressed'), 'false');
+    assert.equal(mapRequests.length, 0, 'closed map must not contact a provider');
+    await toggle().click();
+    await page.getByRole('heading', { name: 'Events map', exact: true }).waitFor();
+    await waitVenues(4);
+    assert.equal(await toggle().getAttribute('aria-pressed'), 'true');
+    assert.equal(await frame().count(), 1, 'exactly one selected venue is embedded');
+    assert.equal(await src(), 'https://maps.google.com/maps?q=37.7749,-122.4194&z=15&output=embed');
+    assert.deepEqual(await venues().allTextContents(), ['Harbor Lights', 'Mission Night', 'Harbor Afterparty', 'Equator Zero']);
+    for (const e of all.filter(e => Number(e.id) >= 200 && Number(e.id) < 300)) {
+      assert.equal(await page.getByText(e.title, { exact: true }).count(), 0, `${e.title} must not leak through map selectors or previews`);
+    }
+    check('selected venue map excludes hidden/private/unpublished/invalid/online/unverified rows');
+
+    await select('Mission Night').click();
+    assert.equal(await src(), 'https://maps.google.com/maps?q=37.7599,-122.4148&z=15&output=embed');
+    await page.getByRole('button', { name: 'View event', exact: true }).click();
+    await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/public/events/102');
+    await page.goBack(); await waitVenues(4);
+    assert.equal(await toggle().getAttribute('aria-pressed'), 'true');
+    await page.goForward(); await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/public/events/102');
+    await page.goBack(); await waitVenues(4);
+    check('venue selection updates actual iframe source; stable id route and browser Back/Forward');
+
+    await search().fill('Harbor'); await waitVenues(2);
+    await select('Harbor Afterparty').click();
+    const sameLocation = await src();
+    await select('Harbor Lights').focus(); await page.keyboard.press('Enter');
+    assert.equal(await select('Harbor Lights').getAttribute('aria-pressed'), 'true');
+    assert.equal(await src(), sameLocation, 'same coordinates remain the same place, but selected event id changes');
+    await page.getByRole('button', { name: 'View event', exact: true }).click();
+    await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/public/events/101');
+    await page.goBack(); await waitVenues(2);
+    assert.equal(await search().inputValue(), 'Harbor');
+    await select('Harbor Afterparty').focus(); await page.keyboard.press('Space');
+    assert.equal(await select('Harbor Afterparty').getAttribute('aria-pressed'), 'true');
+    await page.getByRole('button', { name: 'View event', exact: true }).click();
+    await page.getByRole('heading', { name: 'Event route fixture' }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/public/events/103');
+    await page.goBack(); await waitVenues(2);
+    check('keyboard selectors, coincident venues retain distinct event IDs, search survives navigation');
+
+    for (const viewport of [{ width: 320, height: 568 }, { width: 393, height: 852 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }]) {
+      await page.setViewportSize(viewport);
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await fit(`${viewport.width}px map`);
+      const geometry = await frame().evaluate(el => ({ frameWidth: el.getBoundingClientRect().width, containerWidth: el.parentElement.getBoundingClientRect().width }));
+      assert.ok(Math.abs(geometry.frameWidth - geometry.containerWidth) <= 1, 'venue iframe fills its real map container');
+      assert.ok(geometry.frameWidth > 200, 'venue iframe cannot collapse into a narrow strip');
+      // The embedded document renders in a separate browser process. Wait for
+      // its own resized viewport and paint, not only the parent animation frame.
+      const embedded = await (await frame().elementHandle()).contentFrame();
+      await embedded.waitForFunction(width => Math.abs(innerWidth - width) <= 1, geometry.frameWidth);
+      await embedded.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      viewportEvidence.push({ viewport, ...geometry, innerWidth: await embedded.evaluate(() => innerWidth) });
+      await page.screenshot({ path: path.join(dir, `map-${viewport.width}.png`), fullPage: true });
+    }
+    check('320/393/768/1440px real CSS, shrinking search, 16px input and screenshots');
+    await page.setViewportSize({ width: 393, height: 852 });
+    await page.getByRole('button', { name: 'Show event list', exact: true }).click();
+    await frame().waitFor({ state: 'detached' });
+    assert.equal(await toggle().getAttribute('aria-pressed'), 'false');
+    assert.equal(await toggle().evaluate(el => document.activeElement === el), true, 'closing map restores toggle focus');
+    assert.equal(await search().inputValue(), 'Harbor');
+    assert.ok((await page.locator('[role="button"]').allTextContents()).some(t => t.includes('Harbor Lights')), 'same search remains visible in real list');
+    await toggle().click(); await waitVenues(2);
+    await page.keyboard.press('Escape'); await frame().waitFor({ state: 'detached' });
+    assert.equal(await toggle().evaluate(el => document.activeElement === el), true, 'Escape restores toggle focus');
+    await toggle().click(); await waitVenues(2);
+    check('close/reopen/Escape and same filtered list, with focus restoration');
+
+    await search().fill(''); await waitVenues(4);
+    await select('Equator Zero').click();
+    assert.equal(await src(), 'https://maps.google.com/maps?q=0,0&z=15&output=embed');
+    await page.getByRole('button', { name: 'For You', exact: true }).click(); await waitVenues(1);
+    assert.equal(await venues().first().textContent(), 'Personalized Night');
+    await page.getByRole('button', { name: 'Past', exact: true }).click(); await waitVenues(1);
+    assert.equal(await venues().first().textContent(), 'Past Archive');
+    await page.getByRole('button', { name: 'All', exact: true }).click(); await waitVenues(4);
+    await page.getByRole('button', { name: 'Upcoming', exact: true }).click(); await waitVenues(4);
+    await page.getByRole('button', { name: 'Filters', exact: true }).click();
+    await page.getByRole('button', { name: 'Online', exact: true }).click();
+    await page.getByRole('button', { name: 'Close filters', exact: true }).click();
+    await page.getByText('No published map locations for these results.', { exact: true }).waitFor();
+    assert.equal(await frame().count(), 0);
+    check('zero coordinates, Upcoming/For You/All/Past tabs and Online filter share real list state');
+
+    for (const ids of [['201', '202', '203', '204', '205', '206', '207'], ['301'], ['302', '303']]) {
+      await openPage();
+      await page.evaluate(ids => { const f = window.mapFixture; f.setData({ all: f.data.all.filter(e => ids.includes(e.id)) }); }, ids);
+      const before = mapRequests.length;
+      await toggle().click();
+      await page.getByText('No published map locations for these results.', { exact: true }).waitFor();
+      assert.equal(await venues().count(), 0);
+      assert.equal(await frame().count(), 0, 'no eligible coordinates must not mount provider iframe');
+      assert.equal(mapRequests.length, before, 'private/online/invalid-only data must not reach third-party provider');
+    }
+    check('private-only, online-only, invalid/missing-coordinate states make zero provider requests');
+
+    for (const patch of [{ visibility: 'private' }, { isHidden: true }, { publishAt: '2099-12-31T23:59:59Z' }, { status: 'cancelled' }, { isOnline: true }]) {
+      await openPage();
+      await toggle().click(); await waitVenues(4);
+      await select('Mission Night').click();
+      await page.evaluate(patch => { const f = window.mapFixture; f.data = { ...f.data, all: f.data.all.map(e => e.id === '102' ? {...e, ...patch} : e) }; dispatchEvent(new Event('fixturechange')); }, patch);
+      await waitVenues(3);
+      assert.notEqual(await src(), 'https://maps.google.com/maps?q=37.7599,-122.4148&z=15&output=embed');
+      assert.equal(await select('Mission Night').count(), 0, 'restrictive realtime patch removes previously selected venue: ' + JSON.stringify(patch));
+    }
+    check('restrictive realtime visibility/hidden/publication/status/online patches remove old selection');
+
+    await openPage();
+    await page.evaluate(() => { window.mapFixture.locationError = true; });
+    const beforeLocationFailure = mapRequests.length;
+    await toggle().click();
+    await page.getByRole('button', { name: 'Retry locations', exact: true }).waitFor();
+    assert.equal(await frame().count(), 0);
+    assert.equal(mapRequests.length, beforeLocationFailure, 'metadata failure cannot initialize provider iframe');
+    await page.evaluate(() => { window.mapFixture.locationError = false; });
+    await page.getByRole('button', { name: 'Retry locations', exact: true }).click(); await waitVenues(4);
+    await page.evaluate(() => { const f = window.mapFixture; f.locationError = true; void f.queryClient.invalidateQueries({ queryKey: ['events-map'] }); });
+    await page.getByRole('button', { name: 'Retry locations', exact: true }).waitFor();
+    assert.equal(await venues().count(), 0);
+    assert.equal(await frame().count(), 0, 'failed fresh authorization lookup cannot retain cached venue');
+    check('metadata lookup retries and failed refresh removes stale coordinates');
+
+    await openPage(); embedMode = 'error';
+    await toggle().click(); await waitVenues(4);
+    const directions = page.getByRole('link', { name: 'Open in Google Maps', exact: true });
+    assert.equal(await directions.getAttribute('href'), 'https://maps.google.com/?q=37.7749,-122.4194');
+    assert.equal(await directions.getAttribute('target'), '_blank');
+    assert.match(await directions.getAttribute('rel'), /noopener/);
+    await page.screenshot({ path: path.join(dir, 'embed-fallback.png'), fullPage: true });
+    await frame().evaluate(el => { window.previousMapFrame = el; });
+    const beforeReload = mapRequests.length; embedMode = 'success';
+    await page.getByRole('button', { name: 'Reload map', exact: true }).click();
+    assert.equal(await frame().evaluate(el => el === window.previousMapFrame), false, 'Reload must replace the actual iframe');
+    await page.waitForFunction(() => document.querySelector('iframe[title^="Event location: "]')?.contentWindow != null);
+    await page.waitForTimeout(100);
+    assert.ok(mapRequests.length > beforeReload, 'Reload makes a fresh embed request');
+    await page.getByRole('button', { name: 'Show event list', exact: true }).click(); await frame().waitFor({ state: 'detached' });
+    check('provider failure leaves Reload map and external Google Maps fallback; reload remounts iframe');
+
+    await page.evaluate(() => window.mapFixture.setAuthenticated(false));
+    await toggle().click(); await waitVenues(4);
+    assert.equal(await page.getByRole('button', { name: 'Toggle spicy events' }).count(), 0);
+    assert.equal(await frame().getAttribute('allow'), null, 'iframe must not request geolocation permission');
+    assert.deepEqual(await page.evaluate(() => window.geolocationCalls), []);
+    assert.deepEqual(geolocationCalls, [], 'no scenario may request device location');
+    for (const url of mapRequests) {
+      const coordinate = new URL(url).searchParams.get('q');
+      assert.equal(['-33.9,151.2', '-34.6,-58.4', '51.5,0.1'].includes(coordinate), false, 'private coordinates never enter an iframe URL');
+    }
+    // Independent fixed-device captures distinguish application geometry from
+    // Chromium's resized out-of-process iframe/full-page capture behavior.
+    // Keep every earlier resize assertion and screenshot as separate evidence.
+    for (const viewport of [{ width: 320, height: 568 }, { width: 393, height: 852 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }]) {
+      await openPage(viewport);
+      await search().fill('Harbor'); await toggle().click(); await waitVenues(2);
+      await select('Harbor Afterparty').click(); await fit(`${viewport.width}px fixed map`);
+      const embedded = await (await frame().elementHandle()).contentFrame();
+      await embedded.getByText('Synthetic venue map', { exact: true }).waitFor();
+      await embedded.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await frame().scrollIntoViewIfNeeded();
+      const geometry = async () => ({
+        outer: await frame().evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, containerWidth: el.parentElement.getBoundingClientRect().width })),
+        inner: await embedded.evaluate(() => ({ width: innerWidth, height: innerHeight, clientWidth: document.documentElement.clientWidth, bodyWidth: document.body.getBoundingClientRect().width, contentWidth: document.body.firstElementChild.getBoundingClientRect().width })),
+      });
+      const before = await geometry();
+      assert.ok(Math.abs(before.outer.width - before.outer.containerWidth) <= 1);
+      assert.ok(Math.abs(before.outer.width - before.inner.width) <= 1);
+      assert.ok(Math.abs(before.outer.width - before.inner.bodyWidth) <= 1);
+      await page.screenshot({ path: path.join(dir, `fixed-${viewport.width}-viewport.png`) });
+      await frame().screenshot({ path: path.join(dir, `fixed-${viewport.width}-iframe.png`) });
+      await page.screenshot({ path: path.join(dir, `fixed-${viewport.width}-fullpage.png`), fullPage: true });
+      fixedViewportEvidence.push({ viewport, before, after: await geometry() });
+    }
+    check('fresh fixed-viewport geometry and separate viewport/iframe/full-page capture evidence');
+    assert.deepEqual(blockedRequests, [], 'unexpected network boundary request');
+    assert.deepEqual(errors, [], 'browser uncaught errors');
+    check('guest mode, zero geolocation calls and no private location in any provider request');
+    fs.writeFileSync(path.join(dir, 'results.json'), JSON.stringify({
+      status: 'passed', commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
+      browser: engine.name(), checks, viewportEvidence, fixedViewportEvidence, mapRequests: mapRequests.length, errors, blockedRequests,
+      scope: 'Actual production EventsListScreen, selected-venue EventsMap, Zustand, React Query and CSS; synthetic data/auth/router and deterministic Google iframe network boundaries. API contract uses real source with mocked Supabase transport. Does not prove live provider, deployed route, database access rules or physical mobile behavior.',
+    }, null, 2));
+    console.log('PASS web Events map browser regressions. Evidence:', dir);
+  } catch (error) {
+    console.error('Browser errors:', JSON.stringify(errors));
+    console.error('Browser console:', JSON.stringify(browserConsole));
+    console.error('Failed requests:', JSON.stringify(failedRequests));
+    console.error('Blocked requests:', JSON.stringify(blockedRequests));
+    fs.writeFileSync(path.join(dir, 'results.json'), JSON.stringify({ status: 'failed', checks, error: String(error), errors, browserConsole, failedRequests, blockedRequests }, null, 2));
+    if (page) {
+      console.error('Failure page URL:', page.url());
+      console.error('Failure page HTML:', (await page.content().catch(() => '')).slice(0, 3000));
+      console.error('Failure page:', await page.locator('body').innerText().catch(() => ''));
+      await page.screenshot({ path: path.join(dir, 'failure.png'), fullPage: true }).catch(() => {});
+    }
+    throw error;
+  } finally {
+    await browser?.close(); await new Promise(resolve => server ? server.close(resolve) : resolve());
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

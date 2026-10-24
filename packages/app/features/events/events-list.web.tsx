@@ -8,7 +8,7 @@ import { eventTypeLabel, eventCardActionLabel } from "@dvnt/app/lib/events/event
  * (useEventsScreenStore — no local useState). The native screen pulls maps/media
  * that crash on web, so this is the web view.
  */
-import { useMemo, useRef, useEffect } from "react";
+import { useMemo, useRef, useEffect, lazy, Suspense, useCallback } from "react";
 import { useWindowScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
 import { useRouter } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -16,6 +16,7 @@ import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   Calendar,
   MapPin,
+  Map,
   Search,
   X,
   SlidersHorizontal,
@@ -55,6 +56,8 @@ import {
   resolvePosterUrl,
   resolveRenderableMedia,
 } from "@dvnt/app/lib/media/resolve-renderable";
+
+const EventsMap = lazy(() => import("./ui/events-map.web"));
 
 const TABS = ["Upcoming", "For You", "All", "Past"] as const;
 
@@ -151,6 +154,13 @@ export function EventsListScreen() {
   const filterOpen = useEventsScreenStore((s) => s.filterSheetVisible);
   const setFilterOpen = useEventsScreenStore((s) => s.setFilterSheetVisible);
   const clearAllFilters = useEventsScreenStore((s) => s.clearAllFilters);
+  const showMapView = useEventsScreenStore((s) => s.showMapView);
+  const setShowMapView = useEventsScreenStore((s) => s.setShowMapView);
+  const mapButton = useRef<HTMLButtonElement>(null);
+  const closeMap = useCallback(() => {
+    setShowMapView(false);
+    mapButton.current?.focus({ preventScroll: true });
+  }, [setShowMapView]);
 
   const open = (title?: string | null) =>
     router.push(`/events/${slugify(title)}`);
@@ -331,13 +341,13 @@ export function EventsListScreen() {
               unconstrained field ran the whole width and left the filter
               button marooned at the far edge — the same correction the
               search screen needed when it was widened. */}
-          <div className="flex-1 max-w-xl flex items-center gap-2 h-11 px-3 rounded-xl border border-white/12 bg-white/[0.05]">
+          <div className="flex-1 min-w-0 max-w-xl flex items-center gap-2 h-11 px-3 rounded-xl border border-white/12 bg-white/[0.05]">
             <Search size={18} color="rgba(255,255,255,0.5)" />
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search events, venues, hosts…"
-              className="flex-1 bg-transparent text-[15px] text-white placeholder:text-white/40 outline-none"
+              className="flex-1 min-w-0 bg-transparent text-[16px] text-white placeholder:text-white/40 outline-none"
             />
             {searchQuery ? (
               <button onClick={() => setSearchQuery("")} aria-label="Clear">
@@ -346,9 +356,19 @@ export function EventsListScreen() {
             ) : null}
           </div>
           <button
+            ref={mapButton}
+            onClick={() => { setFilterOpen(false); setShowMapView(!showMapView); }}
+            aria-label="Show events map"
+            aria-pressed={showMapView}
+            title={showMapView ? "Show event list" : "Show events map"}
+            className={`shrink-0 w-11 h-11 rounded-xl border flex items-center justify-center ${showMapView ? "border-[#379ED8] bg-[#379ED8]/20 text-[#379ED8]" : "border-white/12 bg-white/[0.05] text-white"}`}
+          >
+            <Map size={20} aria-hidden="true" />
+          </button>
+          <button
             onClick={() => setFilterOpen(!filterOpen)}
             aria-label="Filters"
-            className="relative w-11 h-11 rounded-xl border border-white/12 bg-white/[0.05] flex items-center justify-center"
+            className="relative shrink-0 w-11 h-11 rounded-xl border border-white/12 bg-white/[0.05] flex items-center justify-center"
           >
             <SlidersHorizontal size={18} color="#fff" />
             {activeFilters.length > 0 ? (
@@ -423,7 +443,11 @@ export function EventsListScreen() {
 
         {/* Content */}
         <div className="mt-5">
-          {(isLoading ||
+          {showMapView ? (
+            <Suspense fallback={<p role="status" className="py-16 text-center text-white/60">Loading map…</p>}>
+              <EventsMap events={filtered} onClose={closeMap} onOpenEvent={(id) => router.push(`/public/events/${encodeURIComponent(id)}`)} />
+            </Suspense>
+          ) : (isLoading ||
             (activeTab === 1 && forYouLoading) ||
             (activeTab === 3 && pastLoading)) &&
           filtered.length === 0 ? (
