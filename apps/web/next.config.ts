@@ -65,6 +65,9 @@ const nextConfig: NextConfig = {
    * come through here.
    */
   env: {
+    // Reuse the public Maps build configuration used by shared Expo code.
+    // No server-only, Places, or native manifest credential fallback.
+    EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
     EXPO_PUBLIC_KLIPY_API_KEY: process.env.EXPO_PUBLIC_KLIPY_API_KEY,
     // Next doesn't inline EXPO_PUBLIC_* by default. Without this flag, the
     // shared Better Auth client falls back to a cross-origin Supabase endpoint,

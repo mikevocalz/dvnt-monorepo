@@ -1,4 +1,5 @@
 "use client";
+import { getGoogleMapsPublicKey } from "../google-maps-public-config";
 
 import { useState } from "react";
 import { APIProvider, Map, Marker } from "@vis.gl/react-google-maps";
@@ -9,7 +10,7 @@ export interface LatLng {
 }
 
 export interface MapPickerProps {
-  /** Google Maps JS API key. Falls back to NEXT_PUBLIC_GOOGLE_MAPS_API_KEY. */
+  /** Google Maps JS API key. Falls back to the shared browser-public Maps configuration. */
   apiKey?: string;
   /** Controlled selected point. */
   value?: LatLng | null;
@@ -40,7 +41,7 @@ export function MapPicker({
   height = 280,
 }: MapPickerProps) {
   const [point, setPoint] = useState<LatLng | null>(value ?? null);
-  const key = apiKey ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+  const key = apiKey ?? getGoogleMapsPublicKey();
   const center = value ?? point ?? defaultCenter;
 
   return (

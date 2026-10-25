@@ -1,8 +1,9 @@
 "use client";
+import { getGoogleMapsPublicKey } from "@dvnt/ui/google-maps-public-config";
 import { useState } from "react";
 import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
 
-export function LocationControls({ allowSharing = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) }: { allowSharing?: boolean }) {
+export function LocationControls({ allowSharing = Boolean(getGoogleMapsPublicKey()) }: { allowSharing?: boolean }) {
   const location = useLocationSettings();
   const [confirm, setConfirm] = useState(false);
   const unavailable = location.loading || location.busy || !location.settings;
