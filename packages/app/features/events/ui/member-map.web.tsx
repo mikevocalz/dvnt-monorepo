@@ -1,4 +1,5 @@
 "use client";
+import { getGoogleMapsPublicKey } from "@dvnt/ui/google-maps-public-config";
 
 import { useEffect, useState } from "react";
 import { APIProvider, Map, Marker, useApiLoadingStatus, APILoadingStatus, useMapsLibrary } from "@vis.gl/react-google-maps";
@@ -8,7 +9,7 @@ import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dv
 import { mapAvatarUrl, mapMemberInitials, mapMemberProfilePath, visibleMapMembers, type MapMember } from "./member-map-render-policy";
 
 export default function MemberMap() {
-  const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() || "";
+  const key = getGoogleMapsPublicKey();
   if (!key) return (
     <section aria-label="Nearby people" className="p-4 space-y-4">
       <p role="status">The nearby people map is not available on this website yet. Event venues still work. No location is collected here.</p>

@@ -27,6 +27,11 @@
       "types": "./src/form/StickySaveBar.web.tsx",
       "import": "./src/form/StickySaveBar.web.tsx",
       "default": "./src/form/StickySaveBar.web.tsx"
+    },
+    "./google-maps-public-config": {
+      "types": "./src/google-maps-public-config.ts",
+      "import": "./src/google-maps-public-config.ts",
+      "default": "./src/google-maps-public-config.ts"
     }
   },
   "scripts": {
