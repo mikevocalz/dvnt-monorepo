@@ -47,10 +47,14 @@ migration and edge functions have been released. Do not silently turn old users 
 ## Release checklist (requires separate approval)
 
 1. Run SQL and edge tests against synthetic data. Review all service-only ACLs and
-   invoker functions. Tables have RLS with no anon/authenticated grants.
+   invoker functions. The sole SECURITY DEFINER exception is the service-only
+   `member_map_moderation_clear(integer)` boolean helper, with fully qualified
+   private-table references and `search_path=pg_catalog,pg_temp`. Its migration
+   owner must be able to read `payload.members`; do not grant payload schema or
+   table access to service_role. Tables have RLS with no anon/authenticated grants.
 2. Verify the prerequisites above, then apply reviewed
    `20261024164346_member_map_explicit_consent.sql` to the existing backend and
-   deploy `member-map`, updated `member-proximity`, and updated
+   deploy `member-map`, `member-proximity` (absent in production preflight), and updated
    `places-autocomplete` together. The Places update is required so Overall OFF
    suppresses IP-derived location bias as well as device GPS.
 3. Confirm service RPC/schema availability and local clients' fail-closed behavior,
@@ -78,3 +82,6 @@ SQL tests execute the actual proposed functions in PostgreSQL/PGlite against a
 wholly synthetic schema, including grants/roles and mutation outcomes. This is
 not a live Supabase migration, advisory scan, concurrency load test or device
 acceptance.
+
+The narrowed moderation helper is a migration revision requiring fresh release
+approval; previous approval of an invoker-only migration does not cover it.

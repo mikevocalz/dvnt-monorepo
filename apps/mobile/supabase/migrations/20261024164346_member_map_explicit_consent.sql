@@ -1,5 +1,6 @@
 -- New independent consent; legacy city/proximity grants never enable avatar pins.
--- Service-only invoker RPCs: the edge verifies Better Auth and expectedAuthId.
+-- Service-only RPCs: the edge verifies Better Auth and expectedAuthId.
+-- Only the narrow moderation boolean helper is SECURITY DEFINER.
 -- Requires the existing member_proximity_presence migration first.
 BEGIN;
 CREATE TABLE public.member_map_settings (
@@ -43,6 +44,18 @@ CREATE TRIGGER member_map_guard_legacy_presence BEFORE INSERT OR UPDATE
 REVOKE ALL ON FUNCTION public.member_map_guard_legacy_presence() FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.member_map_guard_legacy_presence() TO service_role;
 
+-- The service role intentionally has no access to the private payload schema.
+-- Expose only a boolean moderation decision, never its rows or status values.
+CREATE FUNCTION public.member_map_moderation_clear(p_profile_id integer) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+ SELECT EXISTS (SELECT 1 FROM public.users u WHERE u.id=p_profile_id) AND NOT EXISTS (
+  SELECT 1 FROM payload.members m WHERE m.app_user_id=p_profile_id::text
+   AND m.status IN ('suspended','banned','shadow_banned')
+ );
+$$;
+REVOKE ALL ON FUNCTION public.member_map_moderation_clear(integer) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.member_map_moderation_clear(integer) TO service_role;
+
 CREATE FUNCTION public.member_map_eligible(p_user_id text) RETURNS boolean
 LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public,pg_temp AS $$
  SELECT EXISTS (
@@ -54,8 +67,7 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path=public,pg_temp AS $$
    AND COALESCE(to_jsonb(u)->>'private_account','false')='false'
    AND COALESCE(us.settings #>> '{privacy,privateAccount}','false')='false'
    AND u.banned_at IS NULL AND a.banned IS NOT TRUE
-   AND NOT EXISTS(SELECT 1 FROM payload.members m WHERE m.app_user_id=u.id::text
-    AND m.status IN ('suspended','banned','shadow_banned'))
+   AND public.member_map_moderation_clear(u.id)
    AND v.status='passed' AND v.date_of_birth IS NOT NULL
    AND v.date_of_birth <= (CURRENT_DATE - interval '18 years')::date
    AND v.date_of_birth > (CURRENT_DATE - interval '121 years')::date

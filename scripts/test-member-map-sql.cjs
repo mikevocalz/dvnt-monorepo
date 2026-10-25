@@ -109,3 +109,41 @@ test('actual Settings private flag closes discovery even with legacy users.is_pr
  assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members,[]);
  await assert.rejects(()=>publish(db,'viewer'),/off or expired/);
 }));
+test('moderation boolean is service-only without exposing the private payload schema',()=>dbRun(async db=>{
+ const payloadOid=(await db.query("SELECT 'payload.members'::regclass::oid AS oid")).rows[0].oid;
+ const nearId=(await db.query("SELECT id FROM public.users WHERE auth_id='near'")).rows[0].id;
+ const viewerId=(await db.query("SELECT id FROM public.users WHERE auth_id='viewer'")).rows[0].id;
+ const def=(await db.query("SELECT prosecdef,proconfig FROM pg_proc WHERE oid='public.member_map_moderation_clear(integer)'::regprocedure")).rows[0];
+ assert.equal(def.prosecdef,true);assert.deepEqual(def.proconfig,['search_path=pg_catalog, pg_temp']);
+ assert.equal((await db.query("SELECT count(*)::int n FROM pg_proc JOIN pg_namespace ns ON ns.oid=pronamespace WHERE ns.nspname='public' AND proname LIKE 'member_map_%' AND prosecdef AND proname<>'member_map_moderation_clear'")).rows[0].n,0);
+ await db.exec('SET ROLE service_role');
+ assert.equal(await call(db,"has_schema_privilege(current_user,'payload','USAGE')"),false);
+ assert.equal(await call(db,"has_table_privilege(current_user,$1::oid,'SELECT')",[payloadOid]),false);
+ await assert.rejects(()=>db.exec('SELECT * FROM payload.members'),/permission denied/);
+ assert.equal(await call(db,'member_map_moderation_clear(NULL)'),false);
+ assert.equal(await call(db,'member_map_moderation_clear(-1)'),false);
+ assert.equal(await call(db,'member_map_moderation_clear($1)',[nearId]),true);
+ await enable(db,'viewer');await enable(db,'near');await publish(db,'viewer');await publish(db,'near');
+ assert.equal((await call(db,"member_map_nearby('viewer')")).members.length,1);
+ await db.exec('RESET ROLE');
+ for(const status of ['banned','suspended','shadow_banned']) {
+  await db.query('INSERT INTO payload.members VALUES($1,$2)',[String(nearId),status]);
+  await db.exec('SET ROLE service_role');
+  assert.equal(await call(db,'member_map_moderation_clear($1)',[nearId]),false);
+  assert.equal(await call(db,'member_map_moderation_clear($1)',[viewerId]),true);
+  assert.equal((await call(db,"member_map_nearby('viewer')")).members.length,0);
+  await assert.rejects(()=>publish(db,'near'),/off or expired/);
+  await db.exec('RESET ROLE; DELETE FROM payload.members');
+  await db.query('INSERT INTO payload.members VALUES($1,$2)',[String(viewerId),status]);
+  await db.exec('SET ROLE service_role');
+  assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members,[]);
+  await assert.rejects(()=>publish(db,'viewer'),/off or expired/);
+  await db.exec('RESET ROLE; DELETE FROM payload.members');
+ }
+ for(const role of ['anon','authenticated']) {
+  await db.exec('SET ROLE '+role);
+  await assert.rejects(()=>call(db,'member_map_moderation_clear($1)',[nearId]),/permission denied/);
+  await assert.rejects(()=>db.exec('SELECT * FROM payload.members'),/permission denied/);
+  await db.exec('RESET ROLE');
+ }
+}));

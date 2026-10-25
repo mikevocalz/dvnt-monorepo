@@ -16,6 +16,6 @@ INSERT INTO public.users(id,auth_id,username,first_name)
 INSERT INTO public.identity_verifications(user_id,status,date_of_birth)
  SELECT id,'passed',date '1990-01-01' FROM public."user";
 CREATE SCHEMA payload; CREATE TABLE payload.members(app_user_id text,status text);
-GRANT USAGE ON SCHEMA payload TO service_role; GRANT SELECT ON payload.members TO service_role;
+-- Mirror production: service_role has no payload schema or table privileges.
 CREATE TABLE public.user_settings(auth_id text PRIMARY KEY,settings jsonb);
 GRANT SELECT ON public.user_settings TO service_role;
