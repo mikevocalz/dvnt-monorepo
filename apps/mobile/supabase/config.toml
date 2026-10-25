@@ -585,3 +585,7 @@ verify_jwt = false
 # Better Auth verified inside; service-only handoff RPC enforces ownership.
 [functions.live-photo-handoff]
 verify_jwt = false
+
+# Better Auth session verified internally; service-only consent/presence RPCs.
+[functions.member-map]
+verify_jwt = false

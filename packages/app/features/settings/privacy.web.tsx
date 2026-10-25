@@ -2,6 +2,7 @@
 
 import { useRouter } from "solito/navigation";
 import { X } from "lucide-react";
+import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import {
   usePrivacySettings,
@@ -255,6 +256,7 @@ export function PrivacyScreen() {
             ))}
           </div>
 
+          <LocationControls />
           <CityVisibilitySection />
 
           <div className="mt-4 rounded-2xl border border-[#3FDCFF]/20 bg-[#3FDCFF]/5 p-4">

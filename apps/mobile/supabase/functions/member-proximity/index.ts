@@ -307,6 +307,14 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // A pre-migration legacy point does not bypass the overall location master.
+  const masters = await Promise.all([authUserId, String(target.auth_id)].map((id) =>
+    db.from("member_map_settings").select("location_enabled").eq("user_id", id).maybeSingle()
+  ));
+  if (masters.some((result) => result.error || result.data?.location_enabled !== true)) {
+    return json({ ok: true, data: { kind: "unavailable", label: null } });
+  }
+
   const { data: targetPresence } = await db
     .from("member_proximity_presence")
     .select("latitude, longitude, share_until")

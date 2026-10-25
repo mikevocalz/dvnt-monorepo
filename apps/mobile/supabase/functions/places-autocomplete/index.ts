@@ -5,11 +5,8 @@ import {
   readDistanceMeters,
 } from "../_shared/places-origin.ts";
 
-type LatLng = { latitude: number; longitude: number };
-
 const AUTOCOMPLETE_FIELD_MASK =
   "suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat,suggestions.placePrediction.distanceMeters";
-const DEFAULT_BIAS_CENTER: LatLng = { latitude: 34.0522, longitude: -118.2437 };
 const DEFAULT_RADIUS_METERS = 50_000;
 
 function jsonResponse(req: Request, body: unknown, status = 200) {
@@ -28,53 +25,17 @@ function getPlacesApiKey() {
 }
 
 function toFiniteNumber(value: unknown): number | null {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-// Approximate the caller's location from their IP (free, no key). Fallback only
-// when the client sent no device/city bias — so an NYC user searching "AMC"
-// gets NYC theaters instead of a hardcoded default city.
-async function ipGeoBias(ip: string | null): Promise<LatLng | null> {
-  if (!ip || ip === "127.0.0.1" || ip === "::1") return null;
-  try {
-    // ip-api.com: free, no key, ~45 req/min per querying IP. (ipapi.co rate-
-    // limited too aggressively.) ponytail: fine at beta scale; swap to a keyed
-    // geo provider if this edge fn's IP starts hitting the 45/min cap.
-    const res = await fetch(
-      `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,lat,lon`,
-      { signal: AbortSignal.timeout(2000) },
-    );
-    if (!res.ok) return null;
-    const j = await res.json();
-    if (j?.status !== "success") return null;
-    const latitude = toFiniteNumber(j?.lat);
-    const longitude = toFiniteNumber(j?.lon);
-    if (latitude == null || longitude == null) return null;
-    return { latitude, longitude };
-  } catch {
-    return null;
-  }
-}
-
-async function resolveBias(body: Record<string, unknown>, ip: string | null) {
+// Only explicit device/city coordinates may bias search. Never infer or send
+// the caller's IP to an external geolocation service, including legacy opt-ins.
+function resolveBias(body: Record<string, unknown>) {
   const candidate = body.locationBias as Record<string, unknown> | undefined;
-  let latitude = toFiniteNumber(candidate?.latitude);
-  let longitude = toFiniteNumber(candidate?.longitude);
+  const latitude = toFiniteNumber(candidate?.latitude);
+  const longitude = toFiniteNumber(candidate?.longitude);
   const radius = toFiniteNumber(candidate?.radiusMeters) ?? DEFAULT_RADIUS_METERS;
-
-  // No client-supplied location → geolocate by the caller's IP.
-  if (latitude == null || longitude == null) {
-    const ipBias = await ipGeoBias(ip);
-    if (ipBias) {
-      latitude = ipBias.latitude;
-      longitude = ipBias.longitude;
-    }
-  }
-
-  // Still nothing → null so we omit locationBias (global ranking) rather than
-  // pin results to an arbitrary city.
-  if (latitude == null || longitude == null) return null;
+  if (latitude == null || longitude == null || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
 
   return {
     latitude,
@@ -150,7 +111,7 @@ Deno.serve(async (req) => {
     return jsonResponse(req, { ok: false, error: "Missing sessionToken." }, 400);
   }
 
-  const bias = await resolveBias(body, identifier);
+  const bias = resolveBias(body);
   const origin = parsePlacesOrigin(body.origin);
 
   // Do not send includedPrimaryTypes here. Google's Autocomplete (New) caps it

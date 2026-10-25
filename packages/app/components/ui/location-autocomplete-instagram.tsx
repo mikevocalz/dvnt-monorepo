@@ -1,3 +1,7 @@
+import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { locationAllowedFor, useLocationAccessStore } from "@dvnt/app/lib/stores/location-access-store";
 import {
   useCallback,
   useEffect,
@@ -238,6 +242,7 @@ export function LocationAutocompleteInstagram({
   hideTrigger = false,
   onDismiss,
 }: LocationAutocompleteProps) {
+  useLocationSettings();
   const { colors } = useColorScheme();
   // Distances are measured from the member's stored city, never a device fix.
   const activeCity = useEventsLocationStore((s) => s.activeCity);
@@ -576,6 +581,10 @@ export function LocationAutocompleteInstagram({
   );
 
   const handleSelectCurrentLocation = useCallback(async () => {
+    const owner = useAuthStore.getState().user?.authId;
+    const generation = useLocationAccessStore.getState().generation;
+    const allowed = () => locationAllowedFor(owner) && useAuthStore.getState().user?.authId === owner && useLocationAccessStore.getState().generation === generation;
+    if (!allowed()) { useUIStore.getState().showToast("info", "Location is off", "Enable Use device location in Privacy settings first."); return; }
     setIsLoadingLocation(true);
     try {
       // Location permission is intentionally requested ONLY after this explicit
@@ -600,13 +609,16 @@ export function LocationAutocompleteInstagram({
       }
       setLocationBlocked(null);
 
+      if (!allowed()) return;
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
+      if (!allowed()) return;
       const [reverse] = await Location.reverseGeocodeAsync({
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
       });
+      if (!allowed()) return;
       const nextLocation: LocationData = {
         name:
           reverse?.name ||

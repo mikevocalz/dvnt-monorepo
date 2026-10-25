@@ -18,7 +18,7 @@
  *   5. Map remains stable — no camera jumps after settle
  */
 
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, ActivityIndicator } from "react-native";
 import {
   BottomSheetModal,
@@ -29,6 +29,7 @@ import { useRouter } from "expo-router";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useEventMapController } from "@dvnt/app/lib/hooks/use-event-map-controller";
 import { EventsMapView } from "./events-map-view";
+import MemberMap from "./member-map";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
 
@@ -56,6 +57,7 @@ export const EventsMapSheet: React.FC<EventsMapSheetProps> = ({
   onDismiss,
   events,
 }) => {
+  const [mode, setMode] = useState<"events" | "people">("events");
   const sheetRef = useRef<BottomSheetModal>(null);
   const { colors } = useColorScheme();
   const router = useRouter();
@@ -212,6 +214,10 @@ export const EventsMapSheet: React.FC<EventsMapSheetProps> = ({
           </Pressable>
         </View>
 
+        <View accessibilityRole="tablist" style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 12 }}>
+          <Pressable accessibilityRole="tab" accessibilityState={{ selected: mode === "events" }} onPress={() => setMode("events")} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 12, borderRadius: 12, backgroundColor: mode === "events" ? "#8A40CF44" : "#ffffff11" }}><Text style={{ color: colors.foreground }}>Event venues</Text></Pressable>
+          <Pressable accessibilityRole="tab" accessibilityState={{ selected: mode === "people" }} onPress={() => setMode("people")} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 12, borderRadius: 12, backgroundColor: mode === "people" ? "#8A40CF44" : "#ffffff11" }}><Text style={{ color: colors.foreground }}>Nearby people</Text></Pressable>
+        </View>
         {/* ── Map card ── */}
         <View
           style={{
@@ -225,7 +231,7 @@ export const EventsMapSheet: React.FC<EventsMapSheetProps> = ({
             // (matching colors.card) to create the illusion of clipping.
           }}
         >
-          {controller.isReady ? (
+          {mode === "people" ? <MemberMap /> : controller.isReady ? (
             <EventsMapView
               viewport={controller.viewport}
               markers={controller.markers}

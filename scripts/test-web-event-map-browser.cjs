@@ -54,6 +54,7 @@ const rawLocation = e => ({
 });
 const fixtureData = { all, past, forYou, locations: [...all, ...past, ...forYou].filter(e => e.id !== '207').map(rawLocation) };
 const mocks = {
+  './member-map.web': `import React from 'react'; export default function MemberMap(){return React.createElement('section',{'aria-label':'Nearby people'},'Synthetic people boundary');}`,
   'solito/navigation': `export const usePathname=()=>window.mapFixture.path; export const useRouter=()=>({push:p=>window.mapFixture.navigate(p),replace:p=>window.mapFixture.navigate(p,true),back:()=>history.back()});`,
   '@dvnt/app/lib/stores/auth-store': `import {useSyncExternalStore} from 'react'; const subscribe=cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)}; const current=()=>({isAuthenticated:window.mapFixture.authenticated,_hasHydrated:true,user:{id:'fixture-user'}}); export const useAuthStore=selector=>useSyncExternalStore(subscribe,()=>selector(current())); useAuthStore.getState=current;`,
   '@dvnt/app/lib/hooks/use-events': `import {useSyncExternalStore} from 'react'; const subscribe=cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)}; const useData=k=>({data:useSyncExternalStore(subscribe,()=>window.mapFixture.data[k]),isLoading:false}); export const useEvents=()=>useData('all'); export const usePastEvents=()=>useData('past'); export const useForYouEvents=()=>useData('forYou'); export const useToggleEventLike=()=>({mutate:()=>{throw Error('write forbidden in map fixture')}});`,

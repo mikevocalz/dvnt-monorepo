@@ -1,3 +1,6 @@
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { locationAllowedFor, useLocationAccessStore } from "@dvnt/app/lib/stores/location-access-store";
+import { AppState } from "react-native";
 /**
  * Host & Guest WS-5 — arrival presence.
  *
@@ -72,16 +75,21 @@ export async function reportArrivalOnce(params: {
   consented: boolean;
 }): Promise<PresenceState | null> {
   const { eventId, ticketId, venue, consented } = params;
-  if (!consented || !venue) return null;
+  const owner = useAuthStore.getState().user?.authId;
+  const generation = useLocationAccessStore.getState().generation;
+  const allowed = () => locationAllowedFor(owner) && useAuthStore.getState().user?.authId === owner && useLocationAccessStore.getState().generation === generation && AppState.currentState === "active";
+  if (!consented || !venue || !allowed()) return null;
 
   try {
     // Existing authorization only — never a fresh prompt from here.
     const perm = await Location.getForegroundPermissionsAsync();
     if (!perm.granted) return null;
 
+    if (!allowed()) return null;
     const pos = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Balanced,
     });
+    if (!allowed()) return null;
     const state = stateForDistance(
       distanceMetres(
         { lat: pos.coords.latitude, lng: pos.coords.longitude },
