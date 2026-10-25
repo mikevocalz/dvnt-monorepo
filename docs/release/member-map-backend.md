@@ -56,7 +56,9 @@ migration and edge functions have been released. Do not silently turn old users 
    `20261024164346_member_map_explicit_consent.sql` to the existing backend and
    deploy `member-map`, `member-proximity` (absent in production preflight), and updated
    `places-autocomplete` together. The Places update is required so Overall OFF
-   suppresses IP-derived location bias as well as device GPS.
+   removes external IP geolocation entirely. Only explicit device/city coordinates
+   can bias Places search; missing coordinates use manual/global search. Legacy
+   `allowIpBias` inputs are ignored and caller IPs are never sent to an IP lookup provider.
 3. Confirm service RPC/schema availability and local clients' fail-closed behavior,
    using only explicitly consenting synthetic test accounts.
 4. Release clients only after the backend gate is confirmed.
