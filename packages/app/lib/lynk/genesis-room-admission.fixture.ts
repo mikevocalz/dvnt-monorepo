@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { fileURLToPath, URL } from "node:url";
 import path from "node:path";
+import { existsSync } from "node:fs";
 
 // Explicitly run by lynk-room-regressions.yml with isolated DOM dependencies;
 // kept outside the dependency-light test:node glob. No test is skipped.
@@ -15,7 +16,7 @@ const { JSDOM } = require("jsdom");
 const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const app = path.join(ROOT, "packages/app");
 const boundaries: Record<string, string> = {
-  "react-native": `import React from 'react'; const f=window.fixture; export const Platform={OS:f.platform}; export const AppState=f.appState;
+  "react-native": `import React from 'react'; const f=window.fixture; export const Platform={OS:f.platform}; export const AppState=f.appState; export const Linking={openSettings:async()=>{}};
     export const View=({children,className,style})=>React.createElement('div',{className,style},children);export const Text=View;export const ScrollView=View;
     export const Pressable=({children,onPress,disabled})=>React.createElement('button',{onClick:onPress,disabled},children);`,
   "react-native-safe-area-context": `export const useSafeAreaInsets=()=>({top:0,bottom:0});`,
@@ -37,7 +38,7 @@ const boundaries: Record<string, string> = {
   "react-native-moq": `import React,{useMemo,useRef,useEffect,useState,useCallback,useSyncExternalStore} from 'react';const f=window.fixture;
     export function useSession(url){const session=useMemo(()=>{const signal=new f.Signal('idle');const next={id:Symbol(),signal,connect:()=>signal.set('connected'),disconnect:()=>signal.set('closed')};f.sessions.push(next);return next;},[url]);const state=useSyncExternalStore(cb=>session.signal.subscribe(cb),()=>session.signal.peek());return {...session,state};}
     export function usePublisher(session){const ref=useRef(null);const [state,setState]=useState('idle');const publish=useCallback(options=>{ref.current?.close();ref.current=new f.Publication({name:options.path});setState('publishing');},[session.id]);const stop=useCallback(()=>{ref.current?.close();ref.current=null;setState('idle');},[session.id]);return {state,publish,stop};}
-    function useDevice(options){const ref=useRef(null);if(!ref.current)ref.current=new f.Device();useEffect(()=>{ref.current.enabled.set(options.enabled);return()=>ref.current.enabled.set(false);},[options.enabled]);useEffect(()=>()=>ref.current.close(),[]);return ref.current;}
+    function useDevice(options){const ref=useRef(null);if(!ref.current)ref.current=new f.Device();useEffect(()=>{ref.current.enabled.set(options.enabled);return()=>ref.current.enabled.set(false);},[options.enabled]);useEffect(()=>()=>ref.current.close(),[]);const enabled=useSyncExternalStore(cb=>ref.current.enabled.subscribe(cb),()=>ref.current.enabled.peek());return useMemo(()=>({state:enabled?'active':'idle',lastError:null,position:'front'}),[enabled]);}
     export const useCamera=useDevice;export const useMicrophone=useDevice;
     export function useBroadcasts(session,namespace){const paths=useSyncExternalStore(cb=>f.announcements.subscribe(cb),()=>f.announcements.peek());return useMemo(()=>session.state==='connected'?paths.split('\\n').filter(path=>path.startsWith(namespace+'/')).map(path=>({path,player:f.player(path)})):[],[paths,namespace,session.state]);}
     export const useVideoPlayer=broadcast=>broadcast.player;export const VideoView=()=>React.createElement('canvas');export const PublisherView=()=>React.createElement('div');`,
@@ -61,7 +62,10 @@ const bundles = await Promise.all(["web", "native"].map((platform) => esbuild.bu
       if (Object.hasOwn(boundaries, args.path)) return { path: args.path, namespace: "fixture" };
       if (args.path === "./api/supabase" && args.importer.endsWith("useGenesisRoomAdmission.ts")) return { path: "@dvnt/app/features/sneaky-lynk/api/supabase", namespace: "fixture" };
       if (args.path === "./room-lifecycle-source" && args.importer.endsWith("useRoomLifecycle.ts")) return { path: "lifecycle-source-fixture", namespace: "fixture" };
-      if (args.path.startsWith("@dvnt/app/")) return { path: path.join(app, args.path.slice("@dvnt/app/".length)) + ".ts" };
+      if (args.path.startsWith("@dvnt/app/")) {
+        const source = path.join(app, args.path.slice("@dvnt/app/".length));
+        return { path: existsSync(source + ".tsx") ? source + ".tsx" : source + ".ts" };
+      }
     });
     build.onLoad({ filter: /.*/, namespace: "fixture" }, (args: any) => ({ loader: "tsx", resolveDir: ROOT, contents: boundaries[args.path] }));
   } }],
