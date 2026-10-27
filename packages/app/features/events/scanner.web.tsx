@@ -36,6 +36,7 @@ import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import {
   rememberDoorRole,
   recallDoorRole,
+  forgetDoorRole,
 } from "@dvnt/app/lib/events/confirmed-door-role";
 import {
   useDoorOfflineKit,
@@ -49,7 +50,7 @@ import {
   signalVerdict,
   useDoorFeedbackStore,
 } from "./door-feedback.web";
-import { canScanTickets } from "@dvnt/app/lib/events/event-role";
+import { scannerAccessGate } from "@dvnt/app/lib/events/scanner-access";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   X,
@@ -1041,8 +1042,11 @@ export function EventScannerScreen() {
    * The owner-only comparison this replaces refused the scanner screen to
    * anyone given the `scanner` role — the people it exists for.
    */
-  const { role, isLoading: roleLoading, isError: roleError, refetch: refetchRole } =
-    useEventRole(eventId);
+  const {
+    role, isLoading: roleLoading, isError: roleError, errorStatus,
+    isPending: rolePending, isPaused: rolePaused, hasResolved, refetch: refetchRole,
+  } = useEventRole(eventId);
+  const viewerId = user?.id == null ? "" : String(user.id);
   const isAuthenticated = useAuthStore((st) => st.isAuthenticated);
   const hasHydrated = useAuthStore((st) => st._hasHydrated);
   const offlineStore = useOfflineCheckinStore();
@@ -1050,8 +1054,12 @@ export function EventScannerScreen() {
   // A confirmed role is remembered so a phone that has already been told it is
   // staff can still open the door when the venue's signal drops.
   useEffect(() => {
-    if (!roleError && !roleLoading && role) rememberDoorRole(eventId, role);
-  }, [role, roleError, roleLoading, eventId]);
+    if (errorStatus === 401 || errorStatus === 403 || (hasResolved && !role)) {
+      forgetDoorRole(viewerId, eventId);
+    } else if (isAuthenticated && hasResolved && role) {
+      rememberDoorRole(viewerId, eventId, role);
+    }
+  }, [role, errorStatus, isAuthenticated, hasResolved, viewerId, eventId]);
 
   /**
    * Three different problems used to render one "Not authorized", which sends
@@ -1067,20 +1075,12 @@ export function EventScannerScreen() {
    * remembering a role you were granted is not granting yourself one, and a
    * device that has never been confirmed for this event still does not get in.
    */
-  const remembered = recallDoorRole(eventId);
+  const remembered = recallDoorRole(viewerId, eventId);
   const canOpenOffline = !!remembered && offlineStore.hasOfflineData(eventId);
-  const gate: "loading" | "signed_out" | "not_staff" | "cannot_verify" | "open" =
-    !hasHydrated || eventLoading || roleLoading
-      ? "loading"
-      : !isAuthenticated
-        ? "signed_out"
-        : canScanTickets(role)
-          ? "open"
-          : roleError
-            ? canOpenOffline
-              ? "open"
-              : "cannot_verify"
-            : "not_staff";
+  const gate = scannerAccessGate({
+    hasHydrated, isAuthenticated, loading: eventLoading || roleLoading,
+    role, roleError, errorStatus, canOpenOffline, rolePending, rolePaused,
+  });
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">

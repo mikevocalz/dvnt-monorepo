@@ -33,38 +33,62 @@ beforeEach(() => {
 });
 
 test("a device that was never confirmed does not get in", () => {
-  assert.equal(recallDoorRole("event-1"), null);
+  assert.equal(recallDoorRole("staff-1", "event-1"), null);
 });
 
 test("a confirmed role is remembered for that event only", () => {
-  rememberDoorRole("event-1", "scanner");
-  assert.equal(recallDoorRole("event-1"), "scanner");
+  rememberDoorRole("staff-1", "event-1", "scanner");
+  assert.equal(recallDoorRole("staff-1", "event-1"), "scanner");
   // Staffing one door is not staffing every door.
-  assert.equal(recallDoorRole("event-2"), null);
+  assert.equal(recallDoorRole("staff-1", "event-2"), null);
 });
 
 test("a remembered role expires, so last month's door is not tonight's", () => {
   const t0 = Date.now();
-  rememberDoorRole("event-1", "scanner");
-  assert.equal(recallDoorRole("event-1", t0 + DAY - 1000), "scanner");
-  assert.equal(recallDoorRole("event-1", t0 + DAY + 1000), null);
+  rememberDoorRole("staff-1", "event-1", "scanner");
+  assert.equal(recallDoorRole("staff-1", "event-1", t0 + DAY - 1000), "scanner");
+  assert.equal(recallDoorRole("staff-1", "event-1", t0 + DAY + 1000), null);
 });
 
 test("forgetting is immediate — a removed staffer loses offline entry", () => {
-  rememberDoorRole("event-1", "scanner");
-  forgetDoorRole("event-1");
-  assert.equal(recallDoorRole("event-1"), null);
+  rememberDoorRole("staff-1", "event-1", "scanner");
+  forgetDoorRole("staff-1", "event-1");
+  assert.equal(recallDoorRole("staff-1", "event-1"), null);
 });
 
 test("corrupt storage reads as 'never confirmed', never as authorised", () => {
   const map = installStorage();
-  map.set("dvnt.door.confirmed-role.v1", "{not json");
-  assert.equal(recallDoorRole("event-1"), null);
+  map.set("dvnt.door.confirmed-role.v2", "{not json");
+  assert.equal(recallDoorRole("staff-1", "event-1"), null);
 });
 
 test("an empty event id or role is not stored", () => {
-  rememberDoorRole("", "scanner");
-  rememberDoorRole("event-1", "");
-  assert.equal(recallDoorRole(""), null);
-  assert.equal(recallDoorRole("event-1"), null);
+  rememberDoorRole("staff-1", "", "scanner");
+  rememberDoorRole("staff-1", "event-1", "");
+  assert.equal(recallDoorRole("staff-1", ""), null);
+  assert.equal(recallDoorRole("staff-1", "event-1"), null);
+});
+
+test("switching accounts on the same device never inherits another staffer's offline role", () => {
+  rememberDoorRole("staff-1", "event-1", "scanner");
+  assert.equal(recallDoorRole("staff-2", "event-1"), null);
+  assert.equal(recallDoorRole("", "event-1"), null);
+  rememberDoorRole("staff-2", "event-1", "admin");
+  forgetDoorRole("staff-1", "event-1");
+  assert.equal(recallDoorRole("staff-1", "event-1"), null);
+  assert.equal(recallDoorRole("staff-2", "event-1"), "admin");
+});
+test("legacy event-only role evidence and unknown roles cannot authorize offline access", () => {
+  const map = installStorage();
+  map.set("dvnt.door.confirmed-role.v1", JSON.stringify({ "event-1": { role: "scanner", at: Date.now() } }));
+  assert.equal(recallDoorRole("staff-1", "event-1"), null);
+  rememberDoorRole("staff-1", "event-1", "attendee");
+  assert.equal(recallDoorRole("staff-1", "event-1"), null);
+});
+test("corrupt null/future entries fail closed", () => {
+  const map = installStorage();
+  map.set("dvnt.door.confirmed-role.v2", "null");
+  assert.equal(recallDoorRole("staff-1", "event-1"), null);
+  map.set("dvnt.door.confirmed-role.v2", JSON.stringify({ [JSON.stringify(["staff-1", "event-1"])]: { role: "scanner", at: Date.now() + DAY } }));
+  assert.equal(recallDoorRole("staff-1", "event-1"), null);
 });

@@ -45,7 +45,13 @@ export function useEventRole(eventId: string) {
      * would flash "Not authorized" at legitimate staff on every cold open.
      */
     isLoading: query.isLoading,
+    isPending: query.isPending,
+    isPaused: query.fetchStatus === "paused",
+    hasResolved: query.isSuccess,
     isError: query.isError,
+    errorStatus: query.isError && typeof (query.error as { status?: unknown } | null)?.status === "number"
+      ? (query.error as unknown as { status: number }).status
+      : undefined,
     refetch: query.refetch,
   };
 }
