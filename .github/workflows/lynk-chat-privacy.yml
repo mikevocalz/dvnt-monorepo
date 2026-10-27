@@ -1,0 +1,28 @@
+name: Lynk chat author privacy
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/migrations/20261003150200_video_room_members_user_id_private.sql'
+      - 'apps/mobile/supabase/migrations/20261003150300_room_comments_author_private.sql'
+      - 'apps/mobile/supabase/migrations/*lynk_chat_author_privacy_repair.sql'
+      - 'scripts/test-lynk-chat-privacy-sql.cjs'
+      - '.github/workflows/lynk-chat-privacy.yml'
+permissions:
+  contents: read
+jobs:
+  sql-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated PostgreSQL fixture
+        run: npm install --prefix "$RUNNER_TEMP/lynk-sql" --no-package-lock --no-save @electric-sql/pglite@0.5.12
+      - name: Verify real migration, grants, RLS and rollback offline
+        env:
+          NODE_PATH: ${{ runner.temp }}/lynk-sql/node_modules
+        run: node --test scripts/test-lynk-chat-privacy-sql.cjs
