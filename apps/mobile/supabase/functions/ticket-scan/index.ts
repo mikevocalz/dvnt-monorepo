@@ -27,7 +27,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySignedQrPayload } from "../_shared/hmac-qr.ts";
-import { checkRateLimit } from "../_shared/rate-limit.ts";
+import { checkScanPreAuthLimit, checkScanAccountLimit } from "../_shared/scan-rate-limit.ts";
 import { verifySession } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
 
@@ -204,17 +204,9 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       return json({ error: "Missing qr_token or qr_payload" }, 400);
     }
 
-    // Rate-limit per scanner identity. A single scanner can realistically process
-    // at most ~1 scan per 2s in a real door line — 30/minute is a generous ceiling.
-    // This prevents brute-force QR token enumeration.
-    // Rate limit by raw client identifier; scannerAuthId not available
-    // yet (verifySession runs below). x-forwarded-for is acceptable here.
-    const rateLimitKey =
-      device_id || req.headers.get("x-forwarded-for") || "anon";
-    const rl = checkRateLimit(rateLimitKey, "ticket-scan", {
-      maxRequests: 30,
-      windowMs: 60_000,
-    });
+    // Each session gets its own lane; the shared venue IP is only a coarse
+    // pre-auth ceiling. device_id is audit metadata, never an abuse bypass.
+    const rl = await checkScanPreAuthLimit(req);
     if (!rl.allowed) {
       return json(
         {
@@ -235,6 +227,13 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
     const scannerAuthId = await verifySession(supabase, req);
     if (!scannerAuthId) {
       return json({ error: "Unauthorized — session required" }, 401);
+    }
+
+    const accountLimit = checkScanAccountLimit(scannerAuthId);
+    if (!accountLimit.allowed) {
+      return json({
+        error: `Too many scan attempts. Try again in ${Math.ceil(accountLimit.retryAfterMs / 1000)}s.`,
+      }, 429);
     }
 
     // Offline batch sync (syncOfflineScans) flags its replayed scans so

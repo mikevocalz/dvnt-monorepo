@@ -46,7 +46,7 @@ import {
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
-import { canScanTickets } from "@dvnt/app/lib/events/event-role";
+import { scannerAccessGate } from "@dvnt/app/lib/events/scanner-access";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/auth/identity";
 import * as Haptics from "expo-haptics";
@@ -544,10 +544,6 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
       if (cooldownRef.current || scanResult) return;
       const code = codes[0];
       const qrValue = code?.rawValue ?? code?.value;
-      console.log(
-        "[Scanner] qrValue=",
-        qrValue ? qrValue.substring(0, 40) : "(empty)",
-      );
       if (!qrValue) return;
 
       if (qrValue === lastScannedRef.current) return;
@@ -559,7 +555,6 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
       if (deepLinkMatch) {
         qrToken = deepLinkMatch[1];
       }
-      console.log("[Scanner] dispatching scan, qrToken prefix=", qrToken.substring(0, 12));
 
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
@@ -1020,10 +1015,18 @@ function ScannerContent({ eventId }: { eventId: string }) {
    * added to work. The server still enforces on every `ticket-scan`; this only
    * decides whether to render the camera.
    */
-  const { role, isLoading: roleLoading } = useEventRole(eventId);
-  const mayScan = canScanTickets(role);
+  const {
+    role, isLoading: roleLoading, isError: roleError, errorStatus,
+    isPending: rolePending, isPaused: rolePaused, refetch,
+  } = useEventRole(eventId);
+  const hasHydrated = useAuthStore((s) => s._hasHydrated);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const gate = scannerAccessGate({
+    hasHydrated, isAuthenticated, loading: eventLoading || roleLoading,
+    role, roleError, errorStatus, rolePending, rolePaused,
+  });
 
-  if (eventLoading || roleLoading) {
+  if (gate === "loading") {
     return (
       <View className="flex-1 bg-black items-center justify-center">
         <ActivityIndicator color="#fff" />
@@ -1031,7 +1034,33 @@ function ScannerContent({ eventId }: { eventId: string }) {
     );
   }
 
-  if (!mayScan) {
+  if (gate === "cannot_verify" || gate === "signed_out") {
+    return (
+      <View className="flex-1 bg-black items-center justify-center px-8">
+        <AlertTriangle size={64} color="#f59e0b" />
+        <Text style={{ color: "white" }} className="text-lg font-sans-semibold mt-4 text-center">
+          {gate === "signed_out" ? "You've been signed out" : "Can't verify your door access"}
+        </Text>
+        <Text className="text-white/60 text-sm mt-2 text-center">
+          {gate === "signed_out"
+            ? "Sign in again to keep scanning. No ticket was checked."
+            : "We couldn't confirm your access. Check your connection, then try again. No ticket was checked."}
+        </Text>
+        <Pressable
+          onPress={() => gate === "signed_out" ? router.push("/(auth)/login" as any) : void refetch()}
+          accessibilityRole="button"
+          className="mt-6 bg-white/10 rounded-full px-6 py-3"
+        >
+          <Text className="text-white font-sans-semibold">{gate === "signed_out" ? "Sign in" : "Try again"}</Text>
+        </Pressable>
+        <Pressable onPress={() => router.back()} accessibilityRole="button" className="mt-4 px-6 py-3">
+          <Text className="text-white/60">Go Back</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (gate === "not_staff") {
     return (
       <View className="flex-1 bg-black items-center justify-center px-8">
         <XCircle size={64} color="#ef4444" />

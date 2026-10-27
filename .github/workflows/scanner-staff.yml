@@ -1,0 +1,38 @@
+name: Scanner staff isolation
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/ticket-scan/**'
+      - 'apps/mobile/supabase/functions/_shared/scan-rate-limit.ts'
+      - 'apps/mobile/supabase/functions/_shared/rate-limit.ts'
+      - 'apps/mobile/supabase/functions/_shared/verify-session.ts'
+      - 'packages/app/features/events/scanner.web.tsx'
+      - 'packages/app/lib/hooks/use-event-role*'
+      - 'packages/app/lib/api/tickets.ts'
+      - 'packages/app/lib/api/ticket-role-error.test.ts'
+      - 'packages/app/lib/events/scanner-access*'
+      - 'packages/app/lib/events/event-role*'
+      - 'packages/app/lib/events/confirmed-door-role*'
+      - 'packages/app/features/routes/screens/**/events/**/scanner.tsx'
+      - 'scripts/test-native-scanner-access.cjs'
+      - '.github/workflows/scanner-staff.yml'
+      - 'package.json'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scanner-staff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm test:scanner-staff
+      - run: pnpm verify:functions

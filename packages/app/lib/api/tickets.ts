@@ -306,7 +306,7 @@ export const ticketsApi = {
       // Staff at a door cannot tell a failure from an empty venue. The query
       // must fail so the screen can say so.
       console.error("[Tickets] getEventTicketsPaginated HTTP", status);
-      throw new Error(`Could not load the guest list (HTTP ${status}).`);
+      throw Object.assign(new Error(`Could not load the guest list (HTTP ${status}).`), { status });
     }
     const tickets = data?.ok ? (data.tickets ?? []) : [];
     return {
