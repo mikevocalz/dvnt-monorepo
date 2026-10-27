@@ -58,7 +58,10 @@ const ROOT = path.resolve(__dirname, '..');
         for(const box of boxes) {
           assert.equal(box.pair[0].y,box.pair[1].y,'heart/count share the same row');
           assert(box.pair[1].x-box.pair[0].right<=3,'count stays immediately beside heart');
-          for(const b of box.buttons) assert(b.x>=box.card.x && b.right<=box.card.right+1,`no clipped button at ${width}: ${JSON.stringify(box)}`);
+          for(const b of box.buttons) {
+            assert(b.width>=24 && b.height>=44, `compact controls retain at least 24x44px targets at ${width}: ${JSON.stringify(b)}`);
+            assert(b.x>=box.card.x && b.right<=box.card.right+1,`no clipped button at ${width}: ${JSON.stringify(box)}`);
+          }
           for(let i=0;i<box.buttons.length;i++) for(let j=i+1;j<box.buttons.length;j++) {
             const a=box.buttons[i],b=box.buttons[j];
             assert(a.right<=b.x+1 || b.right<=a.x+1 || a.bottom<=b.y+1 || b.bottom<=a.y+1,'action targets must not overlap');
