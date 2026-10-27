@@ -206,7 +206,9 @@ function updatePostInAllCaches(
 ) {
   const targetId = String(postId);
   const mapList = (posts: Post[] | undefined) =>
-    posts?.map((p) => (String(p.id) === targetId ? updater(p) : p));
+    Array.isArray(posts)
+      ? posts.map((p) => (String(p.id) === targetId ? updater(p) : p))
+      : undefined;
 
   // Detail
   queryClient.setQueryData<Post>(postKeys.detail(postId), (old) =>
@@ -214,7 +216,7 @@ function updatePostInAllCaches(
   );
 
   // Legacy feed
-  queryClient.setQueriesData<Post[]>({ queryKey: postKeys.feed() }, (old) =>
+  queryClient.setQueriesData<Post[]>({ queryKey: postKeys.feed(), exact: true }, (old) =>
     mapList(old) ?? old,
   );
 

@@ -9,7 +9,17 @@ on:
       - "packages/app/components/share-to-inbox-sheet.web.tsx"
       - "packages/app/components/web-tab-bar.web.tsx"
       - "packages/app/components/app-shell.web.tsx"
+      - "packages/app/components/feed/feed-post.tsx"
+      - "packages/app/components/feed/masonry-feed.tsx"
+      - "packages/app/features/routes/screens/(protected)/post/[id].tsx"
+      - "packages/app/lib/hooks/usePostLikeState.ts"
+      - "packages/app/lib/hooks/use-posts.ts"
+      - "packages/app/lib/hooks/use-comments.ts"
+      - "packages/app/lib/query/patch.ts"
+      - "packages/ui/src/social/**"
+      - "packages/ui/package.json"
       - "packages/app/lib/api/likes.ts"
+      - "packages/app/lib/api/users.ts"
       - "packages/app/lib/api/stories.ts"
       - "packages/app/lib/hooks/use-post-likers.ts"
       - "packages/app/lib/hooks/use-stories.ts"
@@ -25,6 +35,10 @@ on:
       - "apps/web/src/app/(frontend)/globals.css"
       - "scripts/test-caption-composer.cjs"
       - "scripts/test-post-social-actions.cjs"
+      - "scripts/test-post-like-state.cjs"
+      - "scripts/test-post-comment-counts.cjs"
+      - "scripts/test-native-engagement-counts.cjs"
+      - "scripts/test-engagement-counts-browser.cjs"
       - "scripts/test-post-share-identity.cjs"
       - "scripts/test-web-post-likes-dom.cjs"
       - "scripts/test-web-tab-bar-browser.cjs"
@@ -44,7 +58,7 @@ jobs:
         with:
           node-version: 24
       - name: Install isolated interaction tools
-        run: npm install --prefix "$RUNNER_TEMP/social" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.0.11 jsdom@26.1.0 lucide-react@1.30.0 @tanstack/react-query@5.90.5 react-native-web@0.21.2 playwright@1.58.2
+        run: npm install --prefix "$RUNNER_TEMP/social" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.0.11 jsdom@26.1.0 lucide-react@1.30.0 @tanstack/react-query@5.90.5 react-native-web@0.21.2 playwright@1.58.2 tailwindcss@4.3.0
       - name: Install Chromium
         run: node "$RUNNER_TEMP/social/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Post likes, sharing and viewer isolation
@@ -54,6 +68,10 @@ jobs:
           node --test packages/app/lib/posts/text-post-theme-parity.test.ts apps/mobile/supabase/functions/get-post-likers/index.test.cjs
           node scripts/test-web-post-likes-dom.cjs
           node scripts/test-post-social-actions.cjs
+          node scripts/test-post-like-state.cjs
+          node scripts/test-post-comment-counts.cjs
+          node scripts/test-native-engagement-counts.cjs
+          node --test packages/app/lib/posts/engagement-counts.test.ts packages/ui/src/social/engagement-counts.test.ts
           node scripts/test-post-draft-platform.cjs
           node scripts/test-post-share-identity.cjs
       - name: Actual composer and viewport navigation in Chromium
@@ -62,3 +80,15 @@ jobs:
         run: |
           node scripts/test-caption-composer.cjs
           node scripts/test-web-tab-bar-browser.cjs
+      - name: Engagement counts at phone and desktop widths
+        env:
+          NODE_PATH: ${{ runner.temp }}/social/node_modules
+          ENGAGEMENT_EVIDENCE_DIR: ${{ runner.temp }}/engagement-evidence
+        run: node scripts/test-engagement-counts-browser.cjs
+      - name: Upload engagement layout screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engagement-counts-layout
+          path: ${{ runner.temp }}/engagement-evidence
+          if-no-files-found: ignore

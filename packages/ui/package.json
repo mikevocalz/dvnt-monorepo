@@ -32,6 +32,12 @@
       "types": "./src/google-maps-public-config.ts",
       "import": "./src/google-maps-public-config.ts",
       "default": "./src/google-maps-public-config.ts"
+    },
+    "./post-engagement-counts": {
+      "types": "./src/social/PostEngagementCounts.tsx",
+      "react-native": "./src/social/PostEngagementCounts.native.tsx",
+      "import": "./src/social/PostEngagementCounts.web.tsx",
+      "default": "./src/social/PostEngagementCounts.web.tsx"
     }
   },
   "scripts": {

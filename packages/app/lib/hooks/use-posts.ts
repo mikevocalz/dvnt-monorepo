@@ -19,11 +19,36 @@ import { STALE_TIMES, GC_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import { isValidPostId } from "@dvnt/app/lib/validation/post-params";
 import {
   decrementPostCountEverywhere,
+  updatePostLikeEverywhere,
   removePostEverywhere,
   type PostOwnerIdentity,
 } from "@dvnt/app/lib/query/patch";
 import { postKeys, profileKeys, activityKeys } from "@dvnt/app/lib/query-keys";
 export { postKeys };
+import { captureServerLikeSync } from "@dvnt/app/lib/posts/like-state-sync";
+
+// Only server reads, not tile mounts, can prove that a snapshot is fresh.
+async function withServerLikeSync<T>(
+  queryClient: QueryClient,
+  load: () => Promise<T>,
+  posts: (result: T) => Array<Post | null>,
+): Promise<T> {
+  const viewerId = useAuthStore.getState().user?.id || "";
+  let identityChanged = false;
+  const unsubscribe = useAuthStore.subscribe((state) => {
+    if ((state.user?.id || "") !== viewerId) identityChanged = true;
+  });
+  const sync = captureServerLikeSync(queryClient, viewerId);
+  try {
+    const result = await load();
+    if (identityChanged || (useAuthStore.getState().user?.id || "") !== viewerId) {
+      throw new Error("Session changed while loading posts");
+    }
+    for (const post of posts(result)) if (post) sync(post);
+    return result;
+  } finally { unsubscribe(); }
+}
+
 
 // Track in-flight like mutations per post to prevent race conditions
 const pendingLikeMutations = new Set<string>();
@@ -92,9 +117,10 @@ function restoreCachedQuery(
 
 // Fetch feed posts (legacy - for backwards compatibility)
 export function useFeedPosts() {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: postKeys.feed(),
-    queryFn: postsApi.getFeedPosts,
+    queryFn: () => withServerLikeSync(queryClient, () => postsApi.getFeedPosts(), (posts) => posts),
   });
 }
 
@@ -112,7 +138,11 @@ export function useInfiniteFeedPosts({
   // Wiping here would throw away the list the user is switching back to.
   return useInfiniteQuery({
     queryKey: postKeys.feedInfinite(nsfwEnabled),
-    queryFn: ({ pageParam = 0 }) => postsApi.getFeedPostsPaginated(pageParam, nsfwEnabled),
+    queryFn: ({ pageParam = 0 }) => withServerLikeSync(
+      queryClient,
+      () => postsApi.getFeedPostsPaginated(pageParam, nsfwEnabled),
+      (page) => page?.data || [],
+    ),
     enabled,
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage?.nextCursor ?? undefined,
@@ -131,9 +161,10 @@ export function useInfiniteFeedPosts({
 
 // Fetch profile posts
 export function useProfilePosts(userId: string) {
+  const queryClient = useQueryClient();
   return useQuery<Post[]>({
     queryKey: postKeys.profilePosts(userId),
-    queryFn: () => postsApi.getProfilePosts(userId),
+    queryFn: () => withServerLikeSync(queryClient, () => postsApi.getProfilePosts(userId), (posts) => posts),
     enabled: !!userId,
     staleTime: STALE_TIMES.profilePosts,
   });
@@ -162,7 +193,7 @@ export function usePost(id: string) {
     queryFn: async () => {
       if (__DEV__) console.log("[usePost] Fetching post:", id);
       const cachedSnapshot = findCachedPostSnapshot(queryClient, id);
-      const fetchedPost = await postsApi.getPostById(id);
+      const fetchedPost = await withServerLikeSync(queryClient, () => postsApi.getPostById(id), (post) => [post]);
       return fetchedPost ?? cachedSnapshot ?? null;
     },
     // STRICT VALIDATION: Only enable query if ID is valid format (numeric or UUID)
@@ -365,43 +396,41 @@ export function useSyncLikedPosts() {
   return useQuery({
     queryKey: ["likedPosts", viewerId || "__no_user__"],
     queryFn: async () => {
-      const { usersApi } = await import("@dvnt/app/lib/api/users");
-      const likedPosts = await usersApi.getLikedPosts();
-
-      // Sync to Zustand store
-      const { usePostStore } = await import("@dvnt/app/lib/stores/post-store");
-      usePostStore.getState().syncLikedPosts(likedPosts);
-
-      // CRITICAL: Seed React Query likeState cache for each liked post
-      // This ensures heart color is correct on initial load
-      if (viewerId) {
-        const { likeStateKeys } = await import("@dvnt/app/lib/hooks/usePostLikeState");
-        for (const postId of likedPosts) {
-          const key = likeStateKeys.forPost(viewerId, postId);
-          const existing = queryClient.getQueryData(key) as
-            | { hasLiked: boolean; likes: number }
-            | undefined;
-          if (existing) {
-            // Update hasLiked but preserve existing likes count
-            if (!existing.hasLiked) {
-              queryClient.setQueryData(key, {
-                ...existing,
-                hasLiked: true,
-              });
+      let identityChanged = false;
+      const unsubscribe = useAuthStore.subscribe((state) => {
+        if (state.user?.id !== viewerId) identityChanged = true;
+      });
+      const isCurrent = () => !identityChanged && useAuthStore.getState().user?.id === viewerId;
+      const snapshots = queryClient.getQueriesData<{ hasLiked: boolean; likes: number }>({
+        queryKey: ["likeState", viewerId],
+      });
+      const mutationWasPending = queryClient.isMutating({ mutationKey: ["likePost"] }) > 0;
+      try {
+        const { usersApi } = await import("@dvnt/app/lib/api/users");
+        if (!isCurrent()) throw new Error("Session changed while loading likes");
+        const likedPosts = await usersApi.getLikedPosts();
+        const { usePostStore } = await import("@dvnt/app/lib/stores/post-store");
+        if (!isCurrent()) throw new Error("Session changed while loading likes");
+        const likedIds = new Set(likedPosts.map(String));
+        // A request begun before an unlike can finish after it. Never let that
+        // older read re-light the heart (or replace a newer optimistic count).
+        if (!mutationWasPending && !queryClient.isMutating({ mutationKey: ["likePost"] })) {
+          usePostStore.getState().syncLikedPosts(likedPosts);
+          for (const [key, previous] of snapshots) {
+            if (!previous || queryClient.getQueryData(key) !== previous) continue;
+            // This ID list can be capped by PostgREST (or be [] on failure),
+            // so absence cannot prove an unlike. Exact per-post server reads
+            // above handle false/count reconciliation.
+            if (likedIds.has(String(key[2])) && !previous.hasLiked) {
+              queryClient.setQueryData(key, { ...previous, hasLiked: true });
+              updatePostLikeEverywhere(queryClient, String(key[2]), true, previous.likes);
             }
           }
-          // If no existing cache, do NOT seed with likes: 0.
-          // The feed query now returns viewerHasLiked from the server,
-          // so seedLikeState in feed.tsx will set the correct values.
         }
+        return likedPosts;
+      } finally {
+        unsubscribe();
       }
-
-      if (__DEV__)
-        console.log(
-          "[useSyncLikedPosts] Synced liked posts:",
-          likedPosts.length,
-        );
-      return likedPosts;
     },
     staleTime: STALE_TIMES.likedPosts,
     gcTime: GC_TIMES.standard,

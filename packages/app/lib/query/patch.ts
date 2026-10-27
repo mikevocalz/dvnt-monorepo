@@ -185,13 +185,18 @@ export function updatePostLikeEverywhere(
     viewerHasLiked: liked,
   });
 
-  // Infinite feed
-  patchEntityInInfiniteList<Post>(
-    queryClient,
-    ["posts", "feed", "infinite"],
-    postId,
-    patch,
-  );
+  // Patch every sweet/spicy/infinite variant, not only the obsolete prefix
+  // key. Some feed sources use `posts` rather than `data` within each page.
+  queryClient.setQueriesData<any>({ queryKey: ["posts", "feed", "infinite"] }, (old) => {
+    if (!old?.pages) return old;
+    const patchList = (items: Post[] | undefined) => items?.map((post) =>
+      String(post.id) === postId ? patch(post) : post);
+    return { ...old, pages: old.pages.map((page: any) => ({
+      ...page,
+      ...(Array.isArray(page?.data) ? { data: patchList(page.data) } : {}),
+      ...(Array.isArray(page?.posts) ? { posts: patchList(page.posts) } : {}),
+    })) };
+  });
 
   // Legacy feed
   patchEntityInList<Post>(queryClient, ["posts", "feed"], postId, patch);
@@ -204,7 +209,7 @@ export function updatePostLikeEverywhere(
   // Profile posts (all users)
   queryClient.setQueriesData<Post[]>({ queryKey: ["profilePosts"] }, (old) => {
     if (!old) return old;
-    return old.map((p) => (p.id === postId ? patch(p) : p));
+    return old.map((p) => (String(p.id) === postId ? patch(p) : p));
   });
 }
 

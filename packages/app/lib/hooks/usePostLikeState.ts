@@ -13,13 +13,13 @@
  * - Button disabled while mutation in-flight
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useIsMutating, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { likesApi } from "@dvnt/app/lib/api/likes";
-import { postKeys } from "@dvnt/app/lib/hooks/use-posts";
-import { activityKeys } from "@dvnt/app/lib/hooks/use-activities-query";
+import { postKeys, activityKeys } from "@dvnt/app/lib/query-keys";
+import { markPostLikeMutation } from "@dvnt/app/lib/posts/like-state-sync";
 import { updatePostLikeEverywhere } from "@dvnt/app/lib/query/patch";
 import type { Post } from "@dvnt/app/lib/types";
 import { postLikersKeys, likeStateKeys } from "@dvnt/app/lib/query-keys";
@@ -85,15 +85,14 @@ function findPostInCache(
   return undefined;
 }
 
-function logCacheMutation(
-  action: "setQueryData" | "invalidateQueries",
-  key: readonly unknown[],
-) {
-  if (!__DEV__) return;
-  console.log(`[usePostLikeState] ${action}: ${JSON.stringify(key)}`);
+// Acquired synchronously before mutate(), so rapid clicks and separate mounted
+// feed/detail hooks cannot send duplicate toggles before React renders pending.
+const pendingLikes = new WeakMap<QueryClient, Set<string>>();
+interface LikeOperation {
+  action: "like" | "unlike";
+  isCurrent: () => boolean;
+  finish: () => void;
 }
-
-// Query keys for like state
 
 /**
  * Central hook for post like state
@@ -137,194 +136,114 @@ export function usePostLikeState(
     enabled: !!viewerId && !!normalizedPostId,
   });
 
-  // Like mutation with optimistic updates
+  const mutationKey = ["likePost", normalizedPostId, viewerId];
+  const isPending = useIsMutating({ mutationKey }) > 0;
+
   const likeMutation = useMutation({
-    mutationKey: ["likePost", normalizedPostId],
-    mutationFn: async ({ action }: { action: "like" | "unlike" }) => {
-      if (action === "like") {
-        return likesApi.likePost(normalizedPostId);
-      } else {
-        return likesApi.unlikePost(normalizedPostId);
-      }
+    mutationKey,
+    // toggle-like is not idempotent. Never inherit a global automatic retry.
+    retry: false,
+    mutationFn: async (operation: LikeOperation) => {
+      if (!operation.isCurrent()) throw new Error("Session changed while liking post");
+      return operation.action === "like"
+        ? likesApi.likePost(normalizedPostId, operation.isCurrent)
+        : likesApi.unlikePost(normalizedPostId, operation.isCurrent);
     },
-    onMutate: async ({ action }) => {
-      // Cancel outgoing refetches
-      await queryClient.cancelQueries({ queryKey: likeStateQueryKey });
-      await queryClient.cancelQueries({ queryKey: postKeys.feedInfiniteAll() });
-
-      // Snapshot previous state for rollback
-      const previousLikeState =
-        queryClient.getQueryData<LikeState>(likeStateQueryKey);
-      const prevFeedData = queryClient.getQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled));
-      const prevDetailData = queryClient.getQueryData([
-        "posts",
-        "detail",
-        normalizedPostId,
+    onMutate: async (operation: LikeOperation) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: likeStateQueryKey }),
+        queryClient.cancelQueries({ queryKey: postKeys.feedInfiniteAll() }),
+        queryClient.cancelQueries({ queryKey: postKeys.feed(), exact: true }),
+        queryClient.cancelQueries({ queryKey: postKeys.detail(normalizedPostId) }),
+        queryClient.cancelQueries({ queryKey: ["profilePosts"] }),
+        queryClient.cancelQueries({ queryKey: ["likedPosts", viewerId] }),
       ]);
-      const previousLikedActivity = viewerId
-        ? queryClient.getQueryData(activityKeys.liked(viewerId))
-        : undefined;
-
-      // Compute optimistic values
-      const newHasLiked = action === "like";
-      const newLikes =
-        action === "like"
-          ? (previousLikeState?.likes || 0) + 1
-          : Math.max((previousLikeState?.likes || 0) - 1, 0);
-
-      // 1. Update likeState cache
-      queryClient.setQueryData(likeStateQueryKey, {
-        hasLiked: newHasLiked,
-        likes: newLikes,
-      });
-
-      // 2. Patch ALL post caches via centralized utility
-      updatePostLikeEverywhere(
-        queryClient,
-        normalizedPostId,
-        newHasLiked,
-        newLikes,
-      );
-
-      if (viewerId && action === "like") {
-        const post = findPostInCache(queryClient, normalizedPostId);
-        const createdAt = new Date().toISOString();
-        queryClient.setQueryData(
-          activityKeys.liked(viewerId),
-          (old: any[] | undefined) => [
-            {
-              id: `optimistic-liked-post-${normalizedPostId}-${createdAt}`,
-              entityType: "post",
-              entityId: normalizedPostId,
-              actor: {
-                id: post?.author?.id || "",
-                username: post?.author?.username || "user",
-                avatar: post?.author?.avatar || "",
-              },
-              title: truncateLikedTitle(post?.caption, "A post you liked"),
-              previewImage: resolveLikedPreviewImage(post),
-              videoUrl: resolveVideoUrl(post),
-              timeAgo: "Just now",
-              createdAt,
-            },
-            ...(old || []),
-          ],
-        );
-      }
-
-      return {
-        previousLikeState,
-        prevFeedData,
-        prevDetailData,
-        previousLikedActivity,
+      if (!operation.isCurrent()) throw new Error("Session changed while liking post");
+      const previousLikeState = queryClient.getQueryData<LikeState>(likeStateQueryKey) || {
+        hasLiked: initialHasLiked, likes: initialLikesCount,
       };
-    },
-    onError: (err, _variables, context) => {
-      // Rollback all caches
-      if (context?.previousLikeState) {
-        queryClient.setQueryData(likeStateQueryKey, context.previousLikeState);
-      }
-      if (context?.prevFeedData) {
-        queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), context.prevFeedData);
-      }
-      if (context?.prevDetailData) {
-        queryClient.setQueryData(
-          ["posts", "detail", normalizedPostId],
-          context.prevDetailData,
-        );
-      }
-      if (viewerId && context?.previousLikedActivity !== undefined) {
-        queryClient.setQueryData(
-          activityKeys.liked(viewerId),
-          context.previousLikedActivity,
-        );
-      }
-      // Classify error and show user-safe toast
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      const isNetwork = msg.includes("network") || msg.includes("fetch");
-      const isAuth = msg.includes("unauthorized") || msg.includes("session");
-      const toastMsg = isNetwork
-        ? "Check your connection and try again"
-        : isAuth
-          ? "Please sign in again"
-          : "Something went wrong";
-      useUIStore.getState().showToast("error", "Like failed", toastMsg);
-      if (__DEV__) {
-        console.error(
-          `[usePostLikeState] Mutation error for ${normalizedPostId}:`,
-          msg,
-        );
-      }
-    },
-    onSuccess: (data) => {
-      // Sync ALL caches with server-authoritative data
-      const serverLiked = data.liked;
-      const serverLikes = data.likes;
+      const newHasLiked = operation.action === "like";
+      const newLikes = Math.max(0, previousLikeState.likes +
+        (newHasLiked === previousLikeState.hasLiked ? 0 : newHasLiked ? 1 : -1));
+      queryClient.setQueryData(likeStateQueryKey, { hasLiked: newHasLiked, likes: newLikes });
+      updatePostLikeEverywhere(queryClient, normalizedPostId, newHasLiked, newLikes);
 
-      // 1. Update likeState cache (this viewer)
-      queryClient.setQueryData<LikeState>(likeStateQueryKey, {
-        hasLiked: serverLiked,
-        likes: serverLikes,
-      });
-
-      // 2. Update ALL likeState caches for this post (all viewers)
-      queryClient.setQueriesData<LikeState>(
-        {
-          predicate: (query) => {
-            const key = query.queryKey;
-            return (
-              Array.isArray(key) &&
-              key[0] === "likeState" &&
-              key[2] === normalizedPostId
-            );
+      const optimisticActivityId = `optimistic-liked-post-${normalizedPostId}-${Date.now()}`;
+      if (operation.action === "like") {
+        const post = findPostInCache(queryClient, normalizedPostId);
+        queryClient.setQueryData(activityKeys.liked(viewerId), (old: any[] | undefined) => [
+          {
+            id: optimisticActivityId,
+            entityType: "post",
+            entityId: normalizedPostId,
+            actor: { id: post?.author?.id || "", username: post?.author?.username || "user", avatar: post?.author?.avatar || "" },
+            title: truncateLikedTitle(post?.caption, "A post you liked"),
+            previewImage: resolveLikedPreviewImage(post),
+            videoUrl: resolveVideoUrl(post),
+            timeAgo: "Just now",
+            createdAt: new Date().toISOString(),
           },
-        },
-        { hasLiked: serverLiked, likes: serverLikes },
-      );
-
-      // 3. Patch ALL post caches via centralized utility
-      updatePostLikeEverywhere(
-        queryClient,
-        normalizedPostId,
-        serverLiked,
-        serverLikes,
-      );
-
-      // 4. Invalidate likers list so LikesSheet shows correct data
-      queryClient.invalidateQueries({
-        queryKey: postLikersKeys.forPost(normalizedPostId),
-      });
-      if (viewerId) {
-        queryClient.invalidateQueries({
-          queryKey: activityKeys.liked(viewerId),
-        });
+          ...(old || []),
+        ]);
       }
+      return { previousLikeState, optimisticActivityId };
     },
+    onError: (err, operation, context) => {
+      if (!operation.isCurrent()) return;
+      if (context?.previousLikeState) {
+        const previous = context.previousLikeState;
+        queryClient.setQueryData(likeStateQueryKey, previous);
+        // Roll back just this post's like fields, not snapshots of whole feeds
+        // that could erase a newer comment or another post's successful like.
+        updatePostLikeEverywhere(queryClient, normalizedPostId, previous.hasLiked, previous.likes);
+        queryClient.setQueryData(activityKeys.liked(viewerId), (old: any[] | undefined) =>
+          old?.filter((item) => item.id !== context.optimisticActivityId));
+      }
+      const msg = err instanceof Error ? err.message.toLowerCase() : "unknown error";
+      const toastMsg = msg.includes("network") || msg.includes("fetch")
+        ? "Check your connection and try again"
+        : msg.includes("unauthorized") || msg.includes("session")
+          ? "Please sign in again" : "Something went wrong";
+      useUIStore.getState().showToast("error", "Like failed", toastMsg);
+    },
+    onSuccess: (data, operation) => {
+      if (!operation.isCurrent()) return;
+      // hasLiked belongs to this viewer. Never copy it into other accounts.
+      queryClient.setQueryData<LikeState>(likeStateQueryKey, { hasLiked: data.liked, likes: data.likes });
+      updatePostLikeEverywhere(queryClient, normalizedPostId, data.liked, data.likes);
+      queryClient.invalidateQueries({ queryKey: postLikersKeys.forPost(normalizedPostId) });
+      queryClient.invalidateQueries({ queryKey: activityKeys.liked(viewerId) });
+    },
+    onSettled: (_data, _error, operation) => operation.finish(),
   });
 
-  // Like action - only if not already liked
-  const like = useCallback(() => {
-    if (!normalizedPostId || likeState?.hasLiked || likeMutation.isPending)
-      return;
-    likeMutation.mutate({ action: "like" });
-  }, [likeState?.hasLiked, likeMutation, normalizedPostId]);
-
-  // Unlike action - only if currently liked
-  const unlike = useCallback(() => {
-    if (!normalizedPostId || !likeState?.hasLiked || likeMutation.isPending)
-      return;
-    likeMutation.mutate({ action: "unlike" });
-  }, [likeState?.hasLiked, likeMutation, normalizedPostId]);
-
-  // Toggle action for convenience
-  const toggle = useCallback(() => {
-    if (likeMutation.isPending) return;
-    if (likeState?.hasLiked) {
-      unlike();
-    } else {
-      like();
-    }
-  }, [likeState?.hasLiked, likeMutation.isPending, like, unlike]);
+  const requestLike = useCallback((requested?: "like" | "unlike") => {
+    if (!normalizedPostId || !viewerId || useAuthStore.getState().user?.id !== viewerId) return;
+    let pending = pendingLikes.get(queryClient);
+    if (!pending) { pending = new Set(); pendingLikes.set(queryClient, pending); }
+    const lockKey = JSON.stringify([viewerId, normalizedPostId]);
+    if (pending.has(lockKey) || queryClient.isMutating({ mutationKey: ["likePost", normalizedPostId, viewerId] })) return;
+    // Read current cache, not a closure from the last render.
+    const current = queryClient.getQueryData<LikeState>(likeStateQueryKey) || likeState;
+    const action = requested || (current?.hasLiked ? "unlike" : "like");
+    if ((action === "like") === current?.hasLiked) return;
+    pending.add(lockKey);
+    const locks = pending;
+    markPostLikeMutation(queryClient, normalizedPostId);
+    let identityChanged = false;
+    const unsubscribe = useAuthStore.subscribe((state) => {
+      if (state.user?.id !== viewerId) identityChanged = true;
+    });
+    const operation: LikeOperation = {
+      action,
+      isCurrent: () => !identityChanged && useAuthStore.getState().user?.id === viewerId,
+      finish: () => { unsubscribe(); locks.delete(lockKey); markPostLikeMutation(queryClient, normalizedPostId); },
+    };
+    likeMutation.mutate(operation);
+  }, [queryClient, viewerId, normalizedPostId, likeStateQueryKey, likeState, likeMutation]);
+  const like = useCallback(() => requestLike("like"), [requestLike]);
+  const unlike = useCallback(() => requestLike("unlike"), [requestLike]);
+  const toggle = useCallback(() => requestLike(), [requestLike]);
 
   // CRITICAL: Prioritize cached data over initial props
   // This ensures likes sync correctly on back navigation
@@ -339,7 +258,7 @@ export function usePostLikeState(
     like,
     unlike,
     toggle,
-    isPending: likeMutation.isPending,
+    isPending,
   };
 }
 
@@ -347,7 +266,7 @@ export function usePostLikeState(
  * Initialize like state for a post from server data
  * Call this when post data is fetched to seed the cache
  *
- * CRITICAL: Only seeds if no existing cache entry — never overwrites optimistic updates
+ * Server snapshots may refresh the cache, but never overwrite pending mutations
  */
 export function seedLikeState(
   queryClient: ReturnType<typeof useQueryClient>,

@@ -15,6 +15,7 @@ const { build } = require(
 );
 const ROOT = path.resolve(__dirname, "..");
 const fixture = {
+  "@dvnt/ui/post-engagement-counts": `export {PostEngagementCounts} from "${ROOT}/packages/ui/src/social/PostEngagementCounts.web.tsx";`,
   // Comment GIF search is a network boundary; keep the real composer mounted.
   "@dvnt/app/features/stickers/api/klipy": `export const klipySearch=async()=>({results:[],source:"klipy"});`,
   "social-fixture": `import {create} from 'zustand';
@@ -182,6 +183,21 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
       ),
       "count visible without hover",
     );
+    assert.equal(button("Like").parentElement, button("View 0 likes").parentElement, "heart and likes count are a single inline pair");
+    assert.ok(button("View 0 comments").querySelector("svg.lucide-message-circle"), "comment icon visible at zero");
+    assert.equal(button("View 0 comments").textContent, "0");
+    assert.ok(!button("View 0 comments").closest("a"), "comments action stays outside the card link");
+    await flush(() => button("View 0 comments").click());
+    assert.deepEqual(f.state.navigations.splice(0), ["/feed/post/11#comments"], "comment action goes directly to the post comments");
+    f.post.comments = [{ id: "c1", replies: [{ id: "c2" }] }];
+    await flush(() => app.render());
+    assert.equal(button("View 2 comments").textContent, "2", "tree payload includes replies");
+    f.post.comments = 3;
+    await flush(() => app.render());
+    assert.equal(button("View 3 comments").textContent, "3", "optimistic post cache counts render immediately");
+    f.post.comments = 0;
+    await flush(() => app.render());
+    assert.equal(button("View 0 comments").textContent, "0", "rollback/removal preserves the zero count");
     await flush(() => button("Like").click());
     assert.equal(button("View 1 like").textContent, "1");
     await flush(() => button("View 1 like").click());
@@ -671,6 +687,9 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
     f.state.deferGate = false;
     await setConversations(directConversations);
     await flush(() => app.render(true));
+    assert.equal(button("Unlike").parentElement, button("View 1 like").parentElement, "detail reuses the inline pair");
+    assert.ok(document.getElementById("comments"), "feed comments fragment has a real target");
+    assert.equal(button("View 0 comments").textContent, "0");
     assert.ok(button("View 1 like"));
     assert.ok(button("Reshare post"));
     await flush(() => button("More options").click());

@@ -31,7 +31,7 @@ import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
 import { CardLink } from "@dvnt/app/components/ui/card-link.web";
 import { useScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
-import { Heart, Bookmark, Play, Grid3x3, Plus, Send } from "lucide-react";
+import { Bookmark, Play, Grid3x3, Plus, Send } from "lucide-react";
 import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
 import { useEvents } from "@dvnt/app/lib/hooks/use-events";
 // Event cards rendered in the feed on mobile and never on web, because this
@@ -52,6 +52,8 @@ import {
 import { feedEventCardHeight, feedEventCardMeasurementKey } from "@dvnt/app/components/event/feed-event-card-shape";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
 import { useFeedRealtime } from "@dvnt/app/lib/hooks/use-feed-realtime";
+import { PostEngagementCounts } from "@dvnt/ui/post-engagement-counts";
+import { getPostCommentCount } from "@dvnt/app/lib/posts/engagement-counts";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { useToggleBookmark } from "@dvnt/app/lib/hooks/use-bookmarks";
 import { useBookmarkStore } from "@dvnt/app/lib/stores/bookmark-store";
@@ -175,11 +177,6 @@ function coverFor(post: Post): string {
   return "";
 }
 
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
 
 export function HomeScreen() {
   const router = useRouter();
@@ -476,6 +473,7 @@ function MasonryCell({
   post: Post;
   fallbackHeight: number;
 }) {
+  const router = useRouter();
   const media = post.media?.[0];
   const isVideo = media?.type === "video";
   const isCarousel = (post.media?.length ?? 0) > 1;
@@ -493,6 +491,7 @@ function MasonryCell({
     likes,
     hasLiked,
     toggle: toggleLike,
+    isPending: isLikePending,
   } = usePostLikeState(post.id, post.likes || 0, post.viewerHasLiked || false);
   const bookmarkedPosts = useBookmarkStore((s) => s.bookmarkedPosts);
   const isBookmarked = bookmarkedPosts.includes(post.id);
@@ -618,24 +617,19 @@ function MasonryCell({
           aria-hidden
           className="absolute inset-x-0 bottom-0 h-16 bg-linear-to-t from-black/70 to-transparent"
         />
-        <div className="relative flex items-center justify-between px-1">
-          <button
-            type="button"
-            onClick={toggleLike}
-            className="pointer-events-auto flex min-h-11 min-w-8 items-center justify-center gap-1 rounded-lg px-2 text-white text-xs font-medium focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
-            aria-label={hasLiked ? "Unlike" : "Like"}
-            aria-pressed={hasLiked}
-          >
-            <Heart
-              size={14}
-              color={hasLiked ? "#ef4444" : "#fff"}
-              fill={hasLiked ? "#ef4444" : "transparent"}
-            />
-          </button>
-          <button type="button" onClick={() => openLikes(post.id)} onMouseEnter={() => prefetchLikes(post.id)} onFocus={() => prefetchLikes(post.id)} aria-label={`View ${likes} ${likes === 1 ? "like" : "likes"}`} className="pointer-events-auto min-h-11 min-w-6 text-white text-xs font-medium hover:underline">
-            {formatCount(likes)}
-          </button>
-          <button type="button" onClick={() => openShare(sharedPostContext(post))} aria-label="Reshare post" className="pointer-events-auto flex min-h-11 min-w-8 items-center justify-center rounded-lg text-white focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">
+        <div className="relative flex flex-wrap items-center justify-between gap-x-1 px-1">
+          <PostEngagementCounts
+            compact
+            likes={likes}
+            hasLiked={hasLiked}
+            comments={getPostCommentCount(post.comments)}
+            onLike={toggleLike}
+            disabled={isLikePending}
+            onViewLikes={() => openLikes(post.id)}
+            onPrefetchLikes={() => prefetchLikes(post.id)}
+            onComments={() => router.push(`/feed/post/${post.id}#comments`)}
+          />
+          <button type="button" onClick={() => openShare(sharedPostContext(post))} aria-label="Reshare post" className="pointer-events-auto flex min-h-11 min-w-6 items-center justify-center rounded-lg text-white focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">
             <Send size={14} />
           </button>
           <button
@@ -643,7 +637,7 @@ function MasonryCell({
             onClick={() =>
               toggleBookmark.mutate({ postId: post.id, isBookmarked })
             }
-            className="pointer-events-auto flex min-h-11 min-w-8 items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
+            className="pointer-events-auto flex min-h-11 min-w-6 items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
             aria-label="Bookmark"
             aria-pressed={isBookmarked}
           >
