@@ -24,6 +24,8 @@ on:
       - 'scripts/test-lynk-atomic-admission.cjs'
       - 'scripts/test-lynk-room-browser.cjs'
       - 'scripts/test-lynk-native-capture.cjs'
+      - 'scripts/test-lynk-web-capture-sdk.cjs'
+      - 'scripts/test-lynk-web-capture-ui.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   push:
     branches: [master]
@@ -46,6 +48,10 @@ on:
       - 'apps/mobile/supabase/migrations/*lynk_atomic_member_admission.sql'
       - 'scripts/test-subscription-owner-rls.cjs'
       - 'scripts/test-lynk-atomic-admission.cjs'
+      - 'scripts/test-lynk-native-capture.cjs'
+      - 'scripts/test-lynk-web-capture-sdk.cjs'
+      - 'scripts/test-lynk-web-capture-ui.cjs'
+      - '.github/workflows/lynk-room-regressions.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -58,7 +64,7 @@ jobs:
         with:
           node-version: 24
       - name: Install isolated fixture tools
-        run: npm install --prefix "$RUNNER_TEMP/lynk-tests" --no-package-lock --no-save typescript@5.9.3 esbuild@0.25.11 jsdom@26.1.0 react@19.2.3 react-dom@19.2.3 zod@3.22.4 @electric-sql/pglite@0.3.14 zustand@5.0.14
+        run: npm install --legacy-peer-deps --prefix "$RUNNER_TEMP/lynk-tests" --no-package-lock --no-save typescript@5.9.3 esbuild@0.25.11 jsdom@26.1.0 react@19.2.3 react-dom@19.2.3 zod@3.22.4 @electric-sql/pglite@0.3.14 zustand@5.0.14 @moq/publish@0.5.2 @moq/signals@0.2.5
       - name: Test multi-user chat, media, room end and subscriptions
         env:
           NODE_PATH: ${{ runner.temp }}/lynk-tests/node_modules
@@ -67,5 +73,7 @@ jobs:
           node --test scripts/test-subscription-owner-rls.cjs scripts/test-lynk-atomic-admission.cjs
           node --test apps/mobile/supabase/functions/lynk-livestream-token/index.test.cjs
           node scripts/test-lynk-room-browser.cjs --dom
+          node scripts/test-lynk-web-capture-ui.cjs
           node scripts/test-lynk-native-capture.cjs
+          node scripts/test-lynk-web-capture-sdk.cjs
           node scripts/verify-lynk.mjs

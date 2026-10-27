@@ -48,12 +48,6 @@ import type { LynkBroadcastBase } from "./types";
 export interface UseLynkBroadcastNativeResult extends LynkBroadcastBase {
   /** Local camera track — bind to `<PublisherView camera={...} />` for preview. */
   cameraTrack: CameraTrack;
-  /** Local device failures are recoverable without disconnecting reception. */
-  cameraError: string | null;
-  microphoneError: string | null;
-  captureError: string | null;
-  /** Explicit user retry only; ordinary desired-state reconciliation never retries. */
-  retryCapture: () => void;
   /** Each co-publisher carries the native player its tile renders. */
   coPublishers: NativeLynkPublisher[];
 }

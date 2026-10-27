@@ -62,6 +62,7 @@ export function useLynkBroadcast(
   const cameraRef = useRef<Publish.Source.Camera | null>(null);
   const micRef = useRef<Publish.Source.Microphone | null>(null);
   const broadcastRef = useRef<{ close(): void } | null>(null);
+  const captureLifetimeActive = useRef(false);
 
   const [isLive, setIsLive] = useState(false);
   const [cameraEnabled, setCameraEnabledState] = useState(true);
@@ -97,6 +98,7 @@ export function useLynkBroadcast(
 
   useEffect(() => {
     if (!isBrowser || !roomId) return;
+    captureLifetimeActive.current = true;
     urlSignal.current.set(undefined);
     const reload = new Moq.Connection({
       url: urlSignal.current,
@@ -128,6 +130,10 @@ export function useLynkBroadcast(
     return () => {
       broadcastRef.current?.close();
       broadcastRef.current = null;
+      captureLifetimeActive.current = false;
+      // Explicit retries may have replaced either source during this lifetime.
+      cameraRef.current?.close();
+      micRef.current?.close();
       camera.close();
       mic.close();
       reload.close();
@@ -152,17 +158,47 @@ export function useLynkBroadcast(
   const connectionError = useSignalValue(
     reload?.error ?? new Signal<Error | undefined>(undefined),
   );
-  const cameraError = useSignalValue(
+  const cameraFailure = useSignalValue(
     camera?.out.error ?? new Signal<Error | undefined>(undefined),
   );
-  const microphoneError = useSignalValue(
+  const microphoneFailure = useSignalValue(
     mic?.out.error ?? new Signal<Error | undefined>(undefined),
   );
-  // Rejected credentials and terminal capture failures do not keep retrying.
-  // Surface them instead of claiming a live publication with no media.
-  const error = tokenError ?? connectionError?.message
-    ?? (cameraEnabled ? cameraError?.message : undefined)
-    ?? (micEnabled ? microphoneError?.message : undefined) ?? null;
+  // A local permission/device failure does not disconnect reception. Fatal
+  // auth/transport errors retain their existing room recovery path separately.
+  const error = tokenError ?? connectionError?.message ?? null;
+  const cameraError = canPublish && !ended && cameraEnabled ? cameraFailure?.message ?? null : null;
+  const microphoneError = canPublish && !ended && micEnabled ? microphoneFailure?.message ?? null : null;
+  const captureError = microphoneError ?? cameraError;
+  const captureIntent = useRef({ devices, canPublish, ended, cameraEnabled, micEnabled });
+  captureIntent.current = { devices, canPublish, ended, cameraEnabled, micEnabled };
+  const retryCapture = useCallback(() => {
+    const current = captureIntent.current;
+    const previous = current.devices;
+    if (!captureLifetimeActive.current || !previous || current.ended || !current.canPublish) return;
+    if (previous.reload !== reloadRef.current) return;
+    const retryCamera = current.cameraEnabled && cameraRef.current === previous.camera && !!previous.camera.out.error.peek();
+    const retryMic = current.micEnabled && micRef.current === previous.mic && !!previous.mic.out.error.peek();
+    if (!retryCamera && !retryMic) return;
+    // The SDK's terminal retry budget is private. Replacing only the failed
+    // source guarantees a fresh budget (a synchronous off/on signal can coalesce).
+    // Start disabled: even a mute/role change batched with this click wins before
+    // the enable effects run. Never recreate the receiver or healthy device.
+    const next = { ...previous };
+    if (retryCamera) {
+      previous.camera.close();
+      next.cameraOn = new Signal(false);
+      next.camera = new Publish.Source.Camera({ enabled: next.cameraOn });
+      cameraRef.current = next.camera;
+    }
+    if (retryMic) {
+      previous.mic.close();
+      next.micOn = new Signal(false);
+      next.mic = new Publish.Source.Microphone({ enabled: next.micOn });
+      micRef.current = next.mic;
+    }
+    setDevices(next);
+  }, []);
   // Source outputs contain media tracks, while capture/encoders own frames.
   const cameraMedia = useSignalValue(
     camera?.out.source ?? new Signal<Publish.Source.Media | undefined>(undefined),
@@ -263,6 +299,7 @@ export function useLynkBroadcast(
   }, []);
 
   const end = useCallback(() => {
+    captureLifetimeActive.current = false;
     setEnded(true);
     setIsLive(false);
     broadcastRef.current?.close();
@@ -317,6 +354,10 @@ export function useLynkBroadcast(
     localAudioStream,
     cameraEnabled,
     micEnabled,
+    cameraError,
+    microphoneError,
+    captureError,
+    retryCapture,
     setCameraEnabled,
     setMicEnabled,
     coPublishers,

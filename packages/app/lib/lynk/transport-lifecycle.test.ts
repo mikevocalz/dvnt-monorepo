@@ -369,7 +369,7 @@ test("terminal relay errors surface and recover when fresh credentials clear the
   h.unmount();
 });
 
-test("publisher exposes terminal source and transport errors rather than false live state", async () => {
+test("web publisher keeps recoverable capture failures separate from fatal transport errors", async () => {
   reset();
   const h = new Hooks();
   const view = h.render(() => useLynkBroadcast("room", true));
@@ -377,12 +377,14 @@ test("publisher exposes terminal source and transport errors rather than false l
   const camera = resources.devices[0];
   const microphone = resources.devices[1];
   camera.out.error.set(new Error("Camera permission denied")); h.render();
-  assert.equal(h.value.state, "error");
-  assert.equal(h.value.error, "Camera permission denied");
+  assert.equal(h.value.state, "live");
+  assert.equal(h.value.error, null);
+  assert.equal(h.value.captureError, "Camera permission denied");
   h.value.setCameraEnabled(false); h.flush();
-  assert.equal(h.value.error, null, "disabled camera's old failure is not fatal");
+  assert.equal(h.value.captureError, null, "disabled camera's old failure is not active");
   microphone.out.error.set(new Error("Microphone unavailable")); h.render();
-  assert.equal(h.value.error, "Microphone unavailable");
+  assert.equal(h.value.captureError, "Microphone unavailable");
+  assert.equal(h.value.error, null);
   microphone.out.error.set(undefined); h.render();
   assert.equal(h.value.state, "live");
   const connection = resources.connections.at(-1);
@@ -450,5 +452,43 @@ test("native capture retry respects mute, role loss, disabled devices and termin
   assert.equal(resources.microphoneOptions.at(-1).enabled, false);
   assert.equal(h.value.captureError, null);
   assert.equal(h.value.state, "ended");
+  h.unmount();
+});
+
+
+test("web explicit retry replaces only failed capture, coalesces clicks and respects room teardown", async () => {
+  reset();
+  const h = new Hooks();
+  let permitted = true;
+  h.render(() => useLynkBroadcast("room", permitted));
+  await h.value.goLive(); h.flush();
+  const camera = resources.devices[0];
+  const microphone = resources.devices[1];
+  const receiver = resources.connections[0];
+  microphone.out.error.set(new Error("Microphone permission denied")); h.render();
+  const devicesBeforeRetry = resources.devices.length;
+  h.value.setMicEnabled(true); h.flush();
+  assert.equal(resources.devices.length, devicesBeforeRetry, "normal reconciliation does not retry");
+  h.value.retryCapture(); h.value.retryCapture(); h.flush();
+  assert.equal(resources.devices.length, devicesBeforeRetry + 1);
+  assert.equal(microphone.closed, true);
+  assert.equal(camera.closed, false);
+  assert.equal(receiver.closed, false);
+  const replacement = resources.devices.at(-1);
+  assert.equal(replacement.in.enabled.peek(), true);
+  replacement.out.error.set(new Error("Microphone permission denied")); h.render();
+  h.value.retryCapture(); h.value.setMicEnabled(false); h.flush();
+  const mutedReplacement = resources.devices.at(-1);
+  assert.equal(mutedReplacement.in.enabled.peek(), false, "same-turn host mute wins before capture enables");
+  h.value.setMicEnabled(true); h.flush();
+  mutedReplacement.out.error.set(new Error("Microphone permission denied")); h.render();
+  const staleRetry = h.value.retryCapture;
+  permitted = false; h.render();
+  staleRetry(); h.flush();
+  assert.equal(resources.devices.at(-1), mutedReplacement, "stale callback cannot bypass role loss");
+  permitted = true; h.render();
+  h.value.end(); staleRetry(); h.flush();
+  assert.equal(resources.devices.at(-1), mutedReplacement, "end disables retry synchronously");
+  assert.ok(resources.devices.every((device) => device.closed));
   h.unmount();
 });
