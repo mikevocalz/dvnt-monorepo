@@ -8,7 +8,7 @@
  * both: how many tickets exist, and who the email actually reached.
  *
  * A phone number gets a single-use claim link that DVNT does not send. The
- * result lists one row per phone and opens the host's own Messages composer
+ * result lists one row per ticket and opens the host's own Messages composer
  * for each, one person at a time.
  */
 
@@ -40,6 +40,9 @@ import { bulkCompTickets, type CompResult } from "@dvnt/app/lib/api/privileged";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
 import {
+  COMP_QUANTITIES,
+  type CompQuantity,
+  compClaimLinkLabel,
   canSubmitComp,
   parseCompRecipients,
 } from "@dvnt/app/lib/tickets/comp-recipients";
@@ -76,6 +79,7 @@ export function CompTicketsModal({
 }: Props) {
   const showToast = useUIStore((s) => s.showToast);
   const [tiers, setTiers] = useState<Tier[] | null>(null);
+  const [quantity, setQuantity] = useState<CompQuantity>(1);
   const [tierId, setTierId] = useState<string | null>(null);
   const [recipientsRaw, setRecipientsRaw] = useState("");
   const [note, setNote] = useState("");
@@ -90,6 +94,7 @@ export function CompTicketsModal({
     setResult(null);
     setTiers(null);
     setTierId(null);
+    setQuantity(1);
     setRecipientsRaw("");
     setNote("");
     resetClaimLinks();
@@ -117,7 +122,7 @@ export function CompTicketsModal({
     [recipientsRaw],
   );
   const parsed = preview.entries;
-  const canSend = canSubmitComp({ tierId, preview, sending });
+  const canSend = canSubmitComp({ tierId, preview, sending, quantity });
 
   const claimBusy = useCompClaimSendStore((s) => s.active !== null);
   const handleClose = useCallback(() => {
@@ -159,7 +164,7 @@ export function CompTicketsModal({
     if (!canSend) return;
     setSending(true);
     try {
-      const res = await bulkCompTickets(eventId, tierId!, parsed, note.trim() || undefined);
+      const res = await bulkCompTickets(eventId, tierId!, parsed, note.trim() || undefined, quantity);
       setResult(res);
       loadClaimLinks(res.claim_links ?? [], eventTitle);
       onSuccess?.(res);
@@ -197,7 +202,7 @@ export function CompTicketsModal({
     } finally {
       setSending(false);
     }
-  }, [canSend, tierId, parsed, eventId, eventTitle, note, onSuccess, showToast, loadClaimLinks]);
+  }, [canSend, tierId, quantity, parsed, eventId, eventTitle, note, onSuccess, showToast, loadClaimLinks]);
 
   const noTiers = tiers != null && tiers.length === 0;
 
@@ -370,6 +375,26 @@ export function CompTicketsModal({
                 })
               )}
 
+              <Text style={styles.sectionLabel}>TOTAL TICKETS PER RECIPIENT</Text>
+              <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16 }}>
+                {COMP_QUANTITIES.map((value) => (
+                  <Pressable
+                    key={value}
+                    onPress={() => setQuantity(value)}
+                    disabled={sending}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${value} ticket${value === 1 ? "" : "s"} per recipient`}
+                    accessibilityState={{ selected: quantity === value, disabled: sending }}
+                    style={[styles.quantityBtn, quantity === value && styles.quantityBtnSelected, sending && { opacity: 0.4 }]}
+                  >
+                    <Text style={styles.tierName}>{value}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.helper}>
+                Up to 3 per recipient in this tier. Existing tickets count toward this total; sending again only adds any missing tickets. Active, unused tickets can be transferred from the owner’s DVNT account.
+              </Text>
+
               <Text style={styles.sectionLabel}>
                 RECIPIENTS · usernames, emails or phone numbers
               </Text>
@@ -412,7 +437,7 @@ export function CompTicketsModal({
                 </Text>
               )}
               <Text style={styles.helper}>
-                A DVNT username lands in that member's wallet and activity. An email with no account gets a guest ticket emailed as a claim link. A phone number gets a claim link you text from your own phone; they sign in to claim it, and the link works once. Separate entries by comma, semicolon, or new line. Up to 100 per batch.
+                A DVNT username lands in that member's wallet and activity. An email with no account gets guest ticket links by email. A phone number gets one claim link per ticket that you text from your own phone; they sign in to claim each ticket, and each link works once. Separate entries by comma, semicolon, or new line. Up to 100 per batch.
               </Text>
 
               <Text style={styles.sectionLabel}>NOTE (optional)</Text>
@@ -447,8 +472,8 @@ export function CompTicketsModal({
                 <>
                   <Gift size={16} color="#000" />
                   <Text style={styles.sendBtnText}>
-                    Comp {parsed.length || ""} ticket
-                    {parsed.length === 1 ? "" : "s"}
+                    Comp up to {parsed.length * quantity} ticket
+                    {parsed.length * quantity === 1 ? "" : "s"}
                   </Text>
                 </>
               )}
@@ -522,6 +547,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  quantityBtn: {
+    minWidth: 48,
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 12,
+  },
+  quantityBtnSelected: { borderColor: "#3FDCFF", backgroundColor: "rgba(63,220,255,0.10)" },
   inputWrap: {
     marginHorizontal: 16,
     padding: 12,
@@ -665,7 +700,7 @@ const STATUS_LABEL: Record<ClaimSendStatus, string> = {
 };
 
 /**
- * One row per phone. Every row is its own link, so "Text all" opens one
+ * One row per ticket. Every row is its own link, so "Text all" opens one
  * composer per person in turn and stops if the host cancels one. No group
  * text: the first person to tap a shared link would take everyone's ticket.
  */
@@ -686,16 +721,17 @@ function ClaimLinksSection() {
       <Text style={styles.resultLine}>Text the claim links</Text>
       <Text style={[styles.skipLine, { marginBottom: 6 }]}>
         Each link works once and is sent from your number. Comping the same
-        number again replaces its link.
+        number again replaces its unclaimed links.
       </Text>
       {links.map((link) => {
         const status = statuses[link.ticket_id] ?? "pending";
         const busy = active === link.ticket_id;
+        const label = compClaimLinkLabel(links, link);
         return (
           <View key={link.ticket_id} style={styles.linkRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.linkWho} numberOfLines={1} selectable>
-                {link.recipient}
+                {label}
               </Text>
               <Text
                 style={[
@@ -713,7 +749,7 @@ function ClaimLinksSection() {
               disabled={active !== null}
               style={[styles.linkIconBtn, active !== null && { opacity: 0.4 }]}
               accessibilityRole="button"
-              accessibilityLabel={`Share link for ${link.recipient}`}
+              accessibilityLabel={`Share link for ${label}`}
               hitSlop={6}
             >
               <Share2 size={16} color="#fff" />
@@ -723,7 +759,7 @@ function ClaimLinksSection() {
               disabled={active !== null}
               style={[styles.linkBtn, active !== null && !busy && { opacity: 0.4 }]}
               accessibilityRole="button"
-              accessibilityLabel={`Text link to ${link.recipient}`}
+              accessibilityLabel={`Text link to ${label}`}
             >
               {busy ? (
                 <ActivityIndicator color="#000" size="small" />
@@ -746,7 +782,7 @@ function ClaimLinksSection() {
         >
           <MessageSquare size={16} color="#000" />
           <Text style={styles.sendBtnText}>
-            Text {remaining} {remaining === 1 ? "person" : "people"}, one at a time
+            Text {remaining} link{remaining === 1 ? "" : "s"}, one at a time
           </Text>
         </Pressable>
       )}

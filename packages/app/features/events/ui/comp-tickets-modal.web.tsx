@@ -9,7 +9,7 @@
  * the project's web `BottomSheet` (portal, scrim, Escape, scroll lock) rather
  * than a second dialog implementation.
  *
- * Form state (tier, recipients, note) lives in the attendees Zustand store,
+ * Form state (tier, quantity, recipients, note) lives in the attendees Zustand store,
  * never useState. Tiers and the comp result are SERVER state and live in
  * TanStack Query — `mutation.data` is the result, `mutation.isPending` is the
  * in-flight flag.
@@ -36,6 +36,8 @@ import { copyShareUrl } from "@dvnt/app/lib/deep-linking/share-link";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
 import {
   MAX_COMP_RECIPIENTS,
+  COMP_QUANTITIES,
+  compClaimLinkLabel,
   canSubmitComp,
   parseCompRecipients,
   summarizeCompResult,
@@ -115,8 +117,8 @@ function ResultPanel({ result }: { result: CompResult }) {
             arrive
           </p>
           <ul className="mt-2 space-y-1">
-            {failed.map((d) => (
-              <li key={d.recipient} className="text-[13px] text-white/60">
+            {failed.map((d, index) => (
+              <li key={`${d.recipient}-${index}`} className="text-[13px] text-white/60">
                 {d.recipient} — {d.error || "not delivered"}
               </li>
             ))}
@@ -177,20 +179,21 @@ function ClaimLinksPanel() {
   return (
     <div className="mt-4 rounded-2xl border border-cyan-300/25 p-4">
       <p className="flex items-center gap-2 text-[13px] font-semibold text-cyan-200">
-        <MessageSquare size={14} /> Text each person their link
+        <MessageSquare size={14} /> Text each ticket’s claim link
       </p>
       <p className="mt-1 text-[13px] text-white/50">
         Each link works once and goes out from your number. Comping the same
-        number again replaces its link.
+        number again replaces its unclaimed links.
       </p>
       <ul className="mt-3 divide-y divide-white/8">
         {links.map((link) => {
           const status = statuses[link.ticket_id] ?? "pending";
+          const label = compClaimLinkLabel(links, link);
           return (
             <li key={link.ticket_id} className="flex items-center gap-2 py-2.5">
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-[14px] font-semibold text-white">
-                  {link.recipient}
+                  {label}
                 </span>
                 <span
                   className={`text-[12px] ${
@@ -203,7 +206,7 @@ function ClaimLinksPanel() {
               </span>
               <button
                 type="button"
-                aria-label={`Copy link for ${link.recipient}`}
+                aria-label={`Copy link for ${label}`}
                 onClick={() => {
                   copyShareUrl(link.url);
                   showToast("success", "Link copied", `Send it to ${link.recipient} only.`);
@@ -214,7 +217,7 @@ function ClaimLinksPanel() {
               </button>
               <button
                 type="button"
-                aria-label={`Share link for ${link.recipient}`}
+                aria-label={`Share link for ${label}`}
                 disabled={active !== null}
                 onClick={() => void share(link.ticket_id)}
                 className="rounded-lg bg-white/8 p-2 text-white hover:bg-white/12 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
@@ -224,6 +227,7 @@ function ClaimLinksPanel() {
               <button
                 type="button"
                 disabled={active !== null}
+                aria-label={`Text link to ${label}`}
                 onClick={() => void text(link.ticket_id)}
                 className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-[13px] font-semibold text-black disabled:opacity-40 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
               >
@@ -248,6 +252,8 @@ export function CompTicketsModal({
   const showToast = useUIStore((s) => s.showToast);
   const loadClaimLinks = useCompClaimSendStore((s) => s.load);
   const resetClaimLinks = useCompClaimSendStore((s) => s.reset);
+  const quantity = useAttendeesStore((s) => s.compQuantity);
+  const setQuantity = useAttendeesStore((s) => s.setCompQuantity);
   const tierId = useAttendeesStore((s) => s.compTierId);
   const setTierId = useAttendeesStore((s) => s.setCompTierId);
   const recipientsRaw = useAttendeesStore((s) => s.compRecipients);
@@ -308,7 +314,7 @@ export function CompTicketsModal({
 
   const mutation = useMutation({
     mutationFn: () =>
-      bulkCompTickets(eventId, tierId!, preview.entries, note.trim() || undefined),
+      bulkCompTickets(eventId, tierId!, preview.entries, note.trim() || undefined, quantity),
     onSuccess: (res) => {
       loadClaimLinks(res.claim_links ?? [], eventTitle);
       onSuccess?.(res);
@@ -346,7 +352,7 @@ export function CompTicketsModal({
 
   const result = mutation.data ?? null;
   const sending = mutation.isPending;
-  const ready = canSubmitComp({ tierId, preview, sending });
+  const ready = canSubmitComp({ tierId, preview, sending, quantity });
 
   // A send in flight owns the sheet — closing mid-request would leave the host
   // with no idea which tickets were issued.
@@ -391,8 +397,8 @@ export function CompTicketsModal({
         )}
         {sending
           ? "Comping…"
-          : `Comp ${preview.entries.length || ""} ticket${
-              preview.entries.length === 1 ? "" : "s"
+          : `Comp up to ${preview.entries.length * quantity} ticket${
+              preview.entries.length * quantity === 1 ? "" : "s"
             }`}
       </button>
     </>
@@ -500,6 +506,32 @@ export function CompTicketsModal({
             )}
           </fieldset>
 
+          <fieldset disabled={sending} className="min-w-0">
+            <legend className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-white/45">
+              Total tickets per recipient
+            </legend>
+            <div className="flex gap-2">
+              {COMP_QUANTITIES.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={sending}
+                  aria-label={`${value} ticket${value === 1 ? "" : "s"} per recipient`}
+                  aria-pressed={quantity === value}
+                  onClick={() => setQuantity(value)}
+                  className={`min-w-12 rounded-xl border px-4 py-2 text-[15px] font-semibold text-white ${quantity === value ? "border-cyan-300 bg-cyan-300/10" : "border-white/12 hover:bg-white/5"} disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60`}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-[13px] leading-relaxed text-white/45">
+              Up to 3 per recipient in this tier. Existing tickets count toward
+              this total; sending again only adds any missing tickets. Active,
+              unused tickets can be transferred from the owner’s DVNT account.
+            </p>
+          </fieldset>
+
           <div>
             <label
               htmlFor="comp-user-search"
@@ -594,9 +626,9 @@ export function CompTicketsModal({
             ) : null}
             <p className="mt-2 text-[13px] leading-relaxed text-white/45">
               A DVNT username lands in that member&apos;s wallet. An email with
-              no account gets a guest ticket emailed as a claim link. A phone
-              number gets a claim link you text from your own phone; they sign
-              in to claim it, and the link works once. Separate entries with a
+              no account gets guest ticket links by email. A phone number gets
+              one claim link per ticket that you text from your own phone; they
+              sign in to claim each ticket, and each link works once. Separate entries with a
               comma, semicolon, or new line.
             </p>
           </div>

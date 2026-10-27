@@ -438,7 +438,7 @@ export interface CompResult {
   /** Phone comps newly minted (a resend rotates an existing one and is not counted). */
   phone_guest_issued?: number;
   /**
-   * One single-use claim link per phone. DVNT does not text these: the host's
+   * One single-use claim link per ticket (up to three per phone). DVNT does not text these: the host's
    * device does, from the host's own number.
    */
   claim_links?: CompClaimLink[];
@@ -461,7 +461,8 @@ export interface CompClaimLink {
 
 /**
  * Bulk-issue free tickets to a list of usernames, emails or phone numbers.
- * Owner or admin only. Server enforces tier capacity + skips dupes. An email
+ * Owner or admin only. Quantity is the desired total (1–3) per recipient/tier,
+ * not an additive count on retry. Server enforces tier capacity + skips dupes. An email
  * with no account gets a guest ticket emailed as a claim link; a phone number
  * gets a claim link in `claim_links` for the host to text.
  */
@@ -470,12 +471,14 @@ export async function bulkCompTickets(
   tierId: string,
   recipients: string[],
   note?: string,
+  quantity = 1,
 ): Promise<CompResult> {
   return invokeEdgeFunction<CompResult>("bulk-comp-tickets", {
     event_id: eventId,
     tier_id: tierId,
     recipients,
     note,
+    quantity,
   });
 }
 

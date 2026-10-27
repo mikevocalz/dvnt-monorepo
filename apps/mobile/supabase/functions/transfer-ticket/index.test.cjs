@@ -16,6 +16,14 @@ function fakeDb(orderAddons, { failAddonId } = {}) {
   const ops = [];
   return {
     ops,
+    async rpc(name, args) {
+      assert.equal(name, 'accept_ticket_transfer_atomic');
+      assert.equal(args.p_transfer_id, 'tr1');
+      assert.equal(args.p_recipient_id, 'recipient');
+      assert.equal(args.p_event_id, 7);
+      ops.push({ table: 'tickets', operation: 'atomic_accept', payload: args });
+      return { data: { ok: true, ticket_id: TICKET.id }, error: null };
+    },
     from(table) {
       const op = { table, operation: 'select', payload: null, eq: {}, in: {} };
       const q = {
@@ -41,7 +49,7 @@ function fakeDb(orderAddons, { failAddonId } = {}) {
           if (table === 'ticket_transfers') return { data: { id: 'tr1' }, error: null };
           return { data: null, error: null };
         },
-        maybeSingle: async () => { ops.push(op); return { data: null, error: null }; },
+        maybeSingle: async () => { ops.push(op); return { data: table === "tickets" && op.operation === "update" ? { id: TICKET.id } : null, error: null }; },
         then: (resolve, reject) => {
           ops.push(op);
           const data = op.operation === 'select' ? q.rows() : null;
