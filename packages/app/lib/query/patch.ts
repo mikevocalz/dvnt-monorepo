@@ -187,7 +187,7 @@ export function updatePostLikeEverywhere(
 
   // Patch every sweet/spicy/infinite variant, not only the obsolete prefix
   // key. Some feed sources use `posts` rather than `data` within each page.
-  queryClient.setQueriesData<any>({ queryKey: ["posts", "feed", "infinite"] }, (old) => {
+  queryClient.setQueriesData<any>({ queryKey: ["posts", "feed", "infinite"] }, (old: any) => {
     if (!old?.pages) return old;
     const patchList = (items: Post[] | undefined) => items?.map((post) =>
       String(post.id) === postId ? patch(post) : post);
