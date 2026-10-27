@@ -23,6 +23,7 @@ on:
       - 'scripts/test-subscription-owner-rls.cjs'
       - 'scripts/test-lynk-atomic-admission.cjs'
       - 'scripts/test-lynk-room-browser.cjs'
+      - 'scripts/test-lynk-native-capture.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   push:
     branches: [master]
@@ -66,4 +67,5 @@ jobs:
           node --test scripts/test-subscription-owner-rls.cjs scripts/test-lynk-atomic-admission.cjs
           node --test apps/mobile/supabase/functions/lynk-livestream-token/index.test.cjs
           node scripts/test-lynk-room-browser.cjs --dom
+          node scripts/test-lynk-native-capture.cjs
           node scripts/verify-lynk.mjs

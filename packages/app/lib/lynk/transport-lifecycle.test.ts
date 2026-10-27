@@ -94,6 +94,7 @@ const resources = {
   connections: [] as any[], players: [] as any[], watches: [] as any[], devices: [] as any[],
   captures: [] as any[], encoders: [] as any[], computeds: [] as any[], publications: [] as any[],
   nativePublications: [] as any[], initialPaths: [] as string[],
+  cameraOptions: [] as any[], microphoneOptions: [] as any[],
 };
 class Connection {
   props: any;
@@ -154,9 +155,9 @@ const tokenState = { publish: true };
 let nativeConnects = 0;
 const nativeSession = { state: "connected", connect() { nativeConnects++; }, disconnect() {} };
 const nativePublisher = { state: "publishing", publish: (opts: any) => resources.nativePublications.push(opts), stop() {} };
-const nativeCamera = { position: "front", state: "active" };
-const nativeMicrophone = { state: "active" };
-(globalThis as any).__lynkMocks = { Signal, Computed, Connection, Player, Publication, Device, Capture, Encoder, tokenState, nativeSession, nativePublisher, nativeCamera, nativeMicrophone };
+const nativeCamera = { position: "front", state: "active", lastError: null as string | null };
+const nativeMicrophone = { state: "active", lastError: null as string | null };
+(globalThis as any).__lynkMocks = { Signal, Computed, Connection, Player, Publication, Device, Capture, Encoder, tokenState, nativeSession, nativePublisher, nativeCamera, nativeMicrophone, resources };
 (globalThis as any).window = {};
 const moduleUrl = (source: string) => `data:text/javascript,${encodeURIComponent(source)}`;
 const stubs: Record<string, string> = {
@@ -165,7 +166,7 @@ const stubs: Record<string, string> = {
   "@moq/net": moduleUrl("export const Connection = globalThis.__lynkMocks.Connection; export const Path = { from: p => p }; export const Time = { Milli: { zero: 0 } };"),
   "@moq/watch": moduleUrl("export const Player = globalThis.__lynkMocks.Player;"),
   "@moq/publish": moduleUrl("export const Broadcast = globalThis.__lynkMocks.Publication; export const Source = { Camera: globalThis.__lynkMocks.Device, Microphone: globalThis.__lynkMocks.Device }; export const Video = { Capture: globalThis.__lynkMocks.Capture, Encoder: globalThis.__lynkMocks.Encoder }; export const Audio = Video;"),
-  "react-native-moq": moduleUrl("export const useSession = () => globalThis.__lynkMocks.nativeSession; export const usePublisher = () => globalThis.__lynkMocks.nativePublisher; export const useCamera = () => globalThis.__lynkMocks.nativeCamera; export const useMicrophone = () => globalThis.__lynkMocks.nativeMicrophone; export const useBroadcasts = () => [];"),
+  "react-native-moq": moduleUrl("export const useSession = () => globalThis.__lynkMocks.nativeSession; export const usePublisher = () => globalThis.__lynkMocks.nativePublisher; export const useCamera = (options) => {globalThis.__lynkMocks.resources.cameraOptions.push(options);return globalThis.__lynkMocks.nativeCamera}; export const useMicrophone = (options) => {globalThis.__lynkMocks.resources.microphoneOptions.push(options);return globalThis.__lynkMocks.nativeMicrophone}; export const useBroadcasts = () => [];"),
   "./useMoqToken": moduleUrl("export const useMoqToken = (room, intent, enabled = true) => ({ token: room && enabled && (intent !== 'publish' || globalThis.__lynkMocks.tokenState.publish) ? { relayUrl: 'https://example.invalid/' + room + '/' + intent, namespace: 'lynk/' + room, path: 'lynk/' + room + '/self', peerId: 'self' } : null, error: null });"),
 };
 const hooks = registerHooks({ resolve(specifier: string, context: { parentURL?: string }, next: (...args: any[]) => any) {
@@ -180,7 +181,12 @@ const { useLynkBroadcast } = await import("./useLynkBroadcast.web.ts");
 const { useLynkBroadcast: useNativeBroadcast } = await import("./useLynkBroadcast.native.ts");
 const { useNativeMoqSession } = await import("./useNativeMoqSession.ts");
 after(() => { hooks.deregister(); delete (globalThis as any).window; });
-function reset() { for (const value of Object.values(resources)) value.length = 0; tokenState.publish = true; }
+function reset() {
+  for (const value of Object.values(resources)) value.length = 0;
+  tokenState.publish = true;
+  nativeCamera.state = nativeMicrophone.state = "active";
+  nativeCamera.lastError = nativeMicrophone.lastError = null;
+}
 
 test("web viewer reconstructs its connection during effect replay", () => {
   reset();
@@ -384,5 +390,65 @@ test("publisher exposes terminal source and transport errors rather than false l
   connection.error.set(new Error("Publisher authorization rejected")); h.render();
   assert.equal(h.value.state, "error");
   assert.equal(h.value.error, "Publisher authorization rejected");
+  h.unmount();
+});
+
+
+test("native microphone capture errors are visible without disconnecting receiving or repeatedly retrying", async () => {
+  reset();
+  const h = new Hooks();
+  h.render(() => useNativeBroadcast("room", true));
+  await h.value.goLive(); h.flush();
+  nativeMicrophone.state = "error:permission denied";
+  nativeMicrophone.lastError = "Microphone permission denied";
+  h.render();
+  assert.equal(h.value.microphoneError, "Microphone permission denied");
+  assert.equal(h.value.captureError, "Microphone permission denied");
+  assert.equal(h.value.cameraError, null);
+  const publications = resources.nativePublications.length;
+  assert.equal(h.value.state, "live", "local capture cannot restart room admission/reception");
+  assert.equal(h.value.error, null, "transport error remains independent");
+  for (let i = 0; i < 3; i++) { h.value.setMicEnabled(true); h.render(); }
+  assert.ok(resources.microphoneOptions.every((o) => o.enabled), "ordinary reconciliation never retries permission");
+  assert.equal(resources.nativePublications.length, publications);
+  resources.cameraOptions.length = resources.microphoneOptions.length = 0;
+  h.value.retryCapture(); h.value.retryCapture(); h.flush();
+  assert.deepEqual(resources.microphoneOptions.map((o) => o.enabled), [false, true], "repeated clicks coalesce into one stopped render then restart");
+  assert.ok(resources.cameraOptions.every((o) => o.enabled), "healthy camera never restarts");
+  assert.equal(h.value.captureError, "Microphone permission denied", "retry does not hide a persistent capture failure");
+  nativeMicrophone.state = "idle"; h.render();
+  assert.equal(h.value.captureError, "Microphone permission denied", "stop/idle does not pretend recovery");
+  nativeMicrophone.state = "starting"; h.render();
+  assert.equal(h.value.captureError, null);
+  nativeMicrophone.state = "active"; h.render();
+  assert.equal(h.value.microphoneError, null, "old lastError is ignored after capture recovers");
+  h.unmount();
+});
+
+test("native capture retry respects mute, role loss, disabled devices and terminal leave", () => {
+  reset();
+  const h = new Hooks();
+  let canPublish = true;
+  h.render(() => useNativeBroadcast("room", canPublish));
+  nativeCamera.state = "error:Camera unavailable";
+  nativeMicrophone.state = "error:Microphone unavailable";
+  h.render();
+  assert.equal(h.value.cameraError, "Camera unavailable");
+  assert.equal(h.value.captureError, "Microphone unavailable");
+  h.value.retryCapture();
+  h.value.setMicEnabled(false); h.flush();
+  assert.equal(resources.microphoneOptions.at(-1).enabled, false, "host mute during retry cannot reenable mic");
+  assert.equal(h.value.microphoneError, null, "muted device's old error is not active");
+  assert.equal(h.value.captureError, "Camera unavailable");
+  h.value.retryCapture(); canPublish = false; h.render();
+  assert.equal(resources.cameraOptions.at(-1).enabled, false);
+  assert.equal(resources.microphoneOptions.at(-1).enabled, false);
+  assert.equal(h.value.captureError, null, "listeners do not inherit capture failures");
+  canPublish = true; h.render();
+  h.value.retryCapture(); h.value.end(); h.flush();
+  assert.equal(resources.cameraOptions.at(-1).enabled, false);
+  assert.equal(resources.microphoneOptions.at(-1).enabled, false);
+  assert.equal(h.value.captureError, null);
+  assert.equal(h.value.state, "ended");
   h.unmount();
 });

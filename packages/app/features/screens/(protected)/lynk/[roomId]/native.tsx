@@ -21,6 +21,7 @@ import { PublisherView } from "react-native-moq";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.native";
 import { useLynkViewer } from "@dvnt/app/lib/lynk/useLynkViewer.native";
 import { lynkStateLabel } from "@dvnt/app/lib/lynk/lynkState";
+import { CaptureErrorBanner } from "@dvnt/app/features/sneaky-lynk/ui/CaptureErrorBanner";
 import { PublisherTile } from "./PublisherTile.native";
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -56,6 +57,7 @@ function BroadcasterStage({ roomId, session }: { roomId: string; session: Genesi
             <Text className="text-xs font-semibold text-white">You</Text>
           </View>
         </View>
+        <CaptureErrorBanner error={lynk.captureError} onRetry={lynk.retryCapture} />
         {lynk.coPublishers.map((p) => (
           <PublisherTile key={p.peerId} broadcast={p.broadcast} label="Cohost" />
         ))}
@@ -93,7 +95,7 @@ function BroadcasterStage({ roomId, session }: { roomId: string; session: Genesi
               className="rounded-full bg-white/10 px-5 py-3"
             >
               <Text className="text-sm font-semibold text-white">
-                {lynk.cameraEnabled ? "Camera off" : "Camera on"}
+                {lynk.cameraError ? "Camera unavailable" : lynk.cameraEnabled ? "Camera off" : "Camera on"}
               </Text>
             </Pressable>
             <Pressable
@@ -101,7 +103,7 @@ function BroadcasterStage({ roomId, session }: { roomId: string; session: Genesi
               className="rounded-full bg-white/10 px-5 py-3"
             >
               <Text className="text-sm font-semibold text-white">
-                {lynk.micEnabled ? "Mute" : "Unmute"}
+                {lynk.microphoneError ? "Mic unavailable" : lynk.micEnabled ? "Mute" : "Unmute"}
               </Text>
             </Pressable>
           </>
