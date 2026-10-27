@@ -15,10 +15,25 @@
  * issued and not delivered.
  */
 
-import type { CompResult } from "@dvnt/app/lib/api/privileged";
+import type { CompClaimLink, CompResult } from "@dvnt/app/lib/api/privileged";
 
 /** One request is capped server-side; the UI stops the host before the trip. */
 export const MAX_COMP_RECIPIENTS = 100;
+
+/** Desired total per recipient/tier, not an additive count on every retry. */
+export const COMP_QUANTITIES = [1, 2, 3] as const;
+export type CompQuantity = (typeof COMP_QUANTITIES)[number];
+export function isCompQuantity(value: unknown): value is CompQuantity {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 3;
+}
+
+/** Distinguish several single-use links sent to the same phone. */
+export function compClaimLinkLabel(links: CompClaimLink[], link: CompClaimLink): string {
+  const recipientLinks = links.filter((item) => item.phone === link.phone);
+  if (recipientLinks.length < 2) return link.recipient;
+  const index = recipientLinks.findIndex((item) => item.ticket_id === link.ticket_id);
+  return `${link.recipient} · Ticket ${index + 1} of ${recipientLinks.length}`;
+}
 
 /**
  * Owner or accepted admin co-organizer, matching the `bulk-comp-tickets`
@@ -73,9 +88,11 @@ export function canSubmitComp(input: {
   tierId: string | null | undefined;
   preview: CompRecipientPreview;
   sending: boolean;
+  quantity?: number;
 }): boolean {
   return (
     !input.sending &&
+    isCompQuantity(input.quantity ?? 1) &&
     !!input.tierId &&
     input.preview.entries.length > 0 &&
     !input.preview.overLimit
@@ -89,7 +106,7 @@ export interface CompSummary {
   guestIssued: number;
   /** Phone comps newly minted. Resends rotate an existing ticket and are not counted. */
   phoneIssued: number;
-  /** Claim links the host still has to text, one per phone. */
+  /** Claim links the host still has to text, one per ticket. */
   claimLinks: number;
   /** Every ticket that now exists. */
   totalIssued: number;

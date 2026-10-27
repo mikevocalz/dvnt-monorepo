@@ -8,7 +8,7 @@
  *   { action: "decline", transfer_id }
  *   { action: "cancel", transfer_id }
  *
- * Transfers a ticket from one user to another with a 24h expiry.
+ * Transfers a ticket until 24h after the event ends (24h fallback without a date).
  * - Initiate: creates a pending transfer, marks ticket as "transfer_pending"
  * - Accept: reassigns ticket to recipient, generates new QR token, and moves
  *   the add-ons bound to the ticket (with fresh QRs) to the recipient
@@ -293,24 +293,6 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Cancellation or a door scan may win while recipient lookup is in
-      // flight. Claim only the still-active owned credential, never resurrect
-      // a void/refunded/scanned ticket from the earlier read.
-      const { data: claimedTicket, error: claimError } = await supabase
-        .from("tickets")
-        .update({ status: "transfer_pending" })
-        .eq("id", ticket_id)
-        .eq("user_id", userId)
-        .eq("status", "active")
-        .is("checked_in_at", null)
-        .select("id")
-        .maybeSingle();
-      if (claimError) return json({ error: "Could not start transfer. Please try again." }, 503);
-      if (!claimedTicket) return json({ error: "This ticket is no longer available to transfer." }, 409);
-
-      // Void sender's wallet pass (if any)
-      await voidWalletPass(supabase, ticket_id);
-
       // A transfer lives until the day after the event, not 24h from now.
       //
       // The column default is `now() + 24h`, which is the wrong clock: a pass
@@ -333,12 +315,27 @@ Deno.serve(async (req: Request) => {
       // A window that has already closed would create a transfer that the
       // sweep expires within five minutes, taking the sender's ticket out of
       // service on the way. Refuse instead of handing back something dead.
-      if (expiresAt.getTime() <= Date.now()) {
+      if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
         return json(
           { error: "This event has already passed, so its tickets can no longer be transferred." },
           400,
         );
       }
+
+      // Cancellation or a door scan may win while recipient lookup is in
+      // flight. Claim only the still-active owned credential, never resurrect
+      // a void/refunded/scanned ticket from the earlier read.
+      const { data: claimedTicket, error: claimError } = await supabase
+        .from("tickets")
+        .update({ status: "transfer_pending" })
+        .eq("id", ticket_id)
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .is("checked_in_at", null)
+        .select("id")
+        .maybeSingle();
+      if (claimError) return json({ error: "Could not start transfer. Please try again." }, 503);
+      if (!claimedTicket) return json({ error: "This ticket is no longer available to transfer." }, 409);
 
       // Create transfer record
       const { data: transfer, error: createErr } = await supabase
@@ -353,7 +350,22 @@ Deno.serve(async (req: Request) => {
         .select("id, expires_at")
         .single();
 
-      if (createErr) throw createErr;
+      if (createErr) {
+        // A transport error may follow a committed insert. Verify absence
+        // before releasing the claim; never activate a pending transfer or
+        // revive a ticket cancelled/scanned while the insert was in flight.
+        const { data: pending, error: lookupError } = await supabase
+          .from("ticket_transfers").select("id")
+          .eq("ticket_id", ticket_id).eq("status", "pending").maybeSingle();
+        if (!lookupError && !pending) {
+          await supabase.from("tickets").update({ status: "active" })
+            .eq("id", ticket_id).eq("user_id", userId)
+            .eq("status", "transfer_pending").is("checked_in_at", null);
+        }
+        throw createErr;
+      }
+      // Do this only after a pending transfer actually exists.
+      await voidWalletPass(supabase, ticket_id, userId);
 
       console.log(
         `[transfer-ticket] Transfer initiated: ${ticket_id} from ${userId} to ${recipient.id}`,
@@ -399,7 +411,7 @@ Deno.serve(async (req: Request) => {
       const { data: transfer, error: tErr } = await supabase
         .from("ticket_transfers")
         .select(
-          "*, tickets(id, user_id, event_id, status, ticket_type_id, guest_lookup_token)",
+          "*, tickets(id, user_id, event_id, status, checked_in_at, ticket_type_id, guest_lookup_token)",
         )
         .eq("id", transfer_id)
         .single();
@@ -417,28 +429,22 @@ Deno.serve(async (req: Request) => {
       }
       if (new Date(transfer.expires_at) < new Date()) {
         // Auto-expire and revert ticket to active
-        await supabase
+        const { data: expired, error: expireError } = await supabase
           .from("ticket_transfers")
           .update({ status: "expired", resolved_at: new Date().toISOString() })
-          .eq("id", transfer_id);
+          .eq("id", transfer_id).eq("status", "pending")
+          .select("id").maybeSingle();
+        if (expireError || !expired) return json({ error: "Transfer already processed" }, 409);
         await supabase
           .from("tickets")
           .update({ status: "active" })
-          .eq("id", ticket.id);
+          .eq("id", ticket.id).eq("user_id", transfer.from_user_id)
+          .eq("status", "transfer_pending").is("checked_in_at", null);
         return json({ error: "Transfer has expired" }, 400);
       }
 
-      // Atomically claim the transfer (prevents concurrent accept race)
-      const { data: claimed, error: claimErr } = await supabase
-        .from("ticket_transfers")
-        .update({ status: "accepted", resolved_at: new Date().toISOString() })
-        .eq("id", transfer_id)
-        .eq("status", "pending")
-        .select("id")
-        .single();
-
-      if (claimErr || !claimed) {
-        return json({ error: "Transfer already processed" }, 409);
+      if (ticket.user_id !== transfer.from_user_id || ticket.status !== "transfer_pending" || ticket.checked_in_at) {
+        return json({ error: "This ticket is no longer available to transfer." }, 409);
       }
 
       // Generate new HMAC-signed QR token for security
@@ -447,36 +453,25 @@ Deno.serve(async (req: Request) => {
         ticket.event_id,
       );
 
-      // Reassign ticket to recipient and reactivate
-      // Clear wallet fields so new owner gets a fresh pass
-      const { error: updateErr } = await supabase
-        .from("tickets")
-        .update({
-          user_id: userId,
-          status: "active",
-          qr_token: qrToken,
-          qr_payload: qrPayload,
-          transferred_from: transfer.from_user_id,
-          // The pass belongs to someone else now, so the name on it must not.
-          // The door resolves its guest list from attendee_name FIRST, then
-          // the account, then guest_name — leaving either behind means staff
-          // read out the previous owner's name to the person in front of them,
-          // and the new holder cannot correct it because the row no longer
-          // matches anything they recognise. Cleared here rather than hidden
-          // at render time: the door reads the column, not the screen.
-          attendee_name: null,
-          guest_name: null,
-          guest_email: null,
-          guest_phone: null,
-          wallet_serial_number: null,
-          wallet_auth_token: null,
-          wallet_pass_type_id: null,
-          wallet_voided_at: null,
-          wallet_last_pushed_at: null,
-        })
-        .eq("id", ticket.id);
-
-      if (updateErr) throw updateErr;
+      // Ownership, both credentials and the accepted state commit together.
+      // A failed request either leaves a retryable pending transfer or has
+      // completed all three changes; never accepted + sender-owned/pending.
+      const { data: acceptance, error: acceptanceError } = await supabase.rpc(
+        "accept_ticket_transfer_atomic",
+        {
+          p_transfer_id: transfer_id,
+          p_recipient_id: userId,
+          p_event_id: ticket.event_id,
+          p_qr_token: qrToken,
+          p_qr_payload: qrPayload,
+        },
+      );
+      if (acceptanceError) {
+        return json({ error: "Could not accept transfer. Check My Tickets and try again." }, 503);
+      }
+      if (!acceptance?.ok) {
+        return json({ error: acceptance?.error || "This ticket is no longer available to transfer." }, 409);
+      }
 
       await moveTicketAddons(supabase, ticket.id, ticket.event_id, userId);
 
@@ -543,9 +538,7 @@ Deno.serve(async (req: Request) => {
               claimUrl: null,
               tickets: [{
                 tierLabel: tierRow?.name ?? "Ticket",
-                lookupUrl: ticket.guest_lookup_token
-                  ? `${SITE_URL}/public/tickets/guest/${ticket.guest_lookup_token}`
-                  : null,
+                lookupUrl: null,
               }],
               calendar: eventStart
                 ? { startIso: new Date(eventStart).toISOString() }
@@ -597,7 +590,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: transfer } = await supabase
         .from("ticket_transfers")
-        .select("id, to_user_id, ticket_id, status")
+        .select("id, from_user_id, to_user_id, ticket_id, status")
         .eq("id", transfer_id)
         .single();
 
@@ -626,7 +619,10 @@ Deno.serve(async (req: Request) => {
       await supabase
         .from("tickets")
         .update({ status: "active" })
-        .eq("id", transfer.ticket_id);
+        .eq("id", transfer.ticket_id)
+        .eq("user_id", transfer.from_user_id)
+        .eq("status", "transfer_pending")
+        .is("checked_in_at", null);
 
       console.log(`[transfer-ticket] Transfer declined: ${transfer_id}`);
 
@@ -702,7 +698,10 @@ Deno.serve(async (req: Request) => {
       await supabase
         .from("tickets")
         .update({ status: "active" })
-        .eq("id", transfer.ticket_id);
+        .eq("id", transfer.ticket_id)
+        .eq("user_id", transfer.from_user_id)
+        .eq("status", "transfer_pending")
+        .is("checked_in_at", null);
 
       console.log(`[transfer-ticket] Transfer cancelled: ${transfer_id}`);
 

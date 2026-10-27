@@ -6,13 +6,14 @@
  *   event_id: number,
  *   tier_id: string,                // ticket_types.id (must belong to event)
  *   recipients: string[],           // usernames, emails or phone numbers, mixed
+ *   quantity?: number,              // desired total per recipient/tier, 1–3 (default 1)
  *   note?: string,                  // optional message tucked in entity_payload
  * }
  *
  * Owner or accepted admin only. Issues free tickets (status=active,
- * purchase_amount_cents=0) to every resolved recipient. Skips silently
- * if a recipient already has an active/transfer_pending ticket on
- * this tier (no duplicates). Enforces tier capacity — if the comp
+ * purchase_amount_cents=0) to every resolved recipient. Tops up to the
+ * requested total (1–3) per recipient/tier; active, scanned and
+ * transfer_pending tickets count. Retries do not add duplicate seats. Enforces tier capacity — if the comp
  * batch would exceed quantity_total, returns 409 with a "would_exceed"
  * indicator and issues NOTHING.
  *
@@ -98,6 +99,7 @@ Deno.serve(async (req: Request) => {
       event_id?: number | string;
       tier_id?: string;
       recipients?: string[];
+      quantity?: number;
       note?: string;
     } = {};
     try {
@@ -112,6 +114,11 @@ Deno.serve(async (req: Request) => {
     }
     const tierId = typeof body.tier_id === "string" ? body.tier_id : "";
     if (!tierId) return err("tier_id required", 400, req);
+
+    const quantity = body.quantity === undefined ? 1 : body.quantity;
+    if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1 || quantity > 3) {
+      return err("quantity must be a whole number from 1 to 3", 400, req);
+    }
 
     const recipientsRaw = Array.isArray(body.recipients) ? body.recipients : [];
     if (recipientsRaw.length === 0) {
@@ -331,6 +338,7 @@ Deno.serve(async (req: Request) => {
         p_tier_id: tierId,
         p_actor_id: authId,
         p_user_ids: accounts.unique.map((recipient) => recipient.authId),
+        p_quantity: quantity,
       });
       if (issueError) {
         console.error("[bulk-comp-tickets] atomic issuance failed:", issueError.code);
@@ -347,7 +355,7 @@ Deno.serve(async (req: Request) => {
       toIssue = accounts.unique.filter((recipient) => issuedIds.has(recipient.authId));
       for (const recipient of accounts.unique) {
         if (!issuedIds.has(recipient.authId)) skipped.push({
-          recipient: recipient.raw, reason: "Already holds a ticket in this tier",
+          recipient: recipient.raw, reason: "Already holds the requested number of tickets in this tier",
         });
       }
     }
@@ -357,7 +365,7 @@ Deno.serve(async (req: Request) => {
     // transaction. Both take the same event lock so capacity can never be
     // oversold, but a guest half that hits the cap leaves the member half
     // issued. Upgrade path is one RPC taking both arrays.
-    let guestIssued: { guest_email: string; guest_lookup_token: string }[] = [];
+    let guestIssued: { id: string; guest_email: string; guest_lookup_token: string }[] = [];
     if (guests.length > 0) {
       const { data: guestIssuance, error: guestError } = await supabase.rpc(
         "issue_guest_comp_tickets_atomic",
@@ -366,6 +374,7 @@ Deno.serve(async (req: Request) => {
           p_tier_id: tierId,
           p_actor_id: authId,
           p_guest_emails: guests.map((g) => g.email),
+          p_quantity: quantity,
         },
       );
       if (guestError) {
@@ -381,13 +390,14 @@ Deno.serve(async (req: Request) => {
         for (const g of guests) skipped.push({ recipient: g.raw, reason });
       } else {
         guestIssued = (guestIssuance.tickets || []) as {
+          id: string;
           guest_email: string;
           guest_lookup_token: string;
         }[];
         const mintedEmails = new Set(guestIssued.map((t) => t.guest_email));
         for (const g of guests) {
           if (!mintedEmails.has(g.email)) skipped.push({
-            recipient: g.raw, reason: "Already holds a ticket in this tier",
+            recipient: g.raw, reason: "Already holds the requested number of tickets in this tier",
           });
         }
       }
@@ -406,6 +416,7 @@ Deno.serve(async (req: Request) => {
           p_tier_id: tierId,
           p_actor_id: authId,
           p_guest_phones: phoneGuests.map((g) => g.phone),
+          p_quantity: quantity,
         },
       );
       if (phoneIssueError) {
@@ -426,7 +437,7 @@ Deno.serve(async (req: Request) => {
         );
         for (const g of phoneGuests) {
           if (claimed.has(g.phone)) skipped.push({
-            recipient: g.raw, reason: "Already claimed a ticket in this tier",
+            recipient: g.raw, reason: "Already holds the requested number of phone tickets in this tier",
           });
         }
       }
@@ -506,29 +517,33 @@ Deno.serve(async (req: Request) => {
           minute: "2-digit",
         })
       : null;
+    const ticketsByEmail = new Map<string, typeof guestIssued>();
+    for (const ticket of guestIssued) {
+      const tickets = ticketsByEmail.get(ticket.guest_email) ?? [];
+      tickets.push(ticket);
+      ticketsByEmail.set(ticket.guest_email, tickets);
+    }
     const sends = await Promise.all(
-      guestIssued.map(async (ticket) => {
-        const recipient = rawByEmail.get(ticket.guest_email) || ticket.guest_email;
+      [...ticketsByEmail].map(async ([email, tickets]) => {
+        const recipient = rawByEmail.get(email) || email;
         try {
           const messageId = await sendResendEmail({
-            to: ticket.guest_email,
+            to: email,
             ...ticketConfirmation({
               eventTitle: event.title || "your event",
               flyerUrl: event.flyer_image_url ?? null,
               dominantColor: event.dominant_color ?? null,
               dateLine,
               location: event.location ?? null,
-              toEmail: ticket.guest_email,
+              toEmail: email,
               guestNudge: true,
               greeting:
                 guestNote ||
-                `The host comped you a ticket to ${event.title || "their event"}. Open it below — the QR at the door is inside, no account needed.`,
-              tickets: [
-                {
-                  tier: tier.name,
-                  lookupUrl: `${SITE_URL}/public/tickets/guest/${ticket.guest_lookup_token}`,
-                },
-              ],
+                `The host comped you ${tickets.length} ticket${tickets.length === 1 ? "" : "s"} to ${event.title || "their event"}. Open each ticket below — the QR at the door is inside, no account needed.`,
+              tickets: tickets.map((ticket) => ({
+                tier: tier.name,
+                lookupUrl: `${SITE_URL}/public/tickets/guest/${ticket.guest_lookup_token}`,
+              })),
             }),
           });
           // sendResendEmail returns null when RESEND_API_KEY is unset — nothing
@@ -536,17 +551,17 @@ Deno.serve(async (req: Request) => {
           if (!messageId) {
             return { recipient, delivered: false, error: "Email provider not configured" };
           }
-          return { recipient, delivered: true, email: ticket.guest_email };
+          return { recipient, delivered: true, ticketIds: tickets.map((ticket) => ticket.id) };
         } catch (sendErr: any) {
           console.error("[bulk-comp-tickets] guest email failed:", sendErr?.name || "send error");
           return { recipient, delivered: false, error: "Email delivery failed" };
         }
       }),
     );
-    const deliveredEmails = sends
+    const deliveredIds = sends
       .filter((s) => s.delivered)
-      .map((s) => (s as { email: string }).email);
-    if (deliveredEmails.length > 0) {
+      .flatMap((s) => (s as { ticketIds: string[] }).ticketIds);
+    if (deliveredIds.length > 0) {
       // ponytail: one timestamp, no failure reason column and no retry queue.
       // Upgrade path is a Resend webhook writing bounce/complaint state here.
       const { error: stampError } = await supabase
@@ -554,7 +569,7 @@ Deno.serve(async (req: Request) => {
         .update({ guest_email_sent_at: new Date().toISOString() })
         .eq("event_id", eventId)
         .eq("ticket_type_id", tierId)
-        .in("guest_email", deliveredEmails);
+        .in("id", deliveredIds);
       if (stampError) {
         console.warn("[bulk-comp-tickets] delivery stamp failed:", stampError.code);
       }
