@@ -25,8 +25,6 @@ import {
 import { Article } from "@dvnt/app/components/ui/html";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import {
-  Heart,
-  MessageCircle,
   Send,
   Bookmark,
   MoreHorizontal,
@@ -84,7 +82,8 @@ import { routeToProfile } from "@dvnt/app/lib/utils/route-to-profile";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { navigateToPost, getPostDetailRoute } from "@dvnt/app/lib/routes/post-routes";
 import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
-import { formatLikeCount } from "@dvnt/app/lib/utils/format-count";
+import { PostEngagementCounts } from "@dvnt/ui/post-engagement-counts";
+import { getPostCommentCount } from "@dvnt/app/lib/posts/engagement-counts";
 import { useResponsiveMedia } from "@dvnt/app/lib/hooks/use-responsive-media";
 import { TagOverlayViewer } from "@dvnt/app/features/tags";
 import { usePostTags } from "@dvnt/app/lib/hooks/use-post-tags";
@@ -766,7 +765,7 @@ function FeedPostComponent({
   }, [guestMode, id, openGuestGate, setShareSheetPostId]);
 
   const isBookmarked = bookmarkStore.isBookmarked(id);
-  const commentCount = Array.isArray(comments) ? comments.length : comments;
+  const commentCount = getPostCommentCount(comments);
 
   // ── bottom overlay bottom offset: shift up if video (seek bar takes 24px at very bottom) ──
   const socialBottom = hasPlayableVideo ? 34 : 14;
@@ -927,35 +926,16 @@ function FeedPostComponent({
               <View
                 style={{ flexDirection: "row", alignItems: "center", gap: 18 }}
               >
-                <Pressable
-                  onPress={handleLike}
+                <PostEngagementCounts
+                  likes={likesCount}
+                  hasLiked={hasLiked}
+                  comments={commentCount}
+                  onLike={handleLike}
                   disabled={isLikePending}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-                >
-                  <Heart
-                    size={20}
-                    color={hasLiked ? "#FF5BFC" : "#fff"}
-                    fill={hasLiked ? "#FF5BFC" : "none"}
-                  />
-                  <Text
-                    style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}
-                  >
-                    {formatLikeCount(likesCount)}
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPressIn={() => id && prefetchComments(id)}
-                  onPress={handleCommentsPress}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-                >
-                  <MessageCircle size={20} color="#fff" />
-                  <Text
-                    style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}
-                  >
-                    {commentCount || 0}
-                  </Text>
-                </Pressable>
+                  onPrefetchComments={() => id && prefetchComments(id)}
+                  onComments={handleCommentsPress}
+                  iconSize={20}
+                />
 
                 <Pressable onPress={handleSharePress} hitSlop={8}>
                   <Send size={20} color="#fff" />
@@ -1299,64 +1279,15 @@ function FeedPostComponent({
               }}
             >
               <DVNTLiquidGlass paddingH={12} paddingV={9} radius={14}>
-                {/* Like */}
-                <Pressable
-                  onPress={handleLike}
+                <PostEngagementCounts
+                  likes={likesCount}
+                  hasLiked={hasLiked}
+                  comments={commentCount}
+                  onLike={handleLike}
                   disabled={isLikePending}
-                  hitSlop={8}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
-                >
-                  <Heart
-                    size={22}
-                    color={hasLiked ? "#FF5BFC" : "#fff"}
-                    fill={hasLiked ? "#FF5BFC" : "none"}
-                  />
-                  <Text
-                    style={{
-                      color: "#fff",
-                      fontSize: 14,
-                      fontWeight: "600",
-                      textShadowColor: "rgba(0,0,0,0.8)",
-                      textShadowOffset: { width: 0, height: 1 },
-                      textShadowRadius: 3,
-                    }}
-                  >
-                    {formatLikeCount(likesCount)}
-                  </Text>
-                </Pressable>
-
-                {/* Divider */}
-                <View
-                  style={{
-                    width: 1,
-                    height: 18,
-                    backgroundColor: "rgba(255,255,255,0.2)",
-                  }}
+                  onPrefetchComments={() => id && prefetchComments(id)}
+                  onComments={handleCommentsPress}
                 />
-
-                {/* Comment */}
-                <Pressable
-                  hitSlop={8}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
-                  onPressIn={() => id && prefetchComments(id)}
-                  onPress={handleCommentsPress}
-                >
-                  <MessageCircle size={22} color="#fff" />
-                  {commentCount > 0 && (
-                    <Text
-                      style={{
-                        color: "#fff",
-                        fontSize: 14,
-                        fontWeight: "600",
-                        textShadowColor: "rgba(0,0,0,0.8)",
-                        textShadowOffset: { width: 0, height: 1 },
-                        textShadowRadius: 3,
-                      }}
-                    >
-                      {commentCount}
-                    </Text>
-                  )}
-                </Pressable>
 
                 {/* Divider */}
                 <View

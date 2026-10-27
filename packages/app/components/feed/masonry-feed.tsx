@@ -22,7 +22,7 @@ import { Image } from "expo-image";
 import { useMemo, useCallback, memo, useEffect, useRef, useState, createContext, useContext } from "react";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Heart, Bookmark, Play, Grid3x3 } from "lucide-react-native";
+import { Bookmark, Play, Grid3x3 } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
 import { usePrefetchComments } from "@dvnt/app/lib/hooks/use-comments";
@@ -89,6 +89,8 @@ import { feedScrollY, resetFeedScroll } from "@dvnt/app/lib/stores/feed-scroll-s
 import { FeedInlineVideo, useFeedPlaybackEnabled } from "./feed-inline-video";
 import { isFeedCellVisible } from "./native-feed-playback";
 import { ZoomCard } from "@dvnt/app/components/ui/zoom-card";
+import { PostEngagementCounts } from "@dvnt/ui/post-engagement-counts";
+import { getPostCommentCount } from "@dvnt/app/lib/posts/engagement-counts";
 
 // A section can be much taller than the viewport. Measure individual cells,
 // not section visibility, so recycled/offscreen rows never keep videos alive.
@@ -143,12 +145,6 @@ function estimateRatio(post: Post): number {
   else if (media?.type === "gif") base = 0.75;
   const offset = (hashId(post.id) * 2 - 1) * VARIATION;
   return base + offset;
-}
-
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
 }
 
 // ─── Grid-shaped loading placeholder ────────────────────────────────────────
@@ -358,8 +354,10 @@ const MasonryCell = memo(function MasonryCell({
     likes: likesCount,
     hasLiked,
     toggle: toggleLike,
+    isPending: isLikePending,
   } = usePostLikeState(post.id, post.likes || 0, post.viewerHasLiked || false);
 
+  const router = useRouter();
   const prefetchComments = usePrefetchComments();
   const queryClient = useQueryClient();
   const handlePress = useCallback(() => onPress(post.id), [post.id, onPress]);
@@ -498,22 +496,17 @@ const MasonryCell = memo(function MasonryCell({
           style={styles.overlay}
         >
           <View style={styles.overlayRow}>
-            <Pressable
-              onPress={handleLike}
-              hitSlop={8}
-              style={styles.overlayAction}
-            >
-              <Heart
-                size={iconSize}
-                color={hasLiked ? "#ef4444" : "#fff"}
-                fill={hasLiked ? "#ef4444" : "transparent"}
-              />
-              {likesCount > 0 && (
-                <Text style={styles.overlayText}>
-                  {formatCount(likesCount)}
-                </Text>
-              )}
-            </Pressable>
+            <PostEngagementCounts
+              likes={likesCount}
+              hasLiked={hasLiked}
+              comments={getPostCommentCount(post.comments)}
+              onLike={handleLike}
+              disabled={isLikePending}
+              onPrefetchComments={() => prefetchComments(post.id)}
+              onComments={() => router.push(`/(protected)/comments/${post.id}` as never)}
+              compact
+              iconSize={iconSize}
+            />
 
             <Pressable
               onPress={handleBookmark}
@@ -526,9 +519,8 @@ const MasonryCell = memo(function MasonryCell({
                 fill={isBookmarked ? "#3FDCFF" : "transparent"}
               />
             </Pressable>
-
-            <Text style={styles.overlayTime}>{post.timeAgo || ""}</Text>
           </View>
+          <Text style={styles.overlayTime}>{post.timeAgo || ""}</Text>
         </LinearGradient>
       </View>
     </ZoomCard>
@@ -1000,21 +992,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+    justifyContent: "space-between",
   },
   overlayAction: {
     flexDirection: "row",
     alignItems: "center",
     gap: 3,
   },
-  overlayText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "600",
-  },
   overlayTime: {
     color: "rgba(255,255,255,0.6)",
     fontSize: 10,
-    marginLeft: "auto",
+    position: "absolute",
+    bottom: 44,
+    right: 10,
   },
   loadMore: {
     paddingVertical: 20,

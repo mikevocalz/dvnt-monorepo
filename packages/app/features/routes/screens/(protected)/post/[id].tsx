@@ -23,8 +23,6 @@ import React, {
 import * as Haptics from "expo-haptics";
 
 import {
-  Heart,
-  MessageCircle,
   Send,
   Bookmark,
   MoreHorizontal,
@@ -81,7 +79,7 @@ import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
-import { formatLikeCount } from "@dvnt/app/lib/utils/format-count";
+import { PostEngagementCounts } from "@dvnt/ui/post-engagement-counts";
 import { Alert } from "react-native";
 import { TagOverlayViewer } from "@dvnt/app/features/tags";
 // Galeria's native gestureRecognizer doesn't fire on iOS 26 — the
@@ -261,68 +259,15 @@ function PostDetailActionBar({
 
   const controls = (
     <>
-      <Pressable
-        onPress={onLike}
+      <PostEngagementCounts
+        likes={likeCount}
+        hasLiked={isLiked}
+        comments={commentCount}
+        onLike={onLike}
         disabled={isLikePending}
-        hitSlop={8}
-        style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-      >
-        <Heart
-          size={variant === "glass" ? 22 : 20}
-          color={isLiked ? "#FF5BFC" : "#fff"}
-          fill={isLiked ? "#FF5BFC" : "none"}
-        />
-        <Text
-          style={{
-            color: "#fff",
-            fontSize: variant === "glass" ? 14 : 13,
-            fontWeight: "700",
-            ...(variant === "glass"
-              ? {
-                  textShadowColor: "rgba(0,0,0,0.8)",
-                  textShadowOffset: { width: 0, height: 1 },
-                  textShadowRadius: 3,
-                }
-              : null),
-          }}
-        >
-          {formatLikeCount(likeCount)}
-        </Text>
-      </Pressable>
-
-      {variant === "glass" && (
-        <View
-          style={{
-            width: 1,
-            height: 18,
-            backgroundColor: "rgba(255,255,255,0.2)",
-          }}
-        />
-      )}
-
-      <Pressable
-        hitSlop={8}
-        onPress={onComments}
-        style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-      >
-        <MessageCircle size={variant === "glass" ? 22 : 20} color="#fff" />
-        <Text
-          style={{
-            color: "#fff",
-            fontSize: variant === "glass" ? 14 : 13,
-            fontWeight: "700",
-            ...(variant === "glass"
-              ? {
-                  textShadowColor: "rgba(0,0,0,0.8)",
-                  textShadowOffset: { width: 0, height: 1 },
-                  textShadowRadius: 3,
-                }
-              : null),
-          }}
-        >
-          {commentCount}
-        </Text>
-      </Pressable>
+        onComments={onComments}
+        iconSize={variant === "glass" ? 22 : 20}
+      />
 
       {variant === "glass" && (
         <View

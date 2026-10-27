@@ -579,29 +579,20 @@ export const usersApi = {
    * Get liked posts for current user (Edge Function — bypasses RLS)
    */
   async getLikedPosts(): Promise<string[]> {
-    try {
-      const token = await requireBetterAuthToken();
-      const { data, error } = await supabase.functions.invoke<{
-        postIds?: string[];
-        error?: string;
-      }>("get-liked-posts", {
-        body: {},
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (error) {
-        console.error("[Users] getLikedPosts Edge Function error:", error);
-        return [];
-      }
-      if (!data?.postIds) {
-        if (data?.error) console.error("[Users] get-liked-posts:", data.error);
-        return [];
-      }
-      return data.postIds;
-    } catch (error) {
-      console.error("[Users] getLikedPosts error:", error);
-      return [];
+    const token = await requireBetterAuthToken();
+    const { data, error } = await supabase.functions.invoke<{
+      postIds?: string[];
+      error?: string;
+    }>("get-liked-posts", {
+      body: {},
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    // A failed read is not an empty list: preserve both the Query cache and
+    // Zustand's last successful snapshot during network/session failures.
+    if (error || data?.error || !Array.isArray(data?.postIds)) {
+      throw new Error(error?.message || data?.error || "Could not load liked posts");
     }
+    return data.postIds;
   },
 
   /**

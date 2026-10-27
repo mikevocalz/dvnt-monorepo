@@ -68,10 +68,14 @@ export const likesApi = {
    * Like/unlike via the battle-tested toggle-like endpoint.
    * The DB trigger now maintains likes_count automatically.
    */
-  async toggleLike(postId: string): Promise<{ liked: boolean; likes: number }> {
+  async toggleLike(postId: string, isCurrent?: () => boolean): Promise<{ liked: boolean; likes: number }> {
     try {
       if (__DEV__) console.log("[Likes] toggleLike:", postId);
+      if (isCurrent && !isCurrent()) throw new Error("Session changed while liking post");
       const token = await requireBetterAuthToken();
+      // Token refresh can outlive a sign-out/account switch. Never dispatch
+      // the old click with the next viewer's token.
+      if (isCurrent && !isCurrent()) throw new Error("Session changed while liking post");
       const postIdInt = parseInt(postId);
 
       const { data, error } =
@@ -101,15 +105,15 @@ export const likesApi = {
   /**
    * Like a post (calls toggleLike)
    */
-  async likePost(postId: string): Promise<{ liked: boolean; likes: number }> {
-    return this.toggleLike(postId);
+  async likePost(postId: string, isCurrent?: () => boolean): Promise<{ liked: boolean; likes: number }> {
+    return this.toggleLike(postId, isCurrent);
   },
 
   /**
    * Unlike a post (calls toggleLike)
    */
-  async unlikePost(postId: string): Promise<{ liked: boolean; likes: number }> {
-    return this.toggleLike(postId);
+  async unlikePost(postId: string, isCurrent?: () => boolean): Promise<{ liked: boolean; likes: number }> {
+    return this.toggleLike(postId, isCurrent);
   },
 
   /**

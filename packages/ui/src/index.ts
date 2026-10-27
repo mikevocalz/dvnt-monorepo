@@ -115,3 +115,7 @@ export { MapPicker } from './media/MapPicker';
 export type { MapPickerProps, LatLng } from './media/MapPicker';
 export { StoryViewer } from './media/StoryViewer';
 export type { StoryViewerProps, StoryItem } from './media/StoryViewer';
+
+// Shared feed/detail engagement controls (leaf export also available).
+export { PostEngagementCounts } from "./social/PostEngagementCounts";
+export type { PostEngagementCountsProps } from "./social/PostEngagementCounts.types";

@@ -10,8 +10,6 @@ import { useParams, useRouter } from "solito/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
-  Heart,
-  MessageCircle,
   Bookmark,
   Send,
   MoreHorizontal,
@@ -24,6 +22,8 @@ import {
 import { UserAvatar } from "@dvnt/app/components/ui/avatar";
 import { usePost, useDeletePost } from "@dvnt/app/lib/hooks/use-posts";
 import { useComments } from "@dvnt/app/lib/hooks/use-comments";
+import { PostEngagementCounts } from "@dvnt/ui/post-engagement-counts";
+import { getPostCommentCount } from "@dvnt/app/lib/posts/engagement-counts";
 import { usePostLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import {
   useToggleBookmark,
@@ -75,6 +75,7 @@ export function PostDetailScreen() {
     likes,
     hasLiked,
     toggle: toggleLike,
+    isPending: isLikePending,
   } = usePostLikeState(id, post?.likes || 0, post?.viewerHasLiked || false);
   // Server is the source of truth for is-bookmarked (same hook native uses);
   // the Zustand store mirrors it for instant optimistic flips.
@@ -185,10 +186,7 @@ export function PostDetailScreen() {
     hydratedTextPost?.textSlides ?? post.textSlides,
     hydratedTextPost?.caption ?? post.caption,
   );
-  const commentCount =
-    typeof post.comments === "number"
-      ? post.comments
-      : post.comments?.length ?? 0;
+  const commentCount = getPostCommentCount(post.comments);
   const metaLine =
     (post.timeAgo ?? "") + (post.location ? ` · ${post.location}` : "");
 
@@ -246,33 +244,16 @@ export function PostDetailScreen() {
         )}
 
         <div className="flex items-center gap-5 px-4 py-3">
-          <div className="flex items-center gap-1.5 text-[15px]">
-            <button onClick={toggleLike} aria-label={hasLiked ? "Unlike" : "Like"} aria-pressed={hasLiked}>
-              <Heart
-                size={22}
-                color={hasLiked ? "#ef4444" : "#fff"}
-                fill={hasLiked ? "#ef4444" : "transparent"}
-              />
-            </button>
-            {/* Tapping the count opens the who-liked sheet (native parity). */}
-            <button
-              onMouseEnter={() => prefetchLikesSheet(id)}
-              onFocus={() => prefetchLikesSheet(id)}
-              onClick={() => openLikesSheet(id)}
-              className="hover:underline"
-              aria-label={`View ${likes} ${likes === 1 ? "like" : "likes"}`}
-            >
-              {likes}
-            </button>
-          </div>
-          <button
-            onClick={() => openComposer()}
-            className="flex items-center gap-1.5 text-[15px]"
-            aria-label="Comment"
-          >
-            <MessageCircle size={22} color="#fff" />
-            {commentCount}
-          </button>
+          <PostEngagementCounts
+            likes={likes}
+            hasLiked={hasLiked}
+            comments={commentCount}
+            onLike={toggleLike}
+            disabled={isLikePending}
+            onViewLikes={() => openLikesSheet(id)}
+            onPrefetchLikes={() => prefetchLikesSheet(id)}
+            onComments={() => openComposer()}
+          />
           <button type="button" onClick={() => openShare(sharedPostContext(post))} aria-label="Reshare post">
             <Send size={22} color="#fff" />
           </button>
@@ -353,7 +334,7 @@ export function PostDetailScreen() {
         ) : null}
 
         {/* Threaded comments (Instagram-style). */}
-        <section className="border-t border-white/10 pt-2 pb-3" aria-label="Comments">
+        <section id="comments" className="scroll-mt-20 border-t border-white/10 pt-2 pb-3" aria-label="Comments">
           {comments && comments.length > 0 ? (
             comments.map((c) => (
               <ThreadedComment
