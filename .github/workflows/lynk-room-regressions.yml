@@ -64,10 +64,13 @@ jobs:
         with:
           node-version: 24
       - name: Install isolated fixture tools
-        run: npm install --legacy-peer-deps --prefix "$RUNNER_TEMP/lynk-tests" --no-package-lock --no-save typescript@5.9.3 esbuild@0.25.11 jsdom@26.1.0 react@19.2.3 react-dom@19.2.3 zod@3.22.4 @electric-sql/pglite@0.3.14 zustand@5.0.14 @moq/publish@0.5.2 @moq/signals@0.2.5
+        run: npm install --prefix "$RUNNER_TEMP/lynk-tests" --no-package-lock --no-save typescript@5.9.3 esbuild@0.25.11 jsdom@26.1.0 react@19.2.3 react-dom@19.2.3 zod@3.22.4 @electric-sql/pglite@0.3.14 zustand@5.0.14
+      - name: Install isolated released MoQ SDK (separate Zod 4 peer graph)
+        run: npm install --legacy-peer-deps --prefix "$RUNNER_TEMP/lynk-sdk" --no-package-lock --no-save @moq/publish@0.5.2 @moq/signals@0.2.5 @zod/mini@4.5.0 zod@4.5.0 react@19.2.3
       - name: Test multi-user chat, media, room end and subscriptions
         env:
           NODE_PATH: ${{ runner.temp }}/lynk-tests/node_modules
+          LYNK_SDK_DEPS: ${{ runner.temp }}/lynk-sdk/node_modules
         run: |
           node --test packages/app/features/sneaky-lynk/publish-roles.test.ts packages/app/features/sneaky-lynk/room-entry-status.test.ts packages/app/features/sneaky-lynk/api/*.test.ts packages/app/features/sneaky-lynk/session/*.test.ts packages/app/features/sneaky-lynk/ui/*.test.ts packages/app/lib/video/*.test.ts packages/app/lib/events/event-lynk.test.ts packages/app/features/video/room-lifecycle.test.ts packages/app/features/video/stores/*.test.ts packages/app/lib/lynk/*.test.ts packages/ui/src/video/moqPlayerHtml.test.ts packages/app/lib/lynk/genesis-room-admission.fixture.ts packages/app/lib/subscription/*.test.ts apps/mobile/supabase/functions/video_create_room/subscription.test.cjs apps/mobile/supabase/functions/video_end_room/index.test.cjs apps/mobile/supabase/functions/_shared/lynk-moq-access.test.cjs apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs
           node --test scripts/test-subscription-owner-rls.cjs scripts/test-lynk-atomic-admission.cjs
