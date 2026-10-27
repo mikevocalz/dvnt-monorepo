@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   MAX_COMP_RECIPIENTS,
+  COMP_QUANTITIES,
+  isCompQuantity,
+  compClaimLinkLabel,
   canCompTickets,
   canSubmitComp,
   parseCompRecipients,
@@ -115,4 +118,39 @@ test("phone comps count as issued and their links as still to send", () => {
   assert.equal(s.phoneIssued, 2);
   assert.equal(s.claimLinks, 3);
   assert.equal(s.totalIssued, 3);
+});
+
+
+test("comp quantity is a desired total of 1–3, with the legacy default of one", () => {
+  const base = { tierId: "t1", preview: parseCompRecipients("@nova"), sending: false };
+  assert.deepEqual(COMP_QUANTITIES, [1, 2, 3]);
+  assert.equal(canSubmitComp(base), true);
+  for (const quantity of COMP_QUANTITIES) {
+    assert.equal(isCompQuantity(quantity), true);
+    assert.equal(canSubmitComp({ ...base, quantity }), true);
+    assert.equal(canSubmitComp({ ...base, quantity, sending: true }), false);
+  }
+  for (const quantity of [0, -1, 4, 1.5, NaN, Infinity]) {
+    assert.equal(isCompQuantity(quantity), false);
+    assert.equal(canSubmitComp({ ...base, quantity }), false);
+  }
+  for (const value of ["3", null, undefined, true]) assert.equal(isCompQuantity(value), false);
+});
+
+test("three comps do not reduce the 100-recipient batch cap", () => {
+  const entries = Array.from({ length: MAX_COMP_RECIPIENTS }, (_, i) => `user${i}`);
+  const base = { tierId: "t1", sending: false, quantity: 3 };
+  assert.equal(canSubmitComp({ ...base, preview: parseCompRecipients(entries.join(",")) }), true);
+  assert.equal(canSubmitComp({ ...base, preview: parseCompRecipients([...entries, "overflow"].join(",")) }), false);
+});
+
+test("three phone tickets keep separate links, labels and issuance counts", () => {
+  const links = [1, 2, 3].map((n) => ({ recipient: "+14155550134", phone: "+14155550134", ticket_id: `t${n}`, url: `u${n}`, expires_at: "x", reissued: false }));
+  assert.deepEqual(links.map((link) => compClaimLinkLabel(links, link)), [
+    "+14155550134 · Ticket 1 of 3", "+14155550134 · Ticket 2 of 3", "+14155550134 · Ticket 3 of 3",
+  ]);
+  assert.equal(compClaimLinkLabel([links[0]!], links[0]!), "+14155550134");
+  const summary = summarizeCompResult({ issued: 0, phone_guest_issued: 3, claim_links: links, skipped: [] });
+  assert.equal(summary.totalIssued, 3);
+  assert.equal(summary.claimLinks, 3);
 });

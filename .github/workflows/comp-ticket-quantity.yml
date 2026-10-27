@@ -1,0 +1,40 @@
+name: Comp ticket quantity and transfers
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
+      - 'packages/app/features/events/ui/comp-tickets-modal*'
+      - 'packages/app/lib/tickets/**'
+      - 'packages/app/lib/stores/attendees-store.ts'
+      - 'packages/app/lib/api/privileged/index.ts'
+      - 'scripts/test-comp-quantity-ui.cjs'
+      - 'package.json'
+      - '.github/workflows/comp-ticket-quantity.yml'
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  comp-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated regression dependencies
+        run: npm install --prefix "$RUNNER_TEMP/comp-tests" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.28.1 typescript@5.9.2 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 happy-dom@20.10.3 @tanstack/react-query@5.90.5 pg@8.21.0
+      - name: Mounted web/native selectors, edge quantities, and transfer credentials
+        env:
+          NODE_PATH: ${{ runner.temp }}/comp-tests/node_modules
+        run: npm run test:comp-tickets
+      - name: Real PostgreSQL concurrency, capacity, claim and migration contracts
+        env:
+          NODE_PATH: ${{ runner.temp }}/comp-tests/node_modules
+        # Disposable socket-only local DB. No secrets and no skip fallback.
+        run: npm run test:comp-tickets:sql

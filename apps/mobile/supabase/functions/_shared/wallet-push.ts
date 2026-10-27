@@ -17,20 +17,24 @@
  *
  * This sets wallet_voided_at and wallet_last_pushed_at on the ticket.
  * When Apple's device checks for updates, the web service returns 410 Gone
- * and the pass is removed from the user's wallet.
+ * and the pass is removed from the user's wallet. Transfer initiation supplies
+ * its sender so a delayed invalidation cannot void a later owner's pass.
  */
 export async function voidWalletPass(
   supabase: any,
   ticketId: string,
+  expectedTransferOwner?: string,
 ): Promise<void> {
   const now = new Date().toISOString();
 
   // Get the ticket's wallet info
-  const { data: ticket } = await supabase
-    .from("tickets")
+  let read = supabase.from("tickets")
     .select("wallet_serial_number, wallet_pass_type_id")
-    .eq("id", ticketId)
-    .single();
+    .eq("id", ticketId);
+  if (expectedTransferOwner !== undefined) {
+    read = read.eq("user_id", expectedTransferOwner).eq("status", "transfer_pending");
+  }
+  const { data: ticket } = await read.single();
 
   if (!ticket?.wallet_serial_number) {
     // No wallet pass exists for this ticket
@@ -38,13 +42,20 @@ export async function voidWalletPass(
   }
 
   // Mark the pass as voided
-  await supabase
-    .from("tickets")
-    .update({
-      wallet_voided_at: now,
-      wallet_last_pushed_at: now,
-    })
+  let write = supabase.from("tickets")
+    .update({ wallet_voided_at: now, wallet_last_pushed_at: now })
     .eq("id", ticketId);
+  if (expectedTransferOwner !== undefined) {
+    // The recipient may accept/create a new pass, or the sender may cancel,
+    // between this helper's read and write. Only void the captured sender pass.
+    const { data: voided, error } = await write
+      .eq("user_id", expectedTransferOwner).eq("status", "transfer_pending")
+      .eq("wallet_serial_number", ticket.wallet_serial_number)
+      .select("id").maybeSingle();
+    if (error || !voided) return;
+  } else {
+    await write;
+  }
 
   // Send push notifications to registered devices
   await pushToRegisteredDevices(

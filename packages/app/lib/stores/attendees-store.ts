@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import type { CompQuantity } from "../tickets/comp-recipients"
 
 /**
  * Attendees roster UI state (web). Project rule: screen-local UI state lives
@@ -24,6 +25,7 @@ interface AttendeesState {
    * Server state (tiers, the comp result) is NOT here; that is TanStack Query.
    */
   compOpen: boolean
+  compQuantity: CompQuantity
   compTierId: string | null
   compRecipients: string
   compNote: string
@@ -31,6 +33,7 @@ interface AttendeesState {
   setSearchInput: (value: string) => void
   openComp: () => void
   closeComp: () => void
+  setCompQuantity: (value: CompQuantity) => void
   setCompTierId: (value: string | null) => void
   /** Username autocomplete draft for the comp sheet. */
   compUserQuery: string;
@@ -42,6 +45,7 @@ interface AttendeesState {
 
 const EMPTY_COMP = {
   compOpen: false,
+  compQuantity: 1,
   compTierId: null,
   compRecipients: "",
   compUserQuery: "",
@@ -56,6 +60,7 @@ export const useAttendeesStore = create<AttendeesState>((set) => ({
   setSearchInput: (searchInput) => set({ searchInput }),
   openComp: () => set({ ...EMPTY_COMP, compOpen: true }),
   closeComp: () => set(EMPTY_COMP),
+  setCompQuantity: (compQuantity) => set({ compQuantity }),
   setCompTierId: (compTierId) => set({ compTierId }),
   setCompRecipients: (compRecipients) => set({ compRecipients }),
   setCompUserQuery: (compUserQuery) => set({ compUserQuery }),

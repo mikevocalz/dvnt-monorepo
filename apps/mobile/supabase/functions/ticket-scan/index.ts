@@ -259,6 +259,11 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
         .from("tickets")
         .select("qr_token, event_id")
         .eq("id", verification.ticketId!)
+        // A valid signature proves issuance, not current ownership. Transfers
+        // rotate the payload; the sender's old signed screenshot must not
+        // resolve to the recipient's new raw token by ticket id alone.
+        .eq("qr_payload", qr_payload)
+        .eq("event_id", verification.eventId!)
         .maybeSingle();
       if (byId?.qr_token) {
         resolvedToken = byId.qr_token;
