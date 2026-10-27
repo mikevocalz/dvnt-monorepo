@@ -39,6 +39,12 @@ export interface LynkBroadcastBase {
   isLive: boolean;
   cameraEnabled: boolean;
   micEnabled: boolean;
+  /** Recoverable local capture failures; never a reason to tear down reception. */
+  cameraError: string | null;
+  microphoneError: string | null;
+  captureError: string | null;
+  /** Explicit retry of failed devices only, preserving current media intent. */
+  retryCapture: () => void;
   setCameraEnabled: (on: boolean) => void;
   setMicEnabled: (on: boolean) => void;
   /** Other live publishers in the room (e.g. the cohost) — discovery-driven. */

@@ -78,6 +78,7 @@ import { RoomHeader } from "../ui/web/room-header";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ConnectionBanner, Dialog, RoomTimer } from "@dvnt/ui";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.web";
+import { CaptureErrorBanner } from "../ui/web/CaptureErrorBanner";
 import { useSpeakingDetection } from "@dvnt/app/lib/lynk/useSpeakingDetection.web";
 import { useSpeakingPresence } from "@dvnt/app/lib/lynk/useSpeakingPresence";
 import { speakingSenderId } from "@dvnt/app/lib/lynk/speaking-presence";
@@ -748,12 +749,12 @@ function RoomInner({
   // The transport owns capture; mirror it into the UI store so the mic/camera
   // buttons can never drift from what is actually being published.
   useEffect(() => {
-    setMicOn(lynk.micEnabled && canPublish);
-  }, [lynk.micEnabled, canPublish, setMicOn]);
+    setMicOn(lynk.micEnabled && !lynk.microphoneError && canPublish);
+  }, [lynk.micEnabled, lynk.microphoneError, canPublish, setMicOn]);
 
   useEffect(() => {
-    setCameraOn(lynk.cameraEnabled && canPublish && roomHasVideo);
-  }, [lynk.cameraEnabled, canPublish, roomHasVideo, setCameraOn]);
+    setCameraOn(lynk.cameraEnabled && !lynk.cameraError && canPublish && roomHasVideo);
+  }, [lynk.cameraEnabled, lynk.cameraError, canPublish, roomHasVideo, setCameraOn]);
 
   // An audio-only room must never open the camera. Set before the role lands,
   // so the capture gate in `useLynkBroadcast` never sees `cameraEnabled` true.
@@ -1386,6 +1387,7 @@ function RoomInner({
       {/* Only room content scrolls. The dock never competes with a tall header,
           listener row, enlarged text, or a short landscape viewport. */}
       <div data-room-content className="relative isolate z-0 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+      <CaptureErrorBanner error={lynk.captureError} onRetry={lynk.retryCapture} />
       <RoomHeader
         title={roomTitle}
         connecting={connecting}

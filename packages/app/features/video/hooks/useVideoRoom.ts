@@ -160,12 +160,12 @@ export function useVideoRoom({
   // buttons reflect, and a listener has none. Keying it on isLive instead
   // would report a speaker's camera as off during the go-live handshake.
   useEffect(() => {
-    getStore().setCameraOn(media.cameraEnabled && canPublish);
-  }, [media.cameraEnabled, canPublish, getStore]);
+    getStore().setCameraOn(media.cameraEnabled && !media.cameraError && canPublish);
+  }, [media.cameraEnabled, media.cameraError, canPublish, getStore]);
 
   useEffect(() => {
-    getStore().setMicOn(media.micEnabled && canPublish);
-  }, [media.micEnabled, canPublish, getStore]);
+    getStore().setMicOn(media.micEnabled && !media.microphoneError && canPublish);
+  }, [media.micEnabled, media.microphoneError, canPublish, getStore]);
 
   useEffect(() => {
     getStore().setFrontCamera(media.cameraTrack.position !== "back");
@@ -243,10 +243,10 @@ export function useVideoRoom({
           return false;
         }
       }
-      // MoQ mute is a re-publish with the track dropped, so there is no
-      // failure path to report — unlike Fishjam's toggle, which could reject.
+      // Desired enabled is not proof that native capture started. In particular,
+      // periodic reconciliation must not turn a failed microphone icon back on.
       mediaRef.current.setMicEnabled(enabled);
-      getStore().setMicOn(enabled);
+      getStore().setMicOn(enabled && !mediaRef.current.microphoneError);
       audioSession.setMicMuted(!enabled);
       return true;
     },
@@ -256,7 +256,7 @@ export function useVideoRoom({
   const setCameraEnabled = useCallback(
     async (enabled: boolean) => {
       mediaRef.current.setCameraEnabled(enabled);
-      getStore().setCameraOn(enabled);
+      getStore().setCameraOn(enabled && !mediaRef.current.cameraError);
     },
     [getStore],
   );
@@ -694,6 +694,8 @@ export function useVideoRoom({
     /** Humane transport state — drives "Connecting…" / "Reconnecting…" copy. */
     mediaState: media.state,
     mediaError: media.error,
+    captureError: media.captureError,
+    retryCapture: media.retryCapture,
     isLive: media.isLive,
     canPublish,
   };

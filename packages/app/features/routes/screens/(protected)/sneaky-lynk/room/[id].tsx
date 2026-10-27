@@ -43,6 +43,7 @@ import {
   useMicrophonePermission,
 } from "react-native-vision-camera";
 import { useCamera, useMicrophone } from "react-native-moq";
+import { CaptureErrorBanner } from "@dvnt/app/features/sneaky-lynk/ui/CaptureErrorBanner";
 import { RoomVideo } from "@dvnt/app/features/sneaky-lynk/ui/RoomVideo";
 import { useVideoRoom } from "@dvnt/app/features/video";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -2267,6 +2268,8 @@ function ServerRoom({
     <View style={{ flex: 1 }}>
       <RoomLayout
         admitted={videoRoom.isAdmitted}
+        captureError={videoRoom.captureError}
+        onRetryCapture={videoRoom.retryCapture}
         rosterStatus={videoRoom.isAdmitted && !videoRoom.rosterReady
           ? videoRoom.rosterError
             ? "Couldn't load participants. We're retrying automatically; other people may not appear yet."
@@ -2500,6 +2503,8 @@ function ServerRoom({
 
 function RoomLayout({
   admitted = true,
+  captureError,
+  onRetryCapture,
   rosterStatus,
   insets,
   connectionState,
@@ -2545,6 +2550,8 @@ function RoomLayout({
   timerStartedAt,
 }: {
   admitted?: boolean;
+  captureError?: string | null;
+  onRetryCapture?: () => void;
   insets: any;
   connectionState: "connecting" | "connected" | "reconnecting" | "disconnected";
   /** Host is holding the local participant muted — the mic control says so
@@ -2649,6 +2656,7 @@ function RoomLayout({
       {presenceEvent ? <PresenceToast event={presenceEvent} /> : null}
 
       <View className="flex-1" style={{ paddingTop: insets.top }}>
+        <CaptureErrorBanner error={captureError} onRetry={onRetryCapture} />
         <View
           style={{ paddingLeft: insets.left + 12, paddingRight: insets.right + 12, paddingTop: 8, paddingBottom: 10 }}
         >

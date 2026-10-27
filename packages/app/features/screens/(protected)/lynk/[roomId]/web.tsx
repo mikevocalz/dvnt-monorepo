@@ -13,7 +13,7 @@
  * Web convention: semantic HTML + Tailwind, explicit capture opt-in, avatars rounded SQUARE, bg #06070d, accent cyan #3FDCFF.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "solito/navigation";
 import { VideoTile } from "@dvnt/ui";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.web";
@@ -22,6 +22,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useGenesisRoomAdmission, type GenesisRoomAdmission } from "@dvnt/app/features/sneaky-lynk/useGenesisRoomAdmission";
 import { isPublisherRole } from "@dvnt/app/features/sneaky-lynk/publish-roles";
 import { lynkStateLabel, isTerminalLynkState } from "@dvnt/app/lib/lynk/lynkState";
+import { CaptureErrorBanner } from "@dvnt/app/features/sneaky-lynk/ui/web/CaptureErrorBanner";
 
 function StagePill({ children }: { children: React.ReactNode }) {
   return (
@@ -29,6 +30,20 @@ function StagePill({ children }: { children: React.ReactNode }) {
       {children}
     </span>
   );
+}
+
+// A new callback ref detaches the canvas and destroys its audio player. Keep it
+// stable across mute, capture-error, and other unrelated parent renders.
+function RemotePublisherTile({ path, attachCanvas, muted, label }: {
+  path: string;
+  attachCanvas: (path: string, canvas: HTMLCanvasElement | null) => void;
+  muted?: boolean;
+  label?: string;
+}) {
+  const canvasRef = useCallback((canvas: HTMLCanvasElement | null) => {
+    attachCanvas(path, canvas);
+  }, [attachCanvas, path]);
+  return <VideoTile canvasRef={canvasRef} muted={muted} label={label} className="aspect-video w-full" />;
 }
 
 function BroadcasterStage({ roomId, session }: { roomId: string; session: GenesisRoomAdmission }) {
@@ -65,6 +80,7 @@ function BroadcasterStage({ roomId, session }: { roomId: string; session: Genesi
         </button>
       </div>
 
+      <CaptureErrorBanner error={lynk.captureError} onRetry={lynk.retryCapture} />
       <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Host local preview */}
         <VideoTile
@@ -77,11 +93,11 @@ function BroadcasterStage({ roomId, session }: { roomId: string; session: Genesi
         />
         {/* Co-publishers (cohost) — discovery-driven, no reload */}
         {lynk.coPublishers.map((p) => (
-          <VideoTile
+          <RemotePublisherTile
             key={p.path}
-            canvasRef={(el) => lynk.attachCanvas(p.path, el)}
+            path={p.path}
+            attachCanvas={lynk.attachCanvas}
             label="Cohost"
-            className="aspect-video w-full"
           />
         ))}
       </div>
@@ -101,13 +117,13 @@ function BroadcasterStage({ roomId, session }: { roomId: string; session: Genesi
               onClick={() => lynk.setCameraEnabled(!lynk.cameraEnabled)}
               className="rounded-full bg-white/10 px-5 py-3 text-sm font-semibold text-white"
             >
-              {lynk.cameraEnabled ? "Camera off" : "Camera on"}
+              {lynk.cameraError ? "Camera unavailable" : lynk.cameraEnabled ? "Camera off" : "Camera on"}
             </button>
             <button
               onClick={() => lynk.setMicEnabled(!lynk.micEnabled)}
               className="rounded-full bg-white/10 px-5 py-3 text-sm font-semibold text-white"
             >
-              {lynk.micEnabled ? "Mute" : "Unmute"}
+              {lynk.microphoneError ? "Mic unavailable" : lynk.micEnabled ? "Mute" : "Unmute"}
             </button>
           </>
         )}
@@ -159,11 +175,11 @@ function ViewerStage({ roomId, session }: { roomId: string; session: GenesisRoom
           className={`grid flex-1 gap-4 ${lynk.publishers.length >= 2 ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"}`}
         >
           {lynk.publishers.map((p) => (
-            <VideoTile
+            <RemotePublisherTile
               key={p.path}
-              canvasRef={(el) => lynk.attachCanvas(p.path, el)}
+              path={p.path}
+              attachCanvas={lynk.attachCanvas}
               muted={lynk.muted}
-              className="aspect-video w-full"
             />
           ))}
         </div>
