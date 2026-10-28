@@ -100,13 +100,29 @@ const boundaries = new Map([
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
     const base = `http://127.0.0.1:${server.address().port}`;
+    const screenshotExpanded = async filename => {
+      // Presence/visibility is not enough: a just-opened panel is already in
+      // the DOM while its opacity/max-height transition is still near zero.
+      // Wait for actual settled rendering, not a guessed animation delay.
+      await page.waitForFunction(() => {
+        const panel = document.querySelector('[aria-hidden="false"]');
+        if (!panel) return false;
+        const computed = getComputedStyle(panel);
+        const animations = panel.parentElement.getAnimations({ subtree: true });
+        return computed.opacity === '1'
+          && computed.maxHeight === panel.style.maxHeight
+          && panel.getBoundingClientRect().height > 0
+          && animations.every(animation => !animation.pending && animation.playState !== 'running');
+      });
+      await page.screenshot({ path: path.join(OUT, filename), fullPage: true });
+    };
     for (const scenario of ['few', 'all', 'error']) {
       await page.goto(`${base}/?scenario=${scenario}`);
       const header = page.locator('button[aria-expanded]');
       await header.click();
       if (scenario === 'error') {
         await page.getByRole('button', { name: 'Try again' }).waitFor();
-        await page.screenshot({ path: path.join(OUT, `${browserName}-attendee-retry.png`), fullPage: true });
+        await screenshotExpanded(`${browserName}-attendee-retry.png`);
         await page.evaluate(() => { window.fixture.offline = false; });
         await page.getByRole('button', { name: 'Try again' }).click();
         await page.waitForFunction(() => !document.body.textContent.includes("Couldn't load more"));
@@ -121,7 +137,7 @@ const boundaries = new Map([
         assert.match(await page.locator('body').innerText(), /Only available member profiles/);
         assert.match(await page.locator('body').innerText(), /guest and additional tickets may not have a member profile/);
       }
-      await page.screenshot({ path: path.join(OUT, `${browserName}-attendee-${scenario}.png`), fullPage: true });
+      await screenshotExpanded(`${browserName}-attendee-${scenario}.png`);
       const requestCount = await page.evaluate(() => window.fixture.requests.length);
       await header.click(); await header.click();
       assert.equal(await page.evaluate(() => window.fixture.requests.length), requestCount);

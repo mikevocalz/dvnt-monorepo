@@ -100,16 +100,31 @@ const boundaries = {
       if (!route.request().url().startsWith(origin + '/')) { unexpected.push(route.request().url()); return route.abort(); }
       return route.continue();
     });
-    const page = await context.newPage();
-    page.on('pageerror', error => errors.push(error.message));
-    const enter = async () => { await page.goto(origin); await page.waitForFunction(() => !!window.fixture); };
+    let page;
+    const enter = async (patch = {}) => {
+      // Each server reset starts an independent scenario, not an application
+      // account transition. Dispose the previous document BEFORE changing its
+      // mocked session: focus/visibility revalidation and sign-out listeners
+      // must not race the next scenario's server state. Real transitions stay
+      // within one page below; the context/storage are still shared for the
+      // persisted-token and explicit two-tab cases.
+      await page?.close();
+      reset(patch);
+      page = await context.newPage();
+      page.on('pageerror', error => errors.push(error.message));
+      await page.goto(origin);
+      await page.waitForFunction(() => !!window.fixture);
+      assert.equal(await page.evaluate(() => window.fixture.lifecycle().ready), true,
+        'independent scenario must not inherit the previous document sign-out lock');
+      assert.equal(state.account, patch.account ?? 'A', 'the previous scenario must not change the reset server session');
+    };
     const rest = () => state.calls.filter(call => call.kind === 'rest');
     const ensure = () => page.evaluate(() => window.fixture.ensureSupabaseJwt());
     const patch = account => page.evaluate(a => window.fixture.patch(a), account);
     const assertOwner = (result, account) => { assert.equal(result.error, null); assert.equal(result.data[0].owner_id, account); assert.equal(rest().at(-1).account, account); assert.equal(rest().at(-1).bridgeEpoch, undefined, 'internal epoch header must be stripped'); };
 
     for (const expired of [false, true]) {
-      reset({ lifetimeA: expired ? 60 : 3600 }); await enter(); assert.equal(await ensure(), true);
+      await enter({ lifetimeA: expired ? 60 : 3600 }); assert.equal(await ensure(), true);
       assertOwner(await patch('A'), 'A');
       const oldToken = rest().at(-1).token;
       if (expired) await page.evaluate(() => window.fixture.advance(90000));
@@ -122,7 +137,7 @@ const boundaries = {
       console.log(`PASS: ${expired ? 'expired' : 'nonexpired'} A → B, old bearer blocked, owner B PATCH`);
     }
 
-    reset(); await enter(); assert.equal(await ensure(), true);
+    await enter(); assert.equal(await ensure(), true);
     const dispatchMark = rest().length;
     await page.evaluate(() => { window.fixture.beforeDispatch = () => window.fixture.setUser('B'); });
     assert.ok((await patch('A')).error);
@@ -131,7 +146,7 @@ const boundaries = {
     assertOwner(await patch('B'), 'B');
     console.log('PASS: SDK-selected A bearer invalidated immediately before real fetch dispatch');
 
-    reset(); await enter(); assert.equal(await ensure(), true);
+    await enter(); assert.equal(await ensure(), true);
     await page.evaluate(() => window.fixture.capturePatch('A'));
     await page.evaluate(() => window.fixture.login('B'));
     const epochMark = rest().length;
@@ -140,7 +155,7 @@ const boundaries = {
     assertOwner(await patch('B'), 'B');
     console.log('PASS: request epoch blocks deferred A PATCH even after SDK selects B');
 
-    reset(); await enter();
+    await enter();
     const initial = await page.evaluate(() => Promise.all(Array.from({length:8},()=>window.fixture.ensureSupabaseJwt())));
     assert.ok(initial.every(Boolean));
     assert.equal(state.calls.filter(call=>call.kind==='mint'&&call.account==='A').length,1,'initial calls must coalesce');
@@ -152,7 +167,7 @@ const boundaries = {
     console.log('PASS: concurrent initial and post-login bridge requests coalesce per account');
 
     for (const event of ['focus', 'visibilitychange']) {
-      reset(); await enter(); await page.bringToFront(); assert.equal(await ensure(), true);
+      await enter(); await page.bringToFront(); assert.equal(await ensure(), true);
       const before = await page.evaluate(() => ({ epoch: window.fixture.lifecycle().epoch, reads: window.fixture.sessionReads }));
       await page.evaluate(kind => {
         window.fixture.capturePatch('A');
@@ -168,7 +183,7 @@ const boundaries = {
       console.log(`PASS: same-account ${event} verifies session without invalidating pending PATCH`);
     }
 
-    reset({ holdA: true }); await enter();
+    await enter({ holdA: true });
     await page.evaluate(() => { window.pendingMint = window.fixture.ensureSupabaseJwt(); });
     // Poll server-side to ensure A is genuinely in flight.
     await waitFor(() => state.held.length === 1);
@@ -181,7 +196,7 @@ const boundaries = {
     console.log('PASS: late in-flight A mint cannot refill B cache or reach REST');
 
     for (const failLogout of [false, true]) {
-      reset({ failLogout }); await enter(); assert.equal(await ensure(), true);
+      await enter({ failLogout }); assert.equal(await ensure(), true);
       await page.evaluate(() => window.fixture.signOut());
       const logoutMark = rest().length;
       const result = await patch('A');
@@ -190,7 +205,7 @@ const boundaries = {
       console.log(`PASS: ${failLogout ? 'failed' : 'successful'} logout detaches the bridge`);
     }
 
-    reset(); await enter(); assert.equal(await ensure(), true);
+    await enter(); assert.equal(await ensure(), true);
     await page.evaluate(() => window.fixture.advance(51 * 60 * 1000));
     state.failMint = true;
     const refreshMark = rest().length;
@@ -199,7 +214,7 @@ const boundaries = {
     assert.ok(rest().slice(refreshMark).every(call => call.account === null));
     console.log('PASS: failed JWT refresh detaches still-valid old token with no fallback');
 
-    reset(); await enter(); assert.equal(await ensure(), true);
+    await enter(); assert.equal(await ensure(), true);
     state.failSession = true;
     await page.evaluate(() => window.fixture.invalidateTokenCache());
     assert.equal(await ensure(), false);
@@ -208,16 +223,15 @@ const boundaries = {
     assert.ok(rest().slice(errorMark).every(call => call.account === null));
     console.log('PASS: session error fails closed without reusing bridge A');
 
-    reset({ account: 'B' });
     await context.addInitScript(token => localStorage.setItem('dvnt-supabase-jwt-v1', JSON.stringify({ accessToken: token, expiresAt: 9999999999 })), jwt('A'));
-    await enter(); await page.evaluate(() => window.fixture.setUser('B'));
+    await enter({ account: 'B' }); await page.evaluate(() => window.fixture.setUser('B'));
     assertOwner(await patch('B'), 'B');
     assert.equal(await page.evaluate(() => localStorage.getItem('dvnt-supabase-jwt-v1')), null);
     assert.ok(rest().every(call => call.account === 'B'));
     console.log('PASS: cold persisted A JWT ignored and removed under session B');
 
     // Two real tabs share origin storage but not memory or auth-store state.
-    reset(); await enter(); assert.equal(await ensure(), true);
+    await enter(); assert.equal(await ensure(), true);
     const other = await context.newPage(); await other.goto(origin); await other.waitForFunction(() => !!window.fixture);
     const beforeEpoch = await page.evaluate(() => window.fixture.lifecycle().epoch);
     await other.evaluate(() => window.fixture.signOut());

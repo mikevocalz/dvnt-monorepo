@@ -72,7 +72,8 @@ jobs:
   verification-onboarding-contract:
     # Prevent a recurrence of the 2026-10-08 error: missing Didit secrets
     # must not look like a successful HTTP 200 or expose a bad redirect.
-    runs-on: ubuntu-latest
+    # Pinned Playwright does not yet support ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
