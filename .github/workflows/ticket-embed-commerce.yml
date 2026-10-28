@@ -27,7 +27,8 @@ concurrency:
 jobs:
   purchase-scope:
     name: Determine whether real sandbox purchase is needed
-    runs-on: ubuntu-latest
+    # Pinned Playwright releases support 24.04, not ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     outputs:
       required: ${{ steps.scope.outputs.required }}
     steps:
@@ -55,7 +56,8 @@ jobs:
             echo "No checkout or shared commerce dependency changed. Contract/browser tests still run; no sandbox purchase or email." >> "$GITHUB_STEP_SUMMARY"
           fi
   contracts-and-inventory:
-    runs-on: ubuntu-latest
+    # Pinned Playwright releases support 24.04, not ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,7 +87,8 @@ jobs:
           sudo -u postgres createdb dvnt_checkout_failure_test
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_checkout_failure_test -f scripts/test-checkout-failure-taxonomy.sql
   browser-contract:
-    runs-on: ubuntu-latest
+    # Pinned Playwright releases support 24.04, not ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -108,7 +111,8 @@ jobs:
         run: python scripts/test-ticket-embed-browser.py
   sandbox-release:
     name: Real sandbox purchase (required before release)
-    runs-on: ubuntu-latest
+    # Pinned Playwright releases support 24.04, not ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     needs: [purchase-scope, contracts-and-inventory, browser-contract]
     if: needs.purchase-scope.outputs.required == 'true'
     # All PRs use one disposable event; never run its purchase jobs concurrently.

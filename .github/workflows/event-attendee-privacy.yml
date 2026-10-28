@@ -17,7 +17,8 @@ permissions:
   contents: read
 jobs:
   privacy-regressions:
-    runs-on: ubuntu-latest
+    # Pinned Playwright releases support 24.04, not ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +46,8 @@ jobs:
             packages/app/lib/auth/account-bridge-cache.test.ts
 
   roster-browser:
-    runs-on: ubuntu-latest
+    # Pinned Playwright releases support 24.04, not ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
