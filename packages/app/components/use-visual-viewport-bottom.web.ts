@@ -2,7 +2,7 @@ import { useEffect, type RefObject } from "react";
 
 /**
  * Mobile Safari can keep bottom:0 attached to the pre-keyboard layout viewport
- * after an editor field blurs. Anchor from the visual viewport's TOP instead,
+ * after an editor or event-sheet field blurs. Anchor from the visual viewport's TOP instead,
  * accounting for keyboard panning as well as its height. Keep the body portal:
  * this does not make fixed positioning safe inside a transformed ancestor.
  *

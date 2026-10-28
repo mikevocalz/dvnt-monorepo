@@ -34,7 +34,7 @@ interface GoingAccordionProps {
   onAttendeePress?: (attendee: EventAttendee) => void;
   /** Enables paging past the 20 the detail RPC ships. Omit → static list. */
   eventId?: string;
-  /** Gate: only a public event's list is fetched. */
+  /** Kept for API compatibility; the server enforces viewer access. */
   visibility?: unknown;
 }
 
@@ -125,8 +125,8 @@ const VisibleGoingAccordion = memo(function VisibleGoingAccordion({
       lastPageSize: paged.lastPageSize,
     });
   const onEndReached = useCallback(() => {
-    if (eventId && canLoadMore && !paged.loading) loadMore(eventId, visibility, event);
-  }, [eventId, canLoadMore, paged.loading, loadMore, visibility, event]);
+    if (isLoggedIn && eventId && canLoadMore && !paged.loading && !paged.error) loadMore(eventId, visibility, event);
+  }, [isLoggedIn, eventId, canLoadMore, paged.loading, paged.error, loadMore, visibility, event]);
 
   // The list is measured while the panel is collapsed, so onEndReached cannot
   // be relied on to prime the first page. The web port hit exactly this: the
@@ -137,9 +137,9 @@ const VisibleGoingAccordion = memo(function VisibleGoingAccordion({
   // ponytail: one page per effect pass. Each fetch grows rows, re-running
   // this, so it walks to the end and a failed request stops it.
   useEffect(() => {
-    if (!expanded || !eventId || !canLoadMore || paged.loading) return;
+    if (!isLoggedIn || !expanded || !eventId || !canLoadMore || paged.loading || paged.error) return;
     loadMore(eventId, visibility, event);
-  }, [expanded, eventId, canLoadMore, paged.loading, loadMore, visibility, event]);
+  }, [isLoggedIn, expanded, eventId, canLoadMore, paged.loading, paged.error, loadMore, visibility, event]);
 
   const toggle = useCallback(() => {
     const next = !expanded;
@@ -186,9 +186,8 @@ const VisibleGoingAccordion = memo(function VisibleGoingAccordion({
     );
   }
 
-  // Nothing to expand into: the viewer is not going, so the server withheld the
-  // guest list. An accordion that opens onto an empty grid reads as broken —
-  // say the count and why the faces are missing, and drop the chevron.
+  // Guest-only tickets and denied access can both produce an empty roster.
+  // Do not infer this viewer is not going from an empty result.
   if (rows.length === 0 && totalCount > 0) {
     return (
       <View style={styles.container}>
@@ -196,7 +195,7 @@ const VisibleGoingAccordion = memo(function VisibleGoingAccordion({
           <Text style={styles.countText}>
             <Text style={styles.countBold}>{totalCount}</Text> going
           </Text>
-          <Text style={styles.tapHint}>Only people going can see who's going</Text>
+          <Text style={styles.tapHint}>No member profiles available. Profiles are only shown to attendees and hosts; guest or additional tickets may not have a profile.</Text>
         </View>
       </View>
     );
@@ -233,7 +232,7 @@ const VisibleGoingAccordion = memo(function VisibleGoingAccordion({
             <Text style={styles.countBold}>{totalCount}</Text> going
           </Text>
           {attendees.length > 0 && !expanded && (
-            <Text style={styles.tapHint}>Tap to see everyone</Text>
+            <Text style={styles.tapHint}>Tap to see member profiles</Text>
           )}
         </View>
 
@@ -260,9 +259,23 @@ const VisibleGoingAccordion = memo(function VisibleGoingAccordion({
             </View>
           )}
           ListFooterComponent={
-            paged.loading ? (
-              <Text style={styles.footerText}>Loading more…</Text>
-            ) : null
+            <View>
+              <Text style={styles.footerText}>
+                {rows.length} member profile{rows.length === 1 ? "" : "s"} shown
+              </Text>
+              {totalCount > rows.length ? (
+                <Text style={styles.footerText}>
+                  Only available member profiles are shown. Attendance counts tickets and RSVPs; guest and additional tickets may not have a member profile.
+                </Text>
+              ) : null}
+              {paged.loading ? (
+                <Text style={styles.footerText}>Loading member profiles…</Text>
+              ) : paged.error && eventId ? (
+                <Pressable accessibilityRole="button" onPress={() => loadMore(eventId, visibility, event)}>
+                  <Text style={styles.footerText}>Couldn’t load more member profiles. Try again</Text>
+                </Pressable>
+              ) : null}
+            </View>
           }
         />
       </Animated.View>

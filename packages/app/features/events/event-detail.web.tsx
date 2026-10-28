@@ -2566,7 +2566,7 @@ export function EventDetailScreen() {
           onChange={(ev) => setReviewText(ev.target.value)}
           placeholder="Share how the event went…"
           rows={4}
-          className="w-full rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#379ED8]"
+          className="w-full rounded-xl border border-white/10 bg-white/[0.03] p-3 text-base md:text-sm text-white placeholder:text-white/30 outline-none focus:border-[#379ED8]"
         />
       </Dialog>
 
@@ -2913,7 +2913,7 @@ function CheckoutSheet({
               aria-label="Promo or promoter code"
               maxLength={64}
               autoCapitalize="characters"
-              className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#379ED8]"
+              className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-base md:text-sm text-white placeholder:text-white/30 outline-none focus:border-[#379ED8]"
             />
             <button
               type="button"

@@ -19,7 +19,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   privacy:
-    runs-on: ubuntu-latest
+    # Pinned Playwright releases support 24.04, not ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

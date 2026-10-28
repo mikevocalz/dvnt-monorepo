@@ -49,7 +49,7 @@ export interface GoingAccordionProps {
   onRequireAuth?: () => void;
   /** Enables paging past the 20 the detail RPC ships. Omit -> static list. */
   eventId?: string;
-  /** Gate: only a public event's list is fetched. */
+  /** Kept for API compatibility; the server enforces viewer access. */
   visibility?: unknown;
 }
 
@@ -99,13 +99,13 @@ function VisibleGoingAccordion({ event, id, attendees, totalCount, isLoggedIn, r
     hasMoreAttendees({ loaded: rows.length, totalCount, lastPageSize: paged.lastPageSize });
   const onScroll = useCallback(
     (ev: React.UIEvent<HTMLDivElement>) => {
-      if (!eventId || !canLoadMore || paged.loading) return;
+      if (!loggedIn || !eventId || !canLoadMore || paged.loading || paged.error) return;
       const el = ev.currentTarget;
       if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
         void loadMore(eventId, visibility, event);
       }
     },
-    [eventId, canLoadMore, paged.loading, loadMore, visibility, event],
+    [loggedIn, eventId, canLoadMore, paged.loading, paged.error, loadMore, visibility, event],
   );
 
   // Paging cannot wait for a scroll that will never happen. The detail RPC
@@ -119,9 +119,9 @@ function VisibleGoingAccordion({ event, id, attendees, totalCount, isLoggedIn, r
   // grows rows, which re-runs this, so it walks to the end on its own and a
   // failed request stops it instead of spinning.
   useEffect(() => {
-    if (!expanded || !eventId || !canLoadMore || paged.loading) return;
+    if (!loggedIn || !expanded || !eventId || !canLoadMore || paged.loading || paged.error) return;
     void loadMore(eventId, visibility, event);
-  }, [expanded, eventId, canLoadMore, paged.loading, loadMore, visibility, event]);
+  }, [loggedIn, expanded, eventId, canLoadMore, paged.loading, paged.error, loadMore, visibility, event]);
 
   const container: React.CSSProperties = {
     background: "rgba(138,64,207,0.08)",
@@ -162,9 +162,8 @@ function VisibleGoingAccordion({ event, id, attendees, totalCount, isLoggedIn, r
     );
   }
 
-  // Nothing to expand into: the viewer is not going, so the server withheld the
-  // guest list. An accordion that opens onto an empty grid reads as broken —
-  // say the count and why the faces are missing, and drop the chevron.
+  // An empty authorized roster can mean guest-only tickets, not just denied
+  // access. Do not infer that this viewer is not going from an empty result.
   if (rows.length === 0 && totalCount > 0) {
     return (
       <div style={container}>
@@ -173,7 +172,7 @@ function VisibleGoingAccordion({ event, id, attendees, totalCount, isLoggedIn, r
             <span style={{ color: "#fff", fontWeight: 700 }}>{totalCount}</span> going
           </span>
           <span style={{ display: "block", color: "rgba(255,255,255,0.35)", fontSize: 11, marginTop: 1 }}>
-            Only people going can see who&apos;s going
+            No member profiles available. Profiles are only shown to attendees and hosts; guest or additional tickets may not have a profile.
           </span>
         </div>
       </div>
@@ -182,7 +181,7 @@ function VisibleGoingAccordion({ event, id, attendees, totalCount, isLoggedIn, r
 
   return (
     <div style={container}>
-      <button onClick={() => toggle(id)} style={{ display: "flex", alignItems: "center", width: "100%", background: "transparent", border: 0, cursor: "pointer", padding: 0 }}>
+      <button aria-expanded={expanded} onClick={() => toggle(id)} style={{ display: "flex", alignItems: "center", width: "100%", background: "transparent", border: 0, cursor: "pointer", padding: 0 }}>
         <span style={{ display: "flex" }}>
           {preview.map((a, i) => (
             <span key={a.id} style={{ marginLeft: i === 0 ? 0 : -8, borderRadius: 7, border: "2px solid #000", overflow: "hidden", zIndex: 10 - i, display: "block" }}>
@@ -195,13 +194,15 @@ function VisibleGoingAccordion({ event, id, attendees, totalCount, isLoggedIn, r
             <span style={{ color: "#fff", fontWeight: 700 }}>{totalCount}</span> going
           </span>
           {attendees.length > 0 && !expanded ? (
-            <span style={{ display: "block", color: "rgba(255,255,255,0.35)", fontSize: 11, marginTop: 1 }}>Tap to see everyone</span>
+            <span style={{ display: "block", color: "rgba(255,255,255,0.35)", fontSize: 11, marginTop: 1 }}>Tap to see member profiles</span>
           ) : null}
         </span>
         <ChevronDown size={18} color="rgba(255,255,255,0.5)" style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 280ms cubic-bezier(0.22,1,0.36,1)" }} />
       </button>
 
       <div
+        aria-hidden={!expanded}
+        inert={!expanded}
         onScroll={onScroll}
         style={{
           maxHeight: expanded ? 600 : 0,
@@ -229,10 +230,25 @@ function VisibleGoingAccordion({ event, id, attendees, totalCount, isLoggedIn, r
             </button>
           ))}
         </div>
-        {paged.loading ? (
-          <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, textAlign: "center", padding: "12px 0", margin: 0 }}>
-            Loading more…
+        <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, margin: "12px 0 0" }}>
+          {rows.length} member profile{rows.length === 1 ? "" : "s"} shown
+        </p>
+        {totalCount > rows.length ? (
+          <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, lineHeight: 1.5, margin: "4px 0 0" }}>
+            Only available member profiles are shown. Attendance counts tickets and RSVPs; guest and additional tickets may not have a member profile.
           </p>
+        ) : null}
+        {paged.loading ? (
+          <p role="status" style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, textAlign: "center", padding: "12px 0", margin: 0 }}>
+            Loading member profiles…
+          </p>
+        ) : paged.error && eventId ? (
+          <div role="status" style={{ color: "rgba(255,255,255,0.7)", fontSize: 12, marginTop: 12 }}>
+            Couldn&apos;t load more member profiles.{" "}
+            <button onClick={() => void loadMore(eventId, visibility, event)} style={{ color: "#fff", background: "transparent", border: 0, padding: "8px 4px", textDecoration: "underline", cursor: "pointer" }}>
+              Try again
+            </button>
+          </div>
         ) : null}
       </div>
     </div>

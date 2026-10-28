@@ -715,10 +715,12 @@ export const eventsApi = {
         p_offset: opts.offset,
       });
       if (error) throw error;
-      return Array.isArray(data) ? data : [];
+      if (!Array.isArray(data)) throw new Error("Invalid attendee page response");
+      return data;
     } catch (error) {
       console.error("[Events] getEventAttendeePage error:", error);
-      return [];
+      // A failed request is not an empty final page. Let the roster offer a retry.
+      throw error;
     }
   },
 

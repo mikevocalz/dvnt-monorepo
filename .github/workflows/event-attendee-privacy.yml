@@ -17,7 +17,8 @@ permissions:
   contents: read
 jobs:
   privacy-regressions:
-    runs-on: ubuntu-latest
+    # Pinned Playwright releases support 24.04, not ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +34,7 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/attendee-privacy/node_modules" node --test --test-concurrency=2 \
             scripts/test-event-attendee-privacy-sql.cjs \
             scripts/test-event-attendance-organizer.cjs \
+            scripts/test-event-attendee-roster.ts \
             scripts/test-guest-event-purchase.cjs \
             apps/mobile/supabase/functions/bootstrap-events/index.test.cjs \
             apps/mobile/supabase/functions/create-event/index.test.cjs \
@@ -42,3 +44,35 @@ jobs:
             packages/app/features/events/create/event-form.test.ts \
             packages/app/lib/hooks/event-update-account-cache.test.ts \
             packages/app/lib/auth/account-bridge-cache.test.ts
+
+  roster-browser:
+    # Pinned Playwright releases support 24.04, not ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated roster browser dependencies
+        run: npm install --prefix "$RUNNER_TEMP/attendee-browser" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 lucide-react@1.30.0 playwright@1.58.2
+      - name: Install browser
+        run: node "$RUNNER_TEMP/attendee-browser/node_modules/playwright/cli.js" install --with-deps ${{ matrix.browser }}
+      - name: Render attendee count, pagination and retry states
+        env:
+          NODE_PATH: ${{ runner.temp }}/attendee-browser/node_modules
+          ATTENDEE_BROWSER: ${{ matrix.browser }}
+          ATTENDEE_EVIDENCE_DIR: ${{ runner.temp }}/attendee-evidence
+        run: node scripts/test-event-attendee-roster-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: attendee-roster-${{ matrix.browser }}
+          path: ${{ runner.temp }}/attendee-evidence/*.png
+          if-no-files-found: ignore
