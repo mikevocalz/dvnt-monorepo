@@ -18,11 +18,13 @@ import {
 export interface EventAttendeesEntry {
   rows: AttendeeRow[];
   loading: boolean;
+  /** Failed requests preserve the cursor and can be explicitly retried. */
+  error: boolean;
   /** Rows returned by the most recent fetch; null before any fetch. */
   lastPageSize: number | null;
 }
 
-const EMPTY: EventAttendeesEntry = { rows: [], loading: false, lastPageSize: null };
+const EMPTY: EventAttendeesEntry = { rows: [], loading: false, error: false, lastPageSize: null };
 
 interface EventAttendeesState {
   byEvent: Record<string, EventAttendeesEntry>;
@@ -56,9 +58,9 @@ export const useEventAttendeesStore = create<EventAttendeesState>((set, get) => 
     // The detail response is authoritative: an empty roster can mean this
     // viewer lost their ticket/RSVP access. Never keep old pages behind it.
     if (raw.length === 0) {
-      if (entry.rows.length === 0 && !entry.loading && entry.lastPageSize === 0) return;
+      if (entry.rows.length === 0 && !entry.loading && !entry.error && entry.lastPageSize === 0) return;
       set((s) => ({
-        byEvent: { ...s.byEvent, [eventId]: { rows: [], loading: false, lastPageSize: 0 } },
+        byEvent: { ...s.byEvent, [eventId]: { rows: [], loading: false, error: false, lastPageSize: 0 } },
         revisions: { ...s.revisions, [eventId]: (s.revisions[eventId] ?? 0) + 1 },
       }));
       return;
@@ -67,7 +69,7 @@ export const useEventAttendeesStore = create<EventAttendeesState>((set, get) => 
     const rows = mergeAttendeePage(entry.rows, seeded);
     // Re-seeding on every render must not churn state or the list re-mounts.
     if (rows.length === entry.rows.length && entry.rows.length > 0) return;
-    set((s) => ({ byEvent: { ...s.byEvent, [eventId]: { ...entry, rows } } }));
+    set((s) => ({ byEvent: { ...s.byEvent, [eventId]: { ...entry, rows, error: false, lastPageSize: null } } }));
   },
   loadMore: async (eventId, visibility, event) => {
     const session = getSessionLifecycle();
@@ -76,7 +78,7 @@ export const useEventAttendeesStore = create<EventAttendeesState>((set, get) => 
     const entry = get().byEvent[eventId] ?? EMPTY;
     if (entry.loading) return;
     const revision = get().revisions[eventId] ?? 0;
-    set((s) => ({ byEvent: { ...s.byEvent, [eventId]: { ...entry, loading: true } } }));
+    set((s) => ({ byEvent: { ...s.byEvent, [eventId]: { ...entry, loading: true, error: false } } }));
     const { limit, offset } = attendeePageRequest(entry.rows.length, ATTENDEE_PAGE_SIZE);
     try {
       const page = await eventsApi.getEventAttendeePage(eventId, { visibility, limit, offset });
@@ -85,11 +87,11 @@ export const useEventAttendeesStore = create<EventAttendeesState>((set, get) => 
       if (getSessionLifecycle().epoch !== session.epoch || !getSessionLifecycle().ready ||
         (get().revisions[eventId] ?? 0) !== revision || get().allowed[eventId] === false) return;
       const rows = mergeAttendeePage(entry.rows, page.map((r, i) => normalizeAttendeeRow(r, offset + i)));
-      set((s) => ({ byEvent: { ...s.byEvent, [eventId]: { rows, loading: false, lastPageSize: page.length } } }));
+      set((s) => ({ byEvent: { ...s.byEvent, [eventId]: { rows, loading: false, error: false, lastPageSize: page.length } } }));
     } catch {
       if (getSessionLifecycle().epoch !== session.epoch || !getSessionLifecycle().ready ||
         (get().revisions[eventId] ?? 0) !== revision) return;
-      set((s) => ({ byEvent: { ...s.byEvent, [eventId]: { ...entry, loading: false, lastPageSize: 0 } } }));
+      set((s) => ({ byEvent: { ...s.byEvent, [eventId]: { ...entry, loading: false, error: true } } }));
     }
   },
 }));

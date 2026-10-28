@@ -29,7 +29,9 @@ function moduleAt(relative: string, overrides: Record<string, any> = {}) {
 function storeFixture() {
   let calls = 0;
   let resolvePage!: (rows: unknown[]) => void;
-  const api = { getEventAttendeePage: () => { calls++; return new Promise(resolve => { resolvePage = resolve; }); } };
+  let rejectPage!: (error: Error) => void;
+  const offsets: number[] = [];
+  const api = { getEventAttendeePage: (_id: string, opts: { offset: number }) => { calls++; offsets.push(opts.offset); return new Promise((resolve, reject) => { resolvePage = resolve; rejectPage = reject; }); } };
   let session = { epoch: 1, ready: true, authId: "account-a" };
   let onBoundary: (() => void) | undefined;
   const { useEventAttendeesStore: store } = moduleAt("../stores/event-attendees-store.ts", {
@@ -39,7 +41,7 @@ function storeFixture() {
       subscribeSessionLifecycle: (listener: () => void) => { onBoundary = listener; return () => {}; },
     },
   });
-  return { store, calls: () => calls, finish: (rows: unknown[]) => resolvePage(rows),
+  return { store, calls: () => calls, offsets, finish: (rows: unknown[]) => resolvePage(rows), fail: () => rejectPage(new Error("temporary offline")),
     switchAccount: (authId: string, ready = true) => { session = { epoch: session.epoch + 1, authId, ready }; onBoundary?.(); },
   };
 }
@@ -160,4 +162,106 @@ test("an empty authoritative roster hides old paged identities before effects ru
     }));
     assert.doesNotMatch(html, /private-person|private\.jpg/);
   }
+});
+
+
+test("failed paging keeps the cursor and rows for an explicit retry", async () => {
+  const h = storeFixture();
+  const event = { category: "party" };
+  h.store.getState().seed("1", [person], event);
+  const failed = h.store.getState().loadMore("1", "public", event);
+  h.fail(); await failed;
+  let entry = h.store.getState().byEvent["1"];
+  assert.equal(entry.error, true);
+  assert.equal(entry.lastPageSize, null);
+  assert.equal(entry.rows.length, 1);
+  const retried = h.store.getState().loadMore("1", "public", event);
+  h.finish([{ ...person, id: "next" }]); await retried;
+  entry = h.store.getState().byEvent["1"];
+  assert.deepEqual(h.offsets, [1, 1]);
+  assert.equal(entry.error, false);
+  assert.equal(entry.rows.length, 2);
+  assert.equal(entry.lastPageSize, 1);
+});
+
+test("a newer detail roster reopens an exhausted preview without losing loaded identities", async () => {
+  const h = storeFixture();
+  const event = { category: "party" };
+  h.store.getState().seed("1", [person], event);
+  const done = h.store.getState().loadMore("1", "public", event);
+  h.finish([]); await done;
+  assert.equal(h.store.getState().byEvent["1"].lastPageSize, 0);
+  h.store.getState().seed("1", [person, { ...person, id: "new" }], event);
+  assert.equal(h.store.getState().byEvent["1"].lastPageSize, null);
+  assert.equal(h.store.getState().byEvent["1"].rows.length, 2);
+});
+
+
+test("the actual attendee API preserves errors instead of converting them to a final empty page", async () => {
+  const file = "../api/events.ts";
+  const source = readFileSync(new URL(file, import.meta.url), "utf8");
+  const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  let method: any;
+  const visit = (node: any) => {
+    if (ts.isMethodDeclaration(node) && node.name?.getText(ast) === "getEventAttendeePage") method = node;
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  assert.ok(method);
+  const code = ts.transpileModule(`exports.api = {${method.getText(ast)}}`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+  for (const failure of ["none", "rpc", "malformed"]) {
+    const error = new Error("RPC unavailable");
+    const calls: any[] = [];
+    const context = { exports: {} as any, console: { error() {} }, supabase: { rpc: async (...args: any[]) => { calls.push(args); return failure === "rpc" ? { error } : { data: failure === "malformed" ? {} : [] }; } } };
+    vm.runInNewContext(code, context);
+    const result = context.exports.api.getEventAttendeePage("42", { limit: 24, offset: 4 });
+    if (failure !== "none") await assert.rejects(result, /RPC unavailable|Invalid attendee page response/);
+    else assert.equal((await result).length, 0);
+    assert.equal(calls[0][0], "get_event_attendee_page");
+    assert.equal(calls[0][1].p_offset, 4);
+  }
+});
+
+
+test("a failed second page keeps its full-page cursor and retries from the same offset", async () => {
+  const h = storeFixture();
+  const event = { category: "party" };
+  h.store.getState().seed("1", [person], event);
+  const first = h.store.getState().loadMore("1", "public", event);
+  h.finish(Array.from({ length: 24 }, (_, i) => ({ ...person, id: String(i) }))); await first;
+  const second = h.store.getState().loadMore("1", "public", event);
+  h.fail(); await second;
+  assert.equal(h.store.getState().byEvent["1"].lastPageSize, 24);
+  assert.equal(h.store.getState().byEvent["1"].rows.length, 25);
+  const retry = h.store.getState().loadMore("1", "public", event);
+  h.finish([{ ...person, id: "last" }]); await retry;
+  assert.deepEqual(h.offsets, [1, 25, 25]);
+  assert.equal(h.store.getState().byEvent["1"].rows.length, 26);
+});
+
+test("late page failures cannot resurrect an opted-out or previous-account roster", async () => {
+  for (const boundary of ["privacy", "account"]) {
+    const h = storeFixture();
+    const event = { ...protectedEvent, showAttendees: true };
+    h.store.getState().seed("1", [person], event);
+    const pending = h.store.getState().loadMore("1", "public", event);
+    if (boundary === "privacy") h.store.getState().setAllowed("1", false);
+    else h.switchAccount("account-b");
+    h.fail(); await pending;
+    const entry = h.store.getState().byEvent["1"];
+    assert.equal(entry?.rows.length ?? 0, 0);
+    assert.equal(entry?.error ?? false, false);
+  }
+});
+
+
+test("an authoritative empty seed also clears a prior paging error", async () => {
+  const h = storeFixture();
+  const event = { category: "party" };
+  h.store.getState().seed("1", [], event);
+  const pending = h.store.getState().loadMore("1", "public", event);
+  h.fail(); await pending;
+  assert.equal(h.store.getState().byEvent["1"].error, true);
+  h.store.getState().seed("1", [], event);
+  assert.equal(h.store.getState().byEvent["1"].error, false);
 });

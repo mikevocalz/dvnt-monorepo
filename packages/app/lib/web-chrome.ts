@@ -32,3 +32,12 @@ export function routeIsImmersive(pathname: string): boolean {
     (p) => pathname === p || pathname.startsWith(p + "/"),
   );
 }
+
+/** Routes whose sheets/editors can leave Safari's layout viewport behind after
+ * keyboard dismissal. Match only the detail routes, never their nested comment
+ * or management screens: those have their own composer positioning contracts. */
+export function routeUsesVisualViewportBottom(pathname: string): boolean {
+  return /^\/feed\/events\/(?:create|[1-9]\d*)\/?$/.test(pathname) ||
+    /^\/events\/[^/]+\/?$/.test(pathname) ||
+    /^\/feed\/edit-event\/[^/]+\/?$/.test(pathname);
+}

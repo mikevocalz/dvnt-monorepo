@@ -13,6 +13,7 @@ import { useRouter, usePathname } from "solito/navigation";
 import { Home, Calendar, Plus, Heart, User } from "lucide-react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useVisualViewportBottom } from "./use-visual-viewport-bottom.web";
+import { routeUsesVisualViewportBottom } from "@dvnt/app/lib/web-chrome";
 import { CenterButton } from "./center-button.web";
 
 const CYAN = "#3FDCFF";
@@ -47,11 +48,11 @@ export function WebTabBar() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const viewportRef = useRef<HTMLElement>(null);
-  // Limit the Safari editor workaround to routes covered by editor tests.
-  // Chat/comment composers retain their existing shared bottom:0 behavior.
-  const isEventEditor = pathname === "/feed/events/create" ||
-    /^\/feed\/edit-event\/[^/]+\/?$/.test(pathname ?? "");
-  useVisualViewportBottom(viewportRef, mounted && isMobile && isEventEditor);
+  // Event detail also opens keyboard-bearing sheets (checkout/reviews). Keep
+  // tracking the visible bottom after they close, not just inside editors.
+  // Chat/comment composers retain their separately-tested bottom:0 behavior.
+  const useVisibleBottom = routeUsesVisualViewportBottom(pathname ?? "");
+  useVisualViewportBottom(viewportRef, mounted && isMobile && useVisibleBottom);
 
   const TabItem = ({ href, Icon, label }: Tab) => {
     const active = pathname === href;
@@ -79,7 +80,7 @@ export function WebTabBar() {
     <nav
       ref={viewportRef}
       data-dvnt-tab-bar=""
-      style={{ ...viewportStyle, ...(isMobile ? mobileViewportStyle : {}), ...(isMobile && isEventEditor ? editorViewportStyle : {}) }}
+      style={{ ...viewportStyle, ...(isMobile ? mobileViewportStyle : {}), ...(isMobile && useVisibleBottom ? visualViewportStyle : {}) }}
       aria-label="Primary"
     >
       <View style={[styles.bar, isMobile && styles.barMobile]}>
@@ -110,7 +111,7 @@ const viewportStyle: CSSProperties = {
   pointerEvents: "none",
   padding: "0 16px",
 };
-const editorViewportStyle: CSSProperties = {
+const visualViewportStyle: CSSProperties = {
   top: "var(--dvnt-visible-bottom, 100dvh)",
   bottom: "auto",
   transform: "translateY(-100%)",

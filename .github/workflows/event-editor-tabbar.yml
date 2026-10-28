@@ -1,4 +1,4 @@
-name: Event editor viewport regression
+name: Event viewport regressions
 on:
   pull_request:
     paths:
@@ -8,11 +8,18 @@ on:
       - 'packages/app/components/use-visual-viewport-bottom.web.ts'
       - 'packages/app/features/events/event-create.web.tsx'
       - 'packages/app/features/events/event-edit.web.tsx'
+      - 'packages/app/features/events/event-detail.web.tsx'
+      - 'packages/app/lib/web-chrome.ts'
+      - 'packages/app/lib/web-chrome.test.ts'
+      - 'packages/app/components/app-shell.web.tsx'
+      - 'packages/app/components/bottom-sheet.web.tsx'
+      - 'packages/ui/src/form/Dialog.web.tsx'
       - 'packages/app/features/events/create/**'
       - 'packages/app/features/events/ui/**'
       - 'apps/web/src/app/(frontend)/globals.css'
       - 'scripts/test-event-editor-tabbar-browser.cjs'
       - 'scripts/test-web-tab-bar-browser.cjs'
+      - 'scripts/test-event-detail-tabbar-browser.cjs'
       - '.github/workflows/event-editor-tabbar.yml'
   workflow_dispatch:
 permissions:
@@ -42,6 +49,12 @@ jobs:
           TABBAR_BROWSER: ${{ matrix.browser }}
           TABBAR_EVIDENCE_DIR: ${{ runner.temp }}/editor-evidence
         run: node scripts/test-event-editor-tabbar-browser.cjs
+      - name: Exercise event detail chrome and modal recovery
+        env:
+          NODE_PATH: ${{ runner.temp }}/editor/node_modules
+          TABBAR_BROWSER: ${{ matrix.browser }}
+          TABBAR_EVIDENCE_DIR: ${{ runner.temp }}/editor-evidence
+        run: node scripts/test-event-detail-tabbar-browser.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
