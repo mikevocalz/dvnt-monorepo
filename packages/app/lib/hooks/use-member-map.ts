@@ -120,125 +120,131 @@ export function useLocationSettings() {
 }
 
 function isForeground() { return Platform.OS === "web" ? (typeof document !== "undefined" && document.visibilityState === "visible") : AppState.currentState === "active"; }
-async function sampleLocation(prompt: boolean, allowed: () => boolean) {
+async function sampleLocation(allowed: () => boolean) {
   if (!allowed()) return null;
   if (Platform.OS === "web") {
     if (typeof navigator === "undefined" || !navigator.geolocation) throw new Error("Location isn't supported on this device.");
-    if (!prompt) {
-      if (!navigator.permissions) return null;
-      const permission = await navigator.permissions.query({ name: "geolocation" });
-      if (permission.state !== "granted") return null;
-    }
+    if (!navigator.permissions) return null;
+    const permission = await navigator.permissions.query({ name: "geolocation" });
+    if (permission.state !== "granted") return null;
     if (!allowed()) return null;
     return new Promise<{ latitude: number; longitude: number; timestamp: number }>((resolve, reject) => navigator.geolocation.getCurrentPosition(
       (position) => resolve({ ...position.coords, latitude: position.coords.latitude, longitude: position.coords.longitude, timestamp: position.timestamp }),
-      () => reject(new Error("Location access was denied or unavailable. Enable it in your browser/device settings, then retry.")),
+      () => reject(new Error("Location access was denied or unavailable. Allow location in your browser or device settings; the map will retry automatically.")),
       { enableHighAccuracy: false, maximumAge: 0, timeout: 15_000 },
     ));
   }
   const Location = await import("expo-location");
-  let permission = await Location.getForegroundPermissionsAsync();
-  if (permission.status !== "granted" && prompt && permission.canAskAgain) permission = await Location.requestForegroundPermissionsAsync();
-  if (permission.status !== "granted") { if (!prompt) return null; throw new Error("Allow foreground location in device Settings, then retry."); }
+  const permission = await Location.getForegroundPermissionsAsync();
+  if (permission.status !== "granted") return null;
   if (!allowed()) return null;
   const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
   return { latitude: position.coords.latitude, longitude: position.coords.longitude, timestamp: position.timestamp };
 }
 
-/** Mounted only by a visible, usable People map. No background tracking or automatic permission prompts. */
+/** Visible-map foreground updates only. OS permission and avatar consent remain separate. */
 export function useMemberMapPresence(active: boolean) {
   const owner = useAuthStore((s) => s.user?.authId ?? null);
   const access = useLocationSettings();
+  const generation = useLocationAccessStore((s) => s.generation);
   const client = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setUpdating] = useState(false);
+  const [now, setNow] = useState(Date.now);
+  const [localArea, setLocalArea] = useState<{
+    owner: string; generation: number; latitude: number; longitude: number; expiresAt: string;
+  } | null>(null);
   const lifecycle = useRef(0);
   const activeRef = useRef(active);
-  const inFlight = useRef<{ run: number; prompt: boolean } | null>(null);
-  const queuedPrompt = useRef(false);
+  const inFlight = useRef<{ run: number; owner: string; generation: number } | null>(null);
   const queuedResume = useRef(false);
-  const publishRef = useRef<(prompt: boolean) => Promise<void>>(async () => {});
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
   activeRef.current = active;
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => { setLocalArea((area) => area && Date.parse(area.expiresAt) <= now ? null : area); }, [now]);
   useEffect(() => {
     activeRef.current = active;
     lifecycle.current += 1;
+    // Detach obsolete ownership/consent/map lifetimes. Their callbacks cannot
+    // publish or clear a newer request's busy state (identity-checked finally).
+    inFlight.current = null; queuedResume.current = false;
+    setUpdating(false); setLocalArea(null); setError(null);
     const onVisibility = () => {
-      // Permission dialogs can suspend the app. Never reuse the old sample,
-      // but do resume an explicitly activated session with a fresh permission
-      // check and sample once foregrounded. This path never prompts.
       lifecycle.current += 1;
-      queuedPrompt.current = false;
-      if (isForeground()) void publishRef.current(false);
+      setLocalArea(null);
+      if (isForeground()) void refreshRef.current();
     };
     const subscription = AppState.addEventListener("change", onVisibility);
     if (Platform.OS === "web" && typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
     return () => {
       activeRef.current = false; lifecycle.current += 1;
-      queuedPrompt.current = false; queuedResume.current = false;
+      queuedResume.current = false;
       subscription.remove();
       if (Platform.OS === "web" && typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [active, owner]);
-  const publish = useCallback(async (prompt: boolean) => {
-    if (!active || !owner || !locationAllowedFor(owner) || !access.sharing || !isForeground()) return;
-    if (!prompt && !useLocationAccessStore.getState().avatarSessionActive) return;
+  }, [active, owner, generation]);
+  const refresh = useCallback(async () => {
+    if (!active || !owner || !access.enabled || !locationAllowedFor(owner) || !isForeground()) return;
+    const currentGeneration = useLocationAccessStore.getState().generation;
     if (inFlight.current) {
-      // Session activation also schedules an automatic refresh. Coalesce it
-      // rather than racing two permission/GPS requests and their UI state.
-      if (prompt && !inFlight.current.prompt) queuedPrompt.current = true;
-      else if (inFlight.current.run !== lifecycle.current) queuedResume.current = true;
-      return;
+      if (inFlight.current.owner === owner && inFlight.current.generation === currentGeneration) {
+        if (inFlight.current.run !== lifecycle.current) queuedResume.current = true;
+        return;
+      }
+      inFlight.current = null; queuedResume.current = false;
     }
-    const generation = useLocationAccessStore.getState().generation;
-    const run = lifecycle.current;
-    const request = { run, prompt };
+    const request = { run: lifecycle.current, owner, generation: currentGeneration };
     inFlight.current = request;
-    if (prompt) useLocationAccessStore.getState().activateAvatarSession(owner);
     setUpdating(true); setError(null);
+    const allowed = () => activeRef.current && lifecycle.current === request.run && currentOwner() === owner && useLocationAccessStore.getState().generation === request.generation && locationAllowedFor(owner) && isForeground();
     try {
-      const allowed = () => activeRef.current && lifecycle.current === run && currentOwner() === owner && useLocationAccessStore.getState().generation === generation && locationAllowedFor(owner) && mapGrantActive(useLocationAccessStore.getState().settings, Date.now()) && isForeground();
-      // Recheck the account-backed grant before every collection, not just every poll.
+      // Recheck overall permission before every collection. A server-side avatar
+      // opt-out does not forbid local centering, but it always forbids publishing.
       const fresh = await memberMapApi.settings(owner);
       if (!allowed()) return;
       useLocationAccessStore.getState().accept(owner, fresh);
-      if (!mapGrantActive(fresh, Date.now())) { clearLocalLocation(); return; }
-      const point = await sampleLocation(prompt, allowed);
+      if (!allowed()) { setLocalArea(null); clearLocalLocation(); return; }
+      const point = await sampleLocation(allowed);
+      if (!allowed()) return;
       if (!point) {
-        if (allowed()) setError("Tap Update my location to allow location access and appear on the map.");
+        setLocalArea(null);
+        setError("Location access is off or unavailable. Allow location in your browser or device settings to center the map automatically.");
         return;
       }
-      if (Date.now() - point.timestamp > 60_000) throw new Error("Your location is stale. Please try again.");
+      if (!Number.isFinite(point.timestamp) || Date.now() - point.timestamp > 60_000 || point.timestamp > Date.now() + 5_000) throw new Error("Your location is stale. The map will try again automatically.");
+      const coarse = coarseMapPoint(point.latitude, point.longitude);
+      setLocalArea({ ...coarse, owner, generation: request.generation, expiresAt: new Date(point.timestamp + 15 * 60_000).toISOString() });
       await serialize(async () => {
         const state = useLocationAccessStore.getState();
-        if (!activeRef.current || lifecycle.current !== run || currentOwner() !== owner || state.generation !== generation || !locationAllowedFor(owner) || !mapGrantActive(state.settings, Date.now()) || !isForeground()) return;
-        await memberMapApi.publish(owner, { ...coarseMapPoint(point.latitude, point.longitude), revision: state.settings!.revision, observedAt: new Date(point.timestamp).toISOString() });
-        if (currentOwner() === owner && useLocationAccessStore.getState().generation === generation) await client.invalidateQueries({ queryKey: memberMapKeys.nearby(owner) });
+        if (!allowed() || !mapGrantActive(state.settings, Date.now())) return;
+        await memberMapApi.publish(owner, { ...coarse, revision: state.settings!.revision, observedAt: new Date(point.timestamp).toISOString() });
+        if (allowed()) await client.invalidateQueries({ queryKey: memberMapKeys.nearby(owner) });
       });
     } catch (cause) {
-      if (activeRef.current && lifecycle.current === run && currentOwner() === owner && useLocationAccessStore.getState().generation === generation) {
-        setError(cause instanceof Error ? cause.message : "Location could not be updated.");
+      if (allowed()) {
+        setLocalArea(null);
+        setError(cause instanceof Error ? cause.message : "Location could not be updated. The map will try again automatically.");
       }
     } finally {
       if (inFlight.current === request) {
         inFlight.current = null;
         setUpdating(false);
-        const retryPrompt = queuedPrompt.current;
-        const retry = retryPrompt || queuedResume.current;
-        queuedPrompt.current = false; queuedResume.current = false;
-        if (retry && activeRef.current && currentOwner() === owner && useLocationAccessStore.getState().generation === generation && isForeground()) {
-          void publishRef.current(retryPrompt);
-        }
+        const retry = queuedResume.current;
+        queuedResume.current = false;
+        if (retry && activeRef.current && currentOwner() === owner && useLocationAccessStore.getState().generation === request.generation && isForeground()) void refreshRef.current();
       }
     }
-  }, [active, owner, access.sharing, client]);
-  publishRef.current = publish;
+  }, [active, owner, access.enabled, client]);
+  refreshRef.current = refresh;
   useEffect(() => {
-    if (!active || !access.sharing || !access.avatarSessionActive) return;
-    void publish(false);
-    const interval = setInterval(() => void publish(false), 60_000);
+    if (!active || !access.enabled) { setLocalArea(null); return; }
+    void refresh();
+    const interval = setInterval(() => void refresh(), 60_000);
     return () => clearInterval(interval);
-  }, [active, access.sharing, access.avatarSessionActive, publish]);
-  return { error, isUpdating, refresh: () => publish(true) };
+  }, [active, owner, generation, access.enabled, access.sharing, refresh]);
+  const area = active && access.enabled && localArea?.owner === owner && localArea.generation === generation && Date.parse(localArea.expiresAt) > now
+    ? { latitude: localArea.latitude, longitude: localArea.longitude, expiresAt: localArea.expiresAt } : null;
+  return { error, isUpdating, area, refresh };
 }
 
 export function useNearbyMembers(active: boolean) {

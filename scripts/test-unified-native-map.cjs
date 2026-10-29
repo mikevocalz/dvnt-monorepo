@@ -15,7 +15,7 @@ const mocks={
  '@tanstack/react-query':`export const useQuery=()=>({data:window.fixture.rows,isError:window.fixture.eventError,refetch:()=>{window.fixture.retries++}});`,
  '@dvnt/app/lib/api/event-map':`export const eventMapApi={getLocations:async()=>[]};`,
  '@dvnt/app/features/settings/ui/LocationControls':`import React from 'react';export const LocationControls=()=>React.createElement('button',{onClick:()=>{window.fixture.sharing=false;window.renderFixture()}},'Stop sharing');`,
- '@dvnt/app/lib/hooks/use-member-map':`export const useLocationSettings=()=>({sharing:window.fixture.sharing});export const useMemberMapPresence=active=>({refresh:()=>{window.fixture.refreshes++},isUpdating:false,error:null});export const useNearbyMembers=()=>({data:window.fixture.data,isError:window.fixture.memberError,refetch:()=>{window.fixture.retries++}});`,
+ '@dvnt/app/lib/hooks/use-member-map':`export const useLocationSettings=()=>({sharing:window.fixture.sharing});export const useMemberMapPresence=active=>({area:window.fixture.area,refresh:()=>{window.fixture.refreshes++},isUpdating:false,error:null});export const useNearbyMembers=()=>({data:window.fixture.data,isError:window.fixture.memberError,refetch:()=>{window.fixture.retries++}});`,
 };
 (async()=>{
  const result=await build({stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';import MemberMap from './packages/app/features/events/ui/member-map';const root=createRoot(document.getElementById('root'));window.renderFixture=()=>root.render(<MemberMap events={window.fixture.events} onOpenEvent={id=>window.fixture.eventRoute=id}/>);window.renderFixture();`,resolveDir:root,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfigRaw:{},nodePaths:(process.env.NODE_PATH||'').split(path.delimiter),plugins:[{name:'boundaries',setup(b){b.onResolve({filter:/.*/},a=>mocks[a.path]?{path:a.path,namespace:'mock'}:a.path.startsWith('@dvnt/app/')?{path:path.join(root,'packages/app',a.path.slice('@dvnt/app/'.length)+'.ts')}:undefined);b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:mocks[a.path],loader:'jsx',resolveDir:root}));}}]});
@@ -33,6 +33,12 @@ const mocks={
   assert.deepEqual(await page.evaluate(()=>window.fixture.camera),{coordinates:{latitude:39.5,longitude:-98.35},zoom:3},'no fresh center cannot masquerade as first event location');
   assert.equal(await page.locator('[data-marker="event:1"]').count(),1,'public event remains on overview');
   assert.equal(await page.evaluate(()=>window.fixture.refreshes),0,'overview must not request location');
+  assert.equal(await page.getByRole('button',{name:'Update my location'}).count(),0,'no manual location button');
+  await page.evaluate(()=>{window.fixture.area={latitude:40.85,longitude:-73.9};window.renderFixture()});
+  await page.waitForFunction(()=>window.fixture.camera.coordinates.latitude===40.85);
+  assert.equal(await page.locator('[data-marker="member:self"]').count(),0,'local centering does not invent public presence');
+  await page.evaluate(()=>{window.fixture.area=null;window.renderFixture()});
+  await page.waitForFunction(()=>window.fixture.camera.zoom===3);
   await page.evaluate(()=>{window.fixture.overviewCamera=window.fixture.camera;window.fixture.rows[0].location_lat=34.05;window.fixture.rows[0].location_lng=-118.24;window.renderFixture()});
   await page.waitForFunction(()=>document.querySelector('[data-marker="event:1"]')?.getAttribute('data-lat')==='34.05');
   assert.equal(await page.evaluate(()=>window.fixture.camera===window.fixture.overviewCamera),true,'changing event venue cannot reposition the viewer overview');

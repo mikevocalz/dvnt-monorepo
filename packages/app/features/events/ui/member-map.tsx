@@ -53,10 +53,11 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   const center = sharing && !nearby.isError && leaseLive ? nearby.data?.center : null;
   // A public event venue is not evidence of the viewer's location. Without a
   // fresh consented coarse center, show an explicitly labelled broad overview.
+  const ownArea = presence.area || center;
   const cameraPosition = useMemo(() => ({
-    coordinates: { latitude: center?.latitude ?? 39.5, longitude: center?.longitude ?? -98.35 },
-    zoom: center ? 12 : 3,
-  }), [center?.latitude, center?.longitude]);
+    coordinates: { latitude: ownArea?.latitude ?? 39.5, longitude: ownArea?.longitude ?? -98.35 },
+    zoom: ownArea ? 12 : 3,
+  }), [ownArea?.latitude, ownArea?.longitude, presence.area?.expiresAt]);
   const open = (member: MapMember) => router.push(mapMemberProfilePath(member.username, true) as any);
   const onMarker = (event: { id?: string }) => {
     if (event.id?.startsWith('event:')) {
@@ -86,7 +87,6 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
       {!center ? <Text accessibilityRole="text" style={{ color: '#bbb', fontSize: 13 }}>Showing a broad overview of public event locations, not your current location.</Text> : null}
       <LocationControls allowSharing={Boolean(NativeMap)} />
       {!NativeMap ? <Text accessibilityRole="alert" style={{ color: '#ddd' }}>This map requires a build with native maps. No location is collected here. You can still turn sharing off.</Text> : null}
-      {NativeMap && sharing ? <Pressable accessibilityRole="button" disabled={presence.isUpdating} onPress={() => void presence.refresh()} style={{ minHeight: 44, paddingHorizontal: 12, justifyContent: "center", borderRadius: 12, backgroundColor: "#379ED8" }}><Text style={{ color: "#000", fontWeight: "600" }}>Update my location</Text></Pressable> : null}
       {presence.error ? <Text accessibilityRole="alert" style={{ color: '#ffb4b4' }}>{presence.error}</Text> : null}
       {nearby.isError ? <View><Text accessibilityRole="alert" style={{ color: '#ddd' }}>Nearby people could not be refreshed. Member locations have been hidden.</Text><Pressable accessibilityRole="button" onPress={() => void nearby.refetch()} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>Retry nearby people</Text></Pressable></View> : null}
       {NativeMap && sharing && !center && !nearby.isError ? <View style={{ gap: 8 }}>{presence.isUpdating || nearby.isPending ? <ActivityIndicator /> : null}<Text style={{ color: '#bbb' }}>A fresh location is needed to show nearby people.</Text></View> : null}

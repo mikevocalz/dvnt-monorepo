@@ -388,7 +388,7 @@ async function bundle() {
     await page.goBack(); await waitVenues(4);
     assert.equal(await toggle().getAttribute('aria-pressed'), 'true', 'guest Back returns to the open map');
     assert.equal(await select('Mission Night').getAttribute('aria-pressed'), 'true', 'guest Back preserves the selected event');
-    assert.equal(await src(), '37.7599,-122.4148');
+    assert.equal(await src(), '39.5,-98.35','reopening map defaults to viewer area or broad overview, not persisted event focus');
     check('guest View event uses public stable-id route and Back restores the selected venue');
     assert.equal(await page.locator('iframe').count(),0,'unified map does not add hidden iframe providers');
     assert.deepEqual(await page.evaluate(() => window.geolocationCalls), []);

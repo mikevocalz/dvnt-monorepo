@@ -47,5 +47,9 @@ test("all device-collection entry points honor overall permission and stale call
   assert.match(places, /allowIpBias: access\.enabled/);
   const controller = readFileSync(new URL("../hooks/use-member-map.ts", import.meta.url), "utf8");
   assert.match(controller, /memberMapApi\.revoke\(owner, kind === "overall"/);
-  assert.match(controller, /mapGrantActive\(useLocationAccessStore\.getState\(\)\.settings, Date\.now\(\)\)/);
+  // Local centering needs overall permission, not avatar publication consent.
+  // Publication still requires the fresh grant inside the serialized write.
+  assert.match(controller, /if \(!allowed\(\) \|\| !mapGrantActive\(state\.settings, Date\.now\(\)\)\) return;\s*await memberMapApi\.publish/);
+  assert.doesNotMatch(controller, /requestForegroundPermissionsAsync/);
+  assert.match(controller, /permission\.state !== "granted"\) return null/);
 });

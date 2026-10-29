@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
@@ -31,7 +31,10 @@ export default function EventsMap({ events, onClose, onOpenEvent }: {
   // Never retain coordinates after a failed authorization/metadata refresh.
   const pins = attachEventMapFlyers(eventMapPins(locations.isError ? [] : locations.data || [], ids), eligibleEvents);
   const selectedId = useEventsScreenStore((state) => state.selectedMapEventId);
-  const setSelectedId = useEventsScreenStore((state) => state.setSelectedMapEventId);
+  const rememberSelectedId = useEventsScreenStore((state) => state.setSelectedMapEventId);
+  // A prior event selection must not override automatic own-area centering on map open.
+  const [focusedEventId, setFocusedEventId] = useState<string | null>(null);
+  const setSelectedId = (id: string | null) => { rememberSelectedId(id); setFocusedEventId(id); };
   const selected = pins.find((pin) => pin.id === selectedId) || pins[0];
   const missing = Math.max(0, events.length - pins.length);
 
@@ -52,7 +55,7 @@ export default function EventsMap({ events, onClose, onOpenEvent }: {
         </div>
         <button onClick={onClose} className="shrink-0 min-h-11 px-3 rounded-xl bg-white/10 text-sm font-semibold" aria-label="Show event list">List view</button>
       </div>
-      <Suspense fallback={<p role="status" className="p-4">Loading map…</p>}><MemberMap eventPins={pins} selectedEventId={selectedId} onSelectEvent={setSelectedId} onOpenEvent={onOpenEvent} /></Suspense>
+      <Suspense fallback={<p role="status" className="p-4">Loading map…</p>}><MemberMap eventPins={pins} selectedEventId={focusedEventId} onSelectEvent={setSelectedId} onOpenEvent={onOpenEvent} /></Suspense>
       {locations.isPending && ids.length > 0 ? (
         <p role="status" className="p-4">Loading event locations…</p>
       ) : locations.isError ? (

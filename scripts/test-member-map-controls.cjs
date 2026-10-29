@@ -33,7 +33,7 @@ const mocks = {
  await reset();const ordered=await page.evaluate(()=>{const store=window.fixture.access;const before=store.getState().generation;store.getState().stop('New withdrawal',true);store.getState().accept('owner-a',{...window.fixture.settings,locationEnabled:true,eventsMapEnabled:true,revision:55,shareUntil:new Date(Date.now()+3600000).toISOString()},true,before);return {blocked:store.getState().blocked,pending:store.getState().pendingWithdrawal}});assert.deepEqual(ordered,{blocked:true,pending:true},'older enable response cannot erase newer off intent');
  await reset({settings:{locationEnabled:true,eventsMapEnabled:true,revision:9,shareUntil:new Date(Date.now()+3600000).toISOString()},storage:{'member-map-withdrawal-intents':JSON.stringify({state:{pendingWithdrawals:'broken'},version:0})}});assert.equal(await master().getAttribute('aria-checked'),'false','malformed durable intent fails closed');assert.equal(await page.evaluate(()=>window.fixture.access.getState().hydrationReady),false);assert.equal(await page.evaluate(()=>window.fixture.samples.length),0);const corruptReload=await page.evaluate(()=>({settings:window.fixture.settings,storage:window.fixture.storage}));await reset(corruptReload);assert.equal(await page.evaluate(()=>window.fixture.access.getState().hydrationReady),false,'failed hydration must not overwrite corrupt deny record and unblock on restart');
  await reset();await enable();await page.evaluate(()=>{window.fixture.failStorage=true});await master().click();await page.waitForFunction(()=>!window.fixture.settings.locationEnabled);assert.equal(await page.evaluate(()=>window.fixture.calls.filter(c=>c.action==='revoke').length),1,'disk failure cannot stop emergency server revoke');assert.equal(await page.evaluate(()=>window.fixture.location.getState().deviceLat),null);assert.equal(await master().getAttribute('aria-checked'),'false');assert.match(await page.getByRole('alert').innerText(),/could not be saved on this device/);
- await reset({settings:{locationEnabled:true,eventsMapEnabled:true,revision:9,shareUntil:new Date(Date.now()+3600000).toISOString()}});assert.equal(await page.evaluate(()=>window.fixture.samples.length),0,'server-on and OS permission cannot auto-collect in a new session');await page.getByRole('button',{name:'Update my location',exact:true}).click();await page.waitForFunction(()=>window.fixture.samples.length>0);assert.equal(await page.evaluate(()=>window.fixture.access.getState().avatarSessionActive),true);await master().click();await page.waitForFunction(()=>!window.fixture.settings.locationEnabled);assert.equal(await page.evaluate(()=>window.fixture.access.getState().avatarSessionActive),false,'off clears session activation');
+ await reset({settings:{locationEnabled:true,eventsMapEnabled:true,revision:9,shareUntil:new Date(Date.now()+3600000).toISOString()}});await page.waitForFunction(()=>window.fixture.samples.length===1);assert.equal(await page.evaluate(()=>window.fixture.access.getState().avatarSessionActive),false,'saved permission now allows automatic collection without a new session button');await master().click();await page.waitForFunction(()=>!window.fixture.settings.locationEnabled);assert.equal(await page.evaluate(()=>window.fixture.access.getState().avatarSessionActive),false,'off clears session activation');
  await reset({noStorage:true,settings:{locationEnabled:true,eventsMapEnabled:true,revision:9,shareUntil:new Date(Date.now()+3600000).toISOString()}});assert.equal(await page.evaluate(()=>window.fixture.access.getState().hydrationReady),false,'missing storage fails closed');assert.equal(await page.evaluate(()=>window.fixture.samples.length),0);assert.equal(await master().getAttribute('aria-checked'),'false');await page.getByRole('button',{name:'Turn all location off'}).click();await page.waitForFunction(()=>!window.fixture.settings.locationEnabled);assert.equal(await page.evaluate(()=>window.fixture.calls.filter(c=>c.action==='revoke').length),1,'missing adapter never prevents emergency revoke');assert.match(await page.getByRole('alert').innerText(),/could not be saved on this device/);
  await reset({active:false,settings:{locationEnabled:true,eventsMapEnabled:false,revision:1,shareUntil:null}},false);
  assert.equal(await sharing().isDisabled(),true,'absent browser provider prevents new sharing');
@@ -54,50 +54,64 @@ const mocks = {
  await page.getByRole('button',{name:'Reload settings',exact:true}).click();await page.getByRole('alert').waitFor({state:'detached'});assert.equal(await master().getAttribute('aria-checked'),'true');
  await sharing().click();await page.getByRole('button',{name:'Share my approximate area for 1 hour'}).click();await page.getByRole('button',{name:'Retry avatar sharing',exact:true}).waitFor();
  await page.evaluate(()=>{window.fixture.owner='owner-b';window.fixture.settings={locationEnabled:false,eventsMapEnabled:false,revision:0,shareUntil:null};dispatchEvent(new Event('fixturechange'))});await page.waitForFunction(()=>window.fixture.access.getState().owner==='owner-b');await page.getByRole('alert').waitFor({state:'detached'});
- // Restored consent plus an explicit update must have one in-flight request,
- // even though activating the session schedules the automatic-refresh effect.
+ // Saved overall permission + OS grant automatically centers locally. Sharing
+ // is an independent server consent: an off avatar never publishes a point.
  const restored={settings:{locationEnabled:true,eventsMapEnabled:true,revision:9,shareUntil:new Date(Date.now()+3600000).toISOString()}};
- await reset({...restored,permissionState:'prompt'});
- await page.getByRole('button',{name:'Update my location',exact:true}).click();
- await page.waitForFunction(()=>window.fixture.samples.length===1);
- await page.waitForTimeout(50);
- assert.equal(await page.evaluate(()=>window.fixture.samples.length),1,'explicit activation cannot duplicate GPS');
- assert.equal(await page.evaluate(()=>window.fixture.presence.isUpdating),true,'automatic effect cannot clear manual pending state');
- assert.equal(await page.evaluate(()=>window.fixture.presence.error),null,'automatic permission check cannot overwrite explicit request');
- await page.getByRole('button',{name:'Update my location',exact:true}).click();
- await page.getByRole('button',{name:'Update my location',exact:true}).click();
- await page.waitForTimeout(50);assert.equal(await page.evaluate(()=>window.fixture.samples.length),1,'repeated explicit clicks share one request');
- // A permission dialog may hide/foreground the page. Discard its old sample,
- // then reacquire a fresh point without a second prompt after it returns.
- await page.evaluate(()=>{const f=window.fixture;f.visibility='hidden';document.dispatchEvent(new Event('visibilitychange'));f.visibility='visible';f.permissionState='granted';document.dispatchEvent(new Event('visibilitychange'));f.samples[0].ok({coords:{latitude:40.123456,longitude:-73.123456},timestamp:Date.now()});});
- await page.waitForFunction(()=>window.fixture.samples.length===2);
- assert.equal(await page.evaluate(()=>window.fixture.calls.filter(c=>c.action==='publish').length),0,'interrupted sample is never published');
- await page.evaluate(()=>window.fixture.samples[1].ok({coords:{latitude:40.123456,longitude:-73.123456},timestamp:Date.now()}));
- await page.waitForFunction(()=>window.fixture.calls.filter(c=>c.action==='publish').length===1);
- assert.equal(await page.evaluate(()=>window.fixture.presence.isUpdating),false);
- // Foregrounding without a locally activated session cannot start collection.
- await reset(restored);await page.evaluate(()=>{document.dispatchEvent(new Event('visibilitychange'));});
- await page.waitForTimeout(50);assert.equal(await page.evaluate(()=>window.fixture.samples.length),0);
- // An explicit denial remains a denial, including after returning foreground.
- await reset({...restored,permissionState:'prompt'});await page.getByRole('button',{name:'Update my location',exact:true}).click();await page.waitForFunction(()=>window.fixture.samples.length===1);
- await page.evaluate(()=>{const f=window.fixture;f.visibility='hidden';document.dispatchEvent(new Event('visibilitychange'));f.visibility='visible';f.permissionState='denied';document.dispatchEvent(new Event('visibilitychange'));f.samples[0].fail();});
- await page.waitForFunction(()=>!window.fixture.presence.isUpdating);assert.equal(await page.evaluate(()=>window.fixture.samples.length),1,'foreground retry never prompts denied permission');
+ const localOnly={settings:{locationEnabled:true,eventsMapEnabled:false,revision:9,shareUntil:null}};
+ const resolveSample = index=>page.evaluate(index=>window.fixture.samples[index].ok({coords:{latitude:40.123456,longitude:-73.123456},timestamp:Date.now()}),index);
+ await reset(localOnly);await page.waitForFunction(()=>window.fixture.samples.length===1);
+ await resolveSample(0);await page.waitForFunction(()=>window.fixture.presence.area!==null);
+ assert.equal(await page.evaluate(()=>window.fixture.presence.area.latitude),40.12);
+ assert.notEqual(await page.evaluate(()=>window.fixture.presence.area.longitude),-73.123456);
+ assert.equal(await page.evaluate(()=>window.fixture.calls.filter(c=>c.action==='publish').length),0,'local area alone never publishes');
+ await master().click();await page.waitForFunction(()=>window.fixture.presence.area===null);
+ // Saved avatar grant auto-publishes one fresh sample without a button or a
+ // second collection when repeated refreshes race the activation effect.
+ await reset(restored);await page.waitForFunction(()=>window.fixture.samples.length===1);
+ await page.evaluate(()=>{void window.fixture.presence.refresh();void window.fixture.presence.refresh()});await page.waitForTimeout(50);
+ assert.equal(await page.evaluate(()=>window.fixture.samples.length),1);assert.equal(await page.evaluate(()=>window.fixture.presence.isUpdating),true);
+ await resolveSample(0);await page.waitForFunction(()=>window.fixture.calls.filter(c=>c.action==='publish').length===1);
+ // Background transitions discard pending points; foreground reacquires a
+ // fresh point using granted permission, without showing a permission dialog.
+ await reset(restored);await page.waitForFunction(()=>window.fixture.samples.length===1);
+ await page.evaluate(()=>{const f=window.fixture;f.visibility='hidden';document.dispatchEvent(new Event('visibilitychange'));f.visibility='visible';document.dispatchEvent(new Event('visibilitychange'));});
+ await resolveSample(0);await page.waitForFunction(()=>window.fixture.samples.length===2);
  assert.equal(await page.evaluate(()=>window.fixture.calls.filter(c=>c.action==='publish').length),0);
- // Native permission-sheet AppState transitions use the same guards and fresh retry.
- await reset({...restored,platform:'ios',permissionState:'denied'});await page.getByRole('button',{name:'Update my location',exact:true}).click();await page.waitForFunction(()=>window.fixture.nativePermissionRequests.length===1);
- await page.evaluate(()=>{const f=window.fixture;f.appState='inactive';f.appStateListeners.forEach(fn=>fn('inactive'));f.appState='active';f.permissionState='granted';f.appStateListeners.forEach(fn=>fn('active'));f.nativePermissionRequests[0]({status:'granted'});});
- await page.waitForFunction(()=>window.fixture.samples.length===1);
- assert.equal(await page.evaluate(()=>window.fixture.nativePermissionRequests.length),1,'resume never prompts again');
- await page.evaluate(()=>window.fixture.samples[0].ok({coords:{latitude:40.123456,longitude:-73.123456},timestamp:Date.now()}));await page.waitForFunction(()=>window.fixture.calls.filter(c=>c.action==='publish').length===1);
- // A pending resume cannot escape withdrawal or account/map lifecycle guards.
- for(const stop of ['off','account','closed']) {
-  await reset({...restored,permissionState:'prompt'});await page.getByRole('button',{name:'Update my location',exact:true}).click();await page.waitForFunction(()=>window.fixture.samples.length===1);
-  await page.evaluate(()=>{const f=window.fixture;f.visibility='hidden';document.dispatchEvent(new Event('visibilitychange'));f.visibility='visible';f.permissionState='granted';document.dispatchEvent(new Event('visibilitychange'));});
-  if(stop==='off'){await master().click();await page.waitForFunction(()=>!window.fixture.settings.locationEnabled);}
-  else await page.evaluate(stop=>{const f=window.fixture;if(stop==='closed')f.active=false;else{f.owner='owner-b';f.settings={locationEnabled:false,eventsMapEnabled:false,revision:0,shareUntil:null}}dispatchEvent(new Event('fixturechange'));},stop);
-  await page.waitForTimeout(20);await page.evaluate(()=>window.fixture.samples[0].ok({coords:{latitude:40.123456,longitude:-73.123456},timestamp:Date.now()}));await page.waitForTimeout(50);
-  assert.equal(await page.evaluate(()=>window.fixture.samples.length),1,stop+' cancels queued resume');assert.equal(await page.evaluate(()=>window.fixture.calls.filter(c=>c.action==='publish').length),0);
+ await resolveSample(1);await page.waitForFunction(()=>window.fixture.calls.filter(c=>c.action==='publish').length===1);
+ // No permission prompts on web or native; returning after granting permission
+ // in device settings automatically recovers without another application button.
+ for(const platform of ['web','ios']) {
+  await reset({...restored,platform,permissionState:'denied'});await page.waitForFunction(()=>window.fixture.presence.error?.includes('settings'));
+  assert.equal(await page.evaluate(()=>window.fixture.samples.length),0);assert.equal(await page.evaluate(()=>window.fixture.nativePermissionRequests.length),0);
+  await page.evaluate(platform=>{const f=window.fixture;f.permissionState='granted';if(platform==='web')document.dispatchEvent(new Event('visibilitychange'));else f.appStateListeners.forEach(fn=>fn('active'));},platform);
+  await page.waitForFunction(()=>window.fixture.samples.length===1);await resolveSample(0);await page.waitForFunction(()=>window.fixture.calls.filter(c=>c.action==='publish').length===1);
+  assert.equal(await page.evaluate(()=>window.fixture.nativePermissionRequests.length),0);
  }
- assert.deepEqual(errors,[]);console.log('PASS: default-off, explicit consent, unrestricted withdrawal, local clear, late sample off/close/account switch, sticky withdrawal through failed/recovered GET and retry, denied OS permission, remote withdrawal before collection, query failure fail-closed, coarse publication, durable owner-scoped withdrawal, reload/account isolation, mutation ordering and malformed-storage fail-closed; single-flight activation/repeated clicks, foreground fresh retry, native permission-sheet recovery, no implicit prompts and canceled queued resumes');
+ // Owner/generation/map lifetimes detach an unresolved request so new allowed
+ // sessions don't hang behind native GPS; old callbacks cannot clear new busy
+ // state, center the new owner, or publish under a new grant.
+ for(const change of ['owner','off-on','reopen']) {
+  await reset(restored);await page.waitForFunction(()=>window.fixture.samples.length===1);
+  if(change==='owner')await page.evaluate(()=>{const f=window.fixture;f.owner='owner-b';dispatchEvent(new Event('fixturechange'));});
+  else if(change==='off-on') {await master().click();await page.waitForFunction(()=>!window.fixture.settings.locationEnabled);await master().click();await page.waitForFunction(()=>window.fixture.settings.locationEnabled);}
+  else {await page.evaluate(()=>{window.fixture.active=false;dispatchEvent(new Event('fixturechange'));});await page.waitForTimeout(20);await page.evaluate(()=>{window.fixture.active=true;dispatchEvent(new Event('fixturechange'));});}
+  await page.waitForFunction(()=>window.fixture.samples.length===2);await resolveSample(0);await page.waitForTimeout(50);
+  assert.equal(await page.evaluate(()=>window.fixture.calls.filter(c=>c.action==='publish').length),0,change+' old point never publishes');
+  assert.equal(await page.evaluate(()=>window.fixture.presence.area),null,change+' old point never centers');
+  assert.equal(await page.evaluate(()=>window.fixture.presence.isUpdating),true,change+' old finally cannot clear new flight');
+  await resolveSample(1);await page.waitForFunction(()=>window.fixture.presence.area!==null);
+  assert.equal(await page.evaluate(()=>window.fixture.calls.filter(c=>c.action==='publish').length),change==='off-on'?0:1);
+ }
+ // Freshness, errors and map closure promptly drop the ephemeral local center.
+ await reset(localOnly);await page.waitForFunction(()=>window.fixture.samples.length===1);
+ await page.evaluate(()=>window.fixture.samples[0].ok({coords:{latitude:40.123456,longitude:-73.123456},timestamp:Date.now()-61000}));await page.waitForFunction(()=>window.fixture.presence.error?.includes('stale'));
+ assert.equal(await page.evaluate(()=>window.fixture.presence.area),null);
+ await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await page.waitForFunction(()=>window.fixture.samples.length===2);await resolveSample(1);await page.waitForFunction(()=>window.fixture.presence.area!==null);
+ await page.evaluate(()=>{window.fixture.active=false;dispatchEvent(new Event('fixturechange'));});await page.waitForFunction(()=>window.fixture.presence.area===null);
+ await reset(localOnly);await page.waitForFunction(()=>window.fixture.samples.length===1);await resolveSample(0);await page.waitForFunction(()=>window.fixture.presence.area!==null);
+ await page.evaluate(()=>{const realNow=Date.now;Date.now=()=>realNow()+16*60_000;});await page.waitForFunction(()=>window.fixture.presence.area===null);
+ await reset({...restored,settings:{...restored.settings,locationEnabled:false,eventsMapEnabled:false}});await page.waitForTimeout(50);
+ assert.equal(await page.evaluate(()=>window.fixture.samples.length),0,'overall off never collects on map open');
+ assert.deepEqual(errors,[]);console.log('PASS: default-off, explicit consent, unrestricted withdrawal, local clear, late sample off/close/account switch, sticky withdrawal through failed/recovered GET and retry, denied OS permission, remote withdrawal before collection, query failure fail-closed, coarse publication, durable owner-scoped withdrawal, reload/account isolation, mutation ordering and malformed-storage fail-closed; automatic saved-permission local area, separate avatar publication, single-flight refresh, foreground recovery without prompts, stale-area cleanup and owner/grant/map lifetime isolation');
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});
