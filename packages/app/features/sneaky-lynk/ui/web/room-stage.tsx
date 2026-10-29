@@ -361,7 +361,8 @@ export function StageTile({ tile }: { tile: Tile }) {
     return () => observer.disconnect();
   }, []);
 
-  // Rotated portrait frame must exchange its box dimensions to avoid cropping.
+  // Rotate the cover box with the camera: exchange dimensions on quarter turns
+  // so portrait feeds fill the tile without stretching or side gutters.
   const sideways = rotation % 180 !== 0;
   const canvasStyle = {
     left: "50%",
@@ -369,7 +370,9 @@ export function StageTile({ tile }: { tile: Tile }) {
     width: sideways ? (tileSize.height || "100%") : "100%",
     height: sideways ? (tileSize.width || "100%") : "100%",
     transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-    objectFit: "contain" as const,
+    objectFit: "cover" as const,
+    // Keep the player mounted for audio/recovery, but never show a stale frame.
+    opacity: tile.isCameraOn ? 1 : 0,
   };
   // Stable across re-renders, so the MoQ backend is created once per publisher
   // and closed only when the tile really goes away.
@@ -399,7 +402,7 @@ export function StageTile({ tile }: { tile: Tile }) {
       }`}
     >
       {/* Avatar is the FLOOR of the tile, not an alternative to it: the canvas
-          above it is transparent until MoQ decodes a frame, so a camera-off
+          above it is hidden until MoQ has available video, so a camera-off
           participant reads as their avatar while their audio still plays. */}
       <div className="absolute inset-0 flex items-center justify-center">
         <SquareAvatar uri={tile.avatar} name={tile.name} size={88} />
@@ -409,7 +412,7 @@ export function StageTile({ tile }: { tile: Tile }) {
           ref={canvasRef}
           draggable={false}
           onContextMenu={(event) => event.preventDefault()}
-          className="absolute object-contain"
+          className="absolute object-cover"
           style={canvasStyle}
         />
       ) : tile.isCameraOn && tile.videoStream ? (
@@ -417,7 +420,7 @@ export function StageTile({ tile }: { tile: Tile }) {
           stream={tile.videoStream}
           muted={tile.isLocal}
           mirror={tile.isLocal}
-          className="absolute inset-0 h-full w-full object-contain"
+          className="absolute inset-0 h-full w-full object-cover"
         />
       ) : null}
       {canvasPath && !tile.isLocal ? (

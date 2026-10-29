@@ -35,6 +35,8 @@ import type { LynkBroadcastBase, LynkPublisher } from "./types";
 export interface UseLynkBroadcastResult extends LynkBroadcastBase {
   /** Local camera preview for the broadcaster's own tile. */
   localStream: MediaStream | null;
+  /** Usable capture, separate from the user's camera intent. */
+  cameraActive: boolean;
   /**
    * The local microphone capture, for client-side VAD (`useSpeakingDetection`).
    * MoQ carries no voice-activity signal, so a speaking ring is computed from
@@ -68,6 +70,34 @@ export function useLynkBroadcast(
   const [cameraEnabled, setCameraEnabledState] = useState(true);
   const [micEnabled, setMicEnabledState] = useState(true);
   const [ended, setEnded] = useState(false);
+  const [pageVisible, setPageVisible] = useState(() =>
+    typeof document === "undefined" || document.visibilityState !== "hidden");
+  const [visibilityRevision, setVisibilityRevision] = useState(0);
+  const videoAvailable = useRef(new Signal(false));
+  // Blur alone includes browser chrome and permission dialogs: only actual
+  // page lifecycle transitions suspend capture. Keep microphone intent intact.
+  useEffect(() => {
+    const update = (visible: boolean) => {
+      if (!visible) {
+        videoAvailable.current.set(false);
+        // Stop immediately, without waiting for React's next render.
+        devicesRef.current?.cameraOn.set(false);
+      }
+      setPageVisible(visible);
+      setVisibilityRevision(value => value + 1);
+    };
+    const visibility = () => update(document.visibilityState !== "hidden");
+    const hide = () => update(false);
+    window.addEventListener("pagehide", hide);
+    window.addEventListener("pageshow", visibility);
+    document.addEventListener("visibilitychange", visibility);
+    visibility();
+    return () => {
+      window.removeEventListener("pagehide", hide);
+      window.removeEventListener("pageshow", visibility);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
 
   const isBrowser = typeof window !== "undefined";
 
@@ -95,6 +125,9 @@ export function useLynkBroadcast(
     cameraOn: Signal<boolean>;
     micOn: Signal<boolean>;
   } | null>(null);
+
+  const devicesRef = useRef(devices);
+  devicesRef.current = devices;
 
   useEffect(() => {
     if (!isBrowser || !roomId) return;
@@ -207,9 +240,29 @@ export function useLynkBroadcast(
   const cameraTrack = videoSource && !("frames" in videoSource)
     ? ("track" in videoSource ? videoSource.track : videoSource)
     : undefined;
+  const [trackUsable, setTrackUsable] = useState(false);
+  useEffect(() => {
+    const update = () => {
+      const usable = !!cameraTrack && cameraTrack.readyState === "live" && !cameraTrack.muted;
+      if (!usable) videoAvailable.current.set(false);
+      setTrackUsable(usable);
+    };
+    update();
+    cameraTrack?.addEventListener("mute", update);
+    cameraTrack?.addEventListener("unmute", update);
+    cameraTrack?.addEventListener("ended", update);
+    return () => {
+      cameraTrack?.removeEventListener("mute", update);
+      cameraTrack?.removeEventListener("unmute", update);
+      cameraTrack?.removeEventListener("ended", update);
+    };
+  }, [cameraTrack]);
+  const cameraActive = !!cameraTrack && cameraTrack.readyState === "live" &&
+    !cameraTrack.muted && trackUsable && pageVisible && cameraEnabled && canPublish && !ended;
+  useEffect(() => { videoAvailable.current.set(cameraActive); }, [cameraActive, visibilityRevision]);
   const localStream = useMemo(
-    () => (cameraTrack ? new MediaStream([cameraTrack]) : null),
-    [cameraTrack],
+    () => (cameraActive && cameraTrack ? new MediaStream([cameraTrack]) : null),
+    [cameraTrack, cameraActive],
   );
 
   const microphoneMedia = useSignalValue(
@@ -227,8 +280,8 @@ export function useLynkBroadcast(
   // Capture follows the flags AND the role. Same rule as the native hook, where
   // it is `useCamera({ enabled: cameraEnabled && !ended && canPublish })`.
   useEffect(() => {
-    devices?.cameraOn.set(cameraEnabled && !ended && canPublish);
-  }, [devices, cameraEnabled, ended, canPublish]);
+    devices?.cameraOn.set(cameraEnabled && !ended && canPublish && pageVisible);
+  }, [devices, cameraEnabled, ended, canPublish, pageVisible, visibilityRevision]);
 
   useEffect(() => {
     devices?.micOn.set(micEnabled && !ended && canPublish);
@@ -272,7 +325,7 @@ export function useLynkBroadcast(
       // Keep AVC for the existing native receiver. The SDK probes supported
       // profiles; a software VP8 diagnostic is not evidence of AVC support.
       own(new Publish.Video.Encoder("video/hd", {
-        broadcast, capture, enabled: true, bandwidth: reload.bandwidth,
+        broadcast, capture, enabled: videoAvailable.current, bandwidth: reload.bandwidth,
         config: { codec: "avc1" },
       }));
       own(new Publish.Audio.Encoder("audio", {
@@ -351,6 +404,7 @@ export function useLynkBroadcast(
     error: canPublish ? error : viewer.error,
     isLive,
     localStream,
+    cameraActive,
     localAudioStream,
     cameraEnabled,
     micEnabled,

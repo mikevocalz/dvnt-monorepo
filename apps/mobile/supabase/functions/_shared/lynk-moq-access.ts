@@ -42,40 +42,66 @@ export async function mintBoundedMoqAccess(options: {
   | MoqAccessFailure
 > {
   const now = options.now ?? Date.now;
-  const before = await options.authorize();
-  if (!before.ok) return before;
-  const beforeDeadline = before.access.endsAt == null ? Infinity : Date.parse(before.access.endsAt);
-  const ttl = Math.min(LYNK_MOQ_TOKEN_TTL_SECONDS, Math.floor((beforeDeadline - now()) / 1000));
-  if (!Number.isFinite(ttl) || ttl < 1) {
-    return moqAccessFailure("conflict", "This Lynk's session has ended", { reason: "session_expired" });
-  }
+  const initial = await options.authorize();
+  if (!initial.ok) return initial;
+  const initialDeadline = initial.access.endsAt == null ? Infinity : Date.parse(initial.access.endsAt);
+  const delayed = () => moqAccessFailure("internal_error", "Media authorization was delayed; retrying", { reason: "media_issuance_delayed" });
+  let issuanceMarginMs = 0;
+  // At most one adaptive remint. Provider TTL starts at issuance, after network
+  // latency; reserve the first observed round trip plus a second for rounding.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const before = attempt === 0 ? initial : await options.authorize();
+    if (!before.ok) return before;
+    const beforeDeadline = before.access.endsAt == null ? Infinity : Date.parse(before.access.endsAt);
+    if (Number.isNaN(beforeDeadline) || beforeDeadline <= now()) {
+      return moqAccessFailure("conflict", "This Lynk's session has ended", { reason: "session_expired" });
+    }
+    if (beforeDeadline !== initialDeadline || before.access.path !== initial.access.path ||
+        before.access.namespace !== initial.access.namespace ||
+        (initial.access.memberStatus === "active" && before.access.memberStatus !== "active")) {
+      return moqAccessFailure("conflict", "Room access changed; rejoin this Lynk");
+    }
+    const ttl = Math.min(LYNK_MOQ_TOKEN_TTL_SECONDS, Math.floor((beforeDeadline - now() - issuanceMarginMs) / 1000));
+    if (!Number.isFinite(ttl) || ttl < 1) return delayed();
+    const startedAt = now();
+    const minted = await options.mint(options.intent === "publish"
+      ? { publishPath: before.access.path, ttl }
+      : { subscribePath: before.access.path, ttl });
+    const mintDurationMs = Math.max(0, now() - startedAt);
 
-  const minted = await options.mint(options.intent === "publish"
-    ? { publishPath: before.access.path, ttl }
-    : { subscribePath: before.access.path, ttl });
-
-  // A host can end the room (or access can be revoked) while the provider is
-  // minting. Never release that new credential using only the pre-mint snapshot.
-  const after = await options.authorize();
-  if (!after.ok) return after;
-  if (before.access.memberStatus === "active" && after.access.memberStatus !== "active") {
-    return moqAccessFailure("forbidden", "Your room membership has ended");
+    // Never release credentials based only on the pre-mint admission snapshot.
+    const after = await options.authorize();
+    if (!after.ok) return after;
+    if (before.access.memberStatus === "active" && after.access.memberStatus !== "active") {
+      return moqAccessFailure("forbidden", "Your room membership has ended");
+    }
+    if (after.access.path !== before.access.path || after.access.namespace !== before.access.namespace) {
+      return moqAccessFailure("conflict", "Room access changed; rejoin this Lynk");
+    }
+    let expiresMs: number;
+    try { expiresMs = expiryFromProviderToken(minted.token, ttl); }
+    catch { return moqAccessFailure("internal_error", "Invalid MoQ token expiration"); }
+    const afterDeadline = after.access.endsAt == null ? Infinity : Date.parse(after.access.endsAt);
+    const checkedAt = now();
+    if (Number.isNaN(afterDeadline) || afterDeadline <= checkedAt) {
+      return moqAccessFailure("conflict", "This Lynk's session has ended", { reason: "session_expired" });
+    }
+    if (expiresMs > afterDeadline && afterDeadline !== beforeDeadline) {
+      return moqAccessFailure("conflict", "This Lynk's session deadline changed", { reason: "session_expired" });
+    }
+    if (expiresMs > afterDeadline && attempt === 0) {
+      issuanceMarginMs = mintDurationMs + 1000;
+      continue;
+    }
+    if (!Number.isFinite(expiresMs) || expiresMs <= checkedAt || expiresMs > afterDeadline) {
+      // Do not revoke an existing valid grant on transient issuance delay. The
+      // client retries and independently enforces that grant's hard expiry.
+      return delayed();
+    }
+    return {
+      ok: true, access: after.access, token: minted.token,
+      relayUrl: minted.connection_url, expiresAt: new Date(expiresMs).toISOString(),
+    };
   }
-  if (after.access.path !== before.access.path || after.access.namespace !== before.access.namespace) {
-    return moqAccessFailure("conflict", "Room access changed; rejoin this Lynk");
-  }
-  let expiresMs: number;
-  try { expiresMs = expiryFromProviderToken(minted.token, ttl); }
-  catch { return moqAccessFailure("internal_error", "Invalid MoQ token expiration"); }
-  const afterDeadline = after.access.endsAt == null ? Infinity : Date.parse(after.access.endsAt);
-  if (!Number.isFinite(expiresMs) || expiresMs <= now() || Number.isNaN(afterDeadline) || expiresMs > afterDeadline) {
-    return moqAccessFailure("conflict", "This Lynk's session deadline changed", { reason: "session_expired" });
-  }
-  return {
-    ok: true,
-    access: after.access,
-    token: minted.token,
-    relayUrl: minted.connection_url,
-    expiresAt: new Date(expiresMs).toISOString(),
-  };
+  return delayed();
 }

@@ -171,3 +171,39 @@ test("replacement cancels the previous token's hard-expiry callback", async () =
   assert.equal(h.timers.size, 2);
   h.session.stop();
 });
+
+test("delayed near-deadline authorization retries initial join and preserves renewal only until hard expiry", async () => {
+  const delayed = () => new MoqTokenRequestError("Media authorization was delayed; retrying", true);
+  let calls = 0;
+  const initial = harness(async () => {
+    if (++calls === 1) throw delayed();
+    return token("lynk/room/near-deadline", 47_000);
+  });
+  await initial.session.refresh();
+  assert.equal(initial.states.at(-1)?.token, null);
+  assert.equal(initial.states.at(-1)?.error, delayed().message);
+  const retry = [...initial.timers.values()].find((t) => t.delay === 1000)!;
+  assert.ok(retry, "first-time join retries rather than requiring a manual rejoin");
+  initial.advance(1000);
+  retry.callback();
+  await settle();
+  assert.equal(initial.states.at(-1)?.error, null);
+  assert.ok(initial.states.at(-1)?.token);
+  initial.session.stop();
+
+  let denied = false;
+  const renewal = harness(async () => {
+    if (denied) throw delayed();
+    return token("lynk/room/near-deadline", 47_000);
+  });
+  await renewal.session.refresh();
+  denied = true;
+  renewal.advance(15_000);
+  await renewal.session.refresh();
+  assert.ok(renewal.states.at(-1)?.token);
+  assert.equal(renewal.states.at(-1)?.error, null);
+  renewal.advance(32_000);
+  [...renewal.timers.values()].find((t) => t.delay === 47_000)!.callback();
+  assert.equal(renewal.states.at(-1)?.token, null, "retryable failure never extends room authority");
+  renewal.session.stop();
+});

@@ -50,8 +50,8 @@ const fixture = `
   const mediaActions = { goLive:async()=>{}, end:noop, setMicEnabled:value=>f.actions.push('mic:'+value), setCameraEnabled:value=>f.actions.push('camera:'+value), attachCanvas };
   export function useLynkBroadcast() {
     const c=useFixture();
-    return { ...mediaActions, state:'live', isLive:true, error:null, micEnabled:false,cameraEnabled:false,
-      localStream:null,localAudioStream:null,coPublishers:f.roster.filter(m=>m.role!=='listener' && m.userId!==localUser.id).map(m=>({peerId:m.userId,path:'fixture/'+m.userId})) };
+    return { ...mediaActions, state:'live', isLive:true, error:null, micEnabled:false,cameraEnabled:false,cameraActive:false,
+      localStream:null,localAudioStream:null,coPublishers:f.roster.filter(m=>m.role!=='listener' && m.userId!==localUser.id).map(m=>({peerId:m.userId,path:'fixture/'+m.userId,videoAvailable:c.hasVideo})) };
   }
   const moderationResult = (action, userId) => {
     f.actions.push(action+':'+userId);
@@ -123,6 +123,7 @@ async function buildFixture() {
     stdin: { resolveDir:ROOT, loader:'tsx', contents:`
       import React from 'react';import {createRoot} from 'react-dom/client';
       import {RoomInner} from './${lynk}screens/room.web';
+      import {StageTile} from './${lynk}ui/web/room-stage';
       import {ControlsBar} from './${lynk}ui/ControlsBar';
       import {RoomStage as NativeRoomStage} from './${lynk}ui/RoomStage';
       import {useSneakyLynkCaptureStore} from '@dvnt/app/lib/stores/sneaky-lynk-capture-store';
@@ -130,7 +131,13 @@ async function buildFixture() {
       import {useFixture,f,localUser} from 'fixture';
       f.expireSession=()=>useRoomUIStore.getState().setShowTimeUp(true);
       useSneakyLynkCaptureStore.getState().setWebPeerPresent(true);
+      const portrait=document.createElement('canvas');portrait.width=180;portrait.height=320;
+      const paint=()=>{const ctx=portrait.getContext('2d');ctx.fillStyle='#21b981';ctx.fillRect(0,0,180,320);ctx.fillStyle='#ef4444';ctx.fillRect(0,0,20,320);ctx.fillStyle='#3b82f6';ctx.fillRect(160,0,20,320);};if(location.search.includes('rail=fill'))paint();
+      const preview=location.search.includes('rail=fill') ? portrait.captureStream?.(10) : undefined;
+      const attachFill=(_path,canvas)=>{if(canvas){canvas.width=180;canvas.height=320;canvas.getContext('2d').drawImage(portrait,0,0);f.attachments.push({peer:'fill',attached:true});}};
+      const fillTile={key:'remote',name:'Portrait caller',isHost:false,isCoHost:false,isLocal:false,isCameraOn:true,isMicOn:true,canvasPath:'fill/portrait',attachCanvas:attachFill};
       function App(){const c=useFixture();const action=name=>()=>f.actions.push(name);
+        if(location.search.includes('rail=fill'))return <div style={{height:'100dvh',display:'grid',gridTemplateRows:'1fr 1fr',gap:8,padding:8,background:'#06070d'}}><StageTile tile={{...fillTile,key:'local',isLocal:true,canvasPath:undefined,videoStream:preview}}/><StageTile tile={{...fillTile,isCameraOn:c.hasVideo}}/></div>;
         return location.search.includes('rail=native') ? <div data-native-room style={{position:'fixed',inset:0,background:'#06070d',display:'flex',flexDirection:'column'}}>
           <div data-native-header style={{height:96+c.insets.top,paddingTop:c.insets.top,flexShrink:0,color:'white'}}>Native room header</div>
           <NativeRoomStage participants={f.roster.map(member=>({id:member.userId,user:{id:member.userId,displayName:member.displayName},role:member.role,isLocal:member.userId===localUser.id,isCameraOn:c.hasVideo,isMicOn:false}))}
@@ -513,6 +520,42 @@ async function moderationCases(browser,url) {
   }
 }
 
+async function fillCases(browser,url) {
+  for(const c of cases) {
+    const context=await browser.newContext({viewport:{width:c.width,height:c.height}});
+    const page=await context.newPage();
+    try {
+      await page.goto(url+'?rail=fill');
+      await page.locator('[data-tile="local"] video').waitFor();await tick(page);
+      for(const selector of ['[data-tile="local"] video','[data-tile="remote"] canvas']) {
+        assert.equal(await page.locator(selector).evaluate(el=>getComputedStyle(el).objectFit),'cover','portrait media must fill rather than pillarbox');
+        const box=await page.locator(selector).boundingBox();const tile=await page.locator(selector.split(' ')[0]).boundingBox();
+        assert.ok(Math.abs(box.width-tile.width)<3&&Math.abs(box.height-tile.height)<3,'media box fills tile');
+      }
+      const mounts=await page.evaluate(()=>window.fixture.attachments.length);
+      for(let rotation=90;rotation<=360;rotation+=90) {
+        await page.getByRole('button',{name:"Rotate Portrait caller's video clockwise"}).click();await tick(page);
+        const box=await page.locator('[data-tile="remote"] canvas').boundingBox();const tile=await page.locator('[data-tile="remote"]').boundingBox();
+        assert.ok(Math.abs(box.width-tile.width)<3&&Math.abs(box.height-tile.height)<3,'rotated cover fills same tile');
+        assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mounts,'rotation never rebuilds media');
+      }
+      for(let interruption=0;interruption<3;interruption++) {
+        await page.evaluate(()=>window.fixture.configure({hasVideo:false}));await tick(page);
+        assert.equal(await page.locator('[data-tile="remote"] canvas').evaluate(el=>getComputedStyle(el).opacity),'0','unavailable video reveals avatar');
+        await page.evaluate(()=>window.fixture.configure({hasVideo:true}));await tick(page);
+        assert.equal(await page.locator('[data-tile="remote"] canvas').evaluate(el=>getComputedStyle(el).opacity),'1','available video returns');
+        assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mounts,'fallback preserves decoder and audio subscription');
+      }
+      await page.setViewportSize({width:c.height,height:c.width});await tick(page);
+      const resized=await page.locator('[data-tile="remote"] canvas').boundingBox();const resizedTile=await page.locator('[data-tile="remote"]').boundingBox();
+      assert.ok(Math.abs(resized.width-resizedTile.width)<3&&Math.abs(resized.height-resizedTile.height)<3,'viewport rotation stays filled');
+      assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mounts,'viewport rotation never rebuilds media');
+      await evidence(page,'fill-'+c.name);
+      console.log('PASS portrait local video and remote canvas cover '+c.name+' with stable quarter turns');
+    } catch(error){recordFailure('fill-'+c.name,error)}finally{await context.close()}
+  }
+}
+
 async function timeUpCases(browser,url) {
   for(const c of cases) {
     const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'host');
@@ -888,7 +931,7 @@ async function main() {
     // system executable or change sandbox settings to circumvent a denied run.
     browser=await load('@playwright/test').chromium.launch({headless:true});
     const url='http://127.0.0.1:'+server.address().port;
-    const suites={moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
+    const suites={fill:fillCases,moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
     for(const name of (process.env.LYNK_LAYOUT_SUITES||Object.keys(suites).join(',')).split(','))await suites[name](browser,url);
     assert.equal(failures.length,0,'Rendered regression failures:\n'+JSON.stringify(failures,null,2));
     console.log('PASS all rendered Lynk viewport, room and control layout regressions');
