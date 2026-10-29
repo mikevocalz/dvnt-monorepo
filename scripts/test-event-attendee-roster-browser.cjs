@@ -134,6 +134,9 @@ const boundaries = new Map([
         assert.deepEqual(await page.evaluate(() => window.fixture.requests.map(r => r.offset)), [4, 28]);
       } else {
         await page.getByText('4 member profiles shown', { exact: true }).waitFor();
+        // WebKit can report child geometry before the expanding panel contributes
+        // to rendered body text. Wait for the same rendered-text contract we assert.
+        await page.waitForFunction(() => document.body.innerText.includes('Only available member profiles') && document.body.innerText.includes('guest and additional tickets may not have a member profile'));
         assert.match(await page.locator('body').innerText(), /Only available member profiles/);
         assert.match(await page.locator('body').innerText(), /guest and additional tickets may not have a member profile/);
       }
