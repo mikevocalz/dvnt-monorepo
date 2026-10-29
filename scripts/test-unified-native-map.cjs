@@ -36,6 +36,7 @@ const mocks={
   assert.equal(await page.getByRole('button',{name:'Update my location'}).count(),0,'no manual location button');
   await page.evaluate(()=>{window.fixture.area={latitude:40.85,longitude:-73.9};window.renderFixture()});
   await page.waitForFunction(()=>window.fixture.camera.coordinates.latitude===40.85);
+  assert.equal(await page.getByText('Showing a broad overview of public event locations, not your current location.').count(),0,'local-only own area is not labelled as broad overview');
   assert.equal(await page.locator('[data-marker="member:self"]').count(),0,'local centering does not invent public presence');
   await page.evaluate(()=>{window.fixture.area=null;window.renderFixture()});
   await page.waitForFunction(()=>window.fixture.camera.zoom===3);

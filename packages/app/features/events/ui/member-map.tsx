@@ -84,7 +84,7 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
       <Text style={{ color: '#bbb', fontSize: 13 }}>Party flyers and member avatars share this map. Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</Text>
-      {!center ? <Text accessibilityRole="text" style={{ color: '#bbb', fontSize: 13 }}>Showing a broad overview of public event locations, not your current location.</Text> : null}
+      {!ownArea ? <Text accessibilityRole="text" style={{ color: '#bbb', fontSize: 13 }}>Showing a broad overview of public event locations, not your current location.</Text> : null}
       <LocationControls allowSharing={Boolean(NativeMap)} />
       {!NativeMap ? <Text accessibilityRole="alert" style={{ color: '#ddd' }}>This map requires a build with native maps. No location is collected here. You can still turn sharing off.</Text> : null}
       {presence.error ? <Text accessibilityRole="alert" style={{ color: '#ffb4b4' }}>{presence.error}</Text> : null}
