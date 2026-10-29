@@ -8,11 +8,8 @@
  * actually live" is answered in one place instead of by whichever effect
  * happened to be nearby.
  *
- * What it deliberately does NOT do yet: reconnect. The machine knows the
- * budget, the backoff and when to give up, but acting on that changes what
- * happens to a live call and cannot be trusted until it has run on two real
- * devices in one room. This wires the machine in as the source of truth for
- * session lifecycle; WS-3 turns on the recovery it already describes.
+ * Transport-owned recovery is observed by default. Callers with an explicit
+ * rejoin callback can opt into the machine's bounded recovery policy.
  */
 import { useEffect, useRef, useState } from "react";
 
@@ -91,6 +88,12 @@ export function useRoomSession(
 
   useEffect(() => {
     setSession((current) => {
+      // A fast/cached transport can be connected on the first observed
+      // render. React may also coalesce connecting → connected in one turn.
+      // Admission must not remain idle (and stop heartbeats) in that case.
+      if (status === "connected" && current.state === "idle") {
+        return transition(transition(current, { type: "JOIN" }), { type: "JOIN_GRANTED" });
+      }
       const event = eventFor(status, current);
       return event ? transition(current, event) : current;
     });

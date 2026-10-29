@@ -24,6 +24,7 @@ on:
       - 'scripts/test-lynk-atomic-admission.cjs'
       - 'scripts/test-lynk-room-browser.cjs'
       - 'scripts/test-lynk-native-capture.cjs'
+      - 'scripts/test-lynk-native-session.cjs'
       - 'scripts/test-lynk-web-capture-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
@@ -49,6 +50,7 @@ on:
       - 'scripts/test-subscription-owner-rls.cjs'
       - 'scripts/test-lynk-atomic-admission.cjs'
       - 'scripts/test-lynk-native-capture.cjs'
+      - 'scripts/test-lynk-native-session.cjs'
       - 'scripts/test-lynk-web-capture-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
@@ -78,5 +80,6 @@ jobs:
           node scripts/test-lynk-room-browser.cjs --dom
           node scripts/test-lynk-web-capture-ui.cjs
           node scripts/test-lynk-native-capture.cjs
+          node scripts/test-lynk-native-session.cjs
           node scripts/test-lynk-web-capture-sdk.cjs
           node scripts/verify-lynk.mjs

@@ -96,7 +96,9 @@ export function createMoqTokenSession<T extends { expiresAt: string }>(options: 
         emit({
           token: retryable && stillValid ? state.token : null,
           loading: false,
-          error: error instanceof Error ? error.message : "Token error",
+          // A failed proactive renewal is not a failed call while the old
+          // grant remains valid. Keep its media/UI mounted during backoff.
+          error: retryable && stillValid ? null : error instanceof Error ? error.message : "Token error",
         });
         // A transient cold edge/network failure must not strand the entire
         // room until navigation. Refusals remain terminal until explicit retry.

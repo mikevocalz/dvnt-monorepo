@@ -3,8 +3,8 @@
  * Main hook for managing video room state.
  *
  * WS-3b: the media transport is MoQ (`useLynkBroadcast` → `react-native-moq`),
- * not Fishjam. Everything ELSE — join/leave, roles, ejection, host mute, token
- * refresh, room events — is Supabase and is unchanged; only the media seam moved.
+ * not Fishjam. Join/leave, roles, ejection, host mute and room events stay
+ * on Supabase; media authorization renews through the MoQ token lifecycle.
  * Speakers publish and listeners subscribe through the SAME hook, gated by
  * `canPublish`, because hooks cannot be called conditionally.
  *
@@ -27,7 +27,7 @@
  * ║                                                                    ║
  * ║  ORIGINAL BUG: connectionState effect → setState (new obj) →      ║
  * ║  handleRoomEvent recreated (dep on state.localUser) →             ║
- * ║  scheduleTokenRefresh recreated → join recreated → screen         ║
+ * ║  join recreated → subscriptions reset → screen                   ║
  * ║  re-renders → effects re-fire → infinite loop.                    ║
  * ║                                                                    ║
  * ║  FIX: Zustand store + getState() eliminates all dependency cycles. ║
@@ -58,8 +58,6 @@ import type {
 
 import { useRoomLifecycle } from "../useRoomLifecycle";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-
-const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 min before expiry
 
 interface UseVideoRoomOptions {
   roomId: string;
@@ -119,11 +117,6 @@ export function useVideoRoom({
   const [rosterState, setRosterState] = useState({ key: "", ready: false, error: false });
 
   // ── Internal refs (timers, subscriptions) ───────────────────────────
-  const tokenExpiresAtRef = useRef<Date | null>(null);
-  const tokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const currentJtiRef = useRef<string | null>(null);
   const unsubscribeEventsRef = useRef<(() => void) | null>(null);
   const unsubscribeMembersRef = useRef<(() => void) | null>(null);
   const cameraToggleInFlightRef = useRef(false);
@@ -189,23 +182,15 @@ export function useVideoRoom({
   // ── Stable callbacks (deps: [] only) ────────────────────────────────
   // All mutable values read from store.getState() or refs.
 
-  const clearTokenTimer = useCallback(() => {
-    if (tokenRefreshTimerRef.current) {
-      clearTimeout(tokenRefreshTimerRef.current);
-      tokenRefreshTimerRef.current = null;
-    }
-  }, []);
-
   const handleEject = useCallback(
     (payload: EjectPayload) => {
       ++joinEpoch.current;
       setAdmittedKey(null);
       getStore().setEjected(payload);
       mediaRef.current.end();
-      clearTokenTimer();
       onEjectedRef.current?.(payload);
     },
-    [clearTokenTimer, getStore],
+    [getStore],
   );
 
   const handleRoomEnded = useCallback(() => {
@@ -215,9 +200,8 @@ export function useVideoRoom({
     unsubscribeMembersRef.current?.();
     getStore().setRoomEnded();
     mediaRef.current.end();
-    clearTokenTimer();
     onRoomEndedRef.current?.();
-  }, [clearTokenTimer, getStore]);
+  }, [getStore]);
 
   const { notifyEnded } = useRoomLifecycle({
     roomId, userId: admitted ? store.localUser?.id : undefined,
@@ -319,51 +303,6 @@ export function useVideoRoom({
     [handleEject, notifyEnded, getStore, setMicEnabled],
   );
 
-  const scheduleTokenRefresh = useCallback(
-    (expiresAt: Date) => {
-      const epoch = joinEpoch.current;
-      const key = admissionKeyRef.current;
-      clearTokenTimer();
-
-      const now = Date.now();
-      const refreshAt = expiresAt.getTime() - TOKEN_REFRESH_BUFFER_MS;
-      const delay = Math.max(0, refreshAt - now);
-
-      console.log(`[useVideoRoom] Token refresh scheduled in ${delay / 1000}s`);
-
-      tokenRefreshTimerRef.current = setTimeout(async () => {
-        if (epoch !== joinEpoch.current || key !== admissionKeyRef.current) return;
-        try {
-          console.log("[useVideoRoom] Refreshing token...");
-          const result = await videoApi.refreshToken(
-            roomId,
-            currentJtiRef.current || undefined,
-          );
-          if (epoch !== joinEpoch.current || key !== admissionKeyRef.current) return;
-
-          if (!result.ok) {
-            console.error("[useVideoRoom] Token refresh failed:", result.error);
-            if (result.error?.code === "forbidden") {
-              handleEject({ action: "kick", reason: "Session expired" });
-            }
-            return;
-          }
-
-          // No media reconnect: the MoQ publish/subscribe tokens carry their
-          // own 60s-before-expiry refresh inside `useMoqToken`. This call
-          // renews the ROOM session only (and is what surfaces an eject).
-          tokenExpiresAtRef.current = new Date(result.data!.expiresAt);
-          scheduleTokenRefresh(tokenExpiresAtRef.current);
-        } catch (err) {
-          if (epoch !== joinEpoch.current || key !== admissionKeyRef.current) return;
-          console.error("[useVideoRoom] Token refresh error:", err);
-          onErrorRef.current?.("Failed to refresh session");
-        }
-      }, delay);
-    },
-    [roomId, clearTokenTimer, handleEject, getStore],
-  );
-
   const join = useCallback(async () => {
     const epoch = ++joinEpoch.current;
     const key = admissionKeyRef.current;
@@ -388,10 +327,7 @@ export function useVideoRoom({
         return false;
       }
 
-      const { room, token, peer, user, expiresAt } = result.data!;
-
-      tokenExpiresAtRef.current = new Date(expiresAt);
-      currentJtiRef.current = peer.id;
+      const { room, peer, user } = result.data!;
 
       // The server's session deadline. Stored, not interpreted — the client
       // timer counts down to it and video_join_room enforces it.
@@ -436,8 +372,12 @@ export function useVideoRoom({
       // transport — MoQ paths carry no metadata.
       setMembers([]);
 
-      // Schedule token refresh
-      scheduleTokenRefresh(tokenExpiresAtRef.current);
+      // MoQ owns scoped media authorization and renews it before expiry on
+      // both publish and subscribe connections. Do not also rotate the legacy
+      // Fishjam WebRTC peer token: this hook never consumes it, and its peer
+      // id is not the token JTI. That obsolete timer kicked active members
+      // after 55 minutes. Room lifecycle, moderation and MoQ authorization
+      // still enforce ended rooms, revoked membership and current permissions.
 
       // Subscribe to room events
       unsubscribeEventsRef.current?.();
@@ -472,7 +412,7 @@ export function useVideoRoom({
       onErrorRef.current?.("Failed to connect to room");
       return false;
     }
-  }, [roomId, scheduleTokenRefresh, handleRoomEvent, getStore]);
+  }, [roomId, handleRoomEvent, getStore]);
 
   const leave = useCallback(async () => {
     console.log("[useVideoRoom] Leaving room...");
@@ -480,7 +420,6 @@ export function useVideoRoom({
     ++joinEpoch.current;
     setAdmittedKey(null);
     setMembers([]);
-    clearTokenTimer();
     unsubscribeEventsRef.current?.();
     unsubscribeMembersRef.current?.();
     mediaRef.current.end();
@@ -488,7 +427,7 @@ export function useVideoRoom({
     const s = getStore();
     s.setConnectionStatus("disconnected");
     s.setParticipants([]);
-  }, [clearTokenTimer, getStore]);
+  }, [getStore]);
 
   // ── Media toggles ──────────────────────────────────────────────────
   // Read current on/off from store.getState(); read SDK hooks from refs.
@@ -649,13 +588,12 @@ export function useVideoRoom({
     return () => {
       if (!roomIdRef.current) return;
       ++joinEpoch.current;
-      clearTokenTimer();
       unsubscribeEventsRef.current?.();
       unsubscribeMembersRef.current?.();
       mediaRef.current.end();
       getStore().reset();
     };
-  }, [clearTokenTimer, getStore]);
+  }, [getStore]);
 
   // ── Public API ─────────────────────────────────────────────────────
   // Spread store state so consumers get reactive updates via Zustand.
