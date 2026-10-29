@@ -30,7 +30,7 @@ async function call<T>(body: Record<string, unknown>): Promise<T> {
 }
 export const memberMapApi = {
   settings: (expectedAuthId: string) => call<LocationSettings>({ action: "settings", expectedAuthId }),
-  updateSettings: (expectedAuthId: string, input: { expectedRevision: number; locationEnabled: boolean; eventsMapEnabled: boolean; consentVersion?: "events-map-v1" }) => call<LocationSettings>({ action: "updateSettings", expectedAuthId, ...input }),
+  updateSettings: (expectedAuthId: string, input: { expectedRevision: number; locationEnabled: boolean; eventsMapEnabled: boolean; shareDurationHours?: 1 | 4; consentVersion?: "events-map-v1" }) => call<LocationSettings>({ action: "updateSettings", expectedAuthId, ...input }),
   revoke: (expectedAuthId: string, scope: "overall" | "events" = "events") => call<LocationSettings>({ action: "revoke", expectedAuthId, scope }),
   publish: (expectedAuthId: string, input: { revision: number; latitude: number; longitude: number; observedAt: string }) => call<{ published: true; expiresAt: string }>({ action: "publish", expectedAuthId, ...input }),
   nearby: (expectedAuthId: string) => call<NearbyMembers>({ action: "nearby", expectedAuthId }),

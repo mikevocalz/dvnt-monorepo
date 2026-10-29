@@ -85,7 +85,7 @@ export function useLocationSettings() {
             expectedRevision: fresh.revision,
             locationEnabled: kind === "overall" ? true : fresh.locationEnabled,
             eventsMapEnabled: kind === "sharing",
-            ...(kind === "sharing" ? { consentVersion: "events-map-v1" as const } : {}),
+            ...(kind === "sharing" ? { consentVersion: "events-map-v1" as const, shareDurationHours: 4 as const } : {}),
           });
         }
         if (currentOwner() !== owner) return;

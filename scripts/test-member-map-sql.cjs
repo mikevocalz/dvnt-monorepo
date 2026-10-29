@@ -253,3 +253,47 @@ test('self avatar does not consume or disappear behind the 100-peer limit',()=>d
  assert.equal(result.members.length,100);assert.equal(result.self.username,'viewer');
  assert.ok(result.members.every(member=>member.id!==result.self.id));
 }));
+
+test('four-hour consent is explicit, old clients stay one hour and migration never extends grants',()=>dbRun(async db=>{
+ const old=await enable(db,'viewer');
+ const before=(await db.query("SELECT *,now() AS checked_at FROM member_map_settings WHERE user_id='viewer'")).rows[0];
+ const remaining=Date.parse(old.shareUntil)-new Date(before.checked_at).getTime();
+ assert.ok(remaining>3590000&&remaining<=3601000,'legacy opt-in stays one hour');
+ await db.exec(fs.readFileSync(path.join(root,'apps/mobile/supabase/migrations/20261029205205_member_map_four_hour_sharing.sql'),'utf8'));
+ assert.equal((await call(db,"member_map_get_settings('viewer')")).shareUntil,old.shareUntil,'migration must not extend existing consent');
+ await db.exec('SET ROLE service_role');
+ const four=await call(db,"member_map_update_settings_four_hours('near',0,true,true,'events-map-v1')");
+ await db.exec('RESET ROLE');
+ const now=await call(db,'now()');
+ assert.ok(Date.parse(four.shareUntil)-new Date(now).getTime()>14390000&&Date.parse(four.shareUntil)-new Date(now).getTime()<=14401000);
+ await assert.rejects(()=>call(db,"member_map_update_settings_four_hours('far',0,true,true,NULL)"),/consent/);
+ await publish(db,'near');
+ const presence=(await db.query("SELECT *,now() AS checked_at FROM member_map_presence WHERE user_id='near'")).rows[0];
+ assert.ok(Date.parse(presence.expires_at)-Date.parse(presence.observed_at)<=900000,'4h grant never means4h stale position');
+ // Model a grant three hours into its lifetime; a fresh observation is still valid.
+ await db.exec("UPDATE member_map_settings SET share_until=now()+interval '1 hour' WHERE user_id='near'");
+ await publish(db,'near'); await publish(db,'viewer');
+ assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members.map(m=>m.username),['near']);
+ await db.exec("UPDATE member_map_presence SET observed_at=now()-interval '16 minutes',expires_at=now()-interval '1 minute' WHERE user_id='near'");
+ assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members,[],'stale peer hidden during active4h grant');
+ await publish(db,'near');
+ await call(db,"member_map_revoke('near')");
+ await assert.rejects(()=>publish(db,'near'),/off or expired/);
+ assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members,[]);
+ for(const role of ['anon','authenticated']) {
+  await db.exec('SET ROLE '+role);
+  await assert.rejects(()=>call(db,"member_map_update_settings_four_hours('near',1,true,true,'events-map-v1')"),/permission denied/);
+  await db.exec('RESET ROLE');
+ }
+}));
+
+test('multiple consenting peers appear together, refresh, and disappear independently on opt-out',()=>dbRun(async db=>{
+ for(const u of ['viewer','near','far']) {await enable(db,u);await publish(db,u);}
+ assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members.map(m=>m.username),['far','near']);
+ await call(db,"member_map_revoke('near')");
+ assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members.map(m=>m.username),['far']);
+ await db.exec("UPDATE member_map_presence SET expires_at=now()-interval '1 second' WHERE user_id='far'");
+ assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members,[]);
+ await publish(db,'far');
+ assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members.map(m=>m.username),['far']);
+}));
