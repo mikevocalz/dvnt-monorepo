@@ -11,7 +11,7 @@ function fixture(options={}) {
  const image={...instance('image'),width:()=>options.width??88,height:()=>options.height??88};
  const canvas={clear:color=>calls.push(['clear',color]),clipRRect:(rect,op,aa)=>calls.push(['clip',rect,op,aa]),drawImageRect:(_,src,dst)=>{calls.push(['draw',src,dst]);if(options.throwDraw)throw Error('draw failed')}};
  const skia={ClipOp:{Intersect:1},ImageFormat:{PNG:4},Skia:{
-  Data:{fromURI:async uri=>{calls.push(['load',uri]);if(options.throwLoad)throw Error('load failed');return instance('data')}},
+  Data:{fromURI:async uri=>{calls.push(['load',uri]);if(options.throwLoad)throw Error('load failed');if(options.waitForLoad)await options.waitForLoad(uri);return instance('data')}},
   Image:{MakeImageFromEncoded:()=>options.invalidImage?null:image},
   Surface:{Make:(width,height)=>{calls.push(['surface',width,height]);return options.noSurface?null:{...instance('surface'),getCanvas:()=>canvas,flush:()=>calls.push(['flush']),makeImageSnapshot:()=>({...instance('snapshot'),encodeToBase64:fmt=>{calls.push(['encode',fmt]);return options.emptyEncoding?'':'png-bytes'}})}}},
   Paint:()=>instance('paint'),Color:value=>value,XYWHRect:(x,y,width,height)=>({x,y,width,height}),RRectXY:(rect,rx,ry)=>({rect,rx,ry}),
@@ -34,6 +34,24 @@ function fixture(options={}) {
  }
  const error=fixture({throwDraw:true});await assert.rejects(error.api.roundedNativeMapIcon('https://fixture.test/image.png',44),/draw failed/);assert.deepEqual(error.calls.filter(c=>c[0]==='dispose').map(c=>c[1]),['paint','surface','image','data']);
  const failed=fixture({throwLoad:true});await assert.rejects(failed.api.roundedNativeMapIcon('https://fixture.test/image.png',44),/load failed/);
+ let releaseFirst;const firstLoaded=new Promise(resolve=>{releaseFirst=resolve});
+ const queued=fixture({waitForLoad:uri=>uri.endsWith('/first')?firstLoaded:Promise.resolve()});
+ let keepQueued=true,keepLoading=true;
+ const first=queued.api.roundedNativeMapIcon('https://fixture.test/first',44,()=>keepLoading);
+ const canceled=queued.api.roundedNativeMapIcon('https://fixture.test/canceled',44,()=>keepQueued);
+ const third=queued.api.roundedNativeMapIcon('https://fixture.test/third',58);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.deepEqual(queued.calls.filter(c=>c[0]==='load').map(c=>c[1]),['https://fixture.test/first'],'only one original media load/decode in flight');
+ keepQueued=false;keepLoading=false;releaseFirst();
+ assert.equal(await first,null,'revoked in-flight load does not decode');
+ assert.equal(await canceled,null,'revoked queued job is skipped');
+ assert.equal(await third,'data:image/png;base64,png-bytes');
+ assert.deepEqual(queued.calls.filter(c=>c[0]==='load').map(c=>c[1]),['https://fixture.test/first','https://fixture.test/third'],'canceled queued source is not fetched');
+ assert.equal(queued.calls.filter(c=>c[0]==='draw').length,1,'only still-current image is decoded/drawn');
+ assert.equal(queued.calls.filter(c=>c[0]==='dispose'&&c[1]==='data').length,2,'canceled loaded data is released too');
+ const recoveryOptions={throwLoad:true};const recovery=fixture(recoveryOptions);
+ await assert.rejects(recovery.api.roundedNativeMapIcon('https://fixture.test/failure',44),/load failed/);recoveryOptions.throwLoad=false;
+ assert.equal(await recovery.api.roundedNativeMapIcon('https://fixture.test/recovered',44),'data:image/png;base64,png-bytes','failed job does not poison queue');
  const css=fs.readFileSync(path.join(__dirname,'../apps/mobile/global.css'),'utf8');assert.match(css,/--radius:\s*0\.5rem/);assert.match(css,/--radius-sm:\s*calc\(var\(--radius\) - 4px\)/);
- console.log('PASS native map icon: radius token parity, avatar/flyer cover crop, PNG encoding, decode/surface/load/draw failures and deterministic disposal');
+ console.log('PASS native map icon: radius token parity, avatar/flyer cover crop, PNG encoding, decode/surface/load/draw failures deterministic disposal, sequential queue and cancellation');
 })().catch(error=>{console.error(error);process.exitCode=1});

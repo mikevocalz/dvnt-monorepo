@@ -4,14 +4,26 @@ import { ClipOp, ImageFormat, Skia, type SkImage, type SkPaint, type SkSurface }
 export const MAP_MARKER_RADIUS = 4;
 export const MAP_MARKER_WIDTH = 44;
 
+// One original image at a time prevents a large marker batch from decoding
+// every full-size source simultaneously. Failed jobs must not stall the queue.
+let rasterQueue: Promise<unknown> = Promise.resolve();
+
 /** Cover-crop without stretching, then round the actual provider bitmap. */
-export async function roundedNativeMapIcon(source: string, height: number): Promise<string | null> {
+export function roundedNativeMapIcon(source: string, height: number, isCurrent: () => boolean = () => true): Promise<string | null> {
+  const job = rasterQueue.then(() => isCurrent() ? renderIcon(source, height, isCurrent) : null);
+  rasterQueue = job.catch(() => null);
+  return job;
+}
+
+async function renderIcon(source: string, height: number, isCurrent: () => boolean): Promise<string | null> {
   const data = await Skia.Data.fromURI(source);
   let image: SkImage | null = null;
   let surface: SkSurface | null = null;
   let paint: SkPaint | null = null;
   let snapshot: SkImage | null = null;
   try {
+    // Loading may finish after opt-out/unmount; do not decode revoked work.
+    if (!isCurrent()) return null;
     image = Skia.Image.MakeImageFromEncoded(data);
     if (!image || image.width() <= 0 || image.height() <= 0) return null;
     // A CPU surface avoids a GPU readback just to produce a tiny map icon.

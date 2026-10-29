@@ -122,7 +122,7 @@ function MapIcon({ id, source, height, register }: { id: string; source: string;
   useEffect(() => {
     let current = true;
     setRoundedSource(null);
-    void roundedNativeMapIcon(source, height)
+    void roundedNativeMapIcon(source, height, () => current)
       .then((result) => { if (current) setRoundedSource(result); })
       .catch(() => { if (current) setRoundedSource(null); });
     return () => { current = false; };
