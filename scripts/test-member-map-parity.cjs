@@ -39,3 +39,10 @@ test('first-party useImage is not exempt, including beside aliased Expo binding'
     assert.deepEqual(diff.missDomain, ['useImage']);
   }
 });
+
+test('type-only Event import carries no runtime hook wiring; value imports still do', () => {
+  assert.equal(parity(`import type { Event } from '@dvnt/app/lib/hooks/use-events'; const events: Event[] = [];`), undefined);
+  const diff = parity(`import { useEvents } from '@dvnt/app/lib/hooks/use-events'; useEvents();`);
+  assert.ok(diff.missHooks.includes('use-events'));
+  assert.ok(diff.missDomain.includes('useEvents'));
+});

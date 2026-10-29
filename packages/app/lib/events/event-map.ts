@@ -17,6 +17,7 @@ export interface EventMapLocation {
 }
 
 export interface EventMapPin {
+  flyerUrl?: string | null;
   id: string;
   title: string;
   location: string;
@@ -74,4 +75,14 @@ export function eventListAllowsMap(event: {
     !event.isHidden && !event.isOnline &&
     (event.status == null || event.status === "active" || event.status === "postponed") &&
     (!event.publishAt || (Number.isFinite(Date.parse(event.publishAt)) && Date.parse(event.publishAt) <= now));
+}
+
+/** Enrich only already-authorized pins; list artwork can never grant coordinates. */
+export function attachEventMapFlyers(pins: readonly EventMapPin[], events: readonly {id: string | number; image?: string | null}[]): EventMapPin[] {
+  const images = new Map(events.map(event => [String(event.id), event.image]));
+  return pins.map(pin => {
+    let flyerUrl: string | null = null;
+    try { const url = new URL(images.get(pin.id) || ""); if (url.protocol === "https:") flyerUrl = url.href; } catch { /* Safe title fallback. */ }
+    return {...pin, flyerUrl};
+  });
 }

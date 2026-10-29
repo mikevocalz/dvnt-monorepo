@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { eventMapPins, eventMapIds, type EventMapLocation } from "./event-map.ts";
+import { eventMapPins, eventMapIds, attachEventMapFlyers, type EventMapLocation } from "./event-map.ts";
 
 const now = Date.parse("2026-10-24T00:00:00Z");
 const row: EventMapLocation = { id: 1, title: "Public venue", visibility: "public", is_hidden: false, publish_at: null, status: "active", is_online: false, location_type: "venue", location: "Published venue", location_name: null, location_lat: 0, location_lng: 0 };
@@ -61,4 +61,14 @@ test("realtime revocation removes coordinates before an in-flight request can fi
   assert.deepEqual(calls, ["cancel", "remove"]);
   release(); await pending; await Promise.resolve();
   assert.deepEqual(calls, ["cancel", "remove", "refetch"]);
+});
+
+test("flyers enrich only authorized pins and reject unsafe URLs", () => {
+  const pins = eventMapPins([row], ["1"], now);
+  assert.equal(attachEventMapFlyers(pins, [{id:"1",image:"https://media.example.test/flyer.jpg"}])[0].flyerUrl, "https://media.example.test/flyer.jpg");
+  for (const image of ["javascript:alert(1)", "data:image/png;base64,abc", "http://media.example.test/flyer.jpg", "broken"]) {
+    assert.equal(attachEventMapFlyers(pins, [{id:"1",image}])[0].flyerUrl, null);
+  }
+  assert.deepEqual(attachEventMapFlyers([], [{id:"private",image:"https://media.example.test/private.jpg"}]), []);
+  assert.equal(attachEventMapFlyers(pins, [{id:"2",image:"https://media.example.test/other.jpg"}])[0].flyerUrl, null);
 });

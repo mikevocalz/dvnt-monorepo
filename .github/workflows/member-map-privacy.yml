@@ -7,6 +7,7 @@ on:
       - 'apps/web/next.config.ts'
       - 'apps/mobile/supabase/**'
       - 'scripts/test-member-map*'
+      - 'scripts/test-unified-native-map.cjs'
       - 'scripts/verify-port-parity.mjs'
       - 'scripts/fixtures/member-map/**'
       - '.github/workflows/member-map-privacy.yml'
@@ -49,4 +50,5 @@ jobs:
         run: |
           node --test scripts/test-member-map-config.cjs
           node scripts/test-member-map-renderer.cjs
+          node scripts/test-unified-native-map.cjs
           node scripts/test-member-map-controls.cjs
