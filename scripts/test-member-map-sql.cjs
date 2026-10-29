@@ -297,3 +297,16 @@ test('multiple consenting peers appear together, refresh, and disappear independ
  await publish(db,'far');
  assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members.map(m=>m.username),['far']);
 }));
+
+// Actual publisher quantization, not hand-inserted coordinates: identical samples
+// must remain one shared coarse point and never acquire per-user jitter.
+test('co-located publishers share identical privacy-safe coordinates',()=>dbRun(async db=>{
+ for(const user of ['viewer','near','far']) {await enable(db,user);await publish(db,user);}
+ const result=await call(db,"member_map_nearby('viewer')");
+ assert.equal(result.members.length,2);
+ assert.ok(result.members.every(peer=>peer.latitude===result.self.latitude&&peer.longitude===result.self.longitude));
+ assert.notEqual(result.self.latitude,40.71281);assert.notEqual(result.self.longitude,-74.00602,'raw GPS stays private');
+ await publish(db,'near');
+ const refreshed=await call(db,"member_map_nearby('viewer')");
+ assert.ok(refreshed.members.every(peer=>peer.latitude===refreshed.self.latitude&&peer.longitude===refreshed.self.longitude),'refresh does not spread co-located members');
+}));
