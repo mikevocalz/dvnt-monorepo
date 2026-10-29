@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useImage } from "expo-image";
+import { useQuery } from "@tanstack/react-query";
+import type { Event } from "@dvnt/app/lib/hooks/use-events";
+import { eventMapApi } from "@dvnt/app/lib/api/event-map";
+import { eventMapIds, eventMapPins, eventListAllowsMap, attachEventMapFlyers } from "@dvnt/app/lib/events/event-map";
 import { useRouter } from "expo-router";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dvnt/app/lib/hooks/use-member-map";
@@ -16,8 +20,17 @@ try {
 
 type LoadedIcon = NonNullable<ReturnType<typeof useImage>>;
 
-export default function MemberMap() {
+export default function MemberMap({ events = [], onOpenEvent }: { events?: Event[]; onOpenEvent?: (id: string) => void } = {}) {
   const router = useRouter();
+  const ids = eventMapIds(events.filter(event => eventListAllowsMap(event)).map(event => String(event.id)));
+  const locations = useQuery({
+    queryKey: ["events-map", ids],
+    queryFn: ({ signal }) => eventMapApi.getLocations(ids, signal),
+    enabled: ids.length > 0, staleTime: 0, gcTime: 0, retry: 1,
+    refetchOnWindowFocus: true, refetchInterval: 30_000,
+  });
+  const eventPins = attachEventMapFlyers(eventMapPins(locations.isError ? [] : locations.data || [], ids), events);
+  const openEvent = (id: string) => onOpenEvent ? onOpenEvent(id) : router.push(`/(protected)/events/${id}` as any);
   const { sharing } = useLocationSettings();
   const presence = useMemberMapPresence(Boolean(NativeMap));
   const nearby = useNearbyMembers(Boolean(NativeMap));
@@ -36,39 +49,47 @@ export default function MemberMap() {
     });
   }, []);
   const leaseLive = nearby.data?.expiresAt && Date.parse(nearby.data.expiresAt) > now;
-  const members = sharing && !nearby.isError && leaseLive ? visibleMapMembers(nearby.data?.members || [], now) : [];
+  const members = sharing && !nearby.isError && leaseLive ? visibleMapMembers([...(nearby.data?.self ? [nearby.data.self] : []), ...(nearby.data?.members || [])], now) : [];
   const center = sharing && !nearby.isError && leaseLive ? nearby.data?.center : null;
   const cameraPosition = useMemo(() => ({
-    coordinates: { latitude: center?.latitude ?? 0, longitude: center?.longitude ?? 0 }, zoom: 12,
-  }), [center?.latitude, center?.longitude]);
+    coordinates: { latitude: center?.latitude ?? eventPins[0]?.latitude ?? 39.5, longitude: center?.longitude ?? eventPins[0]?.longitude ?? -98.35 }, zoom: center || eventPins.length ? 12 : 3,
+  }), [center?.latitude, center?.longitude, eventPins[0]?.latitude, eventPins[0]?.longitude]);
   const open = (member: MapMember) => router.push(mapMemberProfilePath(member.username, true) as any);
   const onMarker = (event: { id?: string }) => {
-    const member = members.find((item) => item.id === event.id);
+    if (event.id?.startsWith('event:')) {
+      const pin = eventPins.find(item => `event:${item.id}` === event.id);
+      if (pin) openEvent(pin.id);
+      return;
+    }
+    const member = members.find(item => `member:${item.id}` === event.id);
     if (member) open(member);
   };
-  const annotations = members.filter((member) => icons[member.id]).map((member) => ({
-    id: member.id, coordinates: { latitude: member.latitude, longitude: member.longitude },
-    title: `${member.displayName || member.username} · approximate area`, icon: icons[member.id],
+  const visualPins = [
+    ...eventPins.map(pin => ({ id: `event:${pin.id}`, latitude: pin.latitude, longitude: pin.longitude, title: pin.title, image: pin.flyerUrl, monogram: 'E', tint: '#379ED8' })),
+    ...members.map(member => ({ id: `member:${member.id}`, latitude: member.latitude, longitude: member.longitude,
+      title: `${nearby.data?.self?.id === member.id ? 'You' : member.displayName || member.username} · approximate area`, image: mapAvatarUrl(member.avatarUrl), monogram: mapMemberInitials(member), tint: '#8A40CF' })),
+  ];
+  const annotations = visualPins.filter(pin => icons[pin.id]).map(pin => ({
+    id: pin.id, coordinates: { latitude: pin.latitude, longitude: pin.longitude }, title: pin.title, icon: icons[pin.id],
   }));
-  const markers = members.filter((member) => Platform.OS !== 'ios' || !icons[member.id]).map((member) => ({
-    id: member.id, coordinates: { latitude: member.latitude, longitude: member.longitude },
-    title: `${member.displayName || member.username} · approximate area`,
-    ...(Platform.OS === 'ios' ? { monogram: mapMemberInitials(member), tintColor: '#8A40CF' } : { icon: icons[member.id], anchor: { x: 0.5, y: 0.5 } }),
+  const markers = visualPins.filter(pin => Platform.OS !== 'ios' || !icons[pin.id]).map(pin => ({
+    id: pin.id, coordinates: { latitude: pin.latitude, longitude: pin.longitude }, title: pin.title,
+    ...(Platform.OS === 'ios' ? { monogram: pin.monogram, tintColor: pin.tint } : { icon: icons[pin.id], anchor: { x: 0.5, y: 0.5 } }),
   }));
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
-      <Text style={{ color: '#bbb', fontSize: 13 }}>Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</Text>
+      <Text style={{ color: '#bbb', fontSize: 13 }}>Party flyers and member avatars share this map. Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</Text>
       <LocationControls allowSharing={Boolean(NativeMap)} />
-      {!NativeMap ? <Text accessibilityRole="alert" style={{ color: '#ddd' }}>Nearby people requires a build with native maps. No location is collected here. You can still turn sharing off.</Text> : null}
+      {!NativeMap ? <Text accessibilityRole="alert" style={{ color: '#ddd' }}>This map requires a build with native maps. No location is collected here. You can still turn sharing off.</Text> : null}
       {NativeMap && sharing ? <Pressable accessibilityRole="button" disabled={presence.isUpdating} onPress={() => void presence.refresh()} style={{ minHeight: 44, paddingHorizontal: 12, justifyContent: "center", borderRadius: 12, backgroundColor: "#379ED8" }}><Text style={{ color: "#000", fontWeight: "600" }}>Update my location</Text></Pressable> : null}
       {presence.error ? <Text accessibilityRole="alert" style={{ color: '#ffb4b4' }}>{presence.error}</Text> : null}
-      {nearby.isError ? <View><Text accessibilityRole="alert" style={{ color: '#ddd' }}>Nearby people could not be refreshed. Locations have been hidden.</Text><Pressable accessibilityRole="button" onPress={() => void nearby.refetch()} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>Retry nearby people</Text></Pressable></View> : null}
+      {nearby.isError ? <View><Text accessibilityRole="alert" style={{ color: '#ddd' }}>Nearby people could not be refreshed. Member locations have been hidden.</Text><Pressable accessibilityRole="button" onPress={() => void nearby.refetch()} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>Retry nearby people</Text></Pressable></View> : null}
       {NativeMap && sharing && !center && !nearby.isError ? <View style={{ gap: 8 }}>{presence.isUpdating || nearby.isPending ? <ActivityIndicator /> : null}<Text style={{ color: '#bbb' }}>A fresh location is needed to show nearby people.</Text></View> : null}
-      {NativeMap && center ? (
+      {NativeMap ? (
         <>
-          {members.filter((member) => mapAvatarUrl(member.avatarUrl)).map((member) => <MemberIcon key={`${member.id}:${member.avatarUrl}`} member={member} register={registerIcon} />)}
-          <View style={{ height: 340 }} accessibilityLabel="Approximate nearby member locations">
+          {visualPins.filter(pin => pin.image).map(pin => <MapIcon key={`${pin.id}:${pin.image}`} id={pin.id} source={pin.image!} register={registerIcon} />)}
+          <View style={{ height: 340 }} accessibilityLabel="Event flyers and approximate member locations">
             <NativeMap
               style={{ flex: 1 }}
               cameraPosition={cameraPosition}
@@ -79,7 +100,11 @@ export default function MemberMap() {
               uiSettings={{ myLocationButtonEnabled: false }}
             />
           </View>
-          <Text style={{ color: '#bbb' }}>{members.length ? `${members.length} nearby members sharing an approximate area` : 'No nearby members are sharing right now.'}</Text>
+          <Text style={{ color: '#bbb' }}>{`${eventPins.length} public event locations · ${members.length} sharing avatars`}</Text>
+          {locations.isError ? <View><Text accessibilityRole="alert" style={{ color: '#ddd' }}>Event locations could not be refreshed. Event pins have been hidden.</Text><Pressable accessibilityRole="button" onPress={() => void locations.refetch()}><Text style={{ color: '#3FDCFF', paddingVertical: 12 }}>Retry event locations</Text></Pressable></View> : null}
+          {eventPins.map(pin => <Pressable key={pin.id} accessibilityRole="button" accessibilityLabel={`Open event ${pin.title}`} onPress={() => openEvent(pin.id)} style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            {pin.flyerUrl ? <Image source={{ uri: pin.flyerUrl }} style={{ width: 44, height: 58, borderRadius: 6 }} /> : null}<Text style={{ color: '#fff', flex: 1 }}>{pin.title}</Text>
+          </Pressable>)}
           {members.map((member) => <Pressable key={member.id} accessibilityRole="button" accessibilityLabel={`Open ${member.displayName || member.username}'s profile`} onPress={() => open(member)} style={{ minHeight: 60, padding: 8, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#ffffff22', borderRadius: 12 }}><Avatar member={member} /><View style={{ flex: 1 }}><Text style={{ color: '#fff', fontWeight: '600' }}>{member.displayName || member.username}</Text><Text style={{ color: '#aaa' }}>@{member.username} · approximate area</Text></View></Pressable>)}
         </>
       ) : null}
@@ -87,13 +112,12 @@ export default function MemberMap() {
   );
 }
 
-function MemberIcon({ member, register }: { member: MapMember; register: (id: string, icon: LoadedIcon | null) => void }) {
-  const source = mapAvatarUrl(member.avatarUrl);
-  const icon = useImage(source!, { maxWidth: 44, maxHeight: 44 });
+function MapIcon({ id, source, register }: { id: string; source: string; register: (id: string, icon: LoadedIcon | null) => void }) {
+  const icon = useImage(source, { maxWidth: 44, maxHeight: 58 });
   useEffect(() => {
-    register(member.id, icon);
-    return () => register(member.id, null);
-  }, [member.id, icon, register]);
+    register(id, icon);
+    return () => register(id, null);
+  }, [id, icon, register]);
   return null;
 }
 

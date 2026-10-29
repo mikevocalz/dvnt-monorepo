@@ -1,25 +1,7 @@
-/**
- * EventsMapSheet
- *
- * Detached BottomSheetModal presenting the events map.
- *
- * Architecture:
- * - useEventMapController owns all data: geocoding, nearest-event sorting,
- *   viewport settling. The map is NOT rendered until isReady=true, so it
- *   mounts exactly once at the correct viewport (no double-load, no flicker).
- * - EventsMapView is a pure render component — stable props only.
- * - Corner radius is achieved via CornerMasks in DvntMap (no overflow:hidden).
- *
- * Initialization sequence:
- *   1. Sheet opens → controller starts resolving
- *   2. Skeleton shown while isReady=false
- *   3. isReady=true (events + location settled, or 900ms timeout)
- *   4. Map mounts ONCE at correct viewport
- *   5. Map remains stable — no camera jumps after settle
- */
+/** One map surface for public event flyers and consented member avatars. */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Pressable, ActivityIndicator } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import { View, Text, Pressable} from "react-native";
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -27,8 +9,6 @@ import {
 import { MapPin, X } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
-import { useEventMapController } from "@dvnt/app/lib/hooks/use-event-map-controller";
-import { EventsMapView } from "./events-map-view";
 import MemberMap from "./member-map";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
@@ -38,32 +18,17 @@ interface EventsMapSheetProps {
   events: Event[];
 }
 
-// ── Skeleton shown while controller is resolving ──────────────────────────────
-
-function MapSkeleton({ color }: { color: string }) {
-  return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 12 }}>
-      <ActivityIndicator size="large" color={color} />
-      <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: "500" }}>
-        Finding events near you…
-      </Text>
-    </View>
-  );
-}
-
 // ── Sheet ─────────────────────────────────────────────────────────────────────
 
 export const EventsMapSheet: React.FC<EventsMapSheetProps> = ({
   onDismiss,
   events,
 }) => {
-  const [mode, setMode] = useState<"events" | "people">("events");
   const sheetRef = useRef<BottomSheetModal>(null);
   const { colors } = useColorScheme();
   const router = useRouter();
   const activeCity = useEventsLocationStore((s) => s.activeCity);
 
-  const controller = useEventMapController(events);
 
   // Present sheet on mount
   useEffect(() => {
@@ -106,11 +71,8 @@ export const EventsMapSheet: React.FC<EventsMapSheetProps> = ({
   const headerLabel = useMemo(() => {
     if (activeCity?.state) return `Near ${activeCity.name}, ${activeCity.state}`;
     if (activeCity?.name) return `Near ${activeCity.name}`;
-    return "Nearby Events";
+    return "Events & People";
   }, [activeCity]);
-
-  // maskColor for corner masks must match the card background around the map
-  const maskColor = colors.card;
 
   return (
     <BottomSheetModal
@@ -173,27 +135,6 @@ export const EventsMapSheet: React.FC<EventsMapSheetProps> = ({
             >
               {headerLabel}
             </Text>
-            {controller.nearestCount > 0 && (
-              <View
-                style={{
-                  paddingHorizontal: 8,
-                  paddingVertical: 3,
-                  borderRadius: 20,
-                  backgroundColor: `${colors.primary}20`,
-                }}
-              >
-                <Text
-                  style={{
-                    color: colors.primary,
-                    fontSize: 11,
-                    fontWeight: "700",
-                    fontVariant: ["tabular-nums"],
-                  }}
-                >
-                  {controller.nearestCount}
-                </Text>
-              </View>
-            )}
           </View>
 
           <Pressable
@@ -214,10 +155,6 @@ export const EventsMapSheet: React.FC<EventsMapSheetProps> = ({
           </Pressable>
         </View>
 
-        <View accessibilityRole="tablist" style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 12 }}>
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: mode === "events" }} onPress={() => setMode("events")} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 12, borderRadius: 12, backgroundColor: mode === "events" ? "#8A40CF44" : "#ffffff11" }}><Text style={{ color: colors.foreground }}>Event venues</Text></Pressable>
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: mode === "people" }} onPress={() => setMode("people")} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 12, borderRadius: 12, backgroundColor: mode === "people" ? "#8A40CF44" : "#ffffff11" }}><Text style={{ color: colors.foreground }}>Nearby people</Text></Pressable>
-        </View>
         {/* ── Map card ── */}
         <View
           style={{
@@ -226,21 +163,9 @@ export const EventsMapSheet: React.FC<EventsMapSheetProps> = ({
             marginBottom: 12,
             borderRadius: 12,
             // NO overflow:hidden — that would blank Apple Maps' Metal surface.
-            // Visual rounded corners are achieved by the CornerMasks rendered
-            // inside DvntMap, which overlay the map corners with maskColor
-            // (matching colors.card) to create the illusion of clipping.
           }}
         >
-          {mode === "people" ? <MemberMap /> : controller.isReady ? (
-            <EventsMapView
-              viewport={controller.viewport}
-              markers={controller.markers}
-              onMarkerPress={handleMarkerPress}
-              maskColor={maskColor}
-            />
-          ) : (
-            <MapSkeleton color={colors.primary} />
-          )}
+          <MemberMap events={events} onOpenEvent={handleMarkerPress} />
         </View>
       </View>
     </BottomSheetModal>

@@ -2,24 +2,27 @@
 import { getGoogleMapsPublicKey } from "@dvnt/ui/google-maps-public-config";
 
 import { useEffect, useState } from "react";
-import { APIProvider, Map, Marker, useApiLoadingStatus, APILoadingStatus, useMapsLibrary } from "@vis.gl/react-google-maps";
+import { APIProvider, Map, Marker, useApiLoadingStatus, APILoadingStatus, useMapsLibrary, useMap } from "@vis.gl/react-google-maps";
 import { useRouter } from "solito/navigation";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dvnt/app/lib/hooks/use-member-map";
 import { mapAvatarUrl, mapMemberInitials, mapMemberProfilePath, visibleMapMembers, type MapMember } from "./member-map-render-policy";
 
-export default function MemberMap() {
+import type { EventMapPin } from "@dvnt/app/lib/events/event-map";
+
+type UnifiedMapProps = { eventPins?: EventMapPin[]; selectedEventId?: string | null; onSelectEvent?: (id: string) => void; onOpenEvent?: (id: string) => void };
+export default function MemberMap(props: UnifiedMapProps = {}) {
   const key = getGoogleMapsPublicKey();
   if (!key) return (
-    <section aria-label="Nearby people" className="p-4 space-y-4">
-      <p role="status">The nearby people map is not available on this website yet. Event venues still work. No location is collected here.</p>
+    <section aria-label="Events and people map" className="p-4 space-y-4">
+      <p role="status">The map is unavailable on this device. Event details remain available in the list. No location is collected here.</p>
       <LocationControls allowSharing={false} />
     </section>
   );
-  return <APIProvider apiKey={key}><MemberMapContent /></APIProvider>;
+  return <APIProvider apiKey={key}><MemberMapContent {...props} /></APIProvider>;
 }
 
-function MemberMapContent() {
+function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOpenEvent }: UnifiedMapProps) {
   const status = useApiLoadingStatus();
   const ready = status === APILoadingStatus.LOADED;
   const { sharing } = useLocationSettings();
@@ -35,13 +38,15 @@ function MemberMapContent() {
   // also enforces consent/blocking; polling is never authority to retain pins.
   const leaseLive = nearby.data?.expiresAt && Date.parse(nearby.data.expiresAt) > now;
   const members = sharing && !nearby.isError && leaseLive
-    ? visibleMapMembers(nearby.data?.members || [], now) : [];
+    ? visibleMapMembers([...(nearby.data?.self ? [nearby.data.self] : []), ...(nearby.data?.members || [])], now) : [];
   const center = sharing && !nearby.isError && leaseLive ? nearby.data?.center : null;
+  const selectedEvent = eventPins.find(pin => pin.id === selectedEventId);
+  const mapCenter = selectedEvent || center || eventPins[0] || { latitude: 39.5, longitude: -98.35 };
   const open = (member: MapMember) => router.push(mapMemberProfilePath(member.username));
   const failed = status === APILoadingStatus.FAILED || status === APILoadingStatus.AUTH_FAILURE;
 
   return (
-    <section aria-label="Nearby people" className="p-4 space-y-4">
+    <section aria-label="Events and people map" className="p-4 space-y-4">
       <p className="text-sm text-white/65">Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</p>
       <LocationControls allowSharing={ready} />
       {!ready ? <p role={failed ? 'alert' : 'status'}>{failed ? 'Google Maps could not load. Sharing cannot be enabled here. You can still turn existing sharing off above.' : 'Loading nearby map…'}</p> : null}
@@ -51,14 +56,16 @@ function MemberMapContent() {
         <div role="alert"><p>Nearby people could not be refreshed. Locations have been hidden.</p><button className="min-h-11 px-4 rounded-xl bg-white/10" onClick={() => void nearby.refetch()}>Retry nearby people</button></div>
       ) : null}
       {ready && sharing && !center && !nearby.isError ? <p role="status">{presence.isUpdating || nearby.isPending ? 'Updating your approximate location…' : 'A fresh location is needed to show nearby people.'}</p> : null}
-      {ready && center ? (
+      {ready ? (
         <>
-          <div className="h-[360px] sm:h-[440px] overflow-hidden rounded-xl" aria-label="Approximate nearby member locations">
-            <Map defaultCenter={{ lat: center.latitude, lng: center.longitude }} defaultZoom={12} gestureHandling="cooperative" disableDefaultUI={false}>
-              {members.map((member) => <AvatarMarker key={member.id} member={member} onClick={() => open(member)} />)}
+          <div className="h-[360px] sm:h-[440px] overflow-hidden rounded-xl" aria-label="Event flyers and approximate member locations">
+            <Map defaultCenter={{ lat: mapCenter.latitude, lng: mapCenter.longitude }} defaultZoom={center || eventPins.length ? 12 : 3} gestureHandling="cooperative" disableDefaultUI={false}>
+              <MapFocus latitude={mapCenter.latitude} longitude={mapCenter.longitude} zoom={center || eventPins.length ? 12 : 3} />
+              {eventPins.map(pin => <EventFlyerMarker key={`event:${pin.id}`} pin={pin} onClick={() => { onSelectEvent?.(pin.id); onOpenEvent?.(pin.id); }} />)}
+              {members.map((member) => <AvatarMarker key={`member:${member.id}`} member={member} self={member.id === nearby.data?.self?.id} onClick={() => open(member)} />)}
             </Map>
           </div>
-          <p role="status" className="text-sm text-white/60">{members.length ? `${members.length} nearby ${members.length === 1 ? 'member' : 'members'} sharing an approximate area` : 'No nearby members are sharing right now.'}</p>
+          <p role="status" className="text-sm text-white/60">{members.length ? `${members.length} ${members.length === 1 ? 'avatar' : 'avatars'} sharing an approximate area` : sharing ? 'No fresh member locations yet. Tap Update my location to show your avatar.' : 'Turn on avatar sharing to show yourself and nearby members.'}</p>
           <ul aria-label="Nearby members" className="grid sm:grid-cols-2 gap-2">
             {members.map((member) => (
               <li key={member.id} className="min-w-0"><button className="w-full min-h-14 rounded-xl border border-white/15 p-3 flex items-center gap-3 text-left" onClick={() => open(member)}><Avatar member={member} /><span className="min-w-0 break-words"><span className="block font-semibold">{member.displayName || member.username}</span><span className="block text-sm text-white/60">@{member.username} · approximate area</span></span></button></li>
@@ -78,7 +85,7 @@ function Avatar({ member }: { member: MapMember }) {
     : <span aria-hidden="true" className="w-11 h-11 shrink-0 rounded-full bg-[#8A40CF] flex items-center justify-center font-bold">{mapMemberInitials(member)}</span>;
 }
 
-function AvatarMarker({ member, onClick }: { member: MapMember; onClick: () => void }) {
+function AvatarMarker({ member, onClick, self = false }: { member: MapMember; onClick: () => void; self?: boolean }) {
   // Marker image URL contains no coordinates. The only position supplied to
   // Google is the server's coarse grid cell, never the device GPS sample.
   const avatar = mapAvatarUrl(member.avatarUrl);
@@ -97,9 +104,36 @@ function AvatarMarker({ member, onClick }: { member: MapMember; onClick: () => v
   }, [avatar]);
   return <Marker
     position={{ lat: member.latitude, lng: member.longitude }}
-    title={`${member.displayName || member.username} — approximate area`}
+    title={`${self ? "You" : member.displayName || member.username} — approximate area`}
     label={loadedAvatar === avatar && avatar ? undefined : { text: mapMemberInitials(member), color: '#ffffff' }}
     icon={loadedAvatar === avatar && avatar && core ? { url: avatar, scaledSize: new core.Size(44, 44) } : undefined}
     onClick={onClick}
   />;
+}
+
+/** Follow an explicit event selection or a newly published coarse area, not the expiry clock. */
+function MapFocus({ latitude, longitude, zoom }: { latitude: number; longitude: number; zoom: number }) {
+  const map = useMap();
+  useEffect(() => { map?.panTo({ lat: latitude, lng: longitude }); map?.setZoom(zoom); }, [map, latitude, longitude, zoom]);
+  return null;
+}
+
+function EventFlyerMarker({ pin, onClick }: { pin: EventMapPin; onClick: () => void }) {
+  const core = useMapsLibrary("core");
+  const src = mapAvatarUrl(pin.flyerUrl);
+  const [loaded, setLoaded] = useState<string | null>(null);
+  useEffect(() => {
+    setLoaded(null);
+    if (!src) return;
+    let current = true;
+    const image = new window.Image();
+    image.referrerPolicy = "no-referrer";
+    image.onload = () => { if (current) setLoaded(src); };
+    image.onerror = () => { if (current) setLoaded(null); };
+    image.src = src;
+    return () => { current = false; image.onload = null; image.onerror = null; };
+  }, [src]);
+  return <Marker position={{ lat: pin.latitude, lng: pin.longitude }} title={`Event: ${pin.title}`} onClick={onClick}
+    label={src && loaded === src ? undefined : { text: "EVENT", color: "#ffffff" }}
+    icon={src && loaded === src && core ? { url: src, scaledSize: new core.Size(44, 60) } : undefined} />;
 }

@@ -4,6 +4,8 @@ on:
     paths:
       - 'packages/app/features/events/events-list.web.tsx'
       - 'packages/app/features/events/ui/events-map.web.tsx'
+      - 'packages/app/features/events/ui/member-map.web.tsx'
+      - 'packages/ui/src/google-maps-public-config.ts'
       - 'packages/app/lib/events/event-map*'
       - 'packages/app/lib/events/event-attendee-cache.test.ts'
       - 'packages/app/lib/api/event-map*'
@@ -24,7 +26,7 @@ concurrency:
 jobs:
   browser:
     name: Events map (${{ matrix.browser }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -50,7 +52,7 @@ jobs:
         env:
           NODE_PATH: ${{ runner.temp }}/event-map/node_modules
         run: node --test packages/app/lib/events/event-map.test.ts packages/app/lib/events/event-attendee-cache.test.ts
-      - name: Exercise actual Events screen and venue iframe
+      - name: Exercise actual Events screen and unified map
         env:
           NODE_PATH: ${{ runner.temp }}/event-map/node_modules
           EVENT_MAP_BROWSER: ${{ matrix.browser }}

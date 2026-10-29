@@ -15,6 +15,7 @@ async function dbRun(fn) {
   await db.exec(legacy.slice(0,legacy.indexOf('CREATE OR REPLACE FUNCTION public.viewer_is_verified_adult'))+'COMMIT;');
   await db.exec(migration);
   await db.exec(fs.readFileSync(path.join(root,'apps/mobile/supabase/migrations/20261029041500_member_map_legacy_approval.sql'),'utf8'));
+  await db.exec(fs.readFileSync(path.join(root,'apps/mobile/supabase/migrations/20261029051500_member_map_self_avatar.sql'),'utf8'));
   await fn(db);
  } finally {await db.close();}
 }
@@ -55,7 +56,7 @@ test('nearby excludes blocked both ways, private, minors, denied, expired and fa
  await db.exec("DELETE FROM blocks; INSERT INTO blocks SELECT v.id,b.id FROM users b,users v WHERE b.auth_id='blocked' AND v.auth_id='viewer';");
  assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members.map(m=>m.username),['near']);
  await db.exec("UPDATE member_map_settings SET share_until=now()-interval '1 second' WHERE user_id='viewer'");
- assert.deepEqual(await call(db,"member_map_nearby('viewer')"),{members:[],center:null,expiresAt:null});
+ assert.deepEqual(await call(db,"member_map_nearby('viewer')"),{members:[],self:null,center:null,expiresAt:null});
 }));
 test('overall off deletes legacy presence and trigger refuses late old-client upsert',()=>dbRun(async db=>{
  await enable(db,'viewer');await publish(db,'viewer');
@@ -192,4 +193,63 @@ test('ordinary unapproved members cannot use legacy fallback',()=>dbRun(async db
  await db.exec("DELETE FROM identity_verifications WHERE user_id='viewer'");
  assert.equal(await call(db,"member_map_eligible('viewer')"),false);
  await assert.rejects(()=>enable(db,'viewer'),/consent/);
+}));
+
+test('self avatar is validated coarse server presence, separate from peers and bounded by consent',()=>dbRun(async db=>{
+ const empty={members:[],self:null,center:null,expiresAt:null};
+ assert.deepEqual(await call(db,"member_map_nearby('viewer')"),empty);
+ await enable(db,'viewer');
+ assert.deepEqual(await call(db,"member_map_nearby('viewer')"),empty,'consent without a server publication never invents a self point');
+ await db.exec("INSERT INTO media VALUES(901,'https://fixture.invalid/self-avatar.png'); UPDATE users SET avatar_id=901,first_name='Viewer Name' WHERE auth_id='viewer'");
+ await publish(db,'viewer');await enable(db,'near');await publish(db,'near');
+ await db.exec("UPDATE member_map_settings SET share_until=now()+interval '2 minutes' WHERE user_id='viewer'");
+ await db.exec('SET ROLE service_role');
+ const result=await call(db,"member_map_nearby('viewer')");
+ const stored=(await db.query("SELECT p.latitude,p.longitude,s.share_until,u.id FROM member_map_presence p JOIN member_map_settings s USING(user_id) JOIN users u ON u.auth_id=p.user_id WHERE p.user_id='viewer'")).rows[0];
+ assert.deepEqual(result.self,{id:String(stored.id),username:'viewer',displayName:'Viewer Name',avatarUrl:'https://fixture.invalid/self-avatar.png',latitude:stored.latitude,longitude:stored.longitude,expiresAt:result.expiresAt});
+ assert.equal(Date.parse(result.self.expiresAt),new Date(stored.share_until).getTime());
+ assert.equal(result.self.latitude,40.71);assert.notEqual(result.self.longitude,-74.00602);
+ assert.deepEqual(result.members.map(m=>m.username),['near']);
+ assert.deepEqual(result.center,{latitude:result.self.latitude,longitude:result.self.longitude});
+ await db.exec('RESET ROLE');
+ for(const restriction of [
+  "DELETE FROM member_map_presence WHERE user_id='viewer'",
+  "UPDATE member_map_presence SET expires_at=now()-interval '1 second' WHERE user_id='viewer'",
+  "UPDATE member_map_presence SET observed_at=now()-interval '16 minutes',expires_at=now()-interval '1 minute' WHERE user_id='viewer'",
+  "UPDATE member_map_presence SET revision=revision+1 WHERE user_id='viewer'",
+  "UPDATE member_map_settings SET location_enabled=false,events_map_enabled=false WHERE user_id='viewer'",
+  "UPDATE member_map_settings SET events_map_enabled=false WHERE user_id='viewer'",
+  "UPDATE member_map_settings SET share_until=now()-interval '1 second' WHERE user_id='viewer'",
+  "UPDATE member_map_settings SET consent_version=NULL WHERE user_id='viewer'",
+  "UPDATE users SET is_private=true WHERE auth_id='viewer'",
+  `INSERT INTO user_settings VALUES('viewer','{"privacy":{"privateAccount":true}}')`,
+  "UPDATE users SET banned_at=now() WHERE auth_id='viewer'",
+  `UPDATE "user" SET banned=true WHERE id='viewer'`,
+  "INSERT INTO payload.members SELECT id::text,'suspended' FROM users WHERE auth_id='viewer'",
+  "UPDATE verified_admission_policy SET denylist=ARRAY['viewer']",
+  "UPDATE identity_verifications SET date_of_birth=CURRENT_DATE-interval '17 years' WHERE user_id='viewer'"
+ ]) {
+  await db.exec('BEGIN;'+restriction+';SET LOCAL ROLE service_role');
+  assert.deepEqual(await call(db,"member_map_nearby('viewer')"),empty,restriction);
+  await db.exec('ROLLBACK');
+ }
+ await call(db,"member_map_revoke('viewer')");
+ assert.deepEqual(await call(db,"member_map_nearby('viewer')"),empty);
+}));
+
+test('self avatar does not consume or disappear behind the 100-peer limit',()=>dbRun(async db=>{
+ await enable(db,'viewer');await publish(db,'viewer');
+ await db.exec(`
+  INSERT INTO "user"(id) SELECT 'peer-'||n FROM generate_series(1,101) n;
+  INSERT INTO users(id,auth_id,username,first_name) SELECT 1000+n,'peer-'||n,'peer-'||n,'Peer' FROM generate_series(1,101) n;
+  INSERT INTO identity_verifications(user_id,status,date_of_birth) SELECT 'peer-'||n,'passed',date '1990-01-01' FROM generate_series(1,101) n;
+  INSERT INTO member_map_settings(user_id,location_enabled,events_map_enabled,revision,consent_version,share_until)
+   SELECT 'peer-'||n,true,true,1,'events-map-v1',now()+interval '1 hour' FROM generate_series(1,101) n;
+  INSERT INTO member_map_presence(user_id,latitude,longitude,observed_at,expires_at,revision)
+   SELECT 'peer-'||n,p.latitude,p.longitude,p.observed_at,p.expires_at,1 FROM generate_series(1,101) n CROSS JOIN member_map_presence p WHERE p.user_id='viewer';
+  SET ROLE service_role;
+ `);
+ const result=await call(db,"member_map_nearby('viewer')");
+ assert.equal(result.members.length,100);assert.equal(result.self.username,'viewer');
+ assert.ok(result.members.every(member=>member.id!==result.self.id));
 }));

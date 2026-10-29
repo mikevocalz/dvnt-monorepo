@@ -16,6 +16,8 @@ export interface NearbyMember {
   expiresAt: string;
 }
 export interface NearbyMembers {
+  /** Validated coarse server presence; absent on older deployments, null when unavailable. */
+  self?: NearbyMember | null;
   members: NearbyMember[];
   center: { latitude: number; longitude: number } | null;
   expiresAt: string | null;
