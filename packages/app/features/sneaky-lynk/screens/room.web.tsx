@@ -723,13 +723,16 @@ function RoomInner({
   // the store later gave the default "camera on" back — the same shape of bug
   // as `ended` surviving a transport teardown.
   const joinPrefsRef = useRef({ camera: joinCameraOn, mic: joinMicOn });
+  const joinPrefsAppliedRef = useRef(false);
   useEffect(() => {
-    if (!canPublish) return;
+    if (!canPublish || joinPrefsAppliedRef.current) return;
+    joinPrefsAppliedRef.current = true;
     lynkRef.current.setCameraEnabled(joinPrefsRef.current.camera && roomHasVideo);
-    lynkRef.current.setMicEnabled(joinPrefsRef.current.mic);
-    // Keyed on the moment publishing becomes possible, so a rebuilt transport
-    // gets the preference again rather than starting from its own defaults.
-  }, [canPublish, roomHasVideo]);
+    lynkRef.current.setMicEnabled(joinPrefsRef.current.mic && !hostMuteLocked);
+    // RoomInner is keyed by room/account. Within that lifetime, role changes
+    // must preserve the user's latest intent, not replay the pre-join choices.
+    // Device reconstruction retains the hook flags; it needs no preference reset.
+  }, [canPublish, roomHasVideo, hostMuteLocked]);
 
   // ── Room phase ────────────────────────────────────────────────────────────
   // Being IN the room is a Supabase fact (`video_join_room` resolved a role),
