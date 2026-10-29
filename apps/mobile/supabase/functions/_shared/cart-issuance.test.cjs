@@ -1,6 +1,6 @@
 // prepareCartAddonRows, reached through handleCartPaymentIntentSucceeded.
 // redeem_addon spends a whole order_addons row on one scan, so a redeemable
-// add-on line must reach cart_complete_issuance with one prepared QR per
+// add-on line must reach complete_paid_cart_atomic with one prepared QR per
 // unit (20261009100200 then writes one row per unit). Non-redeemable lines
 // get no QR.
 const { test } = require('node:test');
@@ -34,11 +34,15 @@ function issuanceDb({ addonLines }) {
 
 async function prepared(addonLines) {
   const db = issuanceDb({ addonLines });
-  const h = harness({ database: db });
+  const h = harness({ database: db, stripeFetch: async () => Response.json({
+    id: 'pi_1', status: 'succeeded', amount: 1000, amount_received: 1000, currency: 'usd',
+    metadata: { type: 'cart_checkout', cart_id: 'cart', user_id: 'member', event_id: '1' },
+    latest_charge: { payment_intent: 'pi_1', status: 'succeeded', paid: true, captured: true, refunded: false, amount_refunded: 0, disputed: false },
+  }) });
   const mod = h.load(path.resolve(__dirname, 'cart-issuance.ts'));
   await mod.handleCartPaymentIntentSucceeded(db, { id: 'pi_1', metadata: { cart_id: 'cart', event_id: '1' } });
-  const call = db.rpcs.find((c) => c.name === 'cart_complete_issuance');
-  assert.ok(call, 'cart_complete_issuance was not called');
+  const call = db.rpcs.find((c) => c.name === 'complete_paid_cart_atomic');
+  assert.ok(call, 'complete_paid_cart_atomic was not called');
   return call.args.p_addon_rows;
 }
 

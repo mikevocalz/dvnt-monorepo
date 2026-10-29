@@ -7,36 +7,7 @@
 import { createSignedQrPayload } from "./hmac-qr.ts";
 import { maybeFireCapacityAlerts } from "./capacity-alerts.ts";
 import { recordPromoterEarning } from "./order-state.ts";
-
-async function refundPaymentIntentForAllocationFailure(
-  paymentIntentId: string,
-  cartId: string,
-): Promise<void> {
-  const res = await fetch("https://api.stripe.com/v1/refunds", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${Deno.env.get("STRIPE_SECRET_KEY") || ""}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Idempotency-Key": `allocation_failure_${paymentIntentId}`,
-    },
-    body: new URLSearchParams({
-      payment_intent: paymentIntentId,
-      reason: "requested_by_customer",
-      // Full refund of a destination charge: reverse the organizer transfer
-      // and our application fee too, or DVNT covers the whole amount out of
-      // its own balance for a failure that is ours, not theirs.
-      refund_application_fee: "true",
-      reverse_transfer: "true",
-      "metadata[cart_id]": cartId,
-      "metadata[reason]": "system_allocation_failure",
-    }).toString(),
-  });
-
-  const data = await res.json();
-  if (!res.ok || data.error) {
-    throw new Error(data.error?.message || "Stripe refund failed");
-  }
-}
+import { confirmCartPayment } from "./confirmed-cart-payment.ts";
 
 async function prepareCartTicketRows(
   // deno-lint-ignore no-explicit-any
@@ -185,32 +156,17 @@ async function prepareCartAddonRows(
   return rows;
 }
 
-/**
- * `refundOnAllocationFailure` — whether a rejected issuance may take the
- * buyer's money back.
- *
- * TRUE is right for the webhook, where the cart is seconds old: the hold is
- * live, the seats are really gone if the RPC says so, and refunding
- * immediately is the honest answer.
- *
- * FALSE is the only safe value for the reconciler. A cart hold lasts minutes
- * and the orders it sweeps are hours or days old, so `cart_complete_issuance`
- * returns `hold_expired` for essentially all of them — a statement about the
- * clock, not about inventory. On 2026-09-18 that distinction cost six buyers
- * their tickets: a grant fix removed an unrelated exception that had been
- * accidentally stopping this path short, the next sweep reached the refund
- * call, and $186.40 went back across six orders whose tiers had 97 free seats.
- * An expired hold means "a human should re-arm this", never "give the money
- * back".
- */
+/** Fulfill only against fresh Stripe evidence; never automatically refund. */
 export async function handleCartPaymentIntentSucceeded(
   // deno-lint-ignore no-explicit-any
   supabase: any,
   // deno-lint-ignore no-explicit-any
   pi: any,
-  options: { refundOnAllocationFailure?: boolean } = {},
+  options: { eventCreatedAt?: string } = {},
 ): Promise<boolean> {
-  const mayRefund = options.refundOnAllocationFailure !== false;
+  // The webhook may be retried after a refund/dispute or after a failed attempt.
+  // Always fetch current payment state before restoring any inventory.
+  pi = await confirmCartPayment(pi);
   const metadata = pi.metadata || {};
   const cartId = metadata.cart_id;
   if (!cartId) return false;
@@ -223,70 +179,48 @@ export async function handleCartPaymentIntentSucceeded(
   const preparedTicketRows = await prepareCartTicketRows(supabase, cartId);
   const preparedAddonRows = await prepareCartAddonRows(supabase, cartId);
 
-  // Always pass all 4 named args (p_addon_rows is [] when the cart has no
-  // add-ons) so PostgREST binds the 4-arg overload deterministically —
-  // base migration 20260516150000 (3-arg) and 20260613000300 (4-arg) both
-  // define cart_complete_issuance; a 3-arg named call would be ambiguous.
-  // DEPENDENCY: the 4-arg overload lives in 20260613000300 — if only the
-  // 3-arg is live, that migration must be applied or this RPC 404s.
   const { data: issuanceResult, error: issuanceError } = await supabase.rpc(
-    "cart_complete_issuance",
+    "complete_paid_cart_atomic",
     {
       p_cart_id: cartId,
       p_payment_intent_id: pi.id,
+      p_amount_received: pi.amount_received,
+      p_currency: pi.currency,
+      p_user_id: metadata.user_id,
+      p_event_id: Number(metadata.event_id),
       p_ticket_rows: preparedTicketRows,
       p_addon_rows: preparedAddonRows,
+      p_event_created_at: options.eventCreatedAt ?? null,
     },
   );
 
   if (issuanceError) {
     console.error("[stripe-webhook] cart issuance RPC failed:", issuanceError);
-    if (mayRefund) await refundPaymentIntentForAllocationFailure(pi.id, cartId);
     throw issuanceError;
   }
-
   if (!issuanceResult?.ok) {
     console.error("[stripe-webhook] cart issuance rejected:", issuanceResult);
-
-    if (!mayRefund) {
-      // Leave the money where it is and the order where it is, so the next run
-      // — or a human with a re-armed hold — can still deliver the ticket. A
-      // refund here is unrecoverable: the buyer wanted the pass, not the money.
-      console.error(
-        `[reconcile] PAID BUT UNISSUED cart=${cartId} pi=${pi.id} reason=${
-          issuanceResult?.error ?? "unknown"
-        } — NOT refunding; left pending for a human`,
-      );
-      const { data: blockedOrder } = await supabase
-        .from("orders")
-        .select("id")
-        .eq("cart_id", cartId)
-        .maybeSingle();
-      if (blockedOrder?.id) {
-        await supabase.from("order_timeline").insert({
-          order_id: blockedOrder.id,
-          type: "reconcile_blocked",
-          label: "Paid, tickets not issued yet",
-          detail:
-            `Cart issuance was rejected (${issuanceResult?.error ?? "unknown"}). ` +
-            `Payment is confirmed and has NOT been refunded. Re-arm the cart ` +
-            `hold and re-run issuance to deliver the ticket.`,
-        });
-      }
-      return false;
+    const { data: blockedOrder } = await supabase.from("orders")
+      .select("id").eq("cart_id", cartId).maybeSingle();
+    if (blockedOrder?.id) {
+      // Keep a confirmed paid attempt discoverable by the ordinary retry sweep.
+      // Never overwrite a concurrent success/refund or a replacement PI.
+      const { error: retryError } = await supabase.from("orders")
+        .update({ status: "payment_pending", updated_at: new Date().toISOString() })
+        .eq("id", blockedOrder.id).eq("cart_id", cartId)
+        .eq("stripe_payment_intent_id", pi.id)
+        .eq("status", "payment_failed").is("refunded_at", null);
+      if (retryError) throw retryError;
+      await supabase.from("order_timeline").insert({
+        order_id: blockedOrder.id,
+        type: "reconcile_blocked",
+        label: "Paid purchase needs fulfillment review",
+        detail: `Cart fulfillment was blocked (${issuanceResult?.error ?? "unknown"}). ` +
+          "Payment was verified; no automatic refund or partial allocation was made. " +
+          "Tickets and add-ons require inventory-safe recovery.",
+      });
     }
-
-    await refundPaymentIntentForAllocationFailure(pi.id, cartId);
-
-    await supabase
-      .from("orders")
-      .update({
-        status: "payment_failed",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("cart_id", cartId);
-
-    return true;
+    return false;
   }
 
   if (issuanceResult.duplicate) {
@@ -332,7 +266,7 @@ export async function handleCartPaymentIntentSucceeded(
         order_id: orderRow.id,
         type: "payment_captured",
         label: "Payment captured",
-        detail: `${issuanceResult.issuedCount} ticket(s) issued`,
+        detail: "Purchased tickets and add-ons fulfilled",
       },
     ]);
 

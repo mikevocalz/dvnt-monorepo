@@ -1,0 +1,35 @@
+name: Cart payment retry fulfillment
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
+      - 'package.json'
+      - '.github/workflows/cart-payment-recovery.yml'
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cart-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test tools
+        run: npm install --prefix "$RUNNER_TEMP/cart-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.2 pg@8.21.0
+      - name: Signed webhook and real reconciler regressions
+        env:
+          NODE_PATH: ${{ runner.temp }}/cart-tests/node_modules
+        run: npm run test:cart-recovery
+      - name: Real PostgreSQL concurrent recovery, rollback and inventory checks
+        env:
+          NODE_PATH: ${{ runner.temp }}/cart-tests/node_modules
+        # Disposable local PostgreSQL only; no production credentials or skip fallback.
+        run: npm run test:cart-recovery:sql

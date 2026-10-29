@@ -455,7 +455,7 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
           // Match the reconciler's protection: an expired hold on a delayed
           // delivery must never turn a paid buyer into an automatic refund.
           const issued = await handleCartPaymentIntentSucceeded(supabase, pi, {
-            refundOnAllocationFailure: false,
+            eventCreatedAt,
           });
           if (!issued) throw new Error("Paid cart issuance needs recovery");
         } else if (piMetadata.type === "event_ticket") {
@@ -765,34 +765,29 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         const diagnosis = classifyPaymentIntentFailure(failedPi);
 
         if (failedMetadata.type === "cart_checkout" && failedMetadata.cart_id) {
-          await supabase.rpc("cart_release_hold", {
-            p_cart_id: failedMetadata.cart_id,
-          });
-
-          // Guarded money-state write (monotonic on event.created).
-          const { data: failedCartOrder } = await supabase
-            .from("orders")
-            .select("id")
+          // A failed attempt is not a canceled PaymentIntent: the buyer may
+          // retry this same PI. Keep its hold and pending order recoverable.
+          // CAS prevents a late/duplicate failure from touching paid/refunded
+          // orders or a cart which has moved to a different PaymentIntent.
+          const { data: pending, error } = await supabase.from("orders")
+            .update({
+              checkout_failure_reason: diagnosis.reason,
+              checkout_failure_code: diagnosis.code,
+            })
             .eq("cart_id", failedMetadata.cart_id)
-            .maybeSingle();
-          if (failedCartOrder) {
-            const applied = await upsertOrderMoneyState(supabase, {
-              orderId: failedCartOrder.id,
-              status: "payment_failed",
-              eventCreatedAt,
-              stripePaymentIntentId: failedPi.id,
+            .eq("stripe_payment_intent_id", failedPi.id)
+            .eq("status", "payment_pending")
+            .select("id");
+          if (error) throw error;
+          if (pending?.length) {
+            await supabase.from("order_timeline").insert({
+              order_id: pending[0].id,
+              type: "payment_attempt_failed",
+              label: "Payment attempt not completed",
+              detail: "The buyer can retry payment; inventory remains held until its existing deadline.",
             });
-            if (applied) {
-              await annotateCheckoutFailure(
-                supabase, failedCartOrder.id, diagnosis.reason, diagnosis.code,
-              );
-            }
           }
-
-          console.log(
-            "[stripe-webhook] Cart payment failed, hold released:",
-            failedMetadata.cart_id,
-          );
+          console.log("[stripe-webhook] Cart payment attempt failed; hold preserved");
           break;
         }
 
@@ -873,7 +868,8 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             .from("cart_holds")
             .update({ expires_at: asyncSettlementHoldExpiresAt() })
             .eq("cart_id", processingMetadata.cart_id)
-            .eq("released", false);
+            .eq("released", false)
+            .gt("expires_at", new Date().toISOString());
         }
 
         const { data: processingOrder } =
@@ -893,15 +889,17 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
                 .maybeSingle();
 
         if (processingOrder) {
-          // Stamp provenance through the guarded write: keeps the order
-          // payment_pending but records the PI + advances last_event_at,
-          // so a replayed processing event after settlement is a no-op.
-          await upsertOrderMoneyState(supabase, {
-            orderId: processingOrder.id,
-            status: "payment_pending",
-            eventCreatedAt,
-            stripePaymentIntentId: processingPi.id,
-          });
+          // Cart completion owns its money state atomically. A SELECT of a
+          // pending order followed by a separate status RPC can race success
+          // and downgrade paid -> pending; processing is only provenance here.
+          if (processingMetadata.type !== "cart_checkout") {
+            await upsertOrderMoneyState(supabase, {
+              orderId: processingOrder.id,
+              status: "payment_pending",
+              eventCreatedAt,
+              stripePaymentIntentId: processingPi.id,
+            });
+          }
           await supabase.from("order_timeline").insert({
             order_id: processingOrder.id,
             type: "payment_processing",
