@@ -9,7 +9,13 @@ async function dbRun(fn) {
  const db=new PGlite();
  try {
   await db.exec(fs.readFileSync(path.join(__dirname,'fixtures/member-map/schema.sql'),'utf8'));
-  await db.exec(migration);await fn(db);
+  // Execute the real existing legacy entitlement definition, not a permissive stub.
+  await db.exec("ALTER TABLE public.users ADD COLUMN created_at timestamptz DEFAULT now()");
+  const legacy=fs.readFileSync(path.join(root,'apps/mobile/supabase/migrations/20261011203000_legacy_adult_access.sql'),'utf8');
+  await db.exec(legacy.slice(0,legacy.indexOf('CREATE OR REPLACE FUNCTION public.viewer_is_verified_adult'))+'COMMIT;');
+  await db.exec(migration);
+  await db.exec(fs.readFileSync(path.join(root,'apps/mobile/supabase/migrations/20261029041500_member_map_legacy_approval.sql'),'utf8'));
+  await fn(db);
  } finally {await db.close();}
 }
 async function call(db,expression,args=[]) {return (await db.query('SELECT '+expression+' AS value',args)).rows[0].value;}
@@ -146,4 +152,44 @@ test('moderation boolean is service-only without exposing the private payload sc
   await assert.rejects(()=>db.exec('SELECT * FROM payload.members'),/permission denied/);
   await db.exec('RESET ROLE');
  }
+}));
+
+test('approved legacy adults can opt in without invented ID evidence; approval alone never shares',()=>dbRun(async db=>{
+ await db.exec("DELETE FROM identity_verifications WHERE user_id IN ('viewer','near'); INSERT INTO legacy_adult_access(auth_id,profile_id,basis,approved_by,note) SELECT auth_id,id,'pre_july_membership','fixture','Synthetic approved cohort' FROM users WHERE auth_id IN ('viewer','near');");
+ await db.exec('SET ROLE service_role');
+ assert.equal(await call(db,"member_map_eligible('viewer')"),true);
+ assert.equal((await call(db,"member_map_get_settings('viewer')")).eventsMapEnabled,false);
+ await assert.rejects(()=>publish(db,'viewer'),/off or expired/);
+ await assert.rejects(()=>call(db,"member_map_update_settings('viewer',0,true,true,NULL)"),/consent/);
+ await enable(db,'viewer');await enable(db,'near');await publish(db,'viewer');await publish(db,'near');
+ assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members.map(x=>x.username),['near']);
+ assert.equal(await call(db,"exists(select 1 from identity_verifications where user_id='viewer')"),false);
+ await db.exec('RESET ROLE');
+ for(const change of [
+  "UPDATE legacy_adult_access SET revoked_at=now() WHERE auth_id='near'",
+  "UPDATE legacy_adult_access SET profile_id=(SELECT id FROM users WHERE auth_id='far') WHERE auth_id='near'",
+  "UPDATE users SET is_private=true WHERE auth_id='near'",
+  "UPDATE users SET banned_at=now() WHERE auth_id='near'",
+  `UPDATE "user" SET banned=true WHERE id='near'`,
+  "INSERT INTO user_settings VALUES('near','{\"privacy\":{\"privateAccount\":true}}')",
+  "INSERT INTO payload.members SELECT id::text,'suspended' FROM users WHERE auth_id='near'",
+  "UPDATE verified_admission_policy SET denylist=ARRAY['near']",
+  "INSERT INTO identity_verifications VALUES('near','passed',CURRENT_DATE-interval '17 years',NULL)",
+  "INSERT INTO identity_verifications VALUES('near','failed',NULL,NULL)",
+  "INSERT INTO identity_verifications VALUES('near','review',NULL,'duplicate_identity')"
+ ]) {
+  await db.exec('BEGIN;'+change);
+  await db.exec('SET LOCAL ROLE service_role');
+  assert.equal(await call(db,"member_map_eligible('near')"),false,change);
+  assert.deepEqual((await call(db,"member_map_nearby('viewer')")).members,[],change);
+  await assert.rejects(()=>publish(db,'near'),/off or expired/);
+  await db.exec('ROLLBACK');
+ }
+ await call(db,"member_map_revoke('viewer',true)");
+ assert.equal((await call(db,"member_map_get_settings('viewer')")).eventsMapEnabled,false);
+}));
+test('ordinary unapproved members cannot use legacy fallback',()=>dbRun(async db=>{
+ await db.exec("DELETE FROM identity_verifications WHERE user_id='viewer'");
+ assert.equal(await call(db,"member_map_eligible('viewer')"),false);
+ await assert.rejects(()=>enable(db,'viewer'),/consent/);
 }));
