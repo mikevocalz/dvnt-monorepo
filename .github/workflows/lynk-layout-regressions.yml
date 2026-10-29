@@ -8,6 +8,7 @@ on:
       - 'packages/app/components/media/DVNTLiquidGlass.tsx'
       - 'packages/ui/src/video/RoomTimer*'
       - 'scripts/test-lynk-layout-browser.cjs'
+      - 'scripts/test-lynk-chat-scroll.cjs'
       - 'scripts/test-lynk-native-stage-lifecycle.cjs'
       - 'scripts/test-lynk-guest-gallery-dom.cjs'
       - 'scripts/test-lynk-watermark-dom.cjs'
@@ -40,6 +41,7 @@ jobs:
         run: |
           node scripts/test-lynk-guest-gallery-dom.cjs
           node scripts/test-lynk-watermark-dom.cjs
+          node scripts/test-lynk-chat-scroll.cjs
       - name: Preserve native media tiles across roster and viewport changes
         env:
           LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-layout

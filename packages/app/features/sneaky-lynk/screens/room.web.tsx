@@ -503,7 +503,6 @@ function RoomInner({
    */
   const localUserId = admitted ? admission?.user.id : undefined;
   const isHostRef = useRef(isCreator);
-  const isCoHostRef = useRef(false);
   // Per-MOUNT join guard. Must be a local ref, NOT the global store's
   // `initStarted`: RoomInner is a child of SneakyLynkRoomScreen, and React runs
   // child effects before parent effects, so this effect would read a STALE
@@ -662,7 +661,6 @@ function RoomInner({
       setLocalUserId(joinedUser.id);
       setAdmission({ owner: accountKey, user: joinedUser });
       isHostRef.current = peer.role === "host";
-      isCoHostRef.current = peer.role === "co-host";
 
       setPhase("connecting");
       // Publishing the role is what starts the transport: `canPublish` flips,
@@ -1174,7 +1172,7 @@ function RoomInner({
     avatar: joinAnonymous ? undefined : authUser?.avatar || undefined,
     isLocal: true,
     isHost: isHostRef.current,
-    isCoHost: isCoHostRef.current,
+    isCoHost: localRole === "co-host",
     videoStream: lynk.localStream,
     isCameraOn,
     isMicOn,
@@ -1591,7 +1589,6 @@ function RoomInner({
         open={isParticipantsOpen}
         onClose={() => setParticipantsOpen(false)}
         members={members}
-        isHost={isHost}
         localUserId={localUserId}
         onPromote={promote}
         onDemote={demote}

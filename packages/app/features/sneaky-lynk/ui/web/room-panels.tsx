@@ -203,12 +203,27 @@ export function ChatPanel({
   const sendingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const pinnedToLatest = useRef(true);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const lastMessageId = comments.at(-1)?.id;
 
+  const jumpToLatest = useCallback(() => {
+    pinnedToLatest.current = true;
+    setHasNewMessages(false);
+    const list = scrollRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, []);
+
+  // Reopening chat starts at the latest message. Incoming messages only follow
+  // while already pinned; a busy room must not yank someone out of history.
   useEffect(() => {
-    if (open && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [open, comments.length]);
+    if (open) jumpToLatest();
+  }, [open, jumpToLatest]);
+  useEffect(() => {
+    if (!open) return;
+    if (pinnedToLatest.current) jumpToLatest();
+    else if (lastMessageId !== undefined) setHasNewMessages(true);
+  }, [open, comments.length, lastMessageId, jumpToLatest]);
 
   const submit = useCallback(
     async (e: React.FormEvent) => {
@@ -221,6 +236,7 @@ export function ChatPanel({
       if (!body || disabled || sendingRef.current) return;
       sendingRef.current = true;
       setSending(true);
+      jumpToLatest();
       try {
         if (await onSend(body)) {
           if (el.value.trim() === body) el.value = "";
@@ -230,7 +246,7 @@ export function ChatPanel({
         setSending(false);
       }
     },
-    [onSend, disabled],
+    [onSend, disabled, jumpToLatest],
   );
 
   return (
@@ -240,7 +256,16 @@ export function ChatPanel({
       title="Chat"
       icon={<MessageCircle size={18} color="#3FDCFF" />}
     >
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-4 py-3">
+      <div
+        ref={scrollRef}
+        data-room-chat-messages
+        onScroll={(event) => {
+          const list = event.currentTarget;
+          pinnedToLatest.current = list.scrollHeight - list.clientHeight - list.scrollTop < 40;
+          if (pinnedToLatest.current) setHasNewMessages(false);
+        }}
+        className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-4 py-3"
+      >
         {comments.length === 0 ? (
           <p className="mt-8 text-center text-sm text-white/40">
             {loading ? "Loading chat…" : "No messages yet. Say hi 👋"}
@@ -294,6 +319,11 @@ export function ChatPanel({
           })
         )}
       </div>
+      {hasNewMessages ? (
+        <button type="button" onClick={jumpToLatest} aria-label="Jump to latest messages" className="mx-4 min-h-11 shrink-0 rounded-lg bg-[#3FDCFF]/20 px-3 text-sm font-semibold text-[#3FDCFF] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">
+          New messages · Jump to latest
+        </button>
+      ) : null}
       {error ? <p role="alert" className="px-4 py-2 text-sm text-red-300">{error}</p> : null}
       <form
         onSubmit={submit}
@@ -440,7 +470,6 @@ export function ParticipantsPanel({
   open,
   onClose,
   members,
-  isHost,
   localUserId,
   onPromote,
   onDemote,
@@ -453,7 +482,6 @@ export function ParticipantsPanel({
   open: boolean;
   onClose: () => void;
   members: WebMember[];
-  isHost: boolean;
   localUserId: string | undefined;
   onPromote: (userId: string) => void;
   onDemote: (userId: string) => void;
@@ -465,6 +493,11 @@ export function ParticipantsPanel({
   speakingByUserId?: Record<string, boolean>;
 }) {
   const active = members.filter((m) => m.status === "active");
+  // Use the authoritative active roster, not the initial join role: promotion,
+  // demotion and removal must update controls without leaving the room.
+  const actorRole = active.find((m) => m.userId === localUserId)?.role;
+  const isHost = actorRole === "host";
+  const canModerate = isHost || actorRole === "co-host" || actorRole === "moderator";
   const onStage = active.filter((m) => m.role !== "listener");
   const listening = active.filter((m) => m.role === "listener");
 
@@ -491,7 +524,7 @@ export function ParticipantsPanel({
             {speaking ? <span className="text-[#3FDCFF]">speaking</span> : null}
           </span>
         </span>
-        {isHost && !isSelf && !isRoomHost ? (
+        {canModerate && !isSelf && !isRoomHost ? (
           <span className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
@@ -510,7 +543,7 @@ export function ParticipantsPanel({
             >
               <MicOff size={14} />
             </button>
-            {m.role === "co-host" ? (
+            {isHost && m.role === "co-host" ? (
               <button
                 type="button"
                 onClick={() => onDemote(m.userId)}
@@ -519,7 +552,8 @@ export function ParticipantsPanel({
               >
                 <UserMinus size={14} />
               </button>
-            ) : (
+            ) : null}
+            {isHost && m.role !== "co-host" ? (
               <button
                 type="button"
                 onClick={() => onPromote(m.userId)}
@@ -528,15 +562,17 @@ export function ParticipantsPanel({
               >
                 <Crown size={14} />
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => onKick(m.userId)}
-              aria-label={`Remove ${name} from the room`}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FC253A]/20 text-[#FC253A] hover:bg-[#FC253A]/30"
-            >
-              <UserX size={14} />
-            </button>
+            ) : null}
+            {!(actorRole === "moderator" && m.role === "moderator") ? (
+              <button
+                type="button"
+                onClick={() => onKick(m.userId)}
+                aria-label={`Remove ${name} from the room`}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FC253A]/20 text-[#FC253A] hover:bg-[#FC253A]/30"
+              >
+                <UserX size={14} />
+              </button>
+            ) : null}
           </span>
         ) : null}
       </div>
