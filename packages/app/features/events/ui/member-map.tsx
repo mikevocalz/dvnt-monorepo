@@ -130,8 +130,14 @@ function MapIcon({ id, source, label, color, height, register }: { id: string; s
       .catch(() => { if (current) setRoundedSource(null); });
     return () => { current = false; };
   }, [source, height]);
-  // Failed/late image work never restores a revoked pin or an old source.
-  const icon = useImage(roundedSource || placeholder, { maxWidth: 44, maxHeight: height });
+  const readySource = roundedSource || placeholder;
+  // Expo useImage requires a real source. Remounting also clears its retained
+  // old image reference before a newer bitmap is registered.
+  return readySource ? <LoadedMapIcon key={readySource} id={id} source={readySource} height={height} register={register} /> : null;
+}
+
+function LoadedMapIcon({ id, source, height, register }: { id: string; source: string; height: number; register: (id: string, icon: LoadedIcon | null) => void }) {
+  const icon = useImage(source, { maxWidth: 44, maxHeight: height });
   useEffect(() => {
     register(id, icon);
     return () => register(id, null);

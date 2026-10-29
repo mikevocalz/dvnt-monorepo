@@ -20,6 +20,7 @@ export const Skia={
  XYWHRect:(x,y,width,height)=>({x,y,width,height}),
  RRectXY:(rect,rx,ry)=>({rect,rx,ry}), Paint:()=>({dispose,color:null,setColor(color){this.color=color}}),
  Surface:{Make:(width,height)=>{
+  if(window.fixture.failRaster)return null;
   const element=document.createElement('canvas');element.width=width;element.height=height;
   const context=element.getContext('2d');
   return {dispose,flush:()=>{},getCanvas:()=>({

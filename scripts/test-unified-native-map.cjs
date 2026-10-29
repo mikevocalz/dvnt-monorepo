@@ -11,7 +11,7 @@ const mocks={
  '@shopify/react-native-skia':require('./fixtures/native-map-icon-boundary.cjs'),
  'react-native':`import React from 'react';export const Platform={OS:window.fixture.platform};const Box=({children,accessibilityLabel})=>React.createElement('div',{'aria-label':accessibilityLabel},children);export const View=Box,Text=Box,ScrollView=Box,ActivityIndicator=()=>null;export const Pressable=({children,onPress,accessibilityLabel,disabled})=>React.createElement('button',{onClick:onPress,'aria-label':accessibilityLabel,disabled},children);export const Image=()=>null;`,
  'expo-router':`export const useRouter=()=>({push:p=>window.fixture.route=p});`,
- 'expo-image':`const icons=new Map();export const useImage=s=>{if(!s)return null;if(!icons.has(s))icons.set(s,{source:s});return icons.get(s)};`,
+ 'expo-image':`const icons=new Map();export const useImage=s=>{if(typeof s!=='string'||!s)throw Error('Expo useImage requires a source');if(!icons.has(s))icons.set(s,{source:s});return icons.get(s)};`,
  'expo-maps':`import React from 'react';const Map=({markers,annotations=[],onMarkerClick,onAnnotationClick,cameraPosition,properties})=>{window.fixture.camera=cameraPosition;window.fixture.properties=properties;return React.createElement('div',{'data-map':true},...[...markers,...annotations].map(m=>React.createElement('button',{'data-marker':m.id,'data-image':m.icon?.source,'data-lat':m.coordinates.latitude,key:m.id,onClick:()=>m.icon&&window.fixture.platform==='ios'?onAnnotationClick(m):onMarkerClick(m)},m.title)))};export const AppleMaps={View:Map},GoogleMaps={View:Map};`,
  '@tanstack/react-query':`export const useQuery=()=>({data:window.fixture.rows,isError:window.fixture.eventError,refetch:()=>{window.fixture.retries++}});`,
  '@dvnt/app/lib/api/event-map':`export const eventMapApi={getLocations:async()=>[]};`,
@@ -63,6 +63,13 @@ const mocks={
   await page.locator('[data-marker="event:1"]').click();assert.equal(await page.evaluate(()=>window.fixture.eventRoute),'1');
   await page.locator('[data-marker="member:self"]').click();assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture');
   const loadedPhoto=await page.locator('[data-marker="member:self"]').getAttribute('data-image');
+  await page.evaluate(()=>{window.fixture.failRaster=true;window.fixture.data.self.avatarUrl='https://fixture.example/allocation-failure.png';window.renderFixture()});
+  await page.locator('[data-marker="member:self"]').waitFor({state:'detached'});
+  await page.getByRole('button',{name:"Open Fixture's profile",exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture','raster failure keeps list navigation without passing null to Expo image loader');
+  await page.evaluate(()=>{window.fixture.failRaster=false;window.fixture.data.self.avatarUrl='https://fixture.example/recovered.png';window.renderFixture()});
+  await page.waitForFunction(expected=>document.querySelector('[data-marker="member:self"]')?.getAttribute('data-image')===expected,loadedPhoto);
+
   await page.evaluate(()=>{window.fixture.data.self.avatarUrl='https://fixture.example/broken.png';window.renderFixture()});
   await page.waitForFunction(previous=>{const value=document.querySelector('[data-marker="member:self"]')?.getAttribute('data-image');return value?.startsWith('data:image/png;base64,')&&value!==previous},loadedPhoto);
   const failedPlaceholder=await page.locator('[data-marker="member:self"]').getAttribute('data-image');
