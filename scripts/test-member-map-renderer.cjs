@@ -110,13 +110,13 @@ async function bundle(key, native = false, expoKey = '') {
   assert.equal(await page.evaluate(()=>window.fixture.presenceActive),undefined,'missing provider never mounts collection hook');
   assert.equal(await page.getByRole('button',{name:'Synthetic sharing toggle'}).isDisabled(),true);
   await page.goto(`${url}/native`);await page.locator('[data-testid="native-map"]').waitFor();
-  await page.locator('[data-monogram="NO"]').waitFor();
+  await page.getByRole('button',{name:'Night Owl · approximate area',exact:true}).waitFor();
+  assert.equal(await page.locator('[data-monogram]').count(),0,'initials use a rounded bitmap too');
   await page.evaluate(()=>{window.fixture.initialCamera=window.fixture.camera});
   await page.waitForTimeout(1100);
   assert.equal(await page.evaluate(()=>window.fixture.initialCamera===window.fixture.camera),true,'expiry clock must not reset native camera');
   await page.evaluate(()=>{window.fixture.data.members[0].avatarUrl='https://fixture.example.test/avatar.png';window.renderFixture()});
-  await page.locator('[data-photo="true"]').waitFor();
-  await page.locator('[data-photo="true"]').click();
+  await page.getByRole('button',{name:'Night Owl · approximate area',exact:true}).click();
   assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/night%20owl');
   await page.getByRole('button',{name:'Synthetic sharing toggle'}).click();
   assert.equal(await page.locator('[data-testid="native-map"]').count(),1,'opt-out retains event map');

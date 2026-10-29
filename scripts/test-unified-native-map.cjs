@@ -25,6 +25,7 @@ const mocks={
   const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setContent('<div id="root"></div>');await page.evaluate(f=>window.fixture=f,{platform,events:[event],rows:[row],sharing:true,refreshes:0,retries:0,data:{members:[],self:member,center:{latitude:40.71,longitude:-74.01},expiresAt:'2099-01-01T00:00:00Z'}});await page.addScriptTag({content:result.outputFiles[0].text});
   await page.locator('[data-marker="event:1"][data-image]').waitFor();await page.locator('[data-marker="member:self"][data-image]').waitFor();
+  await page.waitForFunction(()=>window.fixture.iconDraws>=2);
   const clips=await page.evaluate(()=>window.fixture.iconClips);
   assert.ok(clips.some(c=>c.width===44&&c.height===44&&c.rx===4&&c.ry===4&&c.antialias),'avatar raster clips rounded-sm');
   assert.ok(clips.some(c=>c.width===44&&c.height===58&&c.rx===4&&c.ry===4&&c.antialias),'event raster clips rounded-sm');
@@ -61,8 +62,14 @@ const mocks={
 
   await page.locator('[data-marker="event:1"]').click();assert.equal(await page.evaluate(()=>window.fixture.eventRoute),'1');
   await page.locator('[data-marker="member:self"]').click();assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture');
+  const loadedPhoto=await page.locator('[data-marker="member:self"]').getAttribute('data-image');
   await page.evaluate(()=>{window.fixture.data.self.avatarUrl='https://fixture.example/broken.png';window.renderFixture()});
-  await page.waitForFunction(()=>!document.querySelector('[data-marker="member:self"]')?.getAttribute('data-image'));
+  await page.waitForFunction(previous=>{const value=document.querySelector('[data-marker="member:self"]')?.getAttribute('data-image');return value?.startsWith('data:image/png;base64,')&&value!==previous},loadedPhoto);
+  const failedPlaceholder=await page.locator('[data-marker="member:self"]').getAttribute('data-image');
+  await page.evaluate(()=>{window.fixture.data.self.avatarUrl=null;window.renderFixture()});
+  await page.waitForFunction(expected=>document.querySelector('[data-marker="member:self"]')?.getAttribute('data-image')===expected,failedPlaceholder);
+  const fallbackPixels=await page.evaluate(async uri=>{const image=new Image();image.src=uri;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);return {corner:ctx.getImageData(0,0,1,1).data[3],edge:ctx.getImageData(5,0,1,1).data[3]};},failedPlaceholder);
+  assert.equal(fallbackPixels.corner,0,'no-photo/failed-photo fallback stays rounded');assert.equal(fallbackPixels.edge,255,'fallback is small-radius, not a circle');
   await page.locator('[data-marker="member:self"]').click();assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture','failed image fallback keeps navigation');
   await page.evaluate(()=>{window.fixture.data.self.avatarUrl='https://fixture.example/slow.png';window.renderFixture()});
   await page.evaluate(()=>window.fixture.initialCamera=window.fixture.camera);await page.waitForTimeout(1100);assert.equal(await page.evaluate(()=>window.fixture.camera===window.fixture.initialCamera),true);

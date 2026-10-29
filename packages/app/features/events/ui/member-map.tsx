@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useImage } from "expo-image";
-import { MAP_MARKER_RADIUS, roundedNativeMapIcon } from "./native-map-icon";
+import { MAP_MARKER_RADIUS, roundedNativeMapIcon, roundedNativeMapPlaceholder } from "./native-map-icon";
 import { useQuery } from "@tanstack/react-query";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
 import { eventMapApi } from "@dvnt/app/lib/api/event-map";
@@ -77,9 +77,10 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   const annotations = visualPins.filter(pin => icons[pin.id]).map(pin => ({
     id: pin.id, coordinates: { latitude: pin.latitude, longitude: pin.longitude }, title: pin.title, icon: icons[pin.id],
   }));
-  const markers = visualPins.filter(pin => Platform.OS !== 'ios' || !icons[pin.id]).map(pin => ({
+  // Never flash provider-default round/pin shapes while rounded PNGs load.
+  const markers = visualPins.filter(pin => Platform.OS !== 'ios' && icons[pin.id]).map(pin => ({
     id: pin.id, coordinates: { latitude: pin.latitude, longitude: pin.longitude }, title: pin.title,
-    ...(Platform.OS === 'ios' ? { monogram: pin.monogram, tintColor: pin.tint } : { icon: icons[pin.id], anchor: { x: 0.5, y: 0.5 } }),
+    icon: icons[pin.id], anchor: { x: 0.5, y: 0.5 },
   }));
 
   return (
@@ -93,7 +94,7 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
       {NativeMap && sharing && !center && !nearby.isError ? <View style={{ gap: 8 }}>{presence.isUpdating || nearby.isPending ? <ActivityIndicator /> : null}<Text style={{ color: '#bbb' }}>A fresh location is needed to show nearby people.</Text></View> : null}
       {NativeMap ? (
         <>
-          {visualPins.filter(pin => pin.image).map(pin => <MapIcon key={`${pin.id}:${pin.image}`} id={pin.id} source={pin.image!} height={pin.id.startsWith("event:") ? 58 : 44} register={registerIcon} />)}
+          {visualPins.map(pin => <MapIcon key={`${pin.id}:${pin.image}:${pin.monogram}`} id={pin.id} source={pin.image || null} label={pin.monogram} color={pin.tint} height={pin.id.startsWith("event:") ? 58 : 44} register={registerIcon} />)}
           <View style={{ height: 340 }} accessibilityLabel="Event flyers and approximate member locations">
             <NativeMap
               style={{ flex: 1 }}
@@ -117,18 +118,20 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   );
 }
 
-function MapIcon({ id, source, height, register }: { id: string; source: string; height: number; register: (id: string, icon: LoadedIcon | null) => void }) {
+function MapIcon({ id, source, label, color, height, register }: { id: string; source: string | null; label: string; color: string; height: number; register: (id: string, icon: LoadedIcon | null) => void }) {
+  const placeholder = useMemo(() => roundedNativeMapPlaceholder(label, color, height), [label, color, height]);
   const [roundedSource, setRoundedSource] = useState<string | null>(null);
   useEffect(() => {
     let current = true;
     setRoundedSource(null);
+    if (!source) return () => { current = false; };
     void roundedNativeMapIcon(source, height, () => current)
       .then((result) => { if (current) setRoundedSource(result); })
       .catch(() => { if (current) setRoundedSource(null); });
     return () => { current = false; };
   }, [source, height]);
   // Failed/late image work never restores a revoked pin or an old source.
-  const icon = useImage(roundedSource, { maxWidth: 44, maxHeight: height });
+  const icon = useImage(roundedSource || placeholder, { maxWidth: 44, maxHeight: height });
   useEffect(() => {
     register(id, icon);
     return () => register(id, null);

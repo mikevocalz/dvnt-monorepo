@@ -9,12 +9,13 @@ function fixture(options={}) {
  const calls=[];
  const instance=name=>({dispose:()=>calls.push(['dispose',name])});
  const image={...instance('image'),width:()=>options.width??88,height:()=>options.height??88};
- const canvas={clear:color=>calls.push(['clear',color]),clipRRect:(rect,op,aa)=>calls.push(['clip',rect,op,aa]),drawImageRect:(_,src,dst)=>{calls.push(['draw',src,dst]);if(options.throwDraw)throw Error('draw failed')}};
- const skia={ClipOp:{Intersect:1},ImageFormat:{PNG:4},Skia:{
+ const canvas={drawPaint:paint=>calls.push(['background',paint.color]),drawText:(text,x,y)=>calls.push(['text',text,x,y]),clear:color=>calls.push(['clear',color]),clipRRect:(rect,op,aa)=>calls.push(['clip',rect,op,aa]),drawImageRect:(_,src,dst)=>{calls.push(['draw',src,dst]);if(options.throwDraw)throw Error('draw failed')}};
+ const skia={matchFont:()=>{if(options.throwFont)throw Error('font unavailable');return {...instance('font'),measureText:text=>({x:0,y:-10,width:text.length*8,height:14})}},ClipOp:{Intersect:1},ImageFormat:{PNG:4},Skia:{
+  FontMgr:{System:()=>instance('fontManager')},
   Data:{fromURI:async uri=>{calls.push(['load',uri]);if(options.throwLoad)throw Error('load failed');if(options.waitForLoad)await options.waitForLoad(uri);return instance('data')}},
   Image:{MakeImageFromEncoded:()=>options.invalidImage?null:image},
   Surface:{Make:(width,height)=>{calls.push(['surface',width,height]);return options.noSurface?null:{...instance('surface'),getCanvas:()=>canvas,flush:()=>calls.push(['flush']),makeImageSnapshot:()=>({...instance('snapshot'),encodeToBase64:fmt=>{calls.push(['encode',fmt]);return options.emptyEncoding?'':'png-bytes'}})}}},
-  Paint:()=>instance('paint'),Color:value=>value,XYWHRect:(x,y,width,height)=>({x,y,width,height}),RRectXY:(rect,rx,ry)=>({rect,rx,ry}),
+  Paint:()=>({...instance('paint'),setColor(color){this.color=color}}),Color:value=>value,XYWHRect:(x,y,width,height)=>({x,y,width,height}),RRectXY:(rect,rx,ry)=>({rect,rx,ry}),
  }};
  const exports={};const context={module:{exports},exports,require:name=>{assert.equal(name,'@shopify/react-native-skia');return skia}};vm.runInNewContext(code,context);
  return {calls,api:context.module.exports};
@@ -52,6 +53,16 @@ function fixture(options={}) {
  const recoveryOptions={throwLoad:true};const recovery=fixture(recoveryOptions);
  await assert.rejects(recovery.api.roundedNativeMapIcon('https://fixture.test/failure',44),/load failed/);recoveryOptions.throwLoad=false;
  assert.equal(await recovery.api.roundedNativeMapIcon('https://fixture.test/recovered',44),'data:image/png;base64,png-bytes','failed job does not poison queue');
+ for(const [label,color,height] of [['AB','#8A40CF',44],['E','#379ED8',58]]) {
+  const placeholder=fixture();assert.equal(placeholder.api.roundedNativeMapPlaceholder(label,color,height),'data:image/png;base64,png-bytes');
+  assert.equal(placeholder.calls.filter(c=>c[0]==='load').length,0,'placeholder never fetches media');
+  assert.equal(placeholder.calls.find(c=>c[0]==='clip')[1].rx,4);
+  assert.deepEqual(placeholder.calls.find(c=>c[0]==='background'),['background',color]);
+  assert.equal(placeholder.calls.find(c=>c[0]==='text')[1],label);
+  assert.deepEqual(placeholder.calls.filter(c=>c[0]==='dispose').map(c=>c[1]),['snapshot','font','fontManager','paint','surface']);
+ }
+ const fontFailure=fixture({throwFont:true});assert.equal(fontFailure.api.roundedNativeMapPlaceholder('AB','#8A40CF',44),'data:image/png;base64,png-bytes','font failure retains rounded background icon');assert.deepEqual(fontFailure.calls.filter(c=>c[0]==='dispose').map(c=>c[1]),['snapshot','fontManager','paint','surface']);
+ assert.equal(fixture({noSurface:true}).api.roundedNativeMapPlaceholder('AB','#8A40CF',44),null);
  const css=fs.readFileSync(path.join(__dirname,'../apps/mobile/global.css'),'utf8');assert.match(css,/--radius:\s*0\.5rem/);assert.match(css,/--radius-sm:\s*calc\(var\(--radius\) - 4px\)/);
  console.log('PASS native map icon: radius token parity, avatar/flyer cover crop, PNG encoding, decode/surface/load/draw failures deterministic disposal, sequential queue and cancellation');
 })().catch(error=>{console.error(error);process.exitCode=1});

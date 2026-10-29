@@ -1,4 +1,4 @@
-import { ClipOp, ImageFormat, Skia, type SkImage, type SkPaint, type SkSurface } from '@shopify/react-native-skia';
+import { ClipOp, ImageFormat, Skia, matchFont, type SkImage, type SkPaint, type SkSurface } from '@shopify/react-native-skia';
 
 /** Native equivalent of global.css rounded-sm: 0.5rem (8px) - 4px. */
 export const MAP_MARKER_RADIUS = 4;
@@ -49,5 +49,47 @@ async function renderIcon(source: string, height: number, isCurrent: () => boole
     surface?.dispose();
     image?.dispose();
     data.dispose();
+  }
+}
+
+/** No-photo and failed-photo markers keep the same rounded-sm silhouette. */
+export function roundedNativeMapPlaceholder(label: string, color: string, height: number): string | null {
+  const surface = Skia.Surface.Make(MAP_MARKER_WIDTH, height);
+  if (!surface) return null;
+  let paint: SkPaint | null = null;
+  let fontManager: ReturnType<typeof Skia.FontMgr.System> | null = null;
+  let font: ReturnType<typeof matchFont> | null = null;
+  let snapshot: SkImage | null = null;
+  try {
+    paint = Skia.Paint();
+    fontManager = Skia.FontMgr.System();
+    const canvas = surface.getCanvas();
+    canvas.clear(Skia.Color('transparent'));
+    const bounds = Skia.XYWHRect(0, 0, MAP_MARKER_WIDTH, height);
+    canvas.clipRRect(Skia.RRectXY(bounds, MAP_MARKER_RADIUS, MAP_MARKER_RADIUS), ClipOp.Intersect, true);
+    paint.setColor(Skia.Color(color));
+    canvas.drawPaint(paint);
+    try {
+      font = matchFont({ fontSize: 14, fontWeight: 'bold' }, fontManager);
+      const text = Array.from(label).slice(0, 2).join('');
+      const measured = font.measureText(text);
+      paint.setColor(Skia.Color('#ffffff'));
+      canvas.drawText(text, (MAP_MARKER_WIDTH - measured.width) / 2 - measured.x, (height - measured.height) / 2 - measured.y, paint, font);
+    } catch {
+      // Font failure still leaves a rounded, tappable icon with its map title.
+    }
+    surface.flush();
+    snapshot = surface.makeImageSnapshot();
+    const encoded = snapshot.encodeToBase64(ImageFormat.PNG);
+    return encoded ? `data:image/png;base64,${encoded}` : null;
+  } catch {
+    // Keep map/list navigation available even if the device cannot rasterize.
+    return null;
+  } finally {
+    snapshot?.dispose();
+    font?.dispose();
+    fontManager?.dispose();
+    paint?.dispose();
+    surface.dispose();
   }
 }
