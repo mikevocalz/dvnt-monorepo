@@ -242,6 +242,7 @@ const CommentBubble = memo(function CommentBubble({
         <View
           style={{
             flexDirection: "row",
+            flexWrap: "wrap",
             gap: 6,
             marginLeft: isReply ? 48 : 42,
             marginBottom: 8,
@@ -251,9 +252,12 @@ const CommentBubble = memo(function CommentBubble({
             borderRadius: 20,
             paddingHorizontal: 8,
             paddingVertical: 4,
-            alignSelf: "flex-start",
+            alignSelf: "stretch",
           }}
         >
+          <Text style={{ color: TEXT_SECONDARY, fontSize: 11, width: "100%" }}>
+            Only you can see these reactions. They aren’t saved.
+          </Text>
           {REACTION_EMOJIS.map((emoji) => (
             <Pressable
               key={emoji}
@@ -279,6 +283,9 @@ const CommentBubble = memo(function CommentBubble({
             flexWrap: "wrap",
           }}
         >
+          <Text style={{ color: TEXT_SECONDARY, fontSize: 11, width: "100%" }}>
+            Your reactions · only visible to you · not saved
+          </Text>
           {Object.entries(groupedReactions).map(([emoji, count]) => (
             <Pressable
               key={emoji}
@@ -445,6 +452,7 @@ export function ChatSheet({
   const [cursorPos, setCursorPos] = useState(0);
   const { comments, loading: isLoadingComments, error: chatError, send } = useRoomChat({ roomId, currentUser, enabled });
   const sendingRef = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [replyingTo, setReplyingTo] = useState<RoomComment | null>(null);
   const [commentReactions, setCommentReactions] = useState<Record<number, CommentReaction[]>>({});
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
@@ -625,12 +633,16 @@ export function ChatSheet({
 
     if (!enabled || sendingRef.current) return;
     sendingRef.current = true;
+    setIsSubmitting(true);
     try {
       if (await send(body, { parentId, rootId, depth, mentions })) {
         setInputText((text) => text.trim() === body ? "" : text);
         setReplyingTo(null);
       }
-    } finally { sendingRef.current = false; }
+    } finally {
+      sendingRef.current = false;
+      setIsSubmitting(false);
+    }
   }, [inputText, replyingTo, enabled, send, extractMentions]);
 
   const handleReact = useCallback(
@@ -695,7 +707,8 @@ export function ChatSheet({
           <CommentComposerFooter
             value={inputText}
             placeholder={replyingTo ? "Write a reply..." : "Add a comment..."}
-            isSubmitting={false}
+            isSubmitting={isSubmitting}
+            disabled={!enabled}
             replyTargetLabel={replyingTo ? getCommentAuthorLabel(replyingTo) : null}
             mentionSuggestions={mentionSuggestions}
             inputRef={inputRef}

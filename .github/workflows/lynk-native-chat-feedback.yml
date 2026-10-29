@@ -1,0 +1,28 @@
+name: Sneaky Lynk native chat feedback
+on:
+  pull_request:
+    paths:
+      - 'packages/app/features/sneaky-lynk/ui/ChatSheet.tsx'
+      - 'packages/app/features/comments/ui/comment-composer-footer.tsx'
+      - 'scripts/test-lynk-native-chat-feedback.cjs'
+      - '.github/workflows/lynk-native-chat-feedback.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-chat-feedback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated component test tools
+        run: npm install --prefix "$RUNNER_TEMP/lynk-chat" --no-save --no-package-lock esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 happy-dom@20.10.3
+      - name: Exercise actual native chat and composer
+        env:
+          LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-chat
+        run: node scripts/test-lynk-native-chat-feedback.cjs

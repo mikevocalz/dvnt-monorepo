@@ -13,6 +13,7 @@ interface CommentComposerFooterProps {
   value: string;
   placeholder: string;
   isSubmitting: boolean;
+  disabled?: boolean;
   replyTargetLabel?: string | null;
   mentionSuggestions?: MentionSuggestion[];
   inputRef?: RefObject<TextInput | null>;
@@ -27,6 +28,7 @@ export function CommentComposerFooter({
   value,
   placeholder,
   isSubmitting,
+  disabled = false,
   replyTargetLabel,
   mentionSuggestions = [],
   inputRef,
@@ -37,6 +39,7 @@ export function CommentComposerFooter({
   onSubmit,
 }: CommentComposerFooterProps) {
   const insets = useSafeAreaInsets();
+  const unavailable = disabled || isSubmitting;
 
   return (
     <View
@@ -123,13 +126,14 @@ export function CommentComposerFooter({
             onSelectionChange(event.nativeEvent.selection.end)
           }
           placeholder={placeholder}
+          accessibilityLabel="Message"
           placeholderTextColor="#7C8798"
           multiline
           returnKeyType="send"
-          onSubmitEditing={isSubmitting ? undefined : onSubmit}
+          onSubmitEditing={unavailable ? undefined : onSubmit}
           blurOnSubmit={false}
           enablesReturnKeyAutomatically
-          editable={!isSubmitting}
+          editable={!unavailable}
           style={{
             flex: 1,
             minHeight: 42,
@@ -145,7 +149,10 @@ export function CommentComposerFooter({
         />
         <Pressable
           onPress={onSubmit}
-          disabled={!value.trim() || isSubmitting}
+          accessibilityRole="button"
+          accessibilityLabel={isSubmitting ? "Sending message" : "Send message"}
+          accessibilityState={{ disabled: !value.trim() || unavailable, busy: isSubmitting }}
+          disabled={!value.trim() || unavailable}
           style={{
             width: 42,
             height: 42,
@@ -153,7 +160,7 @@ export function CommentComposerFooter({
             alignItems: "center",
             justifyContent: "center",
             backgroundColor:
-              value.trim() && !isSubmitting ? "#3EA4E5" : "rgba(24,24,27,0.95)",
+              value.trim() && !unavailable ? "#3EA4E5" : "rgba(24,24,27,0.95)",
           }}
         >
           {isSubmitting ? (
