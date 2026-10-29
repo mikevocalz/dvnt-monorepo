@@ -1289,6 +1289,10 @@ function ServerRoom({
       }
     : buildLocalUser(authUser);
   const isHost = videoRoom.localUser?.role === "host";
+  const moderationRole =
+    videoRoom.isEjected || videoRoom.room?.status === "ended"
+      ? null
+      : videoRoom.localUser?.role;
   const effectiveMuted = !videoRoom.isMicOn;
   const effectiveVideoOn = videoRoom.isCameraOn;
 
@@ -2305,7 +2309,7 @@ function ServerRoom({
         onCloseChat={handleCloseChat}
         onEjectDismiss={handleEjectDismiss}
         onParticipantPress={
-          isRoomModerator(videoRoom.localUser?.role)
+          isRoomModerator(moderationRole)
             ? handleParticipantPress
             : undefined
         }
@@ -2409,7 +2413,7 @@ function ServerRoom({
           visible={showParticipantsSheet}
           participants={allParticipants}
           localUserId={localUser.id}
-          actorRole={videoRoom.localUser?.role}
+          actorRole={moderationRole}
           onDismiss={() => setShowParticipantsSheet(false)}
           onMute={handleMutePeer}
           onUnmute={handleUnmutePeer}
@@ -2481,7 +2485,7 @@ function ServerRoom({
 
         {/* Moderation action sheet — role-scoped mute / co-host / remove */}
         <ParticipantActions
-          actorRole={videoRoom.localUser?.role}
+          actorRole={moderationRole}
           actorId={videoRoom.localUser?.id}
           visible={!!actionTarget}
           participant={(() => {

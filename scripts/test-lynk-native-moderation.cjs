@@ -285,12 +285,12 @@ const resolve = (n) => require.resolve(n, { paths: deps });
   );
   assert.match(
     screen,
-    /onParticipantPress=\{\s*isRoomModerator\(videoRoom\.localUser\?\.role\)/,
+    /onParticipantPress=\{\s*isRoomModerator\(moderationRole\)/,
     "production route passes capability-specific handler",
   );
   assert.match(
     screen,
-    /actorRole=\{videoRoom\.localUser\?\.role\}/,
+    /actorRole=\{moderationRole\}/,
     "production route supplies server role",
   );
   assert.match(
@@ -303,6 +303,12 @@ const resolve = (n) => require.resolve(n, { paths: deps });
     /onMuteAll=\{isHost \? handleToggleMuteAll : undefined\}/,
     "bulk control remains host-only",
   );
+  assert.match(screen, /videoRoom\.isEjected \|\| videoRoom\.room\?\.status === "ended"\s*\? null/, "terminal actors lose moderation UI");
+  participants = participants.map(p => p.isLocal ? {...p, role:undefined} : p);
+  selected = "guest-2";
+  await render();
+  assert.equal(dialog(), null, "missing local role removes action sheet");
+  assert.equal(button("Mute Person 2"), null, "missing local role removes roster actions");
   await React.act(async () => root.unmount());
   await window.happyDOM.close();
   console.log(
