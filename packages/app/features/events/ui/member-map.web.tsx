@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { APIProvider, Map, useApiLoadingStatus, APILoadingStatus, useMap } from "@vis.gl/react-google-maps";
 import { RoundedMapMarker } from "./rounded-map-marker.web";
 import { useRouter } from "solito/navigation";
+import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import { savedMapArea } from "./member-map-area";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dvnt/app/lib/hooks/use-member-map";
 import { mapAvatarUrl, mapMemberInitials, mapMemberProfilePath, visibleMapMembers, type MapMember } from "./member-map-render-policy";
@@ -27,6 +29,8 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
   const status = useApiLoadingStatus();
   const ready = status === APILoadingStatus.LOADED;
   const { sharing } = useLocationSettings();
+  const savedCity = useEventsLocationStore((state) => state.activeCity);
+  const savedArea = savedMapArea(savedCity);
   const presence = useMemberMapPresence(ready);
   const nearby = useNearbyMembers(ready);
   const [now, setNow] = useState(Date.now);
@@ -43,8 +47,8 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
   const center = sharing && !nearby.isError && leaseLive ? nearby.data?.center : null;
   const selectedEvent = eventPins.find(pin => pin.id === selectedEventId);
   const ownArea = presence.area || center;
-  const mapCenter = selectedEvent || ownArea || { latitude: 39.5, longitude: -98.35 };
-  const mapZoom = selectedEvent || ownArea ? 12 : 3;
+  const mapCenter = selectedEvent || ownArea || savedArea || { latitude: 39.5, longitude: -98.35 };
+  const mapZoom = selectedEvent || ownArea ? 12 : savedArea ? 8 : 3;
   const open = (member: MapMember) => router.push(mapMemberProfilePath(member.username));
   const failed = status === APILoadingStatus.FAILED || status === APILoadingStatus.AUTH_FAILURE;
 
@@ -58,7 +62,7 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
         <div role="alert"><p>Nearby people could not be refreshed. Locations have been hidden.</p><button className="min-h-11 px-4 rounded-xl bg-white/10" onClick={() => void nearby.refetch()}>Retry nearby people</button></div>
       ) : null}
       {ready && sharing && !center && !nearby.isError ? <p role="status">{presence.isUpdating || nearby.isPending ? 'Updating your approximate location…' : 'A fresh location is needed to show nearby people.'}</p> : null}
-      {ready && !ownArea ? <p role="status">Showing public event locations, not events near you. Your location has not been established on this map.</p> : null}
+      {ready && !ownArea ? <p role="status">{savedArea ? `Showing your saved area: ${savedArea.label}. This is not a current device location.` : 'Showing public event locations, not events near you. Your location has not been established on this map.'}</p> : null}
       {ready ? (
         <>
           <div className="h-[360px] sm:h-[440px] overflow-hidden rounded-xl" aria-label="Event flyers and approximate member locations">

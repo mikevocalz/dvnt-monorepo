@@ -120,23 +120,37 @@ export function useLocationSettings() {
 }
 
 function isForeground() { return Platform.OS === "web" ? (typeof document !== "undefined" && document.visibilityState === "visible") : AppState.currentState === "active"; }
-async function sampleLocation(allowed: () => boolean) {
+async function sampleLocation(allowed: () => boolean, requestPermission: boolean, previouslyGranted: boolean, onGranted: () => void, onDenied: () => void) {
   if (!allowed()) return null;
   if (Platform.OS === "web") {
     if (typeof navigator === "undefined" || !navigator.geolocation) throw new Error("Location isn't supported on this device.");
-    if (!navigator.permissions) return null;
-    const permission = await navigator.permissions.query({ name: "geolocation" });
-    if (permission.state !== "granted") return null;
+    // Permissions.query is advisory: Safari/WebViews may omit it or reject
+    // geolocation even when getCurrentPosition is supported. The browser still
+    // owns the permission decision. Never retry a prompt from the minute timer.
+    let permission: PermissionState | null = null;
+    try { permission = (await navigator.permissions?.query({ name: "geolocation" }))?.state ?? null; }
+    catch { /* Unsupported permission query is not a location denial. */ }
+    if (permission === "denied") return null;
+    if (permission === "prompt" && !requestPermission) return null;
+    if (permission === null && !requestPermission && !previouslyGranted) return null;
     if (!allowed()) return null;
     return new Promise<{ latitude: number; longitude: number; timestamp: number }>((resolve, reject) => navigator.geolocation.getCurrentPosition(
-      (position) => resolve({ ...position.coords, latitude: position.coords.latitude, longitude: position.coords.longitude, timestamp: position.timestamp }),
-      () => reject(new Error("Location access was denied or unavailable. Allow location in your browser or device settings; the map will retry automatically.")),
+      (position) => { onGranted(); resolve({ latitude: position.coords.latitude, longitude: position.coords.longitude, timestamp: position.timestamp }); },
+      (cause) => {
+        if (cause?.code === 1) onDenied();
+        else if (cause?.code === 2 || cause?.code === 3) onGranted();
+        reject(new Error(cause?.code === 1 ? "Location access was denied. Allow location in your browser or device settings to center the map automatically." : "Location is temporarily unavailable. The map will retry automatically."));
+      },
       { enableHighAccuracy: false, maximumAge: 0, timeout: 15_000 },
     ));
   }
   const Location = await import("expo-location");
-  const permission = await Location.getForegroundPermissionsAsync();
+  let permission = await Location.getForegroundPermissionsAsync();
+  if (permission.status === "undetermined" && requestPermission && allowed()) {
+    permission = await Location.requestForegroundPermissionsAsync();
+  }
   if (permission.status !== "granted") return null;
+  onGranted();
   if (!allowed()) return null;
   const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
   return { latitude: position.coords.latitude, longitude: position.coords.longitude, timestamp: position.timestamp };
@@ -158,6 +172,8 @@ export function useMemberMapPresence(active: boolean) {
   const activeRef = useRef(active);
   const inFlight = useRef<{ run: number; owner: string; generation: number } | null>(null);
   const queuedResume = useRef(false);
+  const permissionAttempted = useRef(false);
+  const locationSucceeded = useRef(false);
   const refreshRef = useRef<() => Promise<void>>(async () => {});
   activeRef.current = active;
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
@@ -168,6 +184,7 @@ export function useMemberMapPresence(active: boolean) {
     // Detach obsolete ownership/consent/map lifetimes. Their callbacks cannot
     // publish or clear a newer request's busy state (identity-checked finally).
     inFlight.current = null; queuedResume.current = false;
+    permissionAttempted.current = false; locationSucceeded.current = false;
     setUpdating(false); setLocalArea(null); setError(null);
     const onVisibility = () => {
       lifecycle.current += 1;
@@ -204,22 +221,36 @@ export function useMemberMapPresence(active: boolean) {
       if (!allowed()) return;
       useLocationAccessStore.getState().accept(owner, fresh);
       if (!allowed()) { setLocalArea(null); clearLocalLocation(); return; }
-      const point = await sampleLocation(allowed);
+      const requestPermission = !permissionAttempted.current;
+      permissionAttempted.current = true;
+      const point = await sampleLocation(allowed, requestPermission, locationSucceeded.current, () => {
+        // Permission sheets may background the app. Remember only the OS grant,
+        // never their obsolete coordinate, so foreground retry works on WebViews.
+        if (activeRef.current && currentOwner() === owner && useLocationAccessStore.getState().generation === request.generation && inFlight.current === request) locationSucceeded.current = true;
+      }, () => {
+        if (inFlight.current === request) locationSucceeded.current = false;
+      });
       if (!allowed()) return;
       if (!point) {
+        locationSucceeded.current = false;
         setLocalArea(null);
         setError("Location access is off or unavailable. Allow location in your browser or device settings to center the map automatically.");
         return;
       }
       if (!Number.isFinite(point.timestamp) || Date.now() - point.timestamp > 60_000 || point.timestamp > Date.now() + 5_000) throw new Error("Your location is stale. The map will try again automatically.");
+      locationSucceeded.current = true;
       const coarse = coarseMapPoint(point.latitude, point.longitude);
       setLocalArea({ ...coarse, owner, generation: request.generation, expiresAt: new Date(point.timestamp + 15 * 60_000).toISOString() });
-      await serialize(async () => {
+      try { await serialize(async () => {
         const state = useLocationAccessStore.getState();
         if (!allowed() || !mapGrantActive(state.settings, Date.now())) return;
         await memberMapApi.publish(owner, { ...coarse, revision: state.settings!.revision, observedAt: new Date(point.timestamp).toISOString() });
         if (allowed()) await client.invalidateQueries({ queryKey: memberMapKeys.nearby(owner) });
-      });
+      }); } catch (cause) {
+        // Local centering and public avatar publication are separate. A failed
+        // publish must not throw away a fresh permitted coarse location.
+        if (allowed()) setError(cause instanceof Error ? `Your area is centered, but avatar sharing could not update: ${cause.message}` : "Your area is centered, but avatar sharing could not update. It will retry automatically.");
+      }
     } catch (cause) {
       if (allowed()) {
         setLocalArea(null);

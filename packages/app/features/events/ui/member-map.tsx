@@ -7,6 +7,8 @@ import type { Event } from "@dvnt/app/lib/hooks/use-events";
 import { eventMapApi } from "@dvnt/app/lib/api/event-map";
 import { eventMapIds, eventMapPins, eventListAllowsMap, attachEventMapFlyers } from "@dvnt/app/lib/events/event-map";
 import { useRouter } from "expo-router";
+import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
+import { savedMapArea } from "./member-map-area";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dvnt/app/lib/hooks/use-member-map";
 import { mapAvatarUrl, mapMemberInitials, mapMemberProfilePath, visibleMapMembers, type MapMember } from "./member-map-render-policy";
@@ -33,6 +35,8 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   const eventPins = attachEventMapFlyers(eventMapPins(locations.isError ? [] : locations.data || [], ids), events);
   const openEvent = (id: string) => onOpenEvent ? onOpenEvent(id) : router.push(`/(protected)/events/${id}` as any);
   const { sharing } = useLocationSettings();
+  const savedCity = useEventsLocationStore((state) => state.activeCity);
+  const savedArea = savedMapArea(savedCity);
   const presence = useMemberMapPresence(Boolean(NativeMap));
   const nearby = useNearbyMembers(Boolean(NativeMap));
   const [now, setNow] = useState(Date.now);
@@ -53,12 +57,13 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   const members = sharing && !nearby.isError && leaseLive ? visibleMapMembers([...(nearby.data?.self ? [nearby.data.self] : []), ...(nearby.data?.members || [])], now) : [];
   const center = sharing && !nearby.isError && leaseLive ? nearby.data?.center : null;
   // A public event venue is not evidence of the viewer's location. Without a
-  // fresh consented coarse center, show an explicitly labelled broad overview.
+  // fresh permitted center, use the saved city only as a labeled viewport.
   const ownArea = presence.area || center;
+  const viewportArea = ownArea || savedArea;
   const cameraPosition = useMemo(() => ({
-    coordinates: { latitude: ownArea?.latitude ?? 39.5, longitude: ownArea?.longitude ?? -98.35 },
-    zoom: ownArea ? 12 : 3,
-  }), [ownArea?.latitude, ownArea?.longitude, presence.area?.expiresAt]);
+    coordinates: { latitude: viewportArea?.latitude ?? 39.5, longitude: viewportArea?.longitude ?? -98.35 },
+    zoom: ownArea ? 12 : savedArea ? 8 : 3,
+  }), [viewportArea?.latitude, viewportArea?.longitude, Boolean(ownArea), Boolean(savedArea), presence.area?.expiresAt]);
   const open = (member: MapMember) => router.push(mapMemberProfilePath(member.username, true) as any);
   const onMarker = (event: { id?: string }) => {
     if (event.id?.startsWith('event:')) {
@@ -86,7 +91,7 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
       <Text style={{ color: '#bbb', fontSize: 13 }}>Party flyers and member avatars share this map. Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</Text>
-      {!ownArea ? <Text accessibilityRole="text" style={{ color: '#bbb', fontSize: 13 }}>Showing a broad overview of public event locations, not your current location.</Text> : null}
+      {!ownArea ? <Text accessibilityRole="text" style={{ color: '#bbb', fontSize: 13 }}>{savedArea ? `Showing your saved area: ${savedArea.label}. This is not a current device location.` : 'Showing a broad overview of public event locations, not your current location.'}</Text> : null}
       <LocationControls allowSharing={Boolean(NativeMap)} />
       {!NativeMap ? <Text accessibilityRole="alert" style={{ color: '#ddd' }}>This map requires a build with native maps. No location is collected here. You can still turn sharing off.</Text> : null}
       {presence.error ? <Text accessibilityRole="alert" style={{ color: '#ffb4b4' }}>{presence.error}</Text> : null}

@@ -53,6 +53,8 @@ const rawLocation = e => ({
 });
 const fixtureData = { all, past, forYou, locations: [...all, ...past, ...forYou].filter(e => e.id !== '207').map(rawLocation) };
 const mocks = {
+  // Only persistence transport is synthetic; execute the real saved-city store.
+  '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage={getItem:()=>null,setItem:()=>{},removeItem:()=>{}};`,
   '@vis.gl/react-google-maps': require('./fixtures/member-map/google-overlay-boundary.cjs'),
   '@dvnt/app/lib/hooks/use-member-map': `export const useLocationSettings=()=>({sharing:false,enabled:false,settings:{locationEnabled:false,eventsMapEnabled:false},loading:false,busy:false,error:null,setOverall:()=>{throw Error('unexpected consent write')},setSharing:()=>{throw Error('unexpected sharing write')}});export const useMemberMapPresence=()=>({error:null,isUpdating:false,refresh:()=>{throw Error('unexpected GPS request')}});export const useNearbyMembers=()=>({data:undefined,isError:false,isPending:false,refetch:()=>{}});`,
   'solito/navigation': `export const usePathname=()=>window.mapFixture.path; export const useRouter=()=>({push:p=>window.mapFixture.navigate(p),replace:p=>window.mapFixture.navigate(p,true),back:()=>history.back()});`,
