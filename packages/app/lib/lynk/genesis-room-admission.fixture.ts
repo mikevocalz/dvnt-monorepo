@@ -200,6 +200,7 @@ function client(s: ReturnType<typeof server>, owner = "alice", broadcast = false
   };
   f.Watch = class { closed = false; constructor() { f.watches.push(this); } close() { this.closed = true; } };
   f.Player = class {
+    video = { source: { out: { config: new Signal(undefined) } }, out: { frame: new Signal(undefined) } };
     props: any; broadcast = new f.Watch(); closed = false;
     constructor(options: any) {
       assert.ok(options.canvas instanceof Signal); assert.ok(options.muted instanceof Signal); assert.ok(options.volume instanceof Signal);

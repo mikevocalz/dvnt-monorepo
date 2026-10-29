@@ -117,6 +117,7 @@ class Player {
   props: any;
   closed = false;
   broadcast = new WatchBroadcast();
+  video = { source: { out: { config: new Signal(undefined) } }, out: { frame: new Signal(undefined) } };
   constructor(props: any) {
     assert.ok(props.origin instanceof Signal);
     assert.ok(props.canvas instanceof Signal);
@@ -158,7 +159,8 @@ const nativePublisher = { state: "publishing", publish: (opts: any) => resources
 const nativeCamera = { position: "front", state: "active", lastError: null as string | null };
 const nativeMicrophone = { state: "active", lastError: null as string | null };
 (globalThis as any).__lynkMocks = { Signal, Computed, Connection, Player, Publication, Device, Capture, Encoder, tokenState, nativeSession, nativePublisher, nativeCamera, nativeMicrophone, resources };
-(globalThis as any).window = {};
+(globalThis as any).window = new EventTarget();
+(globalThis as any).document = Object.assign(new EventTarget(), { visibilityState: "visible" });
 const moduleUrl = (source: string) => `data:text/javascript,${encodeURIComponent(source)}`;
 const stubs: Record<string, string> = {
   "../observability": moduleUrl("export const enterRoomObservability = () => {}; export const exitRoomObservability = () => {};"),
@@ -207,16 +209,17 @@ test("web viewer reconstructs its connection during effect replay", () => {
   assert.equal(resources.connections.at(-1).closed, true);
 });
 
-test("late joining viewer discovers already-published paths and closes both decoder and subscription", () => {
+test("late joining viewer discovers already-published paths and closes both decoder and subscription", async () => {
   reset();
   resources.initialPaths.push("lynk/room/alice", "lynk/other/bob");
   const h = new Hooks();
   const view = h.render(() => useLynkViewer("room"));
-  assert.deepEqual(view.publishers, [{ path: "lynk/room/alice", peerId: "alice" }]);
+  assert.deepEqual(view.publishers, [{ path: "lynk/room/alice", peerId: "alice", videoAvailable: false }]);
   view.attachCanvas("lynk/room/alice", {});
   assert.equal(resources.players.length, 1);
   assert.equal(resources.watches.length, 1);
   view.attachCanvas("lynk/room/alice", null);
+  await Promise.resolve();
   assert.equal(resources.players[0].closed, true);
   assert.equal(resources.watches[0].closed, true);
   h.unmount();

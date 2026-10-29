@@ -26,6 +26,7 @@ on:
       - 'scripts/test-lynk-native-capture.cjs'
       - 'scripts/test-lynk-native-session.cjs'
       - 'scripts/test-lynk-web-capture-sdk.cjs'
+      - 'scripts/test-lynk-web-viewer-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   push:
@@ -52,6 +53,7 @@ on:
       - 'scripts/test-lynk-native-capture.cjs'
       - 'scripts/test-lynk-native-session.cjs'
       - 'scripts/test-lynk-web-capture-sdk.cjs'
+      - 'scripts/test-lynk-web-viewer-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   workflow_dispatch:
@@ -82,4 +84,5 @@ jobs:
           node scripts/test-lynk-native-capture.cjs
           node scripts/test-lynk-native-session.cjs
           node scripts/test-lynk-web-capture-sdk.cjs
+          node scripts/test-lynk-web-viewer-sdk.cjs
           node scripts/verify-lynk.mjs

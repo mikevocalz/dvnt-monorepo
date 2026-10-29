@@ -14,6 +14,8 @@ export interface LynkPublisher {
   path: string;
   /** Trailing segment — the peer id (maps to a room member). */
   peerId: string;
+  /** Web decoder has current usable video; discovery alone can be audio-only. */
+  videoAvailable?: boolean;
 }
 
 /** Common surface both platforms expose for the viewer. */

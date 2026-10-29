@@ -397,3 +397,122 @@ test('invalid sessions and database lookup failures cannot obtain publish author
   assert.equal((await creator.invoke()).error.detail.reason, 'standing_unavailable');
   assert.equal(creator.fixture.mints, 0);
 });
+
+test('provider issuance latency against an unchanged future deadline remints within the deadline', async () => {
+  for (const intent of ['publish', 'subscribe']) {
+    let clock = NOW;
+    let checks = 0;
+    const result = await mintBoundedMoqAccess({
+      intent, now: () => clock,
+      // Equivalent DB timestamp formats must compare as instants, not strings.
+      authorize: async () => ({ ok: true, access: scope({ endsAt: ++checks === 1
+        ? '2026-10-13T00:00:47Z' : '2026-10-12T20:00:47-04:00' }) }),
+      mint: async ({ ttl }) => {
+        clock += 2000;
+        const iat = clock / 1000;
+        return { token: fakeToken(iat, iat + ttl), connection_url: 'https://fixture.invalid' };
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(checks, 4, 'both attempts authorize before and after mint');
+    assert.equal(Date.parse(result.expiresAt), NOW + 46_000);
+    assert.ok(Date.parse(result.expiresAt) <= NOW + 47_000);
+  }
+});
+
+test('a deadline reached during issuance reports actual expiry, not a changed deadline', async () => {
+  let clock = NOW;
+  const result = await mintBoundedMoqAccess({
+    intent: 'subscribe', now: () => clock,
+    authorize: async () => ({ ok: true, access: scope({ endsAt: new Date(NOW + 2000).toISOString() }) }),
+    mint: async ({ ttl }) => {
+      clock += 3000;
+      return { token: fakeToken(clock / 1000, clock / 1000 + ttl), connection_url: 'https://fixture.invalid' };
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'conflict');
+  assert.equal(result.error.message, "This Lynk's session has ended");
+  assert.equal(result.error.detail.reason, 'session_expired');
+  assert.equal('token' in result, false);
+});
+
+test('actual edge response keeps delayed near-deadline issuance retryable and actual expiry terminal', async (t) => {
+  let clock = NOW;
+  t.mock.method(Date, 'now', () => clock);
+  for (const intent of ['publish', 'subscribe']) {
+    clock = NOW;
+    let mints = 0;
+    const delayed = edgeFixture({ event: { ok: true, linked: false, endsAt: new Date(NOW + 47_000).toISOString() }, mutate: () => { clock += ++mints === 1 ? 2000 : 5000; } });
+    const response = await delayed.invoke({ roomId, intent });
+    assert.equal(response.ok, false);
+    assert.equal(response.error.code, 'internal_error');
+    assert.equal(response.error.detail.reason, 'media_issuance_delayed');
+    assert.equal('data' in response, false);
+    assert.equal(delayed.fixture.mints, 2);
+    clock = NOW + 47_000;
+    const ended = await delayed.invoke({ roomId, intent });
+    assert.equal(ended.error.code, 'conflict');
+    assert.equal(ended.error.detail.reason, 'session_expired');
+    assert.equal(delayed.fixture.mints, 2, 'no mint after actual deadline');
+  }
+});
+
+test('adaptive remint repeats gates and rejects changed deadlines or revoked membership at either retry boundary', async () => {
+  for (const atCheck of [3, 4]) {
+    for (const change of ['shortened', 'ended', 'revoked', 'scope']) {
+      let clock = NOW;
+      let checks = 0;
+      let mints = 0;
+      const result = await mintBoundedMoqAccess({
+        intent: 'publish', now: () => clock,
+        authorize: async () => {
+          checks++;
+          if (checks >= atCheck && change === 'revoked') return moqAccessFailure('forbidden', 'fixture revoked');
+          const changed = checks >= atCheck;
+          return { ok: true, access: scope({ endsAt: new Date(NOW + (changed && change === 'shortened' ? 10_000 : changed && change === 'ended' ? 1000 : 47_000)).toISOString(), ...(changed && change === 'scope' ? { path: 'other-path' } : {}) }) };
+        },
+        mint: async ({ ttl }) => {
+          mints++; clock += 2000;
+          return { token: fakeToken(clock / 1000, clock / 1000 + ttl), connection_url: 'https://fixture.invalid' };
+        },
+      });
+      assert.equal(result.ok, false, `${atCheck}:${change}`);
+      assert.notEqual(result.error.code, 'internal_error', 'genuine admission changes remain terminal');
+      assert.equal('token' in result, false);
+      assert.equal(mints, atCheck === 3 ? 1 : 2);
+    }
+  }
+});
+
+test('too little remaining time for safe remint stays retryable without releasing or extending any token', async () => {
+  let clock = NOW;
+  let mints = 0;
+  const result = await mintBoundedMoqAccess({
+    intent: 'subscribe', now: () => clock,
+    authorize: async () => ({ ok: true, access: scope({ endsAt: new Date(NOW + 4000).toISOString() }) }),
+    mint: async ({ ttl }) => {
+      mints++; clock += 2000;
+      return { token: fakeToken(clock / 1000, clock / 1000 + ttl), connection_url: 'https://fixture.invalid' };
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'internal_error');
+  assert.equal(mints, 1);
+  assert.equal('token' in result, false);
+});
+
+test('actual edge late join recovers with a bounded second mint, including concurrent callers', async (t) => {
+  let clock = NOW;
+  t.mock.method(Date, 'now', () => clock);
+  const callers = ['publish', 'subscribe'].map((intent) => ({
+    intent,
+    edge: edgeFixture({ event: { ok: true, linked: false, endsAt: new Date(NOW + 47_000).toISOString() }, mutate: () => { clock += 1000; } }),
+  }));
+  const results = await Promise.all(callers.map(({ intent, edge }) => edge.invoke({ roomId, intent })));
+  for (let i = 0; i < results.length; i++) {
+    assert.equal(results[i].ok, true);
+    assert.ok(Date.parse(results[i].data.expiresAt) <= NOW + 47_000);
+    assert.equal(callers[i].edge.fixture.mints, 2);
+  }
+});

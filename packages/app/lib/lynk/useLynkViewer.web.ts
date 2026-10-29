@@ -42,8 +42,10 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
   const backends = useRef(new Map<string, {
     player: Watch.Player;
     canvas: Signal<HTMLCanvasElement | undefined>;
+    disposeVideo: () => void;
   }>());
 
+  const [videoAvailability, setVideoAvailability] = useState<Record<string, boolean>>({});
   const [muted, setMutedState] = useState(false);
   const [volume, setVolumeState] = useState(1);
   const [ended, setEnded] = useState(false);
@@ -75,6 +77,7 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
     setReload(connection);
     return () => {
       for (const entry of backends.current.values()) {
+        entry.disposeVideo();
         entry.player.close();
       }
       backends.current.clear();
@@ -112,16 +115,17 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
     for (const path of announcedKey ? announcedKey.split("\n") : []) {
       if (!path) continue;
       if (namespace && !path.startsWith(namespace + "/")) continue;
-      out.push({ path, peerId: path.slice(path.lastIndexOf("/") + 1) });
+      out.push({ path, peerId: path.slice(path.lastIndexOf("/") + 1), videoAvailable: videoAvailability[path] === true });
     }
     return out;
-  }, [announcedKey, namespace]);
+  }, [announcedKey, namespace, videoAvailability]);
 
   // Detach backends for publishers that dropped.
   useEffect(() => {
     const live = new Set(publishers.map((p) => p.path));
     for (const [path, entry] of backends.current) {
       if (!live.has(path)) {
+        entry.disposeVideo();
         entry.player.close();
         backends.current.delete(path);
       }
@@ -132,10 +136,16 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
     (path: string, canvas: HTMLCanvasElement | null) => {
       const existing = backends.current.get(path);
       if (!canvas) {
-        if (existing) {
+        // React ref callbacks may detach/reattach in the same commit. Do not
+        // restart the decoder/audio for that churn, but release a truly removed
+        // tile (e.g. a roster removal before relay discovery catches up).
+        existing?.canvas.set(undefined);
+        if (existing) queueMicrotask(() => {
+          if (backends.current.get(path) !== existing || existing.canvas.peek()) return;
+          existing.disposeVideo();
           existing.player.close();
           backends.current.delete(path);
-        }
+        });
         return;
       }
       if (existing) {
@@ -156,7 +166,35 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
         muted: mutedSignal.current,
         volume: volumeSignal.current,
       });
-      backends.current.set(path, { player, canvas: target });
+      // Discovery also announces audio-only publishers. Wait for a usable
+      // rendition and decoded frame; publisher capture suspension removes the
+      // rendition without disconnecting the peer's audio.
+      let unavailableFrame: VideoFrame | undefined;
+      const available = new Computed((effect) => {
+        const config = effect.get(player.video.source.out.config);
+        const frame = effect.get(player.video.out.frame);
+        if (!config || config.stalled) {
+          unavailableFrame = frame;
+          return false;
+        }
+        // The SDK can retain its last frame after a rendition disappears.
+        // Restoration is not usable until a NEW frame arrives for this epoch.
+        return !!frame && frame !== unavailableFrame;
+      });
+      const updateVideo = () => {
+        const value = available.peek() === true;
+        setVideoAvailability(current => current[path] === value ? current : { ...current, [path]: value });
+      };
+      const unsubscribe = available.subscribe(updateVideo);
+      updateVideo();
+      backends.current.set(path, { player, canvas: target, disposeVideo: () => {
+        unsubscribe();
+        available.close();
+        setVideoAvailability(current => {
+          if (!(path in current)) return current;
+          const next = { ...current }; delete next[path]; return next;
+        });
+      } });
     },
     [reload, ended],
   );
@@ -175,6 +213,7 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
   const leave = useCallback(() => {
     setEnded(true);
     for (const b of backends.current.values()) {
+      b.disposeVideo();
       b.player.close();
     }
     backends.current.clear();

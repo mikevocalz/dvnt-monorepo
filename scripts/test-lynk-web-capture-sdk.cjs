@@ -26,12 +26,12 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
   const React = require(resolve('react'));
   const { createRoot } = require(resolve('react-dom/client'));
   const { JSDOM } = require(resolve('jsdom'));
-  const { window } = new JSDOM('<!doctype html><div id="root"></div>', { url: 'https://example.invalid/' });
+  const { window } = new JSDOM('<!doctype html><div id="root"></div>', { url: 'https://example.invalid/', pretendToBeVisual: true });
   Object.assign(global, { window, document: window.document, HTMLElement: window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true });
   const f = global.__webCaptureSdk = {
     Signals, Publish, latest: null, sources: [], connections: [], publications: [], resources: [], tracks: [],
     calls: { audio: 0, video: 0 }, allowed: { audio: false, video: true }, viewerLeaves: 0,
-    deferAudio: false, resolveAudio: null,
+    deferAudio: false, resolveAudio: null, deferVideo: false, resolveVideo: null,
   };
   class Track extends EventTarget {
     constructor(kind) { super(); this.kind = kind; this.readyState = 'live'; this.id = `${kind}-${f.tracks.length}`; f.tracks.push(this); }
@@ -49,6 +49,7 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
   mediaDevices.enumerateDevices = async () => [{ kind: 'audioinput', deviceId: 'audio-fixture' }, { kind: 'videoinput', deviceId: 'video-fixture' }];
   mediaDevices.getUserMedia = async constraints => {
     const kind = constraints.audio ? 'audio' : 'video'; f.calls[kind]++;
+    if (kind === 'video' && f.deferVideo) return new Promise(resolve => { f.resolveVideo = resolve; });
     if (kind === 'audio' && f.deferAudio) return new Promise(resolve => { f.resolveAudio = resolve; });
     if (!f.allowed[kind]) { const error = new Error(`${kind === 'audio' ? 'Microphone' : 'Camera'} permission denied`); error.name = 'NotAllowedError'; throw error; }
     return new MediaStream([new Track(kind)]);
@@ -130,6 +131,68 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     await act(() => connection.error.set(undefined));
     assert.equal(f.latest.state, 'live');
 
+    // Real capture sources + production hook: distinguish user intent from
+    // track usability and browser lifecycle, without restarting publication.
+    const videoEncoder = () => f.resources.filter(r => r.props.config?.codec === 'avc1' && !r.closed).at(-1);
+    const publicationCount = f.publications.length;
+    const audioTrack = f.latest.localAudioStream.getAudioTracks()[0];
+    await act(() => window.dispatchEvent(new window.Event('blur')));
+    assert.equal(f.latest.cameraActive, true, 'ordinary blur is not background');
+    await act(() => { cameraTrack.muted = true; cameraTrack.dispatchEvent(new Event('mute')); });
+    assert.equal(f.latest.localStream, null); assert.equal(f.latest.cameraEnabled, true);
+    assert.equal(videoEncoder().props.enabled.peek(), false, 'muted capture removes remote video rendition');
+    await act(() => { cameraTrack.muted = false; cameraTrack.dispatchEvent(new Event('unmute')); });
+    assert.equal(f.latest.cameraActive, true);
+    const visibility = async state => act(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
+      document.dispatchEvent(new window.Event('visibilitychange'));
+    });
+    for (let i = 0; i < 3; i++) {
+      await visibility('hidden');
+      await settle(() => !latestSource('video').out.source.peek());
+      assert.equal(f.latest.cameraActive, false); assert.equal(f.latest.cameraEnabled, true);
+      assert.equal(videoEncoder().props.enabled.peek(), false);
+      assert.equal(audioTrack.readyState, 'live', 'background does not change microphone choice');
+      await visibility('visible'); await settle(() => f.latest.cameraActive);
+    }
+    assert.equal(f.publications.length, publicationCount, 'interruptions do not restart transport/encoder ownership');
+    await act(() => {
+      window.dispatchEvent(new window.Event('pagehide'));
+      window.dispatchEvent(new window.Event('pageshow'));
+    });
+    await settle(() => f.latest.cameraActive && latestSource('video').in.enabled.peek());
+    assert.equal(videoEncoder().props.enabled.peek(), true, 'same-batch page lifecycle restores encoder availability');
+    await act(() => window.dispatchEvent(new window.Event('pagehide')));
+    await settle(() => !f.latest.cameraActive);
+    await act(() => f.latest.setCameraEnabled(false));
+    const beforeOffResume = f.calls.video;
+    await act(() => window.dispatchEvent(new window.Event('pageshow')));
+    assert.equal(f.calls.video, beforeOffResume); assert.equal(f.latest.cameraActive, false);
+    await act(() => f.latest.setCameraEnabled(true)); await settle(() => f.latest.cameraActive);
+    await visibility('hidden'); await settle(() => !latestSource('video').out.source.peek());
+    f.allowed.video = false;
+    await visibility('visible'); await settle(() => !!f.latest.cameraError);
+    assert.equal(f.latest.cameraActive, false); assert.equal(f.latest.localStream, null);
+    assert.equal(videoEncoder().props.enabled.peek(), false, 'failed resume remains an avatar');
+    f.allowed.video = true; await act(() => f.latest.retryCapture()); await settle(() => f.latest.cameraActive);
+
+    // A suspended in-flight video capture must release the late track and not
+    // advertise camera readiness while a permission/browser request is pending.
+    await visibility('hidden'); await settle(() => !latestSource('video').out.source.peek());
+    f.deferVideo = true;
+    await visibility('visible'); await settle(() => !!f.resolveVideo);
+    assert.equal(f.latest.cameraActive, false);
+    await visibility('hidden');
+    const lateVideo = new Track('video');
+    await act(() => f.resolveVideo(new MediaStream([lateVideo])));
+    assert.equal(lateVideo.readyState, 'ended'); assert.equal(f.latest.cameraActive, false);
+    f.deferVideo = false;
+    await visibility('visible'); await settle(() => f.latest.cameraActive);
+    const endedTrack = f.latest.localStream.getVideoTracks()[0];
+    await act(() => { endedTrack.readyState = 'ended'; endedTrack.dispatchEvent(new Event('ended')); });
+    assert.equal(f.latest.cameraActive, false); assert.equal(videoEncoder().props.enabled.peek(), false);
+    await visibility('hidden'); await visibility('visible'); await settle(() => f.latest.cameraActive);
+
     // Refund/retry a newly denied mic, then race explicit Retry with host mute.
     await act(() => f.latest.setMicEnabled(false));
     await settle(() => !latestSource('audio').out.source.peek());
@@ -178,7 +241,7 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     assert.equal(f.calls.audio, callsAfterUnmount);
     assert.ok(f.sources.every(source => source.fixtureClosed));
     assert.ok(f.tracks.every(track => track.readyState === 'ended'));
-    console.log('PASS actual web SDK capture: private terminal-budget retry, microtask signals, failed-source-only replacement, healthy capture/viewer retention, duplicate retry, host mute/role/end races, auth fatal, publication cleanup and late getUserMedia release. Media/network boundaries mocked; no audible browser/hardware verification.');
+    console.log('PASS actual web SDK capture: background/pageshow, blur exclusion, mute/unmute/end, rapid interruptions, manual-off and failed resume, delayed video release, private terminal-budget retry, microtask signals, failed-source-only replacement, healthy capture/viewer retention, duplicate retry, host mute/role/end races, auth fatal, publication cleanup and late getUserMedia release. Media/network boundaries mocked; no audible browser/hardware verification.');
   } finally {
     if (!unmounted) await act(() => root.unmount());
     window.close(); delete global.__webCaptureSdk; delete global.MediaStream;

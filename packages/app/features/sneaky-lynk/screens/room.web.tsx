@@ -751,8 +751,8 @@ function RoomInner({
   }, [lynk.micEnabled, lynk.microphoneError, canPublish, setMicOn]);
 
   useEffect(() => {
-    setCameraOn(lynk.cameraEnabled && !lynk.cameraError && canPublish && roomHasVideo);
-  }, [lynk.cameraEnabled, lynk.cameraError, canPublish, roomHasVideo, setCameraOn]);
+    setCameraOn(lynk.cameraActive && !lynk.cameraError && canPublish && roomHasVideo);
+  }, [lynk.cameraActive, lynk.cameraError, canPublish, roomHasVideo, setCameraOn]);
 
   // An audio-only room must never open the camera. Set before the role lands,
   // so the capture gate in `useLynkBroadcast` never sees `cameraEnabled` true.
@@ -1152,14 +1152,10 @@ function RoomInner({
         // included — so it is attached for every publisher, camera or not.
         canvasPath: publisher?.path,
         attachCanvas: lynk.attachCanvas,
-        // ponytail: web MoQ discovery announces a PATH, not a track list, so a
-        // publisher's camera/mic state is not knowable here (the native tile
-        // reads `broadcast.videoTracks`, which the web viewer has no analog
-        // for). "On air" is the honest approximation, and the speaking ring —
-        // which IS real, broadcast per client — carries the live signal. If the
-        // muted badge starts lying too often, broadcast mic state on the same
-        // channel as `speaking`.
-        isCameraOn: !!publisher,
+        // Video readiness comes from the selected rendition and decoded frame,
+        // not path discovery (an audio-only publisher still has a path).
+        // Mic availability remains discovery-based; speaking is signaled.
+        isCameraOn: publisher?.videoAvailable === true,
         isMicOn: !!publisher,
         isSpeaking: !!speakingByUserId[member.userId],
         isPublisher: isPublisherRole(member.role),
