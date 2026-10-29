@@ -28,7 +28,7 @@ permissions:
   contents: read
 jobs:
   flyer-video:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Hosted Ubuntu mirrors can be slow; keep setup bounded without skipping encodes.
     timeout-minutes: 45
     steps:

@@ -28,6 +28,8 @@ export interface InvokeEdgeResult<T> {
   data?: T;
   error?: {
     message: string;
+    /** Explicit machine-readable server refusal, never inferred from transport failure. */
+    code?: string;
     /**
      * HTTP status, when the function actually answered. supabase-js collapses
      * every non-2xx into the same "Edge Function returned a non-2xx status

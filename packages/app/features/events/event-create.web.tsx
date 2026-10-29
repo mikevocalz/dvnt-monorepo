@@ -1,3 +1,4 @@
+import { shouldDiscardPreparedRoom } from "@dvnt/app/lib/events/event-publish-error";
 import { prepareEventLynkRoom } from "@dvnt/app/lib/events/prepare-event-lynk-room";
 import { webEventDetailRoute } from "@dvnt/app/lib/events/event-detail-route";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
@@ -336,6 +337,7 @@ export function CreateEventScreen() {
     if (publishLock.current || busy || createEvent.isPending || flyerPreparation.isBusy()) return;
     publishLock.current = true;
     const publishingAuthId = getAuthIdFromStore();
+    const publishingRequestId = useCreateEventStore.getState().getPublishRequestId();
     setBusy(true);
     try {
 
@@ -432,6 +434,7 @@ export function CreateEventScreen() {
       const lynkRoomId = s.attachLynkRoom
         ? await prepareEventLynkRoom({
             authId: publishingAuthId,
+            expectedRequestId: publishingRequestId,
             currentAuthId: getAuthIdFromStore,
             getState: useCreateEventStore.getState,
             save: (preparedLynkRoom) => useCreateEventStore.setState({ preparedLynkRoom }),
@@ -454,7 +457,7 @@ export function CreateEventScreen() {
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const created = await withTimeout(
-        createEvent.mutateAsync({ ...payload, clientRequestId: s.getPublishRequestId(), expectedAuthId: publishingAuthId } as any),
+        createEvent.mutateAsync({ ...payload, clientRequestId: publishingRequestId, expectedAuthId: publishingAuthId } as any),
         20000,
         "create-event-insert",
       );
@@ -680,6 +683,9 @@ export function CreateEventScreen() {
       }
       if (screenMounted.current) router.push(id ? webEventDetailRoute(id) : "/events");
     } catch (e) {
+      if (shouldDiscardPreparedRoom(e, { authId: publishingAuthId, requestId: publishingRequestId }, {
+        authId: getAuthIdFromStore(), preparedRoom: useCreateEventStore.getState().preparedLynkRoom,
+      })) useCreateEventStore.setState({ preparedLynkRoom: null });
       showToast(
         "error",
         "Couldn't publish",

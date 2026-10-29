@@ -5,6 +5,7 @@ on:
       - 'packages/app/**'
       - 'apps/mobile/supabase/functions/**'
       - 'scripts/test-event-lynk*'
+      - 'apps/mobile/supabase/migrations/*event_lynk*'
       - '.github/workflows/sneaky-event-quality.yml'
 permissions:
   contents: read
@@ -19,12 +20,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm install --prefix "$RUNNER_TEMP/lynk" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 jsdom@26.1.0 @tanstack/react-query@5.90.2
+      - run: npm install --prefix "$RUNNER_TEMP/lynk" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @electric-sql/pglite@0.3.7 jsdom@26.1.0 @tanstack/react-query@5.90.2
       - name: Creation, RSVP admission, lifecycle, privacy, free purchase and retry
         env:
           NODE_PATH: ${{ runner.temp }}/lynk/node_modules
         run: |
-          node --test packages/app/lib/events/prepare-event-lynk-room.test.ts packages/app/lib/events/event-access.test.ts packages/app/lib/events/event-lynk.test.ts apps/mobile/supabase/functions/event-lynk-room/index.test.cjs apps/mobile/supabase/functions/event-lynk-invite/index.test.cjs apps/mobile/supabase/functions/process-event-lynk-lifecycle/index.test.cjs
+          node --test apps/mobile/supabase/functions/create-event/index.test.cjs packages/app/lib/events/event-publish-error.test.ts packages/app/lib/events/prepare-event-lynk-room.test.ts packages/app/lib/events/event-access.test.ts packages/app/lib/events/event-lynk.test.ts apps/mobile/supabase/functions/event-lynk-room/index.test.cjs apps/mobile/supabase/functions/event-lynk-invite/index.test.cjs apps/mobile/supabase/functions/process-event-lynk-lifecycle/index.test.cjs
+          node scripts/test-event-lynk-expiry.cjs --pglite
           node scripts/test-event-lynk-entry-hooks.cjs
           node scripts/test-guest-event-purchase.cjs
   event-browser:
@@ -48,3 +50,19 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/lynk/node_modules
           LYNK_BROWSER: ${{ matrix.browser }}
         run: node scripts/test-event-lynk-entry-hooks.cjs --browser
+  event-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Execute migrations and expiry assertions in disposable PostgreSQL
+        run: |
+          set -euo pipefail
+          sudo systemctl start postgresql
+          sudo -u postgres createdb dvnt_sneaky_event_test
+          node scripts/test-event-lynk-expiry.cjs --sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_sneaky_event_test

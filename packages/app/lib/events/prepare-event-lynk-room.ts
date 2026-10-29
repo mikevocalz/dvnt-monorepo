@@ -16,6 +16,7 @@ async function waitForRoom(operation: Promise<string>, timeoutMs: number): Promi
 }
 export async function prepareEventLynkRoom(options: {
   authId: string | null | undefined;
+  expectedRequestId?: string;
   getState(): State;
   currentAuthId?(): string | null | undefined;
   timeoutMs?: number;
@@ -26,6 +27,9 @@ export async function prepareEventLynkRoom(options: {
   const authId = options.authId;
   const state = options.getState();
   const requestId = state.getPublishRequestId();
+  if (options.expectedRequestId && requestId !== options.expectedRequestId) {
+    throw new Error("Your event draft changed. Review the current draft before publishing.");
+  }
   const saved = state.preparedLynkRoom;
   if (saved?.authId === authId && saved.requestId === requestId) return saved.roomId;
   const key = `${authId}:${requestId}`;

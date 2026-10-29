@@ -43,3 +43,8 @@ test('timeout is recoverable and retry waits for the original request, not a dup
  resolve({ ok: true, data: { room: { id: 'slow-room' } } });
  assert.equal(await retry, 'slow-room'); assert.equal(creates, 1);
 });
+test('a draft switched during uploads cannot prepare a room for the wrong publish attempt', async () => {
+ const h = fixture();
+ await assert.rejects(prepareEventLynkRoom({ ...h.options, expectedRequestId: 'previous-draft' }), /draft changed/);
+ assert.equal(h.count(), 0);
+});

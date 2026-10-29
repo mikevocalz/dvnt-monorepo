@@ -1,3 +1,4 @@
+import { shouldDiscardPreparedRoom } from "@dvnt/app/lib/events/event-publish-error";
 import { prepareEventLynkRoom } from "@dvnt/app/lib/events/prepare-event-lynk-room";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
@@ -546,6 +547,7 @@ function CreateEventScreenContent() {
     }
 
     const publishingAuthId = getAuthIdFromStore();
+    const publishingRequestId = useCreateEventStore.getState().getPublishRequestId();
     setIsSubmitting(true);
     try {
       if (!title.trim()) {
@@ -769,6 +771,7 @@ function CreateEventScreenContent() {
       const lynkRoomId = attachLynkRoom
         ? await prepareEventLynkRoom({
             authId: publishingAuthId,
+            expectedRequestId: publishingRequestId,
             currentAuthId: getAuthIdFromStore,
             getState: useCreateEventStore.getState,
             save: (preparedLynkRoom) => useCreateEventStore.setState({ preparedLynkRoom }),
@@ -783,7 +786,7 @@ function CreateEventScreenContent() {
         : undefined;
 
       const eventData: Record<string, any> = {
-        clientRequestId: useCreateEventStore.getState().getPublishRequestId(),
+        clientRequestId: publishingRequestId,
         expectedAuthId: publishingAuthId,
         title: title.trim(),
         description: description.trim(),
@@ -1051,6 +1054,9 @@ function CreateEventScreenContent() {
       }
       if (screenMounted.current) router.back();
     } catch (error: any) {
+      if (shouldDiscardPreparedRoom(error, { authId: publishingAuthId, requestId: publishingRequestId }, {
+        authId: getAuthIdFromStore(), preparedRoom: useCreateEventStore.getState().preparedLynkRoom,
+      })) useCreateEventStore.setState({ preparedLynkRoom: null });
       setIsSubmitting(false);
       console.error("[CreateEvent] Unexpected error:", error);
       showToast(

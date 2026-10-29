@@ -18,6 +18,7 @@
  * is what net._http_response records for the cron run.
  */
 
+import { decideEventRoomAccess } from "../_shared/event-access.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -56,17 +57,10 @@ Deno.serve(async (req: Request) => {
   const s = createClient(SUPABASE_URL, SERVICE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { data: events, error } = await s
-    .from("events")
-    .select("id,lynk_room_id,start_date,end_date,status")
-    .not("lynk_room_id", "is", null)
-    .limit(500);
-  if (error) {
-    console.error("[process-event-lynk-lifecycle] event query failed:", error);
-    return json({ ok: false, error: error.message }, 500);
-  }
-
   let changed = 0;
+  let checked = 0;
+  let cursor = 0;
+  const PAGE_SIZE = 500;
   const failed: number[] = [];
   const fail = (id: number, step: string, detail: unknown) => {
     console.error(
@@ -76,38 +70,60 @@ Deno.serve(async (req: Request) => {
     if (!failed.includes(id)) failed.push(id);
   };
 
-  for (const e of events || []) {
-    const { data: synced, error: syncError } = await s.rpc(
-      "sync_event_lynk_lifecycle",
-      { p_event_id: e.id },
-    );
-    if (syncError) {
-      fail(e.id, "sync_event_lynk_lifecycle", syncError);
-      continue;
+  // Keyset pagination prevents the oldest linked events from permanently
+  // consuming the first 500 slots. Each query is bounded and advances by id,
+  // so deletion/relinking between pages cannot shift offsets and skip rows.
+  while (true) {
+    const { data: events, error } = await s.from("events")
+      .select("id,lynk_room_id,start_date,end_date,status")
+      .not("lynk_room_id", "is", null).gt("id", cursor)
+      .order("id", { ascending: true }).limit(PAGE_SIZE);
+    if (error) {
+      console.error("[process-event-lynk-lifecycle] event page failed:", error);
+      return json({ ok: false, error: error.message, checked, changed, failed }, 500);
     }
-    if (synced && (synced as { ok?: boolean }).ok === false) {
-      fail(e.id, "sync_event_lynk_lifecycle", synced);
-      continue;
-    }
+    if (!events?.length) break;
+    checked += events.length;
+    for (const e of events || []) {
+      const { data: synced, error: syncError } = await s.rpc(
+        "sync_event_lynk_lifecycle",
+        { p_event_id: e.id },
+      );
+      if (syncError) {
+        fail(e.id, "sync_event_lynk_lifecycle", syncError);
+        continue;
+      }
+      if (synced && (synced as { ok?: boolean }).ok === false) {
+        fail(e.id, "sync_event_lynk_lifecycle", synced);
+        continue;
+      }
 
-    const start = new Date(e.start_date).getTime();
-    const end = e.end_date
-      ? new Date(e.end_date).getTime()
-      : start + 6 * 60 * 60 * 1000;
-    const now = Date.now();
-    if (["cancelled", "deleted"].includes(e.status) || now >= end) {
-      const { data: r, error: endError } = await s
-        .from("video_rooms")
-        .update({ status: "ended", ended_at: new Date().toISOString() })
-        .eq("uuid", e.lynk_room_id)
-        .neq("status", "ended")
-        .select("id")
-        .maybeSingle();
-      if (endError) fail(e.id, "end room", endError);
-      else if (r) changed++;
+      const { data: room, error: roomError } = await s.from("video_rooms")
+        .select("status,created_at,ends_at").eq("uuid", e.lynk_room_id).maybeSingle();
+      if (roomError || !room) {
+        fail(e.id, "read room", roomError || "Room missing");
+        continue;
+      }
+      // The same shifted plan window guards wait, start, join and token refresh.
+      // Treat the host as admitted here: this sweep only closes, never starts.
+      const decision = decideEventRoomAccess(
+        { ...e, host_id: "" }, { organizer: true, ticket: false, invited: false },
+        room, Date.now(), true,
+      );
+      if (!decision.ok && decision.detail.reason === "event_schedule_missing") {
+        fail(e.id, "schedule", decision.message);
+        continue;
+      }
+      if (!decision.ok) {
+        const { data: didEnd, error: endError } = await s.rpc("expire_event_lynk_room", { p_event_id: e.id });
+        if (endError) fail(e.id, "expire room", endError);
+        else if (didEnd === true) changed++;
+      }
     }
+    cursor = events[events.length - 1].id;
+    if (events.length < PAGE_SIZE) break;
   }
 
-  const body = { ok: failed.length === 0, checked: (events || []).length, changed, failed };
+  const body = { ok: failed.length === 0, checked, changed, failed };
   return json(body, failed.length ? 500 : 200);
 });
