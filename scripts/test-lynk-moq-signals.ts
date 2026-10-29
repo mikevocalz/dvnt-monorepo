@@ -128,6 +128,7 @@ class Player {
   props: any;
   closed = false;
   broadcast = new WatchBroadcast();
+  video = { source: { out: { config: new Signal(undefined) } }, out: { frame: new Signal(undefined) } };
   constructor(props: any) {
     assert.ok(props.origin instanceof Signal);
     assert.ok(props.canvas instanceof Signal);
@@ -165,9 +166,10 @@ class Encoder {
   close() { this.closed = true; }
 }
 const tokenState = { publish: true };
-const savedGlobals = { window: (globalThis as any).window, MediaStream: (globalThis as any).MediaStream };
+const savedGlobals = { window: (globalThis as any).window, document: (globalThis as any).document, MediaStream: (globalThis as any).MediaStream };
 (globalThis as any).__lynkMocks = { Signal, Computed, Connection, Player, Publication, Device, Capture, Encoder, tokenState };
-(globalThis as any).window = {};
+(globalThis as any).window = new EventTarget();
+(globalThis as any).document = Object.assign(new EventTarget(), { visibilityState: "visible" });
 (globalThis as any).MediaStream = class { tracks: any[]; constructor(tracks: any[]) { this.tracks = tracks; } };
 const moduleUrl = (source: string) => `data:text/javascript,${encodeURIComponent(source)}`;
 const stubs: Record<string, string> = {
@@ -230,7 +232,8 @@ test("real signals: publication ownership survives replay and token loss", async
   t.after(() => h.unmount());
   h.render(() => useLynkBroadcast("room", true));
   await h.settle(); h.replay(); await h.settle();
-  const videoTrack = { kind: "video" }, audioTrack = { kind: "audio" };
+  const videoTrack = Object.assign(new EventTarget(), { kind: "video", readyState: "live", muted: false });
+  const audioTrack = Object.assign(new EventTarget(), { kind: "audio", readyState: "live", muted: false });
   resources.devices.at(-2).media.set({ video: videoTrack });
   resources.devices.at(-1).media.set({ audio: audioTrack });
   await h.settle();
