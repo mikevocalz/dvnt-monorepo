@@ -161,6 +161,7 @@ const nativeMicrophone = { state: "active", lastError: null as string | null };
 (globalThis as any).window = {};
 const moduleUrl = (source: string) => `data:text/javascript,${encodeURIComponent(source)}`;
 const stubs: Record<string, string> = {
+  "../observability": moduleUrl("export const enterRoomObservability = () => {}; export const exitRoomObservability = () => {};"),
   react: moduleUrl(["useState", "useRef", "useMemo", "useCallback", "useEffect", "useSyncExternalStore"].map((name) => `export const ${name} = (...args) => globalThis.__lynkHooks.${name}(...args);`).join("\n")),
   "@moq/signals": moduleUrl("export const Signal = globalThis.__lynkMocks.Signal; export const Computed = globalThis.__lynkMocks.Computed;"),
   "@moq/net": moduleUrl("export const Connection = globalThis.__lynkMocks.Connection; export const Path = { from: p => p }; export const Time = { Milli: { zero: 0 } };"),
@@ -171,7 +172,7 @@ const stubs: Record<string, string> = {
 };
 const hooks = registerHooks({ resolve(specifier: string, context: { parentURL?: string }, next: (...args: any[]) => any) {
   if (stubs[specifier]) return { url: stubs[specifier], shortCircuit: true };
-  if (specifier.startsWith(".") && context.parentURL?.includes("/lib/lynk/") && !specifier.endsWith(".ts")) {
+  if (specifier.startsWith(".") && (context.parentURL?.includes("/lib/lynk/") || context.parentURL?.includes("/features/sneaky-lynk/session/")) && !specifier.endsWith(".ts")) {
     return { url: new URL(`${specifier}.ts`, context.parentURL).href, shortCircuit: true };
   }
   return next(specifier, context);
@@ -180,6 +181,8 @@ const { useLynkViewer } = await import("./useLynkViewer.web.ts");
 const { useLynkBroadcast } = await import("./useLynkBroadcast.web.ts");
 const { useLynkBroadcast: useNativeBroadcast } = await import("./useLynkBroadcast.native.ts");
 const { useNativeMoqSession } = await import("./useNativeMoqSession.ts");
+const { useRoomSession } = await import("../../features/sneaky-lynk/session/useRoomSession.ts");
+const { deriveLynkState } = await import("./lynkState.ts");
 after(() => { hooks.deregister(); delete (globalThis as any).window; });
 function reset() {
   for (const value of Object.values(resources)) value.length = 0;
@@ -491,4 +494,23 @@ test("web explicit retry replaces only failed capture, coalesces clicks and resp
   assert.equal(resources.devices.at(-1), mutedReplacement, "end disables retry synchronously");
   assert.ok(resources.devices.every((device) => device.closed));
   h.unmount();
+});
+
+
+test("already-connected transport starts an active room session without an intermediate render", () => {
+  const h = new Hooks();
+  let status: any = "connected";
+  h.render(() => useRoomSession(status));
+  assert.equal(h.value.state, "connected", "fast admission cannot leave heartbeat inactive");
+  status = "disconnected"; h.render();
+  assert.equal(h.value.state, "reconnecting");
+  status = "connecting"; h.render();
+  assert.equal(h.value.state, "reconnecting", "transport retry remains recovery, not a new room");
+  status = "connected"; h.render();
+  assert.equal(h.value.state, "connected");
+  h.unmount();
+});
+
+test("explicit leave remains ended despite a late token/transport error", () => {
+  assert.equal(deriveLynkState({ hasToken: false, connection: "disconnected", hasMedia: false, ended: true, error: true }), "ended");
 });

@@ -46,8 +46,8 @@ export interface LynkStateInputs {
  * it is trivially unit-testable and identical across platforms.
  */
 export function deriveLynkState(i: LynkStateInputs): LynkState {
-  if (i.error) return "error";
   if (i.ended) return "ended";
+  if (i.error) return "error";
   if (!i.hasToken) return "requesting-token";
   if (i.connection === "connected") {
     return i.hasMedia ? "live" : "connecting";

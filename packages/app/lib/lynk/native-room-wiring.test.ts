@@ -30,16 +30,13 @@ test("native media cannot mint before this account and room receive admission", 
   assert.match(hook, /useLynkBroadcast\(admitted \? roomId : undefined, canPublish\)/);
 });
 
-test("late room-session refresh results cannot revive a departed room", () => {
-  const refresh = hook.slice(hook.indexOf("const scheduleTokenRefresh = useCallback("), hook.indexOf("const join = useCallback("));
-  assert.match(refresh, /const epoch = joinEpoch.current/);
-  assert.match(refresh, /const key = admissionKeyRef.current/);
-  const afterRequest = refresh.slice(refresh.indexOf("await videoApi.refreshToken("));
-  assert.match(afterRequest, /if \(epoch !== joinEpoch.current \|\| key !== admissionKeyRef.current\) return/);
+test("native MoQ room never schedules an unused legacy Fishjam token rotation", () => {
+  assert.doesNotMatch(hook, /videoApi\.refreshToken|scheduleTokenRefresh|currentJtiRef/);
+  assert.match(hook, /useLynkBroadcast\(admitted \? roomId : undefined, canPublish\)/);
   const leave = hook.slice(hook.indexOf("const leave = useCallback("), hook.indexOf("// ── Media toggles"));
   assert.match(leave, /\+\+joinEpoch.current/);
   assert.match(leave, /setAdmittedKey\(null\)/);
-  assert.match(leave, /mediaRef.current.end\(\)/);
+  assert.match(leave, /mediaRef\.current.end\(\)/);
 });
 
 test("authoritative room-end observation revokes native admission and media", () => {

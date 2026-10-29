@@ -41,6 +41,7 @@ test("server refusals are terminal and never retain a previously granted token",
   denied = true;
   await h.session.refresh();
   assert.equal(h.states.at(-1)?.token, null);
+  assert.equal(h.states.at(-1)?.error, "banned", "permanent refusal must not be hidden by the old valid grant");
   assert.equal(h.timers.size, 0);
 });
 
@@ -90,6 +91,7 @@ test("transient renewal keeps a valid token, but never an expired bearer", async
   offline = true;
   await h.session.refresh();
   assert.ok(h.states.at(-1)?.token);
+  assert.equal(h.states.at(-1)?.error, null, "proactive renewal failure must not replace an active room with an error screen");
   h.advance(3_600_001);
   await h.session.refresh();
   assert.equal(h.states.at(-1)?.token, null);
