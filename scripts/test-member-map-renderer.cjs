@@ -25,7 +25,7 @@ async function bundle(key, native = false, expoKey = '') {
     'expo-maps': `import React from 'react';const Map=({markers=[],annotations=[],onMarkerClick,onAnnotationClick,cameraPosition})=>{window.fixture.camera=cameraPosition;return React.createElement('div',{'data-testid':'native-map'},...markers.map(m=>React.createElement('button',{key:m.id,'data-monogram':m.monogram,onClick:()=>onMarkerClick(m)},m.title)),...annotations.map(m=>React.createElement('button',{key:m.id,'data-photo':!!m.icon,onClick:()=>onAnnotationClick(m)},m.title)))};export const AppleMaps={View:Map},GoogleMaps={View:Map};`,
   } : {};
   const boundaries = {...mocks, ...platformMocks};
-  return build({jsx:'automatic',tsconfigRaw:{},nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';import MemberMap from ${JSON.stringify(path.join(root,`packages/app/features/events/ui/member-map${native ? '' : '.web'}.tsx`))};const r=createRoot(document.getElementById('root'));window.renderFixture=()=>r.render(React.createElement(MemberMap,{eventPins:window.fixture.eventPins,onOpenEvent:id=>window.fixture.eventOpened=id}));window.renderFixture();`,resolveDir:root,loader:'tsx'},bundle:true,write:false,format:'iife',platform:'browser',define:{'process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY':JSON.stringify(key),'process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY':JSON.stringify(expoKey)},plugins:[{name:'synthetic-boundaries',setup(b){b.onResolve({filter:/.*/},args=>args.path==='@dvnt/app/lib/events/event-map'?{path:path.join(root,'packages/app/lib/events/event-map.ts')}:args.path==='@dvnt/ui/google-maps-public-config'?{path:path.join(root,'packages/ui/src/google-maps-public-config.ts')}:boundaries[args.path]?{path:args.path,namespace:'fixture'}:undefined);b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:boundaries[args.path],loader:'jsx',resolveDir:root}));}}]});
+  return build({jsx:'automatic',tsconfigRaw:{},nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';import MemberMap from ${JSON.stringify(path.join(root,`packages/app/features/events/ui/member-map${native ? '' : '.web'}.tsx`))};const r=createRoot(document.getElementById('root'));window.renderFixture=()=>r.render(React.createElement(MemberMap,{eventPins:window.fixture.eventPins,selectedEventId:window.fixture.selectedEventId,onSelectEvent:id=>{window.fixture.selectedEventId=id;window.renderFixture()},onOpenEvent:id=>window.fixture.eventOpened=id}));window.renderFixture();`,resolveDir:root,loader:'tsx'},bundle:true,write:false,format:'iife',platform:'browser',define:{'process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY':JSON.stringify(key),'process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY':JSON.stringify(expoKey)},plugins:[{name:'synthetic-boundaries',setup(b){b.onResolve({filter:/.*/},args=>args.path==='@dvnt/app/lib/events/event-map'?{path:path.join(root,'packages/app/lib/events/event-map.ts')}:args.path==='@dvnt/ui/google-maps-public-config'?{path:path.join(root,'packages/ui/src/google-maps-public-config.ts')}:boundaries[args.path]?{path:args.path,namespace:'fixture'}:undefined);b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:boundaries[args.path],loader:'jsx',resolveDir:root}));}}]});
 }
 (async()=>{
  const scripts={expo:(await bundle('  ',false,'  synthetic-expo-key  ')).outputFiles[0].text,configured:(await bundle('synthetic-not-a-real-key')).outputFiles[0].text,missing:(await bundle('')).outputFiles[0].text,native:(await bundle('',true)).outputFiles[0].text};
@@ -47,6 +47,12 @@ async function bundle(key, native = false, expoKey = '') {
   assert.equal(await page.locator('[data-testid="google-map"]').count(),1,'one map holds events and avatars');
   await page.getByRole('button',{name:'You — approximate area'}).waitFor();
   assert.equal(await page.evaluate(()=>window.fixture.zoom),12);
+  await page.evaluate(()=>{window.fixture.selectedEventId='event-1';window.renderFixture()});
+  await page.waitForFunction(()=>window.fixture.camera.lat===40.72);
+  await page.getByRole('button',{name:'Show my area',exact:true}).click();
+  await page.waitForFunction(()=>window.fixture.camera.lat===40.7);
+  await page.evaluate(()=>{window.fixture.selectedEventId='event-1';window.renderFixture()});
+  await page.waitForFunction(()=>window.fixture.camera.lat===40.72);
   await page.waitForFunction(()=>document.querySelector('[aria-label="Event: Synthetic Party"]')?.getAttribute('data-icon')==='https://fixture.example.test/flyer.png');
   await page.getByRole('button',{name:'Event: Synthetic Party'}).click();assert.equal(await page.evaluate(()=>window.fixture.eventOpened),'event-1');
   for(const width of [320,393,768,1280]) {
@@ -59,9 +65,14 @@ async function bundle(key, native = false, expoKey = '') {
   assert.equal(await page.evaluate(()=>window.fixture.route),'/profile/night%20owl');
   await page.getByRole('button',{name:'Update my location'}).click();
   assert.equal(await page.evaluate(()=>window.fixture.refreshes),1);
+  await page.waitForFunction(()=>window.fixture.camera.lat===40.7);
+  assert.equal(await page.evaluate(()=>window.fixture.selectedEventId),null,'refresh clears remote event focus');
   await page.getByRole('button',{name:'Synthetic sharing toggle'}).click();
   assert.equal(await page.locator('[data-testid="google-map"]').count(),1,'off keeps public event map');
   assert.equal(await page.getByRole('button',{name:'You — approximate area'}).count(),0,'off removes self');
+  await page.waitForFunction(()=>window.fixture.zoom===3);
+  assert.deepEqual(await page.evaluate(()=>window.fixture.camera),{lat:39.5,lng:-98.35},'no location uses broad overview, not arbitrary first event');
+  await page.getByText('Showing public event locations, not events near you.',{exact:false}).waitFor();
   assert.equal(await page.getByRole('button',{name:'Night Owl — approximate area'}).count(),0,'off removes peers');
   await page.getByRole('button',{name:'Event: Synthetic Party'}).waitFor();
   await page.evaluate(()=>{window.fixture.sharing=true;window.fixture.error=true;window.renderFixture()});

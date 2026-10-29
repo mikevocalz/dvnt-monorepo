@@ -10,7 +10,7 @@ import { mapAvatarUrl, mapMemberInitials, mapMemberProfilePath, visibleMapMember
 
 import type { EventMapPin } from "@dvnt/app/lib/events/event-map";
 
-type UnifiedMapProps = { eventPins?: EventMapPin[]; selectedEventId?: string | null; onSelectEvent?: (id: string) => void; onOpenEvent?: (id: string) => void };
+type UnifiedMapProps = { eventPins?: EventMapPin[]; selectedEventId?: string | null; onSelectEvent?: (id: string | null) => void; onOpenEvent?: (id: string) => void };
 export default function MemberMap(props: UnifiedMapProps = {}) {
   const key = getGoogleMapsPublicKey();
   if (!key) return (
@@ -29,6 +29,8 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
   const presence = useMemberMapPresence(ready);
   const nearby = useNearbyMembers(ready);
   const [now, setNow] = useState(Date.now);
+  const [focusRevision, setFocusRevision] = useState(0);
+  const focusMyArea = () => { onSelectEvent?.(null); setFocusRevision(value => value + 1); };
   const router = useRouter();
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -41,7 +43,8 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
     ? visibleMapMembers([...(nearby.data?.self ? [nearby.data.self] : []), ...(nearby.data?.members || [])], now) : [];
   const center = sharing && !nearby.isError && leaseLive ? nearby.data?.center : null;
   const selectedEvent = eventPins.find(pin => pin.id === selectedEventId);
-  const mapCenter = selectedEvent || center || eventPins[0] || { latitude: 39.5, longitude: -98.35 };
+  const mapCenter = selectedEvent || center || { latitude: 39.5, longitude: -98.35 };
+  const mapZoom = selectedEvent || center ? 12 : 3;
   const open = (member: MapMember) => router.push(mapMemberProfilePath(member.username));
   const failed = status === APILoadingStatus.FAILED || status === APILoadingStatus.AUTH_FAILURE;
 
@@ -50,17 +53,19 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
       <p className="text-sm text-white/65">Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</p>
       <LocationControls allowSharing={ready} />
       {!ready ? <p role={failed ? 'alert' : 'status'}>{failed ? 'Google Maps could not load. Sharing cannot be enabled here. You can still turn existing sharing off above.' : 'Loading nearby map…'}</p> : null}
-      {ready && sharing ? <button type="button" disabled={presence.isUpdating} className="min-h-11 rounded-xl bg-[#379ED8] text-black px-4 font-semibold disabled:opacity-50" onClick={() => void presence.refresh()}>Update my location</button> : null}
+      {ready && sharing ? <button type="button" disabled={presence.isUpdating} className="min-h-11 rounded-xl bg-[#379ED8] text-black px-4 font-semibold disabled:opacity-50" onClick={() => { focusMyArea(); void presence.refresh(); }}>Update my location</button> : null}
       {presence.error ? <p role="alert">{presence.error}</p> : null}
       {nearby.isError ? (
         <div role="alert"><p>Nearby people could not be refreshed. Locations have been hidden.</p><button className="min-h-11 px-4 rounded-xl bg-white/10" onClick={() => void nearby.refetch()}>Retry nearby people</button></div>
       ) : null}
       {ready && sharing && !center && !nearby.isError ? <p role="status">{presence.isUpdating || nearby.isPending ? 'Updating your approximate location…' : 'A fresh location is needed to show nearby people.'}</p> : null}
+      {ready && !center ? <p role="status">Showing public event locations, not events near you. Your location has not been established on this map.</p> : null}
+      {ready && center ? <button type="button" className="min-h-11 px-4 rounded-xl bg-white/10" onClick={focusMyArea}>Show my area</button> : null}
       {ready ? (
         <>
           <div className="h-[360px] sm:h-[440px] overflow-hidden rounded-xl" aria-label="Event flyers and approximate member locations">
-            <Map defaultCenter={{ lat: mapCenter.latitude, lng: mapCenter.longitude }} defaultZoom={center || eventPins.length ? 12 : 3} gestureHandling="cooperative" disableDefaultUI={false}>
-              <MapFocus latitude={mapCenter.latitude} longitude={mapCenter.longitude} zoom={center || eventPins.length ? 12 : 3} />
+            <Map defaultCenter={{ lat: mapCenter.latitude, lng: mapCenter.longitude }} defaultZoom={mapZoom} gestureHandling="cooperative" disableDefaultUI={false}>
+              <MapFocus latitude={mapCenter.latitude} longitude={mapCenter.longitude} zoom={mapZoom} revision={focusRevision} />
               {eventPins.map(pin => <EventFlyerMarker key={`event:${pin.id}`} pin={pin} onClick={() => { onSelectEvent?.(pin.id); onOpenEvent?.(pin.id); }} />)}
               {members.map((member) => <AvatarMarker key={`member:${member.id}`} member={member} self={member.id === nearby.data?.self?.id} onClick={() => open(member)} />)}
             </Map>
@@ -112,9 +117,9 @@ function AvatarMarker({ member, onClick, self = false }: { member: MapMember; on
 }
 
 /** Follow an explicit event selection or a newly published coarse area, not the expiry clock. */
-function MapFocus({ latitude, longitude, zoom }: { latitude: number; longitude: number; zoom: number }) {
+function MapFocus({ latitude, longitude, zoom, revision }: { latitude: number; longitude: number; zoom: number; revision: number }) {
   const map = useMap();
-  useEffect(() => { map?.panTo({ lat: latitude, lng: longitude }); map?.setZoom(zoom); }, [map, latitude, longitude, zoom]);
+  useEffect(() => { map?.panTo({ lat: latitude, lng: longitude }); map?.setZoom(zoom); }, [map, latitude, longitude, zoom, revision]);
   return null;
 }
 

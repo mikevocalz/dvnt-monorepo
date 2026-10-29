@@ -154,24 +154,46 @@ export function useMemberMapPresence(active: boolean) {
   const [isUpdating, setUpdating] = useState(false);
   const lifecycle = useRef(0);
   const activeRef = useRef(active);
+  const inFlight = useRef<{ run: number; prompt: boolean } | null>(null);
+  const queuedPrompt = useRef(false);
+  const queuedResume = useRef(false);
+  const publishRef = useRef<(prompt: boolean) => Promise<void>>(async () => {});
   activeRef.current = active;
   useEffect(() => {
     activeRef.current = active;
     lifecycle.current += 1;
-    const subscription = AppState.addEventListener("change", () => { lifecycle.current += 1; });
-    const onVisibility = () => { lifecycle.current += 1; };
+    const onVisibility = () => {
+      // Permission dialogs can suspend the app. Never reuse the old sample,
+      // but do resume an explicitly activated session with a fresh permission
+      // check and sample once foregrounded. This path never prompts.
+      lifecycle.current += 1;
+      queuedPrompt.current = false;
+      if (isForeground()) void publishRef.current(false);
+    };
+    const subscription = AppState.addEventListener("change", onVisibility);
     if (Platform.OS === "web" && typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      activeRef.current = false; lifecycle.current += 1; subscription.remove();
+      activeRef.current = false; lifecycle.current += 1;
+      queuedPrompt.current = false; queuedResume.current = false;
+      subscription.remove();
       if (Platform.OS === "web" && typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [active, owner]);
   const publish = useCallback(async (prompt: boolean) => {
     if (!active || !owner || !locationAllowedFor(owner) || !access.sharing || !isForeground()) return;
-    if (prompt) useLocationAccessStore.getState().activateAvatarSession(owner);
-    if (!useLocationAccessStore.getState().avatarSessionActive) return;
+    if (!prompt && !useLocationAccessStore.getState().avatarSessionActive) return;
+    if (inFlight.current) {
+      // Session activation also schedules an automatic refresh. Coalesce it
+      // rather than racing two permission/GPS requests and their UI state.
+      if (prompt && !inFlight.current.prompt) queuedPrompt.current = true;
+      else if (inFlight.current.run !== lifecycle.current) queuedResume.current = true;
+      return;
+    }
     const generation = useLocationAccessStore.getState().generation;
     const run = lifecycle.current;
+    const request = { run, prompt };
+    inFlight.current = request;
+    if (prompt) useLocationAccessStore.getState().activateAvatarSession(owner);
     setUpdating(true); setError(null);
     try {
       const allowed = () => activeRef.current && lifecycle.current === run && currentOwner() === owner && useLocationAccessStore.getState().generation === generation && locationAllowedFor(owner) && mapGrantActive(useLocationAccessStore.getState().settings, Date.now()) && isForeground();
@@ -181,7 +203,10 @@ export function useMemberMapPresence(active: boolean) {
       useLocationAccessStore.getState().accept(owner, fresh);
       if (!mapGrantActive(fresh, Date.now())) { clearLocalLocation(); return; }
       const point = await sampleLocation(prompt, allowed);
-      if (!point) { setError("Tap Update my location to allow location access and appear on the map."); return; }
+      if (!point) {
+        if (allowed()) setError("Tap Update my location to allow location access and appear on the map.");
+        return;
+      }
       if (Date.now() - point.timestamp > 60_000) throw new Error("Your location is stale. Please try again.");
       await serialize(async () => {
         const state = useLocationAccessStore.getState();
@@ -189,9 +214,24 @@ export function useMemberMapPresence(active: boolean) {
         await memberMapApi.publish(owner, { ...coarseMapPoint(point.latitude, point.longitude), revision: state.settings!.revision, observedAt: new Date(point.timestamp).toISOString() });
         if (currentOwner() === owner && useLocationAccessStore.getState().generation === generation) await client.invalidateQueries({ queryKey: memberMapKeys.nearby(owner) });
       });
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Location could not be updated."); }
-    finally { setUpdating(false); }
+    } catch (cause) {
+      if (activeRef.current && lifecycle.current === run && currentOwner() === owner && useLocationAccessStore.getState().generation === generation) {
+        setError(cause instanceof Error ? cause.message : "Location could not be updated.");
+      }
+    } finally {
+      if (inFlight.current === request) {
+        inFlight.current = null;
+        setUpdating(false);
+        const retryPrompt = queuedPrompt.current;
+        const retry = retryPrompt || queuedResume.current;
+        queuedPrompt.current = false; queuedResume.current = false;
+        if (retry && activeRef.current && currentOwner() === owner && useLocationAccessStore.getState().generation === generation && isForeground()) {
+          void publishRef.current(retryPrompt);
+        }
+      }
+    }
   }, [active, owner, access.sharing, client]);
+  publishRef.current = publish;
   useEffect(() => {
     if (!active || !access.sharing || !access.avatarSessionActive) return;
     void publish(false);
