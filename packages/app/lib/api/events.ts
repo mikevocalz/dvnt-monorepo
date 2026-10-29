@@ -1,3 +1,4 @@
+import { eventPublishError } from "@dvnt/app/lib/events/event-publish-error";
 import { canShowEventAttendees } from "../events/event-attendee-visibility";
 import { getSessionLifecycle } from "../auth/session-lifecycle";
 import { storedEventType, eventTypeUpdate } from "@dvnt/app/lib/events/event-type";
@@ -1001,9 +1002,9 @@ export const eventsApi = {
         expectedAuthId: eventData.expectedAuthId || getAuthIdFromStore(),
       });
 
-      if (result.error) throw new Error(result.error.message);
+      if (result.error) throw eventPublishError(result.error);
       if (!result.data?.ok || !result.data.data?.event) {
-        throw new Error(result.data?.error?.message || "Failed to create event");
+        throw eventPublishError(result.data?.error);
       }
 
       const data = result.data.data.event;

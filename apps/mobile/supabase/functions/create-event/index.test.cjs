@@ -4,17 +4,18 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-function harness({ standing = { state: 'allowed', reason: 'not_enrolled', message: null } } = {}) {
+function harness({ standing = { state: 'allowed', reason: 'not_enrolled', message: null }, rooms = [{uuid:'00000000-0000-4000-8000-000000000003',created_by:'deviant',is_public:false,status:'open',ends_at:null}], failRoomRead = false, failLinkRead = false, insertError = null } = {}) {
   let handler, nextId = 1;
   const rows = [];
-  const client = { from: () => {
+  const client = { from: (table) => {
     let payload, filters = {};
     const query = {
       select: () => query,
       eq: (key, value) => { filters[key] = value; return query; },
-      maybeSingle: async () => ({ data: rows.find(row => Object.entries(filters).every(([k, v]) => row[k] === v)) || null }),
+      maybeSingle: async () => ((table === 'video_rooms' && failRoomRead) || (table === 'events' && filters.lynk_room_id && failLinkRead)) ? {error:{message:'synthetic read failure'}} : ({ data: (table === 'video_rooms' ? rooms : rows).find(row => Object.entries(filters).every(([k, v]) => row[k] === v)) || null }),
       insert: value => { payload = value; return query; },
       single: async () => {
+        if (insertError) return {error:insertError};
         if (payload.client_request_id && rows.some(row => row.host_id === payload.host_id && row.client_request_id === payload.client_request_id)) return { error: { code: '23505' } };
         const data = { ...payload, id: nextId++ }; rows.push(data); return { data };
       },
@@ -36,7 +37,7 @@ function harness({ standing = { state: 'allowed', reason: 'not_enrolled', messag
     const response = await handler(new Request('http://test', { method: 'POST', headers: { 'x-test-actor': actor }, body: JSON.stringify(body) }));
     return response.json();
   };
-  return { rows, publish };
+  return { rows, rooms, publish };
 }
 const draft = { title: 'DC', date: '2026-10-01T20:00:00Z', location: 'DC', expectedAuthId: 'deviant', clientRequestId: 'event-attempt-123' };
 
@@ -156,4 +157,45 @@ test('protected event attendance defaults off; only a boolean organizer opt-in e
 test('ordinary creation cannot retain a latent attendance opt-in for future type changes',async()=>{
   const result=await harness().publish({...draft,event_type:'party',showAttendees:true});
   assert.equal(result.ok,true);assert.equal(result.data.event.show_attendees,false);
+});
+
+const preparedRoom = {uuid:'00000000-0000-4000-8000-000000000003',created_by:'deviant',is_public:false,status:'open',ends_at:'2099-01-01T00:00:00Z'};
+test('new event refuses missing, ended, expired, and malformed-deadline prepared rooms', async () => {
+  for(const rooms of [[],[{...preparedRoom,status:'ended'}],[{...preparedRoom,ends_at:'2000-01-01T00:00:00Z'}],[{...preparedRoom,ends_at:'invalid'}]]) {
+    const h=harness({rooms});const result=await h.publish({...draft,lynkRoomId:preparedRoom.uuid});
+    assert.equal(result.ok,false);assert.equal(result.error.code,'room_unavailable');assert.equal(h.rows.length,0);
+  }
+});
+test('new event refuses malformed, public, and cross-host room links without publishing', async () => {
+  for(const [room,id,code] of [[preparedRoom,'broken','validation_error'],[{...preparedRoom,is_public:true},preparedRoom.uuid,'validation_error'],[{...preparedRoom,created_by:'micah'},preparedRoom.uuid,'forbidden']]) {
+    const h=harness({rooms:[room]});const result=await h.publish({...draft,lynkRoomId:id});
+    assert.equal(result.error.code,code);assert.equal(h.rows.length,0);
+  }
+});
+test('prepared room read and event-link read failures fail closed', async () => {
+  for(const failure of [{failRoomRead:true},{failLinkRead:true}]) {
+    const h=harness({...failure,rooms:[preparedRoom]});const result=await h.publish({...draft,lynkRoomId:preparedRoom.uuid});
+    assert.equal(result.error.code,'internal_error');assert.equal(h.rows.length,0);
+  }
+});
+test('published event replay succeeds after room ends, but another draft cannot reuse the room', async () => {
+  const h=harness({rooms:[{...preparedRoom}]});const body={...draft,lynkRoomId:preparedRoom.uuid};
+  const first=await h.publish(body);assert.equal(first.ok,true);
+  const second=await h.publish({...body,clientRequestId:'different-draft-id'});
+  assert.equal(second.error.code,'room_already_linked');assert.equal(h.rows.length,1);
+  h.rooms[0].status='ended';const replay=await h.publish(body);
+  assert.equal(replay.ok,true);assert.equal(replay.data.replayed,true);assert.equal(replay.data.event.id,first.data.event.id);assert.equal(h.rows.length,1);
+});
+
+test('authoritative room expiry race clears safely only for the specific trigger refusal', async () => {
+  const message='This Sneaky Lynk room is no longer available. Prepare a new room before publishing.';
+  for(const [insertError,expected] of [
+    [{code:'23514',message},'room_unavailable'],
+    [{code:'23514',message:'Unrelated check constraint failed'},'internal_error'],
+    [{code:'08006',message},'internal_error'],
+  ]) {
+    const h=harness({rooms:[preparedRoom],insertError});
+    const result=await h.publish({...draft,lynkRoomId:preparedRoom.uuid});
+    assert.equal(result.ok,false);assert.equal(result.error.code,expected);assert.equal(h.rows.length,0);
+  }
 });

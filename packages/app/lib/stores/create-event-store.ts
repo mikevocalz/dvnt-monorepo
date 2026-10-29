@@ -131,6 +131,7 @@ interface TicketTier {
 // Fields that persist as a draft
 interface DraftFields {
   clientRequestId: string | null;
+  preparedLynkRoom: { requestId: string; authId: string; roomId: string } | null;
   /** Server-backed named draft identity; null means this is only the local autosave. */
   serverDraftId: string | null;
   serverDraftRevision: number | null;
@@ -333,6 +334,7 @@ type CreateEventState = DraftFields & UIFields & CreateEventActions;
 
 const DRAFT_DEFAULTS: DraftFields = {
   clientRequestId: null,
+  preparedLynkRoom: null,
   serverDraftId: null,
   serverDraftRevision: null,
   draftSourceEventId: null,
@@ -471,6 +473,7 @@ export const useCreateEventStore = create<CreateEventState>()(
           // A server draft is configuration, never a continuation of a live
           // publish idempotency operation from another device.
           clientRequestId: null,
+          preparedLynkRoom: null,
           serverDraftId: meta.id,
           serverDraftRevision: meta.revision,
         }),
@@ -641,6 +644,7 @@ export const useCreateEventStore = create<CreateEventState>()(
       },
       partialize: (state) => ({
         clientRequestId: state.clientRequestId,
+        preparedLynkRoom: state.preparedLynkRoom,
         serverDraftId: state.serverDraftId,
         serverDraftRevision: state.serverDraftRevision,
         draftSourceEventId: state.draftSourceEventId,

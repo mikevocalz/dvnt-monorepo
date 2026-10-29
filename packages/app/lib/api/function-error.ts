@@ -7,7 +7,7 @@
  */
 export async function describeFunctionError(
   error: any,
-): Promise<{ message: string; status?: number }> {
+): Promise<{ message: string; status?: number; code?: string }> {
   const res: Response | undefined = error?.context;
   const status = typeof res?.status === "number" ? res.status : undefined;
   if (res && typeof res.text === "function") {
@@ -17,6 +17,9 @@ export async function describeFunctionError(
         try {
           const parsed = JSON.parse(body);
           const detail = parsed?.error ?? parsed?.message;
+          if (detail && typeof detail === "object" && typeof detail.message === "string") {
+            return { message: detail.message, status, ...(typeof detail.code === "string" ? { code: detail.code } : {}) };
+          }
           if (typeof detail === "string" && detail) return { message: detail, status };
         } catch {
           // not JSON — fall through to the raw body

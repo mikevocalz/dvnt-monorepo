@@ -1,3 +1,5 @@
+import { shouldDiscardPreparedRoom } from "@dvnt/app/lib/events/event-publish-error";
+import { prepareEventLynkRoom } from "@dvnt/app/lib/events/prepare-event-lynk-room";
 import { webEventDetailRoute } from "@dvnt/app/lib/events/event-detail-route";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 /**
@@ -335,6 +337,7 @@ export function CreateEventScreen() {
     if (publishLock.current || busy || createEvent.isPending || flyerPreparation.isBusy()) return;
     publishLock.current = true;
     const publishingAuthId = getAuthIdFromStore();
+    const publishingRequestId = useCreateEventStore.getState().getPublishRequestId();
     setBusy(true);
     try {
 
@@ -427,44 +430,23 @@ export function CreateEventScreen() {
         }
       }
 
-      // Companion Sneaky Lynk room. Created BEFORE the event so its uuid can
-      // go in with the insert — one row, one truth, no second write that can
-      // half-fail. If the room cannot be created the event still publishes:
-      // an event without its room is a real event, an event that failed to
-      // publish because a room failed is not.
-      let lynkRoomId: string | undefined;
-      if (s.attachLynkRoom) {
-        try {
-          const room = await withTimeout(
-            sneakyLynkApi.createRoom({
-              title: s.title.trim() || "Event Lynk",
+      // A requested virtual room is required, not optional publish setup.
+      const lynkRoomId = s.attachLynkRoom
+        ? await prepareEventLynkRoom({
+            authId: publishingAuthId,
+            expectedRequestId: publishingRequestId,
+            currentAuthId: getAuthIdFromStore,
+            getState: useCreateEventStore.getState,
+            save: (preparedLynkRoom) => useCreateEventStore.setState({ preparedLynkRoom }),
+            create: () => sneakyLynkApi.createRoom({
+              title: (s.title.trim() || "Event Lynk").slice(0, 100),
               topic: s.eventType || "",
-              description: s.description.trim(),
+              description: s.description.trim().slice(0, 500),
               hasVideo: true,
-              // Private: the guest list is the event's, enforced at the door
-              // by the event, not by a public room anyone can walk into.
               isPublic: false,
             }),
-            20000,
-            "create-lynk-room",
-          );
-          if (room.ok && room.data?.room?.id) {
-            lynkRoomId = String(room.data.room.id);
-          } else {
-            showToast(
-              "warning",
-              "Lynk room not created",
-              "The event will publish without it. You can add one from Edit.",
-            );
-          }
-        } catch {
-          showToast(
-            "warning",
-            "Lynk room not created",
-            "The event will publish without it. You can add one from Edit.",
-          );
-        }
-      }
+          })
+        : undefined;
 
       const payload = buildEventInsert(s, {
         image,
@@ -475,7 +457,7 @@ export function CreateEventScreen() {
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const created = await withTimeout(
-        createEvent.mutateAsync({ ...payload, clientRequestId: s.getPublishRequestId(), expectedAuthId: publishingAuthId } as any),
+        createEvent.mutateAsync({ ...payload, clientRequestId: publishingRequestId, expectedAuthId: publishingAuthId } as any),
         20000,
         "create-event-insert",
       );
@@ -701,6 +683,9 @@ export function CreateEventScreen() {
       }
       if (screenMounted.current) router.push(id ? webEventDetailRoute(id) : "/events");
     } catch (e) {
+      if (shouldDiscardPreparedRoom(e, { authId: publishingAuthId, requestId: publishingRequestId }, {
+        authId: getAuthIdFromStore(), preparedRoom: useCreateEventStore.getState().preparedLynkRoom,
+      })) useCreateEventStore.setState({ preparedLynkRoom: null });
       showToast(
         "error",
         "Couldn't publish",
@@ -1110,8 +1095,9 @@ export function CreateEventScreen() {
                         consequence is a second object being created has to
                         name that consequence before the tap, not after. */}
                     <span className="mt-0.5 block text-xs text-white/55">
-                      Creates a private video room for this event. Guests join it
-                      from the event page — you can start it any time.
+                      Creates a private video room. Guests RSVP and wait until you start
+                      it from the event page. Leave ticket sales off for free entry.
+                      Your Sneaky Lynk hosting plan’s time and capacity limits still apply.
                     </span>
                   </span>
                 </label>

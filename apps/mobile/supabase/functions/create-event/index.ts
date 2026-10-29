@@ -259,14 +259,30 @@ Deno.serve(async (req) => {
     if (maxAttendees != null && maxAttendees > 0) {
       insertPayload.max_attendees = Math.floor(maxAttendees);
     }
-    // Sneaky Lynk room this event is hosted in. A uuid or nothing — never a
-    // half-written value, and never a reason to fail the event insert: the
-    // room is a companion to the event, not a precondition for it.
+    // A requested companion room is a publishing precondition, not optional
+    // decoration. Replay above stays harmless even if a published room ended.
     const lynkRoomId = text(body.lynkRoomId);
-    if (
-      lynkRoomId &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lynkRoomId)
-    ) {
+    if (body.lynkRoomId != null && body.lynkRoomId !== "") {
+      if (!lynkRoomId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lynkRoomId)) {
+        return errorResponse(req, "validation_error", "Invalid Sneaky Lynk room. Prepare the room again before publishing.", 400);
+      }
+      const { data: room, error: roomError } = await supabaseAdmin.from("video_rooms")
+        .select("uuid,created_by,is_public,status,ends_at").eq("uuid", lynkRoomId).maybeSingle();
+      if (roomError) return errorResponse(req, "internal_error", "Could not verify the Sneaky Lynk room. Retry publishing.", 500);
+      if (room && room.created_by !== authUserId) {
+        return errorResponse(req, "forbidden", "Only your own private Sneaky Lynk room can be attached to this event.", 403);
+      }
+      if (room && room.is_public !== false) {
+        return errorResponse(req, "validation_error", "Event Sneaky Lynk rooms must be private.", 400);
+      }
+      const deadline = room?.ends_at ? Date.parse(room.ends_at) : null;
+      if (!room || room.status !== "open" || (deadline !== null && (!Number.isFinite(deadline) || deadline <= Date.now()))) {
+        return errorResponse(req, "room_unavailable", "Your prepared Sneaky Lynk room expired or ended. Prepare a new room and retry. Your event has not been published.", 409);
+      }
+      const { data: linked, error: linkedError } = await supabaseAdmin.from("events")
+        .select("id").eq("lynk_room_id", lynkRoomId).maybeSingle();
+      if (linkedError) return errorResponse(req, "internal_error", "Could not verify the room's event link. Retry publishing.", 500);
+      if (linked) return errorResponse(req, "room_already_linked", "This Sneaky Lynk room already belongs to another event.", 409);
       insertPayload.lynk_room_id = lynkRoomId;
     }
 
@@ -373,6 +389,12 @@ Deno.serve(async (req) => {
       const existing = await supabaseAdmin.from("events").select("*")
         .eq("host_id", authUserId).eq("client_request_id", clientRequestId).maybeSingle();
       if (!existing.error && existing.data) return jsonResponse(req, { ok: true, data: { event: existing.data, replayed: true } });
+    }
+    // Cron can end the prepared room after preflight but before the insert.
+    // Only this exact authoritative trigger refusal is safe to discard/retry;
+    // unrelated constraints and uncertain insert errors must keep the cache.
+    if (error?.code === "23514" && error.message === "This Sneaky Lynk room is no longer available. Prepare a new room before publishing.") {
+      return errorResponse(req, "room_unavailable", error.message, 409);
     }
     if (error || !event) {
       console.error("[Edge:create-event] insert error:", error);

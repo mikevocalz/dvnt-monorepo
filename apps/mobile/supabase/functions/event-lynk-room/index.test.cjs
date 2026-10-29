@@ -17,6 +17,7 @@ function transpile(file) {
 function loadShared(name) {
   const exports = {};
   vm.runInNewContext(transpile(path.join(SHARED, name)), {
+    require: (name) => loadShared(path.basename(name)),
     exports, Date, Promise, Number, String, Error, Math, console: { log() {}, warn() {}, error() {} },
   });
   return exports;
@@ -51,6 +52,14 @@ function harness({ actor = 'host-auth', failTables = [], event = {}, room = {}, 
   const writes = [];
   const client = {
     rpc: async (name, args) => {
+      if (name === 'issue_rsvp_ticket') {
+        // SQL issuance is simulated; both HTTP handlers and shared access gates
+        // below are production code. The SQL owns $0 order + ticket atomicity.
+        const existing = tables.tickets.find((r) => r.event_id === args.p_event_id && r.user_id === args.p_user_auth_id && r.status === 'active');
+        if (!existing) tables.tickets.push({ event_id: args.p_event_id, user_id: args.p_user_auth_id, status: 'active', category: 'admission' });
+        writes.push({ table: 'tickets', kind: 'rpc', value: args });
+        return { data: { id: 'rsvp-ticket', already_existed: !!existing }, error: null };
+      }
       if (name !== 'sync_event_lynk_lifecycle') throw new Error(`unexpected rpc ${name}`);
       if (!tables.event_lynk_lifecycle.some((r) => r.event_id === args.p_event_id)) {
         tables.event_lynk_lifecycle.push({ event_id: args.p_event_id, state: 'scheduled' });
@@ -100,12 +109,14 @@ function harness({ actor = 'host-auth', failTables = [], event = {}, room = {}, 
     },
   };
   const shared = {
+    'sales-cutoff.ts': loadShared('sales-cutoff.ts'),
     'event-access.ts': loadShared('event-access.ts'),
     'event-lynk-host.ts': loadShared('event-lynk-host.ts'),
     'event-lynk-start.ts': loadShared('event-lynk-start.ts'),
   };
   let who = actor;
-  vm.runInNewContext(transpile(path.join(__dirname, 'index.ts')), {
+  const loadHandler = (file) => {
+  vm.runInNewContext(transpile(file), {
     exports: {}, console: { log() {}, warn() {}, error() {} }, Response, Date,
     Deno: { env: { get: () => 'test' }, serve: (fn) => { handler = fn; } },
     require: (name) => {
@@ -113,19 +124,25 @@ function harness({ actor = 'host-auth', failTables = [], event = {}, room = {}, 
       const base = path.basename(name);
       if (shared[base]) return shared[base];
       return {
+        checkRateLimit: () => ({ allowed: true }),
         verifySession: async () => who,
         corsHeaders: () => ({}),
         optionsResponse: () => new Response(null, { status: 204 }),
       };
     },
   });
-  const call = async (as, body) => {
+  return handler;
+  };
+  const lynkHandler = loadHandler(path.join(__dirname, 'index.ts'));
+  const rsvpHandler = loadHandler(path.join(__dirname, '../rsvp-issue-ticket/index.ts'));
+  const call = async (as, body, handler = lynkHandler) => {
     who = as;
     const res = await handler(new Request('http://test', { method: 'POST', body: JSON.stringify(body) }));
     return { status: res.status, body: await res.json() };
   };
   return {
     tables, writes,
+    rsvp: (as, extra = {}) => call(as, { eventId: 9, ...extra }, rsvpHandler),
     wait: (as) => call(as, { action: 'wait', room_id: 'room-uuid' }),
     list: (as = 'host-auth') => call(as, { action: 'list', event_id: 9 }),
     start: (as = 'host-auth') => call(as, { action: 'start', event_id: 9 }),
@@ -350,4 +367,136 @@ test('the migration marks events already in progress live and leaves future ones
   assert.match(backfill, /e\.status = 'active'/);
   assert.doesNotMatch(backfill, /NOT IN \('cancelled','deleted'\)/);
   assert.match(backfill, /ON CONFLICT \(event_id\) DO UPDATE/);
+});
+
+test('free public RSVP admission waits, then joins without a payment or room replacement', async () => {
+  const h = harness({ event: { ticketing_enabled: false, visibility: 'public' } });
+  assert.equal((await h.wait('ann-auth')).body.reason, undefined);
+  assert.equal((await h.wait('ann-auth')).body.admitted, false);
+  assert.equal((await h.start()).status, 200);
+  assert.equal((await h.wait('ann-auth')).body.admitted, true);
+  assert.equal(h.tables.video_rooms.length, 1);
+  assert.equal(h.tables.events[0].lynk_room_id, 'room-uuid');
+});
+
+test('past events refuse waiting guests even when no host ever started', async () => {
+  for (const end_date of [null, new Date(Date.now() - HOUR).toISOString()]) {
+    const h = harness({ event: { start_date: new Date(Date.now() - 8 * HOUR).toISOString(), end_date } });
+    const result = await h.wait('ann-auth');
+    assert.equal(result.status, 409);
+    assert.equal(result.body.reason, 'session_expired');
+    assert.equal(h.tables.event_lynk_waiting.length, 0);
+  }
+});
+
+test('wait refuses ended or missing rooms, including a stale live lifecycle', async () => {
+  for (const missing of [false, true]) {
+    const h = harness({ room: { status: 'ended' } });
+    h.tables.event_lynk_lifecycle.push({ event_id: 9, state: 'live' });
+    if (missing) h.tables.video_rooms.length = 0;
+    const result = await h.wait('ann-auth');
+    assert.equal(result.status, 409);
+    assert.equal(result.body.reason, 'room_ended');
+    assert.equal(h.tables.event_lynk_waiting.length, 0);
+  }
+});
+
+test('terminal lifecycle cannot be mistaken for waiting for a host', async () => {
+  for (const state of ['ended', 'cancelled']) {
+    const h = harness();
+    h.tables.event_lynk_lifecycle.push({ event_id: 9, state });
+    const result = await h.wait('ann-auth');
+    assert.equal(result.status, 409);
+    assert.equal(result.body.reason, 'room_ended');
+    assert.equal(h.tables.event_lynk_waiting.length, 0);
+  }
+});
+
+test('room metadata read failures fail closed without queueing or admission', async () => {
+  const h = harness({ failTables: ['video_rooms'] });
+  assert.equal((await h.wait('ann-auth')).status, 500);
+  assert.equal(h.tables.event_lynk_waiting.length, 0);
+});
+
+test('invalid schedules cannot be started by a host', async () => {
+  for (const start_date of [null, 'not-a-date']) {
+    const h = harness({ event: { start_date } });
+    const result = await h.start();
+    assert.equal(result.status, 409);
+    assert.equal(result.body.reason, 'event_schedule_missing');
+    assert.notEqual(h.state(), 'live');
+  }
+});
+
+
+test('host start and wait enforce the same expired hosting-plan window as join', async () => {
+  const start = Date.now() - HOUR;
+  const h = harness({
+    event: { start_date: new Date(start).toISOString() },
+    room: { created_at: new Date(start - HOUR).toISOString(), ends_at: new Date(start - HOUR + 300_000).toISOString() },
+  });
+  const started = await h.start();
+  assert.equal(started.status, 409);
+  assert.equal(started.body.reason, 'session_expired');
+  assert.equal((await h.wait('ann-auth')).body.reason, 'session_expired');
+  assert.notEqual(h.state(), 'live');
+});
+
+
+test('free RSVP HTTP issuance admits the authenticated account, never a supplied account', async () => {
+  const h = harness({ event: { ticketing_enabled: false, visibility: 'public' } });
+  assert.equal((await h.wait('new-auth')).status, 403);
+  const issued = await h.rsvp('new-auth', { userId: 'spoofed-auth' });
+  assert.equal(issued.body.ok, true);
+  assert.equal((await h.rsvp('new-auth')).body.data.already_existed, true);
+  assert.equal(h.tables.tickets.filter((t) => t.user_id === 'new-auth').length, 1);
+  assert.equal((await h.wait('new-auth')).body.admitted, false);
+  await h.start();
+  assert.equal((await h.wait('new-auth')).body.admitted, true);
+  assert.equal((await h.wait('spoofed-auth')).status, 403);
+});
+
+test('RSVP HTTP issuance cannot bypass paid-event, private invite or ended-event gates', async () => {
+  for (const event of [
+    { ticketing_enabled: true, visibility: 'public' },
+    { ticketing_enabled: false, visibility: 'private' },
+    { ticketing_enabled: false, visibility: 'public', end_date: new Date(Date.now() - HOUR).toISOString() },
+  ]) {
+    const h = harness({ event });
+    assert.equal((await h.rsvp('new-auth')).body.ok, false);
+    assert.equal(h.tables.tickets.some((t) => t.user_id === 'new-auth'), false);
+  }
+});
+
+
+test('host list normalizes terminal rooms/events without returning stale waiting identities', async () => {
+  for (const kind of ['room-ended', 'room-missing', 'event-ended', 'event-cancelled', 'plan-expired', 'lifecycle-ended']) {
+    const h = harness();
+    await h.wait('ann-auth');
+    h.tables.event_lynk_lifecycle.push({ event_id: 9, state: 'live' });
+    if (kind === 'room-ended') h.tables.video_rooms[0].status = 'ended';
+    if (kind === 'room-missing') h.tables.video_rooms.length = 0;
+    if (kind === 'event-ended') h.tables.events[0].end_date = new Date(Date.now() - HOUR).toISOString();
+    if (kind === 'event-cancelled') h.tables.events[0].status = 'cancelled';
+    if (kind === 'lifecycle-ended') h.tables.event_lynk_lifecycle[0].state = 'ended';
+    if (kind === 'plan-expired') {
+      h.tables.events[0].start_date = new Date(Date.now() - HOUR).toISOString();
+      Object.assign(h.tables.video_rooms[0], {
+        created_at: new Date(Date.now() - 2 * HOUR).toISOString(),
+        ends_at: new Date(Date.now() - 2 * HOUR + 300_000).toISOString(),
+      });
+    }
+    const writesBefore = h.writes.length;
+    const result = await h.list();
+    assert.equal(result.status, 200, kind);
+    assert.equal(result.body.state, kind === 'event-cancelled' ? 'cancelled' : 'ended', kind);
+    assert.equal(result.body.count, 0, kind);
+    assert.deepEqual(result.body.waiting, [], kind);
+    assert.equal(h.writes.length, writesBefore, 'effective state must not mutate lifecycle');
+  }
+});
+
+test('host list fails closed if room metadata cannot be verified', async () => {
+  const h = harness({ failTables: ['video_rooms'] });
+  assert.equal((await h.list()).status, 500);
 });

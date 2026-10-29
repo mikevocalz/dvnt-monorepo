@@ -11,6 +11,8 @@
  * already succeeded, into a log line.
  */
 
+import { decideEventRoomAccess } from "./event-access.ts";
+
 export interface EventLynkStartEvent {
   id: number;
   status?: string | null;
@@ -21,7 +23,7 @@ export interface EventLynkStartEvent {
 
 export type EventLynkStartResult =
   | { ok: true; started: boolean; admitted: number }
-  | { ok: false; reason: "event_unavailable" | "event_ended" | "room_ended"; message: string; state?: string };
+  | { ok: false; reason: "event_unavailable" | "event_ended" | "room_ended" | "event_schedule_missing" | "session_expired"; message: string; state?: string };
 
 const ASSUMED_EVENT_LENGTH_MS = 6 * 60 * 60 * 1000;
 
@@ -38,14 +40,24 @@ export async function startEventLynk(
 ): Promise<EventLynkStartResult> {
   if (["cancelled", "deleted"].includes(String(event.status)))
     return { ok: false, reason: "event_unavailable", message: "This event was cancelled" };
+  if (!Number.isFinite(Date.parse(event.start_date ?? "")))
+    return { ok: false, reason: "event_schedule_missing", message: "The event schedule is not ready" };
   if (Date.now() >= eventLynkEnd(event))
     return { ok: false, reason: "event_ended", message: "This event has ended" };
 
-  const { data: room, error: roomError } = await db.from("video_rooms").select("status")
+  const { data: room, error: roomError } = await db.from("video_rooms").select("status,created_at,ends_at")
     .eq("uuid", event.lynk_room_id).maybeSingle();
   if (roomError) throw new Error("Could not read the Lynk room");
   if (!room || room.status !== "open")
     return { ok: false, reason: "room_ended", message: "This Lynk has ended" };
+
+  // Use the same host-plan window as wait/join/token refresh. Starting a room
+  // must not report success when its token rails will immediately reject it.
+  const access = decideEventRoomAccess(
+    { ...event, host_id: actor }, { organizer: true, ticket: false, invited: false }, room,
+  );
+  if (!access.ok)
+    return { ok: false, reason: "session_expired", message: access.message };
 
   const { data: synced, error: syncError } = await db.rpc("sync_event_lynk_lifecycle", { p_event_id: event.id });
   if (syncError || (synced && synced.ok === false)) throw new Error("Could not sync the Lynk lifecycle");
