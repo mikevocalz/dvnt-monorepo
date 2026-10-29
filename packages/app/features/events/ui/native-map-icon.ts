@@ -54,15 +54,15 @@ async function renderIcon(source: string, height: number, isCurrent: () => boole
 
 /** No-photo and failed-photo markers keep the same rounded-sm silhouette. */
 export function roundedNativeMapPlaceholder(label: string, color: string, height: number): string | null {
-  const surface = Skia.Surface.Make(MAP_MARKER_WIDTH, height);
-  if (!surface) return null;
+  let surface: SkSurface | null = null;
   let paint: SkPaint | null = null;
   let fontManager: ReturnType<typeof Skia.FontMgr.System> | null = null;
   let font: ReturnType<typeof matchFont> | null = null;
   let snapshot: SkImage | null = null;
   try {
+    surface = Skia.Surface.Make(MAP_MARKER_WIDTH, height);
+    if (!surface) return null;
     paint = Skia.Paint();
-    fontManager = Skia.FontMgr.System();
     const canvas = surface.getCanvas();
     canvas.clear(Skia.Color('transparent'));
     const bounds = Skia.XYWHRect(0, 0, MAP_MARKER_WIDTH, height);
@@ -70,6 +70,7 @@ export function roundedNativeMapPlaceholder(label: string, color: string, height
     paint.setColor(Skia.Color(color));
     canvas.drawPaint(paint);
     try {
+      fontManager = Skia.FontMgr.System();
       font = matchFont({ fontSize: 14, fontWeight: 'bold' }, fontManager);
       const text = Array.from(label).slice(0, 2).join('');
       const measured = font.measureText(text);
@@ -90,6 +91,6 @@ export function roundedNativeMapPlaceholder(label: string, color: string, height
     font?.dispose();
     fontManager?.dispose();
     paint?.dispose();
-    surface.dispose();
+    surface?.dispose();
   }
 }

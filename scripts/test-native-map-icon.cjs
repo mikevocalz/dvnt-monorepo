@@ -11,10 +11,10 @@ function fixture(options={}) {
  const image={...instance('image'),width:()=>options.width??88,height:()=>options.height??88};
  const canvas={drawPaint:paint=>calls.push(['background',paint.color]),drawText:(text,x,y)=>calls.push(['text',text,x,y]),clear:color=>calls.push(['clear',color]),clipRRect:(rect,op,aa)=>calls.push(['clip',rect,op,aa]),drawImageRect:(_,src,dst)=>{calls.push(['draw',src,dst]);if(options.throwDraw)throw Error('draw failed')}};
  const skia={matchFont:()=>{if(options.throwFont)throw Error('font unavailable');return {...instance('font'),measureText:text=>({x:0,y:-10,width:text.length*8,height:14})}},ClipOp:{Intersect:1},ImageFormat:{PNG:4},Skia:{
-  FontMgr:{System:()=>instance('fontManager')},
+  FontMgr:{System:()=>{if(options.throwFontManager)throw Error('font manager unavailable');return instance('fontManager')}},
   Data:{fromURI:async uri=>{calls.push(['load',uri]);if(options.throwLoad)throw Error('load failed');if(options.waitForLoad)await options.waitForLoad(uri);return instance('data')}},
   Image:{MakeImageFromEncoded:()=>options.invalidImage?null:image},
-  Surface:{Make:(width,height)=>{calls.push(['surface',width,height]);return options.noSurface?null:{...instance('surface'),getCanvas:()=>canvas,flush:()=>calls.push(['flush']),makeImageSnapshot:()=>({...instance('snapshot'),encodeToBase64:fmt=>{calls.push(['encode',fmt]);return options.emptyEncoding?'':'png-bytes'}})}}},
+  Surface:{Make:(width,height)=>{calls.push(['surface',width,height]);if(options.throwSurface)throw Error('surface allocation failed');return options.noSurface?null:{...instance('surface'),getCanvas:()=>canvas,flush:()=>calls.push(['flush']),makeImageSnapshot:()=>({...instance('snapshot'),encodeToBase64:fmt=>{calls.push(['encode',fmt]);return options.emptyEncoding?'':'png-bytes'}})}}},
   Paint:()=>({...instance('paint'),setColor(color){this.color=color}}),Color:value=>value,XYWHRect:(x,y,width,height)=>({x,y,width,height}),RRectXY:(rect,rx,ry)=>({rect,rx,ry}),
  }};
  const exports={};const context={module:{exports},exports,require:name=>{assert.equal(name,'@shopify/react-native-skia');return skia}};vm.runInNewContext(code,context);
@@ -61,8 +61,11 @@ function fixture(options={}) {
   assert.equal(placeholder.calls.find(c=>c[0]==='text')[1],label);
   assert.deepEqual(placeholder.calls.filter(c=>c[0]==='dispose').map(c=>c[1]),['snapshot','font','fontManager','paint','surface']);
  }
+ const managerFailure=fixture({throwFontManager:true});assert.equal(managerFailure.api.roundedNativeMapPlaceholder('AB','#8A40CF',44),'data:image/png;base64,png-bytes','font manager failure retains rounded colored icon');assert.deepEqual(managerFailure.calls.filter(c=>c[0]==='dispose').map(c=>c[1]),['snapshot','paint','surface']);
  const fontFailure=fixture({throwFont:true});assert.equal(fontFailure.api.roundedNativeMapPlaceholder('AB','#8A40CF',44),'data:image/png;base64,png-bytes','font failure retains rounded background icon');assert.deepEqual(fontFailure.calls.filter(c=>c[0]==='dispose').map(c=>c[1]),['snapshot','fontManager','paint','surface']);
  assert.equal(fixture({noSurface:true}).api.roundedNativeMapPlaceholder('AB','#8A40CF',44),null);
+ const allocationFailure=fixture({throwSurface:true});assert.equal(allocationFailure.api.roundedNativeMapPlaceholder('AB','#8A40CF',44),null,'thrown placeholder allocation cannot crash map render');assert.equal(allocationFailure.calls.filter(c=>c[0]==='dispose').length,0,'no allocated resources on failed surface');
+ const imageAllocationFailure=fixture({throwSurface:true});await assert.rejects(imageAllocationFailure.api.roundedNativeMapIcon('https://fixture.test/image.png',44),/surface allocation failed/);assert.deepEqual(imageAllocationFailure.calls.filter(c=>c[0]==='dispose').map(c=>c[1]),['image','data'],'image allocation failure still disposes decoded input');
  const css=fs.readFileSync(path.join(__dirname,'../apps/mobile/global.css'),'utf8');assert.match(css,/--radius:\s*0\.5rem/);assert.match(css,/--radius-sm:\s*calc\(var\(--radius\) - 4px\)/);
  console.log('PASS native map icon: radius token parity, avatar/flyer cover crop, PNG encoding, decode/surface/load/draw failures deterministic disposal, sequential queue and cancellation');
 })().catch(error=>{console.error(error);process.exitCode=1});
