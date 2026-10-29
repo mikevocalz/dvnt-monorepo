@@ -10,6 +10,7 @@ on:
       - 'scripts/test-lynk-layout-browser.cjs'
       - 'scripts/test-lynk-chat-scroll.cjs'
       - 'scripts/test-lynk-native-moderation.cjs'
+      - 'scripts/test-lynk-native-countdown.cjs'
       - 'scripts/test-lynk-native-stage-lifecycle.cjs'
       - 'scripts/test-lynk-native-playback-ownership.cjs'
       - 'scripts/test-lynk-guest-gallery-dom.cjs'
@@ -37,6 +38,12 @@ jobs:
         run: node --test packages/app/features/sneaky-lynk/ui/controls-layout.test.ts packages/app/features/sneaky-lynk/ui/native-stage-layout.test.ts
       - name: Web stacked and paginated guest geometry
         run: node --test packages/app/features/sneaky-lynk/ui/guest-gallery-layout.test.ts packages/app/features/sneaky-lynk/ui/stage-grid.test.ts
+      - name: Shared absolute countdown arithmetic
+        env:
+          NODE_PATH: ${{ runner.temp }}/lynk-layout/node_modules
+        run: |
+          node -e "require('esbuild').buildSync({entryPoints:['packages/ui/src/video/RoomTimer.countdown.test.ts'],bundle:true,platform:'node',format:'cjs',outfile:process.env.RUNNER_TEMP+'/lynk-countdown-pure.cjs',nodePaths:[process.env.NODE_PATH]})"
+          node --test "$RUNNER_TEMP/lynk-countdown-pure.cjs"
       - name: Preserve web media and capture guards without watermarks
         env:
           NODE_PATH: ${{ runner.temp }}/lynk-layout/node_modules
@@ -45,6 +52,7 @@ jobs:
           node scripts/test-lynk-watermark-dom.cjs
           node scripts/test-lynk-chat-scroll.cjs
           node scripts/test-lynk-native-moderation.cjs
+          node scripts/test-lynk-native-countdown.cjs
           node --test packages/app/features/sneaky-lynk/ui/moderation-permissions.test.ts
       - name: Preserve native media tiles across roster and viewport changes
         env:

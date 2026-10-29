@@ -1817,13 +1817,17 @@ function ServerRoom({
   const timerStartedAt = parseRoomStartedAt(roomSnapshot?.createdAt);
 
   const handleTimeUp = useCallback(() => {
-    if (isHost && !isPaidHost) {
-      setShowTimesUpPaywall(true);
-    } else {
-      // Guests just leave when time is up
-      handleLeave();
-    }
-  }, [isHost, isPaidHost, handleLeave]);
+    // An absolute server deadline is terminal regardless of the host's current
+    // entitlement. Stop devices before any UI/network work; expiry is not an
+    // optional "leave" action and must never wait for a host confirmation.
+    desiredVideoEnabledRef.current = false;
+    desiredMicEnabledRef.current = false;
+    void videoRoomRef.current.leave();
+    markRoomClosed(null, "This Lynk reached its session time limit and has ended.");
+    void sneakyLynkApi.leaveRoom(id).catch((error) => {
+      console.warn("[SneakyLynk:Server] Expired room presence cleanup failed:", error);
+    });
+  }, [id, markRoomClosed]);
 
   const handleToggleMic = useCallback(async () => {
     const actuallyOn = videoRoomRef.current.isMicOn;
@@ -2343,11 +2347,7 @@ function ServerRoom({
             ? videoRoom.serverEndsAt === null
             : isHost && isPaidHost
         }
-        timerDurationMs={
-          videoRoom.serverEndsAt != null && timerStartedAt != null
-            ? new Date(videoRoom.serverEndsAt).getTime() - timerStartedAt
-            : undefined
-        }
+        timerEndsAt={videoRoom.serverEndsAt}
         timerStartedAt={timerStartedAt}
       />
 
@@ -2555,7 +2555,7 @@ function RoomLayout({
   onOpenHandQueue,
   onTimeUp,
   hideTimer,
-  timerDurationMs,
+  timerEndsAt,
   timerStartedAt,
 }: {
   admitted?: boolean;
@@ -2613,8 +2613,8 @@ function RoomLayout({
   onOpenHandQueue?: () => void;
   onTimeUp?: () => void;
   hideTimer?: boolean;
-  /** Derived from the server deadline; undefined keeps the free-tier default. */
-  timerDurationMs?: number;
+  /** Authoritative absolute deadline, including explicit unlimited null. */
+  timerEndsAt?: string | null;
   timerStartedAt?: number;
 }) {
   // Capped at the RN default (6 concurrent) because each reaction here is an
@@ -2865,6 +2865,14 @@ function RoomLayout({
                 >
                   {roomTitle}
                 </Text>
+                {!hideTimer && (timerEndsAt != null || timerStartedAt != null) ? (
+                  <RoomTimer
+                    compact
+                    endsAt={timerEndsAt}
+                    startedAt={timerStartedAt}
+                    onTimeUp={onTimeUp ?? onLeave}
+                  />
+                ) : null}
               </View>
             </DVNTLiquidGlass>
 
@@ -2922,19 +2930,6 @@ function RoomLayout({
             hostUserId={hostUserId}
             onParticipantPress={onParticipantPress}
             stageHeight={stageContentHeight}
-            hostOverlay={
-              // No startedAt means no server fact to count down from. Falling
-              // back to mount time would invent one, and two clients in the
-              // same room would then disagree about when it ends.
-              !hideTimer && timerStartedAt != null ? (
-                <RoomTimer
-                  key={timerStartedAt}
-                  onTimeUp={onTimeUp ?? onLeave}
-                  startedAt={timerStartedAt}
-                  durationMs={timerDurationMs}
-                />
-              ) : null
-            }
           />
         </View>
 

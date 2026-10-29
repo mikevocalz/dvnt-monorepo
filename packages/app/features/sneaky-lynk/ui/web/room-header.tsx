@@ -22,7 +22,8 @@ type RoomHeaderProps = {
 
 const buttonStyle = "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/8 hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]";
 
-/** Keep the header in one row at every width. Only the title may shrink.
+/** Keep title and controls in one row at every width. Only the title may shrink.
+ * The room countdown has its own full-width row so no role can lose it to clipping.
  * Phones expose Share and Participants directly; host-only moderation moves
  * into a labelled overflow instead of shrinking 44px targets or adding a row. */
 export function RoomHeader(props: RoomHeaderProps) {
@@ -104,7 +105,6 @@ export function RoomHeader(props: RoomHeaderProps) {
         </span>
         <span className="flex w-full min-w-0 items-center gap-1 text-xs text-white/50">
           {isHost ? <span className="shrink-0 text-[9px] font-extrabold text-blue-200 sm:hidden">HOST</span> : null}
-          {timer}
           {event ? <button type="button" data-lynk-event={event.id} onClick={props.onEvent} title={`Go to ${event.title}`}
             className="min-w-0 max-w-[32vw] truncate rounded-md bg-[#8A40CF]/25 px-1 py-0.5 text-[10px] font-semibold text-[#D9B8FF] hover:bg-[#8A40CF]/40">{event.title}</button> : null}
         </span>
@@ -137,6 +137,7 @@ export function RoomHeader(props: RoomHeaderProps) {
           </div>
         </> : null}
       </div>
+      {timer ? <div data-room-timer-row className="col-span-3 min-w-0 pt-1">{timer}</div> : null}
     </header>
   );
 }

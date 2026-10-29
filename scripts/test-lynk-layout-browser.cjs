@@ -39,6 +39,7 @@ const fixture = `
       ...Array.from({length:c.publishers-1},(_,i)=>({userId:'publisher-'+String(i+1).padStart(2,'0'),role:'participant',status:'active',handRaised:false,displayName:names(i+1)})),
       ...Array.from({length:c.listeners},(_,i)=>({userId:'listener-'+i,role:'listener',status:'active',handRaised:i<3,displayName:'Listener '+i}))];
   }
+  f.deadline = params.get('deadline') === 'unlimited' ? null : new Date(Date.now() + Number(params.get('deadline') || 300) * 1000).toISOString();
   f.deliverRoster = () => {
     const state=useFixture.getState().rosterState;
     if(state==='ready')f.membersSync?.(f.roster);
@@ -65,7 +66,7 @@ const fixture = `
   };
   // The production timer only renders during the final minute. Keep a real
   // server deadline in that window so host header geometry includes the badge.
-  export const sneakyLynkApi = { joinRoom:async()=>({ok:true,data:{peer:{role:useFixture.getState().role},user:localUser,room:{id:'fixture-room',title:'A very long Lynk title that must not push host controls outside the phone',hasVideo:true,endsAt:new Date(Date.now()+55000).toISOString()}}}),
+  export const sneakyLynkApi = { joinRoom:async()=>({ok:true,data:{peer:{role:useFixture.getState().role},user:localUser,room:{id:'fixture-room',title:'A very long Lynk title that must not push host controls outside the phone',hasVideo:true,endsAt:f.deadline}}}),
     endRoom:async()=>{f.actions.push('endRoom');return {ok:true}},leaveRoom:async()=>{f.actions.push('leaveRoom');return {ok:true}},toggleHand:async()=>({ok:true}) };
   const comments = Array.from({length:30},(_,i)=>({id:i+1,roomId:'fixture-room',authorId:'publisher-1',body:'Earlier message '+i+' with enough text to wrap on a narrow phone.',parentId:null,rootId:null,depth:0,mentions:[],createdAt:new Date(1700000000000+i).toISOString(),author:{displayName:'Participant 01',username:'Participant 01',avatar:''}}));
   export const subscribeToRoomComments=(_id,_new,options)=>{f.commentsSync=options.onSync;queueMicrotask(()=>f.commentsSync?.(comments));return()=>{f.commentsSync=null}};
@@ -308,7 +309,7 @@ async function setInsets(page, insets) {
   assert.deepEqual(actual,[insets.top,insets.right,insets.bottom,insets.left],'Chromium must really emulate CSS safe areas');
 }
 
-async function createPage(browser,url,c,role,rail='web',rosterState='ready') {
+async function createPage(browser,url,c,role,rail='web',rosterState='ready',deadline='300') {
   const context=await browser.newContext({viewport:{width:c.width,height:c.height},reducedMotion:'reduce'});
   const page=await context.newPage();
   page.setDefaultTimeout(8000);
@@ -319,7 +320,7 @@ async function createPage(browser,url,c,role,rail='web',rosterState='ready') {
     if(target.origin===url)return route.continue();
     unexpectedRequests.push(target.origin+target.pathname);return route.abort();
   });
-  await page.goto(url+'/?rail='+rail+'&role='+role+'&roster='+rosterState);
+  await page.goto(url+'/?rail='+rail+'&role='+role+'&roster='+rosterState+'&deadline='+deadline);
   await page.waitForFunction(()=>window.fixture);
   await setInsets(page,{...zeroInsets,...c.insets});
   if(rail==='web')await page.locator('main[data-room-phase="connected"]').waitFor();
@@ -578,6 +579,64 @@ async function fillCases(browser,url) {
       console.log('PASS portrait local video and remote canvas cover '+c.name+' with stable quarter turns');
     } catch(error){recordFailure('fill-'+c.name,error)}finally{await context.close()}
   }
+}
+
+async function countdownCases(browser,url) {
+  for (const role of ['host','co-host','participant','moderator']) {
+    const c={name:'countdown-'+role,width:320,height:700};
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,role);
+    try {
+      await page.evaluate(()=>{const now=Date.now();Date.now=()=>now;window.dispatchEvent(new Event('pageshow'));});await tick(page);
+      const timer=page.getByRole('timer');
+      assert.match(await timer.textContent(), /Time left [45]:[0-5][0-9]/, 'all roles see the initial five-minute allowance');
+      assert.equal(await timer.getAttribute('aria-live'), 'off', 'do not announce every tick');
+      const row=page.locator('[data-room-countdown]');
+      assert.equal(await row.getAttribute('data-warning'), 'false');
+      await assertFullyVisibleCard(row,'countdown remains legible on narrow phone');
+      const [stageBounds]=await dimensions(page.locator('[data-stage-participants]'));
+      const [dockBounds]=await dimensions(page.locator('[data-room-controls]'));
+      assert.ok(stageBounds.bottom<=dockBounds.y,'settled countdown stage must end above dock');
+      for(const tile of await dimensions(page.locator('[data-tile]')))assert.ok(tile.bottom<=dockBounds.y,'initial participant tile must not extend behind dock');
+      console.log('PASS countdown initial bounds '+role+': '+JSON.stringify({stageBottom:stageBounds.bottom,dockTop:dockBounds.y}));
+      await evidence(page,'countdown-'+role+'-initial');
+      const initial=await timer.textContent();
+      await page.evaluate(()=>window.fixture.configure({publishers:12}));await tick(page);
+      assert.equal(await timer.textContent(),initial,'roster changes do not reset the deadline');
+      await page.evaluate(()=>{Date.now=()=>Date.parse(window.fixture.deadline)-30000;window.dispatchEvent(new Event('pageshow'));});await tick(page);
+      assert.equal(await row.getAttribute('data-warning'),'true');
+      assert.match(await row.textContent(),/Time left 0:30.*Ending in 30 seconds or less/);
+      await assertFullyVisibleCard(row,'thirty-second warning is not truncated');
+      await evidence(page,'countdown-'+role+'-30sec');
+      await page.setViewportSize({width:700,height:320});await tick(page);
+      await assertFullyVisibleCard(row,'warning remains visible in landscape');
+      // Simulate suspended timers: only a visibility event, not a timer tick,
+      // may catch the display up. No new local budget on resume.
+      await page.evaluate(()=>{Date.now=()=>Date.parse(window.fixture.deadline)-7000;Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});document.dispatchEvent(new Event('visibilitychange'));});await tick(page);
+      assert.match(await timer.textContent(),/0:07/);
+      await page.evaluate(()=>{window.fixture.actions.length=0;Date.now=()=>Date.parse(window.fixture.deadline)+1000;window.dispatchEvent(new Event('pageshow'));});await tick(page);
+      assert.ok((await page.evaluate(()=>window.fixture.actions)).includes('camera:false'));
+      assert.ok((await page.evaluate(()=>window.fixture.actions)).includes('mic:false'));
+      const stoppedActions=await page.evaluate(()=>window.fixture.actions.slice());
+      await page.evaluate(()=>{window.dispatchEvent(new Event('pageshow'));document.dispatchEvent(new Event('visibilitychange'));});await tick(page);
+      assert.deepEqual(await page.evaluate(()=>window.fixture.actions),stoppedActions,'expiry callback fires once across repeated resumes');
+      if(role!=='host') {
+        assert.equal(await page.getByRole('dialog',{name:'Session time limit'}).count(),0,'guests never see host billing paywall');
+        assert.match(await timer.textContent(),/Session ended/);
+      }
+      assert.deepEqual(errors,[]);assert.deepEqual(unexpectedRequests,[]);
+    } finally {await context.close()}
+  }
+  for(const deadline of ['22','unlimited']) {
+    const {page,context}=await createPage(browser,url,{name:'latejoin',width:390,height:844},'participant','web','ready',deadline);
+    try {
+      if(deadline==='unlimited')assert.equal(await page.getByRole('timer').count(),0,'unlimited server room has no fabricated countdown');
+      else {
+        assert.match(await page.getByRole('timer').textContent(),/0:2[0-2]/,'late join uses remaining server time, not five minutes');
+        assert.equal(await page.locator('[data-room-countdown]').getAttribute('data-warning'),'true');
+      }
+    } finally {await context.close()}
+  }
+  console.log('PASS countdown all roles, initial/late join, 30-second warning, background return, expiry and unlimited rooms');
 }
 
 async function timeUpCases(browser,url) {
@@ -921,7 +980,7 @@ async function main() {
         window.eval(assets.js);await new Promise(resolve=>setTimeout(resolve,350));
         assert.ok(window.fixture,rail+' fixture mounted');
         assert.ok(window.document.querySelector(rail==='web'?'main[data-room-phase="connected"]':'[data-native-room] [role="button"]'),rail+' actual component mounted: '+window.document.body.innerHTML.slice(0,1200));
-        if(rail==='web')assert.ok(window.document.querySelector('[role="timer"]'),'host fixture must exercise the real final-minute timer badge');
+        if(rail==='web')assert.ok(window.document.querySelector('[role="timer"]'),'host fixture must exercise the real always-visible timer badge');
         for(const publishers of [1,2,12,20]) {
           window.fixture.configure({publishers});await new Promise(resolve=>setTimeout(resolve,30));
           assert.equal(window.document.querySelectorAll(rail==='web'?'[data-tile]':'[data-testid^="native-tile-"]').length,publishers,rail+' rendered participant count');
@@ -955,7 +1014,7 @@ async function main() {
     // system executable or change sandbox settings to circumvent a denied run.
     browser=await load('@playwright/test').chromium.launch({headless:true});
     const url='http://127.0.0.1:'+server.address().port;
-    const suites={consent:consentCases,fill:fillCases,moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
+    const suites={consent:consentCases,countdown:countdownCases,fill:fillCases,moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
     for(const name of (process.env.LYNK_LAYOUT_SUITES||Object.keys(suites).join(',')).split(','))await suites[name](browser,url);
     assert.equal(failures.length,0,'Rendered regression failures:\n'+JSON.stringify(failures,null,2));
     console.log('PASS all rendered Lynk viewport, room and control layout regressions');
