@@ -8,9 +8,10 @@ const member={id:'self',username:'fixture',displayName:'Fixture',avatarUrl:'http
 const event={id:1,title:'Party',image:'https://fixture.example/flyer.png'};
 const row={id:1,title:'Party',visibility:'public',is_hidden:false,publish_at:null,status:'active',is_online:false,location_type:'venue',location:'Public venue',location_name:null,location_lat:33.78,location_lng:-84.41};
 const mocks={
+ '@shopify/react-native-skia':require('./fixtures/native-map-icon-boundary.cjs'),
  'react-native':`import React from 'react';export const Platform={OS:window.fixture.platform};const Box=({children,accessibilityLabel})=>React.createElement('div',{'aria-label':accessibilityLabel},children);export const View=Box,Text=Box,ScrollView=Box,ActivityIndicator=()=>null;export const Pressable=({children,onPress,accessibilityLabel,disabled})=>React.createElement('button',{onClick:onPress,'aria-label':accessibilityLabel,disabled},children);export const Image=()=>null;`,
  'expo-router':`export const useRouter=()=>({push:p=>window.fixture.route=p});`,
- 'expo-image':`const icons=new Map();export const useImage=s=>{if(!icons.has(s))icons.set(s,{source:s});return icons.get(s)};`,
+ 'expo-image':`const icons=new Map();export const useImage=s=>{if(typeof s!=='string'||!s)throw Error('Expo useImage requires a source');if(!icons.has(s))icons.set(s,{source:s});return icons.get(s)};`,
  'expo-maps':`import React from 'react';const Map=({markers,annotations=[],onMarkerClick,onAnnotationClick,cameraPosition,properties})=>{window.fixture.camera=cameraPosition;window.fixture.properties=properties;return React.createElement('div',{'data-map':true},...[...markers,...annotations].map(m=>React.createElement('button',{'data-marker':m.id,'data-image':m.icon?.source,'data-lat':m.coordinates.latitude,key:m.id,onClick:()=>m.icon&&window.fixture.platform==='ios'?onAnnotationClick(m):onMarkerClick(m)},m.title)))};export const AppleMaps={View:Map},GoogleMaps={View:Map};`,
  '@tanstack/react-query':`export const useQuery=()=>({data:window.fixture.rows,isError:window.fixture.eventError,refetch:()=>{window.fixture.retries++}});`,
  '@dvnt/app/lib/api/event-map':`export const eventMapApi={getLocations:async()=>[]};`,
@@ -24,6 +25,16 @@ const mocks={
   const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setContent('<div id="root"></div>');await page.evaluate(f=>window.fixture=f,{platform,events:[event],rows:[row],sharing:true,refreshes:0,retries:0,data:{members:[],self:member,center:{latitude:40.71,longitude:-74.01},expiresAt:'2099-01-01T00:00:00Z'}});await page.addScriptTag({content:result.outputFiles[0].text});
   await page.locator('[data-marker="event:1"][data-image]').waitFor();await page.locator('[data-marker="member:self"][data-image]').waitFor();
+  await page.waitForFunction(()=>window.fixture.iconDraws>=2);
+  const clips=await page.evaluate(()=>window.fixture.iconClips);
+  assert.ok(clips.some(c=>c.width===44&&c.height===44&&c.rx===4&&c.ry===4&&c.antialias),'avatar raster clips rounded-sm');
+  assert.ok(clips.some(c=>c.width===44&&c.height===58&&c.rx===4&&c.ry===4&&c.antialias),'event raster clips rounded-sm');
+  for(const marker of ['member:self','event:1']) {
+   const uri=await page.locator(`[data-marker="${marker}"]`).getAttribute('data-image');
+   assert.ok(uri.startsWith('data:image/png;base64,'),'provider receives rounded raster, not unrounded network source');
+   const pixels=await page.evaluate(async uri=>{const image=new Image();image.src=uri;await image.decode();const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const ctx=c.getContext('2d');ctx.drawImage(image,0,0);return {corner:ctx.getImageData(0,0,1,1).data[3],center:ctx.getImageData(22,22,1,1).data[3],edge:ctx.getImageData(5,0,1,1).data[3]};},uri);
+   assert.equal(pixels.corner,0,'rounded corner is actually transparent');assert.equal(pixels.center,255);assert.equal(pixels.edge,255,'small radius does not become circle');
+  }
   assert.equal(await page.locator('[data-map]').count(),1);assert.equal(await page.locator('[data-marker="member:self"]').innerText(),'You · approximate area');
   assert.equal(await page.locator('[data-marker="member:self"]').getAttribute('data-lat'),'40.71');
   assert.deepEqual(await page.evaluate(()=>window.fixture.properties),{isMyLocationEnabled:false,showsUserLocation:false});
@@ -51,6 +62,23 @@ const mocks={
 
   await page.locator('[data-marker="event:1"]').click();assert.equal(await page.evaluate(()=>window.fixture.eventRoute),'1');
   await page.locator('[data-marker="member:self"]').click();assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture');
+  const loadedPhoto=await page.locator('[data-marker="member:self"]').getAttribute('data-image');
+  await page.evaluate(()=>{window.fixture.failRaster=true;window.fixture.data.self.avatarUrl='https://fixture.example/allocation-failure.png';window.renderFixture()});
+  await page.locator('[data-marker="member:self"]').waitFor({state:'detached'});
+  await page.getByRole('button',{name:"Open Fixture's profile",exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture','raster failure keeps list navigation without passing null to Expo image loader');
+  await page.evaluate(()=>{window.fixture.failRaster=false;window.fixture.data.self.avatarUrl='https://fixture.example/recovered.png';window.renderFixture()});
+  await page.waitForFunction(expected=>document.querySelector('[data-marker="member:self"]')?.getAttribute('data-image')===expected,loadedPhoto);
+
+  await page.evaluate(()=>{window.fixture.data.self.avatarUrl='https://fixture.example/broken.png';window.renderFixture()});
+  await page.waitForFunction(previous=>{const value=document.querySelector('[data-marker="member:self"]')?.getAttribute('data-image');return value?.startsWith('data:image/png;base64,')&&value!==previous},loadedPhoto);
+  const failedPlaceholder=await page.locator('[data-marker="member:self"]').getAttribute('data-image');
+  await page.evaluate(()=>{window.fixture.data.self.avatarUrl=null;window.renderFixture()});
+  await page.waitForFunction(expected=>document.querySelector('[data-marker="member:self"]')?.getAttribute('data-image')===expected,failedPlaceholder);
+  const fallbackPixels=await page.evaluate(async uri=>{const image=new Image();image.src=uri;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);return {corner:ctx.getImageData(0,0,1,1).data[3],edge:ctx.getImageData(5,0,1,1).data[3]};},failedPlaceholder);
+  assert.equal(fallbackPixels.corner,0,'no-photo/failed-photo fallback stays rounded');assert.equal(fallbackPixels.edge,255,'fallback is small-radius, not a circle');
+  await page.locator('[data-marker="member:self"]').click();assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture','failed image fallback keeps navigation');
+  await page.evaluate(()=>{window.fixture.data.self.avatarUrl='https://fixture.example/slow.png';window.renderFixture()});
   await page.evaluate(()=>window.fixture.initialCamera=window.fixture.camera);await page.waitForTimeout(1100);assert.equal(await page.evaluate(()=>window.fixture.camera===window.fixture.initialCamera),true);
   await page.getByRole('button',{name:'Stop sharing'}).click();await page.locator('[data-marker="member:self"]').waitFor({state:'detached'});assert.equal(await page.locator('[data-map]').count(),1);assert.equal(await page.locator('[data-marker="event:1"]').count(),1);
   await page.evaluate(()=>{window.fixture.sharing=true;window.fixture.memberError=true;window.renderFixture()});await page.getByText('Nearby people could not be refreshed.',{exact:false}).waitFor();assert.equal(await page.locator('[data-marker="member:self"]').count(),0);assert.equal(await page.locator('[data-marker="event:1"]').count(),1);
@@ -61,6 +89,12 @@ const mocks={
   await page.evaluate(()=>{window.fixture.data.expiresAt=new Date(Date.now()-1).toISOString();window.renderFixture()});
   await page.getByText('Showing a broad overview of public event locations, not your current location.').waitFor();
   assert.equal(await page.evaluate(()=>window.fixture.camera.zoom),3,'expired viewer lease cannot retain local center');
+  await page.evaluate(()=>{window.fixture.data.self.expiresAt='2099-01-01T00:00:00Z';window.fixture.data.expiresAt='2099-01-01T00:00:00Z';window.fixture.data.self.avatarUrl='https://fixture.example/slow-late.png';window.fixture.sharing=true;window.renderFixture()});
+  await page.waitForFunction(()=>window.fixture.iconLoads.includes('https://fixture.example/slow-late.png'));
+  await page.getByRole('button',{name:'Stop sharing'}).click();await page.waitForTimeout(250);
+  assert.equal(await page.locator('[data-marker="member:self"]').count(),0,'late image completion cannot restore opted-out member');
+  assert.ok(await page.evaluate(()=>window.fixture.disposals>0),'temporary native raster resources are disposed');
+
   assert.deepEqual(errors,[]);await page.close();
  }console.log('PASS unified native iOS/Android: one map, event flyer/self avatar, coarse point, navigation, no precise blue dot, stable camera, opt-out, separate refresh failures, private event revocation, expiry');}finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});

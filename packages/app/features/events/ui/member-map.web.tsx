@@ -2,7 +2,8 @@
 import { getGoogleMapsPublicKey } from "@dvnt/ui/google-maps-public-config";
 
 import { useEffect, useState } from "react";
-import { APIProvider, Map, Marker, useApiLoadingStatus, APILoadingStatus, useMapsLibrary, useMap } from "@vis.gl/react-google-maps";
+import { APIProvider, Map, useApiLoadingStatus, APILoadingStatus, useMap } from "@vis.gl/react-google-maps";
+import { RoundedMapMarker } from "./rounded-map-marker.web";
 import { useRouter } from "solito/navigation";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dvnt/app/lib/hooks/use-member-map";
@@ -83,34 +84,15 @@ function Avatar({ member }: { member: MapMember }) {
   const [failed, setFailed] = useState(false);
   const src = mapAvatarUrl(member.avatarUrl);
   return src && !failed
-    ? <img src={src} alt="" referrerPolicy="no-referrer" className="w-11 h-11 shrink-0 rounded-full object-cover" onError={() => setFailed(true)} />
-    : <span aria-hidden="true" className="w-11 h-11 shrink-0 rounded-full bg-[#8A40CF] flex items-center justify-center font-bold">{mapMemberInitials(member)}</span>;
+    ? <img src={src} alt="" referrerPolicy="no-referrer" className="w-11 h-11 shrink-0 rounded-sm object-cover" onError={() => setFailed(true)} />
+    : <span aria-hidden="true" className="w-11 h-11 shrink-0 rounded-sm bg-[#8A40CF] flex items-center justify-center font-bold">{mapMemberInitials(member)}</span>;
 }
 
 function AvatarMarker({ member, onClick, self = false }: { member: MapMember; onClick: () => void; self?: boolean }) {
-  // Marker image URL contains no coordinates. The only position supplied to
-  // Google is the server's coarse grid cell, never the device GPS sample.
-  const avatar = mapAvatarUrl(member.avatarUrl);
-  const core = useMapsLibrary("core");
-  const [loadedAvatar, setLoadedAvatar] = useState<string | null>(null);
-  useEffect(() => {
-    setLoadedAvatar(null);
-    if (!avatar) return;
-    let current = true;
-    const image = new window.Image();
-    image.referrerPolicy = "no-referrer";
-    image.onload = () => { if (current) setLoadedAvatar(avatar); };
-    image.onerror = () => { if (current) setLoadedAvatar(null); };
-    image.src = avatar;
-    return () => { current = false; image.onload = null; image.onerror = null; };
-  }, [avatar]);
-  return <Marker
-    position={{ lat: member.latitude, lng: member.longitude }}
+  return <RoundedMapMarker latitude={member.latitude} longitude={member.longitude}
     title={`${self ? "You" : member.displayName || member.username} — approximate area`}
-    label={loadedAvatar === avatar && avatar ? undefined : { text: mapMemberInitials(member), color: '#ffffff' }}
-    icon={loadedAvatar === avatar && avatar && core ? { url: avatar, scaledSize: new core.Size(44, 44) } : undefined}
-    onClick={onClick}
-  />;
+    source={mapAvatarUrl(member.avatarUrl)} fallback={mapMemberInitials(member)}
+    onClick={onClick} />;
 }
 
 /** Follow an explicit event selection or a newly published coarse area, not the expiry clock. */
@@ -121,21 +103,7 @@ function MapFocus({ latitude, longitude, zoom, revision }: { latitude: number; l
 }
 
 function EventFlyerMarker({ pin, onClick }: { pin: EventMapPin; onClick: () => void }) {
-  const core = useMapsLibrary("core");
-  const src = mapAvatarUrl(pin.flyerUrl);
-  const [loaded, setLoaded] = useState<string | null>(null);
-  useEffect(() => {
-    setLoaded(null);
-    if (!src) return;
-    let current = true;
-    const image = new window.Image();
-    image.referrerPolicy = "no-referrer";
-    image.onload = () => { if (current) setLoaded(src); };
-    image.onerror = () => { if (current) setLoaded(null); };
-    image.src = src;
-    return () => { current = false; image.onload = null; image.onerror = null; };
-  }, [src]);
-  return <Marker position={{ lat: pin.latitude, lng: pin.longitude }} title={`Event: ${pin.title}`} onClick={onClick}
-    label={src && loaded === src ? undefined : { text: "EVENT", color: "#ffffff" }}
-    icon={src && loaded === src && core ? { url: src, scaledSize: new core.Size(44, 60) } : undefined} />;
+  return <RoundedMapMarker latitude={pin.latitude} longitude={pin.longitude}
+    title={`Event: ${pin.title}`} source={mapAvatarUrl(pin.flyerUrl)}
+    fallback="EVENT" height={60} onClick={onClick} />;
 }

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useImage } from "expo-image";
+import { MAP_MARKER_RADIUS, roundedNativeMapIcon, roundedNativeMapPlaceholder } from "./native-map-icon";
 import { useQuery } from "@tanstack/react-query";
 import type { Event } from "@dvnt/app/lib/hooks/use-events";
 import { eventMapApi } from "@dvnt/app/lib/api/event-map";
@@ -76,9 +77,10 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   const annotations = visualPins.filter(pin => icons[pin.id]).map(pin => ({
     id: pin.id, coordinates: { latitude: pin.latitude, longitude: pin.longitude }, title: pin.title, icon: icons[pin.id],
   }));
-  const markers = visualPins.filter(pin => Platform.OS !== 'ios' || !icons[pin.id]).map(pin => ({
+  // Never flash provider-default round/pin shapes while rounded PNGs load.
+  const markers = visualPins.filter(pin => Platform.OS !== 'ios' && icons[pin.id]).map(pin => ({
     id: pin.id, coordinates: { latitude: pin.latitude, longitude: pin.longitude }, title: pin.title,
-    ...(Platform.OS === 'ios' ? { monogram: pin.monogram, tintColor: pin.tint } : { icon: icons[pin.id], anchor: { x: 0.5, y: 0.5 } }),
+    icon: icons[pin.id], anchor: { x: 0.5, y: 0.5 },
   }));
 
   return (
@@ -92,7 +94,7 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
       {NativeMap && sharing && !center && !nearby.isError ? <View style={{ gap: 8 }}>{presence.isUpdating || nearby.isPending ? <ActivityIndicator /> : null}<Text style={{ color: '#bbb' }}>A fresh location is needed to show nearby people.</Text></View> : null}
       {NativeMap ? (
         <>
-          {visualPins.filter(pin => pin.image).map(pin => <MapIcon key={`${pin.id}:${pin.image}`} id={pin.id} source={pin.image!} register={registerIcon} />)}
+          {visualPins.map(pin => <MapIcon key={`${pin.id}:${pin.image}:${pin.monogram}`} id={pin.id} source={pin.image || null} label={pin.monogram} color={pin.tint} height={pin.id.startsWith("event:") ? 58 : 44} register={registerIcon} />)}
           <View style={{ height: 340 }} accessibilityLabel="Event flyers and approximate member locations">
             <NativeMap
               style={{ flex: 1 }}
@@ -107,7 +109,7 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
           <Text style={{ color: '#bbb' }}>{`${eventPins.length} public event locations · ${members.length} sharing avatars`}</Text>
           {locations.isError ? <View><Text accessibilityRole="alert" style={{ color: '#ddd' }}>Event locations could not be refreshed. Event pins have been hidden.</Text><Pressable accessibilityRole="button" onPress={() => void locations.refetch()}><Text style={{ color: '#3FDCFF', paddingVertical: 12 }}>Retry event locations</Text></Pressable></View> : null}
           {eventPins.map(pin => <Pressable key={pin.id} accessibilityRole="button" accessibilityLabel={`Open event ${pin.title}`} onPress={() => openEvent(pin.id)} style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            {pin.flyerUrl ? <Image source={{ uri: pin.flyerUrl }} style={{ width: 44, height: 58, borderRadius: 6 }} /> : null}<Text style={{ color: '#fff', flex: 1 }}>{pin.title}</Text>
+            {pin.flyerUrl ? <Image source={{ uri: pin.flyerUrl }} style={{ width: 44, height: 58, borderRadius: MAP_MARKER_RADIUS }} /> : null}<Text style={{ color: '#fff', flex: 1 }}>{pin.title}</Text>
           </Pressable>)}
           {members.map((member) => <Pressable key={member.id} accessibilityRole="button" accessibilityLabel={`Open ${member.displayName || member.username}'s profile`} onPress={() => open(member)} style={{ minHeight: 60, padding: 8, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#ffffff22', borderRadius: 12 }}><Avatar member={member} /><View style={{ flex: 1 }}><Text style={{ color: '#fff', fontWeight: '600' }}>{member.displayName || member.username}</Text><Text style={{ color: '#aaa' }}>@{member.username} · approximate area</Text></View></Pressable>)}
         </>
@@ -116,8 +118,26 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   );
 }
 
-function MapIcon({ id, source, register }: { id: string; source: string; register: (id: string, icon: LoadedIcon | null) => void }) {
-  const icon = useImage(source, { maxWidth: 44, maxHeight: 58 });
+function MapIcon({ id, source, label, color, height, register }: { id: string; source: string | null; label: string; color: string; height: number; register: (id: string, icon: LoadedIcon | null) => void }) {
+  const placeholder = useMemo(() => roundedNativeMapPlaceholder(label, color, height), [label, color, height]);
+  const [roundedSource, setRoundedSource] = useState<string | null>(null);
+  useEffect(() => {
+    let current = true;
+    setRoundedSource(null);
+    if (!source) return () => { current = false; };
+    void roundedNativeMapIcon(source, height, () => current)
+      .then((result) => { if (current) setRoundedSource(result); })
+      .catch(() => { if (current) setRoundedSource(null); });
+    return () => { current = false; };
+  }, [source, height]);
+  const readySource = roundedSource || placeholder;
+  // Expo useImage requires a real source. Remounting also clears its retained
+  // old image reference before a newer bitmap is registered.
+  return readySource ? <LoadedMapIcon key={readySource} id={id} source={readySource} height={height} register={register} /> : null;
+}
+
+function LoadedMapIcon({ id, source, height, register }: { id: string; source: string; height: number; register: (id: string, icon: LoadedIcon | null) => void }) {
+  const icon = useImage(source, { maxWidth: 44, maxHeight: height });
   useEffect(() => {
     register(id, icon);
     return () => register(id, null);
@@ -128,5 +148,5 @@ function MapIcon({ id, source, register }: { id: string; source: string; registe
 function Avatar({ member }: { member: MapMember }) {
   const [failed, setFailed] = useState(false);
   const source = mapAvatarUrl(member.avatarUrl);
-  return source && !failed ? <Image source={{ uri: source }} onError={() => setFailed(true)} style={{ width: 44, height: 44, borderRadius: 22 }} /> : <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#8A40CF', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontWeight: '700' }}>{mapMemberInitials(member)}</Text></View>;
+  return source && !failed ? <Image source={{ uri: source }} onError={() => setFailed(true)} style={{ width: 44, height: 44, borderRadius: MAP_MARKER_RADIUS }} /> : <View style={{ width: 44, height: 44, borderRadius: MAP_MARKER_RADIUS, backgroundColor: '#8A40CF', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontWeight: '700' }}>{mapMemberInitials(member)}</Text></View>;
 }
