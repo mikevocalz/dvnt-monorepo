@@ -1,6 +1,6 @@
 /**
  * ParticipantActions Component
- * Bottom sheet action menu for host controls on a participant.
+ * Bottom sheet action menu for role-scoped participant moderation.
  * Long-press a participant tile → Mute / Make Co-Host / Remove
  */
 
@@ -11,9 +11,12 @@ import { Mic, MicOff, Crown, UserMinus, X, EyeOff } from "lucide-react-native";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import type { SneakyUser } from "../types";
 import { getSneakyUserLabel } from "./user-labels";
+import { participantModeration } from "./moderation-permissions";
 
 interface ParticipantActionsProps {
   visible: boolean;
+  actorRole: string | null | undefined;
+  actorId: string | undefined;
   participant: {
     userId: string;
     user: SneakyUser;
@@ -30,6 +33,8 @@ interface ParticipantActionsProps {
 
 export function ParticipantActions({
   visible,
+  actorRole,
+  actorId,
   participant,
   onMute,
   onUnmute,
@@ -43,6 +48,8 @@ export function ParticipantActions({
   if (!participant) return null;
 
   const { userId, user, role, isMicOn } = participant;
+  const permissions = participantModeration(actorRole, actorId, userId, role);
+  if (!permissions.mute) return null;
   const isCoHost = role === "co-host";
   const isAnon = user.isAnonymous;
   const label = getSneakyUserLabel(user);
@@ -83,7 +90,12 @@ export function ParticipantActions({
                 </Text>
               </View>
             </View>
-            <Pressable onPress={onClose} hitSlop={12}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close participant actions"
+              onPress={onClose}
+              hitSlop={12}
+            >
               <X size={22} color="#6B7280" />
             </Pressable>
           </View>
@@ -93,6 +105,8 @@ export function ParticipantActions({
           {/* Actions */}
           {isMicOn ? (
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Mute ${label}`}
               style={styles.action}
               onPress={() => {
                 onMute(userId);
@@ -111,6 +125,8 @@ export function ParticipantActions({
             </Pressable>
           ) : onUnmute ? (
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Let ${label} unmute`}
               style={styles.action}
               onPress={() => {
                 onUnmute(userId);
@@ -123,16 +139,18 @@ export function ParticipantActions({
                 <Mic size={20} color="#10B981" />
               </View>
               <View style={styles.actionText}>
-                <Text style={styles.actionTitle}>Unmute</Text>
+                <Text style={styles.actionTitle}>Let them unmute</Text>
                 <Text style={styles.actionDesc}>
-                  Turn their microphone back on
+                  They choose when to turn their microphone on
                 </Text>
               </View>
             </Pressable>
           ) : null}
 
-          {isCoHost ? (
+          {permissions.changeRole && isCoHost ? (
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Remove co-host from ${label}`}
               style={styles.action}
               onPress={() => {
                 onDemote(userId);
@@ -151,8 +169,11 @@ export function ParticipantActions({
                 </Text>
               </View>
             </Pressable>
-          ) : (
+          ) : null}
+          {permissions.changeRole && !isCoHost ? (
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Make ${label} a co-host`}
               style={styles.action}
               onPress={() => {
                 onMakeCoHost(userId);
@@ -171,27 +192,33 @@ export function ParticipantActions({
                 </Text>
               </View>
             </Pressable>
-          )}
+          ) : null}
 
-          <Pressable
-            style={styles.action}
-            onPress={() => {
-              onRemove(userId);
-              onClose();
-            }}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: "#EF444420" }]}>
-              <UserMinus size={20} color="#EF4444" />
-            </View>
-            <View style={styles.actionText}>
-              <Text style={[styles.actionTitle, { color: "#EF4444" }]}>
-                Remove from Room
-              </Text>
-              <Text style={styles.actionDesc}>
-                Kick this user out of the room
-              </Text>
-            </View>
-          </Pressable>
+          {permissions.remove ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${label} from the room`}
+              style={styles.action}
+              onPress={() => {
+                onRemove(userId);
+                onClose();
+              }}
+            >
+              <View
+                style={[styles.actionIcon, { backgroundColor: "#EF444420" }]}
+              >
+                <UserMinus size={20} color="#EF4444" />
+              </View>
+              <View style={styles.actionText}>
+                <Text style={[styles.actionTitle, { color: "#EF4444" }]}>
+                  Remove from Room
+                </Text>
+                <Text style={styles.actionDesc}>
+                  Kick this user out of the room
+                </Text>
+              </View>
+            </Pressable>
+          ) : null}
         </Pressable>
       </Pressable>
     </Modal>

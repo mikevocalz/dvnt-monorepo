@@ -4,6 +4,7 @@
  * Every camera tile remains mounted while scrolling, resizing, or new people
  * joining: moving tiles between paginated parent rows stops their MoQ audio.
  */
+import { participantModeration } from "./moderation-permissions";
 import React, { memo, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Users } from "lucide-react-native";
@@ -31,6 +32,9 @@ export const RoomStage = memo(function RoomStage({
   stageHeight = 0,
   hostOverlay,
 }: RoomStageProps) {
+  const actor = participants.find((participant) => participant.isLocal);
+  const canOpenActions = (participant: VideoParticipant) =>
+    participantModeration(actor?.role, actor?.id, participant.id, participant.role).mute;
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [measured, setMeasured] = useState<{ width: number; height: number } | null>(null);
@@ -93,7 +97,7 @@ export const RoomStage = memo(function RoomStage({
                   tileWidth={box.width}
                   tileHeight={box.height}
                   isHost={isHost}
-                  onPress={isHost && !participant.isLocal ? () => onParticipantPress?.(participant) : undefined}
+                  onPress={onParticipantPress && canOpenActions(participant) ? () => onParticipantPress(participant) : undefined}
                 />
                 {index === 0 && hostOverlay ? (
                   <View pointerEvents="none" style={styles.hostOverlay}>{hostOverlay}</View>
@@ -129,7 +133,7 @@ export const RoomStage = memo(function RoomStage({
                       tileWidth={layout.tileWidth}
                       tileHeight={layout.tileHeight}
                       isHost={isHost}
-                      onPress={isHost && !participant.isLocal ? () => onParticipantPress?.(participant) : undefined}
+                      onPress={onParticipantPress && canOpenActions(participant) ? () => onParticipantPress(participant) : undefined}
                     />
                   </View>
                 ))}

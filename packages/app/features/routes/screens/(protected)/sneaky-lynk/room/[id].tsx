@@ -9,6 +9,7 @@
  * - ServerRoom: uses useVideoRoom for full Fishjam room management
  */
 
+import { isRoomModerator } from "@dvnt/app/features/sneaky-lynk/ui/moderation-permissions";
 import {
   View,
   Text,
@@ -1288,6 +1289,10 @@ function ServerRoom({
       }
     : buildLocalUser(authUser);
   const isHost = videoRoom.localUser?.role === "host";
+  const moderationRole =
+    videoRoom.isEjected || videoRoom.room?.status === "ended"
+      ? null
+      : videoRoom.localUser?.role;
   const effectiveMuted = !videoRoom.isMicOn;
   const effectiveVideoOn = videoRoom.isCameraOn;
 
@@ -2045,7 +2050,7 @@ function ServerRoom({
     async (targetUserId: string) => {
       const res = await videoApi.unmutePeer({ roomId: roomUuid, targetUserId });
       if (res.ok) {
-        showToast("info", "Unmuted", "Participant has been unmuted");
+        showToast("info", "Mute lifted", "Participant can choose to unmute.");
       } else {
         showToast("error", "Error", res.error?.message || "Failed to unmute");
       }
@@ -2303,7 +2308,11 @@ function ServerRoom({
         onChat={handleChat}
         onCloseChat={handleCloseChat}
         onEjectDismiss={handleEjectDismiss}
-        onParticipantPress={isHost ? handleParticipantPress : undefined}
+        onParticipantPress={
+          isRoomModerator(moderationRole)
+            ? handleParticipantPress
+            : undefined
+        }
         onMuteAll={isHost ? handleToggleMuteAll : undefined}
         allMuted={allMuted}
         // Share is host + co-host only. Matches the product intent:
@@ -2404,7 +2413,7 @@ function ServerRoom({
           visible={showParticipantsSheet}
           participants={allParticipants}
           localUserId={localUser.id}
-          isHost={isHost}
+          actorRole={moderationRole}
           onDismiss={() => setShowParticipantsSheet(false)}
           onMute={handleMutePeer}
           onUnmute={handleUnmutePeer}
@@ -2474,19 +2483,19 @@ function ServerRoom({
           }}
         />
 
-        {/* Host action sheet — mute / co-host / remove */}
+        {/* Moderation action sheet — role-scoped mute / co-host / remove */}
         <ParticipantActions
+          actorRole={moderationRole}
+          actorId={videoRoom.localUser?.id}
           visible={!!actionTarget}
-          participant={
-            actionTarget
-              ? {
-                  userId: actionTarget.id,
-                  user: actionTarget.user,
-                  role: actionTarget.role,
-                  isMicOn: actionTarget.isMicOn,
-                }
-              : null
-          }
+          participant={(() => {
+            const current = allParticipants.find(
+              (member) => member.id === actionTarget?.id,
+            );
+            return current
+              ? { userId: current.id, user: current.user, role: current.role, isMicOn: current.isMicOn }
+              : null;
+          })()}
           onMute={handleMutePeer}
           onUnmute={handleUnmutePeer}
           onMakeCoHost={handleMakeCoHost}

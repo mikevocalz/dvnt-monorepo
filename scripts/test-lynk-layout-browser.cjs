@@ -31,7 +31,7 @@ const fixture = `
   const defaults = { role:params.get('role') || 'host', publishers:2, listeners:0, hasVideo:true, overlayOpen:false,
     insets:{top:0,right:0,bottom:0,left:0}, reactions:[], connection:'connected', rosterState:params.get('roster') || 'ready' };
   export const useFixture = create(() => ({...defaults}));
-  export const f = window.fixture = { actions:[], routes:[], sent:[], attachments:[], nativeMounts:[], roster:[], membersSync:null, membersError:null, commentsSync:null };
+  export const f = window.fixture = { actions:[], toasts:[], failActions:[], routes:[], sent:[], attachments:[], nativeMounts:[], roster:[], membersSync:null, membersError:null, commentsSync:null };
   const names = index => 'Participant ' + String(index).padStart(2,'0');
   function roster() {
     const c = useFixture.getState();
@@ -53,11 +53,15 @@ const fixture = `
     return { ...mediaActions, state:'live', isLive:true, error:null, micEnabled:false,cameraEnabled:false,
       localStream:null,localAudioStream:null,coPublishers:f.roster.filter(m=>m.role!=='listener' && m.userId!==localUser.id).map(m=>({peerId:m.userId,path:'fixture/'+m.userId})) };
   }
+  const moderationResult = (action, userId) => {
+    f.actions.push(action+':'+userId);
+    return f.failActions.includes(action) ? {ok:false,error:{message:'Fixture permission changed'}} : {ok:true};
+  };
   export const videoApi = {
     subscribeToMembers:(_id,_change,options)=> {f.membersSync=options.onSync;f.membersError=options.onError;queueMicrotask(()=>f.deliverRoster());return()=>{f.membersSync=null;f.membersError=null}},
     subscribeToRoomEvents:()=>noop,
-    muteAll:async()=>{f.actions.push('muteAll');return {ok:true}},unmuteAll:async()=>{f.actions.push('unmuteAll');return {ok:true}},mutePeer:async()=>({ok:true}),unmutePeer:async()=>({ok:true}),
-    promotePeer:async()=>({ok:true}),demotePeer:async()=>({ok:true}),kickUser:async()=>({ok:true})
+    muteAll:async()=>{f.actions.push('muteAll');return {ok:true}},unmuteAll:async()=>{f.actions.push('unmuteAll');return {ok:true}},mutePeer:async({targetUserId})=>moderationResult('mute',targetUserId),unmutePeer:async({targetUserId})=>moderationResult('unmute',targetUserId),
+    promotePeer:async()=>({ok:true}),demotePeer:async()=>({ok:true}),kickUser:async({targetUserId})=>moderationResult('kick',targetUserId),changeRole:async({targetUserId,newRole})=>moderationResult(newRole,targetUserId)
   };
   // The production timer only renders during the final minute. Keep a real
   // server deadline in that window so host header geometry includes the badge.
@@ -72,7 +76,7 @@ const boundaries = new Map([
   ['fixture', fixture],
   ['solito/navigation', `import {f} from 'fixture';const router={push:path=>f.routes.push(path),back:()=>{}};export const useRouter=()=>router;export const useParams=()=>({id:'fixture-room'});export const useSearchParams=()=>new URLSearchParams();`],
   ['@dvnt/app/lib/stores/auth-store', `import {create} from 'zustand';import {localUser} from 'fixture';export const useAuthStore=create(()=>({user:localUser}));`],
-  ['@dvnt/app/lib/stores/ui-store', `import {create} from 'zustand';import {noop} from 'fixture';export const useUIStore=create(()=>({showToast:noop}));`],
+  ['@dvnt/app/lib/stores/ui-store', `import {create} from 'zustand';import {f} from 'fixture';export const useUIStore=create(()=>({showToast:(...args)=>f.toasts.push(args)}));`],
   ['@dvnt/app/lib/lynk/useLynkBroadcast.web', `export {useLynkBroadcast} from 'fixture';`],
   ['@dvnt/app/lib/lynk/useSpeakingDetection.web', `export const useSpeakingDetection=()=>false;`],
   ['@dvnt/app/lib/lynk/useSpeakingPresence', `const empty={};export const useSpeakingPresence=()=>empty;`],
@@ -436,6 +440,73 @@ async function webCases(browser,url) {
       await evidence(page,'web-'+c.name+'-'+role);
       console.log('PASS rendered web '+c.name+' '+role+': 1/2/12-person layouts, dock, header, listeners, reactions, chat send/close');
     } catch(error) {await evidence(page,'FAIL-web-'+c.name+'-'+role,error);recordFailure('web-'+c.name+'-'+role,error)} finally {await context.close()}
+  }
+}
+
+// Exercise the production RoomInner callbacks and ParticipantsPanel, not copied
+// controls. Media/account boundaries remain fixtures; this is not a live call.
+async function moderationCases(browser,url) {
+  for(const c of cases)for(const role of (process.env.LYNK_MODERATION_ROLES || 'host,co-host,participant,moderator').split(',')) {
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,role);
+    try {
+      await page.keyboard.press('Enter');
+      await page.evaluate(role=>{
+        const f=window.fixture;
+        f.configure({publishers:12,listeners:0});
+        f.roster[1].role=role==='host'?'co-host':'host';
+        if(role==='moderator')f.roster[2].role='moderator';
+        f.deliverRoster();
+      },role);
+      await tick(page);
+      await page.getByRole('button',{name:'Participants',exact:true}).click();
+      const panel=page.getByRole('dialog',{name:'In the room · 12',exact:true});
+      await panel.waitFor();
+      const guest='Participant 03';
+      const mute=panel.getByRole('button',{name:'Mute '+guest,exact:true});
+      const allowed=role!=='participant';
+      assert.equal(await mute.count(),allowed?1:0,role+' individual moderation');
+      assert.equal(await panel.getByRole('button',{name:'Mute Local Host',exact:true}).count(),0,'never moderate self');
+      if(role!=='host')assert.equal(await panel.getByRole('button',{name:'Mute Participant 01',exact:true}).count(),0,'never moderate room host');
+      assert.equal(await panel.getByRole('button',{name:'Make '+guest+' a co-host',exact:true}).count(),role==='host'?1:0,'promotion is host-only');
+      assert.equal(await panel.getByRole('button',{name:'Mute everyone',exact:true}).count(),role==='host'?1:0,'bulk mute is host-only');
+      if(role==='moderator')assert.equal(await panel.getByRole('button',{name:'Remove Participant 02 from the room',exact:true}).count(),0,'moderator cannot kick peer moderator');
+      if(allowed) {
+        for(const [name,action] of [['Mute '+guest,'mute'],['Let '+guest+' unmute','unmute'],['Remove '+guest+' from the room','kick']]) {
+          const button=panel.getByRole('button',{name,exact:true});
+          await button.scrollIntoViewIfNeeded();await tick(page);
+          await assertReachable(button,c.name+' '+role+' '+action);
+          await button.click();
+          await page.waitForFunction(action=>window.fixture.actions.includes(action+':publisher-03'),action);
+          await page.evaluate(action=>window.fixture.failActions=[action],action);
+          await button.click();
+          await page.waitForFunction(()=>window.fixture.toasts.some(t=>t[0]==='error'&&t[2]==='Fixture permission changed'));
+          await page.evaluate(()=>{window.fixture.failActions=[];window.fixture.toasts=[]});
+        }
+      }
+      if(role==='host') {
+        await panel.getByRole('button',{name:'Make '+guest+' a co-host',exact:true}).click();
+        await panel.getByRole('button',{name:'Remove co-host from Participant 01',exact:true}).click();
+        await page.waitForFunction(()=>window.fixture.actions.includes('co-host:publisher-03')&&window.fixture.actions.includes('participant:publisher-01'));
+      }
+      await evidence(page,'moderation-'+c.name+'-'+role);
+      // Realtime role changes must remove and restore controls with the panel open.
+      await page.evaluate(()=>{const f=window.fixture;f.roster[0].role='participant';f.deliverRoster()});await tick(page);
+      assert.equal(await panel.getByRole('button',{name:'Mute '+guest,exact:true}).count(),0,'demotion removes controls immediately');
+      assert.equal(await page.locator('[data-tile="local"]').getByText('Co-host',{exact:true}).count(),0,'demotion removes stale local cohost badge');
+      await page.evaluate(()=>{const f=window.fixture;f.roster[0].role='co-host';f.deliverRoster()});await tick(page);
+      assert.equal(await panel.getByRole('button',{name:'Mute '+guest,exact:true}).count(),1,'promotion restores per-peer controls');
+      if(role!=='host')assert.equal(await page.locator('[data-tile="local"]').getByText('Co-host',{exact:true}).count(),1,'promotion updates local cohost badge');
+      assert.equal(await panel.getByRole('button',{name:'Make '+guest+' a co-host',exact:true}).count(),0,'cohost promotion does not grant host controls');
+      await panel.getByRole('button',{name:'Close',exact:true}).click();
+      await page.getByRole('button',{name:'Participants',exact:true}).click();
+      await panel.waitFor();
+      assert.equal(await panel.getByRole('button',{name:'Mute '+guest,exact:true}).count(),1,'reopen preserves current role');
+      await page.evaluate(()=>{const f=window.fixture;f.roster[0].status='left';f.deliverRoster()});await tick(page);
+      assert.equal(await page.getByRole('button',{name:'Mute '+guest,exact:true}).count(),0,'inactive actor has no controls');
+      assert.deepEqual(errors,[],role+' moderation runtime errors');
+      assert.deepEqual(unexpectedRequests,[],role+' no live endpoints');
+      console.log('PASS production moderation '+c.name+' '+role+': 12 members, callbacks, failure feedback, role changes, close/reopen');
+    } catch(error) {await evidence(page,'FAIL-moderation-'+c.name+'-'+role,error);recordFailure('moderation-'+c.name+'-'+role,error)} finally {await context.close()}
   }
 }
 
@@ -814,7 +885,7 @@ async function main() {
     // system executable or change sandbox settings to circumvent a denied run.
     browser=await load('@playwright/test').chromium.launch({headless:true});
     const url='http://127.0.0.1:'+server.address().port;
-    const suites={web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
+    const suites={moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
     for(const name of (process.env.LYNK_LAYOUT_SUITES||Object.keys(suites).join(',')).split(','))await suites[name](browser,url);
     assert.equal(failures.length,0,'Rendered regression failures:\n'+JSON.stringify(failures,null,2));
     console.log('PASS all rendered Lynk viewport, room and control layout regressions');
