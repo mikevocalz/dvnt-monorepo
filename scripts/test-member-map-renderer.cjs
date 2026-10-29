@@ -10,7 +10,7 @@ const http = require('node:http');
 const root = path.resolve(__dirname, '..');
 const member = {id:'fixture-1',username:'night owl',displayName:'Night Owl',avatarUrl:null,latitude:40.71,longitude:-74.01,expiresAt:'2099-01-01T00:00:00Z'};
 const mocks = {
-  '@vis.gl/react-google-maps': `import React from 'react'; const map={panTo:p=>window.fixture.camera=p,setZoom:z=>window.fixture.zoom=z};export const useMap=()=>map; export const useMapsLibrary=()=>({Size:class{constructor(w,h){this.width=w;this.height=h}}}); export const APILoadingStatus={LOADED:'loaded',FAILED:'failed',AUTH_FAILURE:'auth_failure'}; export const APIProvider=({children,apiKey})=>{window.fixture.providerKey=apiKey;return children}; export const useApiLoadingStatus=()=>window.fixture.status; export const Map=({children})=>React.createElement('div',{'data-testid':'google-map'},children); export const Marker=({title,onClick,position,icon})=>React.createElement('button',{'aria-label':title,onClick,'data-lat':position.lat,'data-lng':position.lng,'data-icon':icon?.url},title);`,
+  '@vis.gl/react-google-maps': require('./fixtures/member-map/google-overlay-boundary.cjs'),
   '@tanstack/react-query': `export const useQuery=()=>({data:[],isPending:false,isError:false,refetch:async()=>{}});`,
   '@dvnt/app/lib/api/event-map': `export const eventMapApi={getLocations:async()=>[]};`,
   'solito/navigation': `export const useRouter=()=>({push:p=>window.fixture.route=p});`,
@@ -21,7 +21,8 @@ async function bundle(key, native = false, expoKey = '') {
   const platformMocks = native ? {
     'react-native': `import React from 'react'; export const Platform={OS:'ios'}; const box=({children,accessibilityLabel,onPress,...props})=>React.createElement('div',{'aria-label':accessibilityLabel},children); export const View=box,Text=box,ScrollView=box,ActivityIndicator=()=>null;export const Pressable=({children,onPress,accessibilityLabel})=>React.createElement('button',{onClick:onPress,'aria-label':accessibilityLabel},children);export const Image=()=>React.createElement('span',null,'avatar');`,
     'expo-router': `export const useRouter=()=>({push:p=>window.fixture.route=p});`,
-    'expo-image': `const icon={fixtureImage:true};export const useImage=()=>icon;`,
+    'expo-image': `const icon={fixtureImage:true};export const useImage=source=>source?icon:null;`,
+    '@shopify/react-native-skia': require('./fixtures/native-map-icon-boundary.cjs'),
     'expo-maps': `import React from 'react';const Map=({markers=[],annotations=[],onMarkerClick,onAnnotationClick,cameraPosition})=>{window.fixture.camera=cameraPosition;return React.createElement('div',{'data-testid':'native-map'},...markers.map(m=>React.createElement('button',{key:m.id,'data-monogram':m.monogram,onClick:()=>onMarkerClick(m)},m.title)),...annotations.map(m=>React.createElement('button',{key:m.id,'data-photo':!!m.icon,onClick:()=>onAnnotationClick(m)},m.title)))};export const AppleMaps={View:Map},GoogleMaps={View:Map};`,
   } : {};
   const boundaries = {...mocks, ...platformMocks};
@@ -31,7 +32,7 @@ async function bundle(key, native = false, expoKey = '') {
  const scripts={expo:(await bundle('  ',false,'  synthetic-expo-key  ')).outputFiles[0].text,configured:(await bundle('synthetic-not-a-real-key')).outputFiles[0].text,missing:(await bundle('')).outputFiles[0].text,native:(await bundle('',true)).outputFiles[0].text};
  const tw=path.dirname(require.resolve('tailwindcss/package.json'));
  const globals=fs.readFileSync(path.join(root,'apps/web/src/app/(frontend)/globals.css'),'utf8');
- const candidates=fs.readFileSync(path.join(root,'packages/app/features/events/ui/member-map.web.tsx'),'utf8').match(/[a-zA-Z0-9_!@#%./:[\](),+*=&<>-]+/g)||[];
+ const candidates=(fs.readFileSync(path.join(root,'packages/app/features/events/ui/member-map.web.tsx'),'utf8')+fs.readFileSync(path.join(root,'packages/app/features/events/ui/rounded-map-marker.web.tsx'),'utf8')).match(/[a-zA-Z0-9_!@#%./:[\](),+*=&<>-]+/g)||[];
  const css=(await compile(fs.readFileSync(path.join(tw,'theme.css'),'utf8')+'\n'+fs.readFileSync(path.join(tw,'preflight.css'),'utf8')+'\n@tailwind utilities important;\n'+globals.slice(globals.indexOf('/* ── Deviant brand tokens')))).build(candidates);
  const server=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<style>${css}</style><body style="background:#06070d;color:white"><div id="root"></div><script>window.fixture=${JSON.stringify({status:'loaded',sharing:true,error:false,eventPins:[{id:'event-1',title:'Synthetic Party',latitude:40.72,longitude:-74.02,flyerUrl:'https://fixture.example.test/flyer.png'}],refreshes:0,retries:0,data:{members:[member],self:{...member,id:'self-1',username:'self',displayName:'Self'},center:{latitude:40.7,longitude:-74},expiresAt:'2099-01-01T00:00:00Z'}})};</script><script>${scripts[req.url==='/expo'?'expo':req.url==='/native'?'native':req.url==='/missing'?'missing':'configured']}</script>`);});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -53,8 +54,26 @@ async function bundle(key, native = false, expoKey = '') {
   assert.equal(await page.getByRole('button',{name:'Update my location',exact:true}).count(),0);
   await page.evaluate(()=>{window.fixture.selectedEventId=null;window.renderFixture()});
   await page.waitForFunction(()=>window.fixture.camera.lat===40.7);
-  await page.waitForFunction(()=>document.querySelector('[aria-label="Event: Synthetic Party"]')?.getAttribute('data-icon')==='https://fixture.example.test/flyer.png');
+  await page.locator('[aria-label="Event: Synthetic Party"] img').waitFor();
+  for(const label of ['Event: Synthetic Party','You — approximate area','Night Owl — approximate area']) {
+    const marker=page.getByRole('button',{name:label,exact:true});
+    assert.equal(await marker.evaluate(e=>getComputedStyle(e).borderRadius),'4px');
+    assert.equal(await marker.evaluate(e=>getComputedStyle(e).overflow),'hidden');
+  }
   await page.getByRole('button',{name:'Event: Synthetic Party'}).click();assert.equal(await page.evaluate(()=>window.fixture.eventOpened),'event-1');
+  const flyer=page.getByRole('button',{name:'Event: Synthetic Party',exact:true});
+  await flyer.focus();await page.keyboard.press('Enter');assert.equal(await page.evaluate(()=>window.fixture.eventOpened),'event-1','keyboard opens event');
+  assert.equal(await flyer.locator('img').getAttribute('referrerpolicy'),'no-referrer');
+  await page.route('https://fixture.example.test/broken.png',r=>r.abort());
+  await page.evaluate(()=>{window.fixture.eventPins[0].flyerUrl='https://fixture.example.test/broken.png';window.renderFixture()});
+  await flyer.getByText('EVENT',{exact:true}).waitFor();
+  assert.equal(await flyer.evaluate(e=>getComputedStyle(e).borderRadius),'4px','failed image keeps rounded fallback');
+  await page.evaluate(()=>{window.fixture.eventPins[0].flyerUrl='https://fixture.example.test/flyer.png';window.renderFixture()});
+  await flyer.locator('img').waitFor();
+  await page.evaluate(()=>{window.fixture.eventPins[0].latitude=40.73;window.renderFixture()});
+  await page.waitForFunction(()=>document.querySelector('[aria-label="Event: Synthetic Party"]')?.dataset.lat==='40.73');
+  assert.equal(await flyer.count(),1,'coordinate change removes previous overlay');
+
   for(const width of [320,393,768,1280]) {
    await page.setViewportSize({width,height:900});
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`People UI fits ${width}px`);

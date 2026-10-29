@@ -1,0 +1,39 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const {transformSync} = require('esbuild');
+const source=fs.readFileSync(path.join(__dirname,'../packages/app/features/events/ui/native-map-icon.ts'),'utf8');
+const code=transformSync(source,{loader:'ts',format:'cjs'}).code;
+function fixture(options={}) {
+ const calls=[];
+ const instance=name=>({dispose:()=>calls.push(['dispose',name])});
+ const image={...instance('image'),width:()=>options.width??88,height:()=>options.height??88};
+ const canvas={clear:color=>calls.push(['clear',color]),clipRRect:(rect,op,aa)=>calls.push(['clip',rect,op,aa]),drawImageRect:(_,src,dst)=>{calls.push(['draw',src,dst]);if(options.throwDraw)throw Error('draw failed')}};
+ const skia={ClipOp:{Intersect:1},ImageFormat:{PNG:4},Skia:{
+  Data:{fromURI:async uri=>{calls.push(['load',uri]);if(options.throwLoad)throw Error('load failed');return instance('data')}},
+  Image:{MakeImageFromEncoded:()=>options.invalidImage?null:image},
+  Surface:{Make:(width,height)=>{calls.push(['surface',width,height]);return options.noSurface?null:{...instance('surface'),getCanvas:()=>canvas,flush:()=>calls.push(['flush']),makeImageSnapshot:()=>({...instance('snapshot'),encodeToBase64:fmt=>{calls.push(['encode',fmt]);return options.emptyEncoding?'':'png-bytes'}})}}},
+  Paint:()=>instance('paint'),Color:value=>value,XYWHRect:(x,y,width,height)=>({x,y,width,height}),RRectXY:(rect,rx,ry)=>({rect,rx,ry}),
+ }};
+ const exports={};const context={module:{exports},exports,require:name=>{assert.equal(name,'@shopify/react-native-skia');return skia}};vm.runInNewContext(code,context);
+ return {calls,api:context.module.exports};
+}
+(async()=>{
+ for(const height of [44,58]){
+  const {calls,api}=fixture();assert.equal(api.MAP_MARKER_RADIUS,4);
+  assert.equal(await api.roundedNativeMapIcon('https://fixture.test/image.png',height),'data:image/png;base64,png-bytes');
+  assert.deepEqual(calls.find(c=>c[0]==='surface'),['surface',44,height]);
+  const clip=calls.find(c=>c[0]==='clip');assert.equal(clip[1].rx,4);assert.equal(clip[1].ry,4);assert.equal(clip[2],1);assert.equal(clip[3],true);
+  const draw=calls.find(c=>c[0]==='draw');assert.equal(draw[2].width,44);assert.equal(draw[2].height,height);
+  assert.ok(Math.abs(draw[1].width/draw[1].height-44/height)<1e-10,'crop preserves target aspect, no stretching');
+  assert.deepEqual(calls.filter(c=>c[0]==='dispose').map(c=>c[1]),['snapshot','paint','surface','image','data']);
+ }
+ for(const [options,names] of [[{invalidImage:true},['data']],[{noSurface:true},['image','data']],[{emptyEncoding:true},['snapshot','paint','surface','image','data']]]){
+  const {calls,api}=fixture(options);assert.equal(await api.roundedNativeMapIcon('https://fixture.test/image.png',44),null);assert.deepEqual(calls.filter(c=>c[0]==='dispose').map(c=>c[1]),names);
+ }
+ const error=fixture({throwDraw:true});await assert.rejects(error.api.roundedNativeMapIcon('https://fixture.test/image.png',44),/draw failed/);assert.deepEqual(error.calls.filter(c=>c[0]==='dispose').map(c=>c[1]),['paint','surface','image','data']);
+ const failed=fixture({throwLoad:true});await assert.rejects(failed.api.roundedNativeMapIcon('https://fixture.test/image.png',44),/load failed/);
+ const css=fs.readFileSync(path.join(__dirname,'../apps/mobile/global.css'),'utf8');assert.match(css,/--radius:\s*0\.5rem/);assert.match(css,/--radius-sm:\s*calc\(var\(--radius\) - 4px\)/);
+ console.log('PASS native map icon: radius token parity, avatar/flyer cover crop, PNG encoding, decode/surface/load/draw failures and deterministic disposal');
+})().catch(error=>{console.error(error);process.exitCode=1});
