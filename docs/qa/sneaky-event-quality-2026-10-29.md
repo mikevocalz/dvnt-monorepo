@@ -38,3 +38,8 @@ Real signed-in host/guest sessions, physical iOS/Android audio/video permission 
 Free attendee admission is not unlimited hosting. Existing host subscription limits remain unchanged (the free plan is capped; explicit-end events retain the existing five-minute policy). Confirm an appropriate hosting plan before a long afterparty.
 
 Room preparation is not a cross-service transaction. A room-create response lost across a full reload can still leave an orphan private room; saved successful responses and same-tab pending requests are reused, but this patch does not claim server-side room-creation idempotency or cleanup. Previously published events already missing a room are not silently repaired or relinked. Unlinked prepared rooms that expired before a retry are rejected authoritatively; only an explicit room_unavailable refusal clears the same account/draft cache. Uncertain network failures retain it.
+
+
+## Pre-release production schema correction
+
+Read-only production metadata on October 29 verified the actual token columns are `is_revoked` and `revoked_at`, not `revoked`. The SQL fixture was corrected to mirror those columns first and reproduced `column "revoked" does not exist` against the prior migration. The cleanup now sets both the revocation flag and timestamp, preserving an existing timestamp, and the same fixture passes. The remaining referenced columns and state constraints were independently compared with production metadata. This is schema parity verification, not a live multiuser media test.

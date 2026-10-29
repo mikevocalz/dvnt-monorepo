@@ -58,7 +58,8 @@ BEGIN
   UPDATE public.video_rooms SET status = 'ended', ended_at = coalesce(ended_at, now()), participant_count = 0 WHERE id = r.id;
   UPDATE public.video_room_members SET status = 'left', left_at = now(), hand_raised = false
     WHERE room_id = r.id AND status = 'active';
-  UPDATE public.video_room_tokens SET revoked = true WHERE room_id = r.id AND revoked = false;
+  UPDATE public.video_room_tokens SET is_revoked = true, revoked_at = coalesce(revoked_at, now())
+    WHERE room_id = r.id AND (is_revoked IS DISTINCT FROM true OR revoked_at IS NULL);
   IF did_end THEN
     INSERT INTO public.video_room_events(room_id, type, actor_id, payload)
       VALUES(r.id, 'room_ended', r.created_by, jsonb_build_object('reason', 'event_session_expired'));

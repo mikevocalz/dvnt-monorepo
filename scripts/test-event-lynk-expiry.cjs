@@ -19,7 +19,7 @@ CREATE TABLE public.video_rooms (
  ended_at timestamptz, participant_count integer DEFAULT 1, created_at timestamptz DEFAULT now(), is_public boolean DEFAULT false
 );
 CREATE TABLE public.events(id integer PRIMARY KEY, lynk_room_id uuid, start_date timestamptz, end_date timestamptz, host_id text DEFAULT 'fixture-host', status text DEFAULT 'active');
-CREATE TABLE public.video_room_tokens(room_id integer, revoked boolean DEFAULT false);
+CREATE TABLE public.video_room_tokens(room_id integer, is_revoked boolean DEFAULT false, revoked_at timestamptz);
 CREATE TABLE public.event_lynk_lifecycle(event_id integer, state text DEFAULT 'scheduled', ended_at timestamptz, updated_at timestamptz);
 CREATE TABLE public.video_room_members(room_id integer, status text DEFAULT 'active', left_at timestamptz, hand_raised boolean DEFAULT true);
 CREATE TABLE public.video_room_events(room_id integer, type text, actor_id text, payload jsonb);
@@ -60,7 +60,8 @@ END $$;
 -- The linked room's original deadline is past, but its shifted event deadline
 -- is still tomorrow. Then move the synthetic schedule past its five-minute cap.
 UPDATE video_rooms SET created_at=now()-interval '2 hours', ends_at=now()-interval '115 minutes' WHERE id=2;
-INSERT INTO video_room_tokens VALUES(2,false);
+INSERT INTO video_room_tokens(room_id,is_revoked) VALUES(2,false);
+INSERT INTO video_room_tokens(room_id,is_revoked,revoked_at) VALUES(2,true,'2000-01-01T00:00:00Z');
 INSERT INTO event_lynk_lifecycle(event_id) VALUES(2);
 DO $$ BEGIN
  IF public.expire_event_lynk_room(2) THEN RAISE EXCEPTION 'Future event prematurely expired'; END IF;
@@ -70,8 +71,9 @@ DO $$ BEGIN
  IF NOT public.expire_event_lynk_room(2) THEN RAISE EXCEPTION 'Shifted five-minute cap not enforced'; END IF;
  IF public.expire_event_lynk_room(2) THEN RAISE EXCEPTION 'Event expiry is not idempotent'; END IF;
  IF (SELECT count(*) FROM video_room_events WHERE room_id=2) <> 1 THEN RAISE EXCEPTION 'Event audit duplicated'; END IF;
+ IF NOT EXISTS (SELECT 1 FROM video_room_tokens WHERE room_id=2 AND revoked_at='2000-01-01T00:00:00Z') THEN RAISE EXCEPTION 'Original revocation timestamp replaced'; END IF;
  IF EXISTS (SELECT 1 FROM video_room_members WHERE room_id=2 AND status='active') OR
-    EXISTS (SELECT 1 FROM video_room_tokens WHERE room_id=2 AND revoked=false) OR
+    EXISTS (SELECT 1 FROM video_room_tokens WHERE room_id=2 AND (is_revoked IS DISTINCT FROM true OR revoked_at IS NULL)) OR
     EXISTS (SELECT 1 FROM video_rooms WHERE id=2 AND participant_count<>0) OR
     EXISTS (SELECT 1 FROM event_lynk_lifecycle WHERE event_id=2 AND state<>'ended') THEN
   RAISE EXCEPTION 'Atomic event expiry cleanup incomplete';

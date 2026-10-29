@@ -207,7 +207,7 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .single();
 
-      if (tokenLookupError || !existingToken || existingToken.revoked === true || existingToken.revoked_at) {
+      if (tokenLookupError || !existingToken || existingToken.is_revoked === true || existingToken.revoked_at) {
         return errorResponse("forbidden", "Your session has been revoked");
       }
     }
@@ -225,15 +225,19 @@ Deno.serve(async (req) => {
 
     if (recentKickBan) {
       // Check if this event is newer than the user's current active token
-      const { data: latestToken } = await supabase
+      const { data: latestToken, error: latestTokenError } = await supabase
         .from("video_room_tokens")
         .select("*")
         .eq("room_id", internalRoomId)
         .eq("user_id", userId)
-        .eq("revoked", false)
+        .eq("is_revoked", false)
         .order("issued_at", { ascending: false })
         .limit(1)
         .single();
+
+      if (latestTokenError || !latestToken) {
+        return errorResponse("forbidden", "Could not verify your current session");
+      }
 
       if (
         latestToken &&
@@ -247,13 +251,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Revoke old tokens
-    await supabase
+    // Fail closed if old credentials cannot be revoked in the live schema.
+    const { error: revokeError } = await supabase
       .from("video_room_tokens")
-      .update({ revoked: true })
+      .update({ is_revoked: true, revoked_at: new Date().toISOString() })
       .eq("room_id", internalRoomId)
       .eq("user_id", userId)
-      .eq("revoked", false);
+      .eq("is_revoked", false);
+    if (revokeError) {
+      return errorResponse("internal_error", "Could not refresh your session. Please retry.");
+    }
 
     // Create new peer token in Fishjam
     const jti = generateJti();
