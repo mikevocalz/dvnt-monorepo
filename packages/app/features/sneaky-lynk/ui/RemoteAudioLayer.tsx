@@ -14,6 +14,7 @@
 import React, { useEffect, useMemo } from "react";
 import { useAudioPlayer, type BroadcastInfo } from "react-native-moq";
 import type { VideoParticipant } from "./VideoGrid";
+import { nativePlaybackKey } from "./native-playback-key";
 
 interface RemoteAudioLayerProps {
   participants: VideoParticipant[];
@@ -47,7 +48,10 @@ export function RemoteAudioLayer({ participants }: RemoteAudioLayerProps) {
   return (
     <>
       {audioOnly.map((p) => (
-        <ParticipantAudio key={p.id} broadcast={p.broadcast as BroadcastInfo} />
+        <ParticipantAudio
+          key={`${p.id}:${nativePlaybackKey(p.broadcast as BroadcastInfo)}`}
+          broadcast={p.broadcast as BroadcastInfo}
+        />
       ))}
     </>
   );

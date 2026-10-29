@@ -24,7 +24,7 @@ const dependency = (name) => require(resolve(name));
     bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic',
     plugins: [{ name: 'native-stage-lifecycle-adapter', setup(build) {
       build.onResolve({ filter: /^(react|react\/jsx-runtime)$/ }, ({ path: name }) => ({ path: resolve(name), external: true }));
-      build.onResolve({ filter: /^(react-native|react-native-safe-area-context|lucide-react-native|\.\/VideoGrid)$/ }, ({ path: name }) => ({ path: name, namespace: 'native-adapter' }));
+      build.onResolve({ filter: /^(react-native|react-native-safe-area-context|lucide-react-native|\.\/VideoGrid|\.\/RoomVideoPlayback)$/ }, ({ path: name }) => ({ path: name, namespace: 'native-adapter' }));
       build.onLoad({ filter: /.*/, namespace: 'native-adapter' }, ({ path: name }) => ({ loader: 'jsx', contents: name === 'react-native' ? `
         import React, {useLayoutEffect} from 'react';
         export function View({children, testID, onLayout, style}) {
@@ -36,7 +36,7 @@ const dependency = (name) => require(resolve(name));
         export const ScrollView=({children,testID})=><div data-testid={testID}>{children}</div>;
         export const StyleSheet={create:styles=>styles};
         export const useWindowDimensions=()=>globalThis.__nativeStageSize;
-      ` : name === 'react-native-safe-area-context' ? `export const useSafeAreaInsets=()=>globalThis.__nativeStageInsets;` : name === './VideoGrid' ? `
+      ` : name === 'react-native-safe-area-context' ? `export const useSafeAreaInsets=()=>globalThis.__nativeStageInsets;` : name === './RoomVideoPlayback' ? `export const RoomVideoPlaybackProvider=({children})=>children;` : name === './VideoGrid' ? `
         import React,{useEffect} from 'react';
         export function VideoTile({participant}) {
           const id=participant.id;

@@ -7,11 +7,14 @@
  *     shows the camera whether or not we are publishing yet).
  *   - `broadcast` — a remote participant's live `BroadcastInfo` → `<VideoView>`.
  *
- * Playback starts on mount and stops on unmount, so a tile that unmounts stops
- * pulling media rather than quietly decoding off-screen.
+ * In the room stage, playback is owned by RoomVideoPlaybackProvider so a
+ * promotion can move a native view without restarting audio/video. Standalone
+ * consumers retain mount/unmount ownership.
  */
 
 import { memo, useEffect } from "react";
+import { useRoomVideoPlayback } from "./RoomVideoPlayback";
+import { nativePlaybackKey } from "./native-playback-key";
 import { StyleSheet } from "react-native";
 import {
   VideoView,
@@ -20,6 +23,29 @@ import {
   type BroadcastInfo,
   type CameraTrack,
 } from "react-native-moq";
+
+function OwnedRemoteVideo({
+  broadcast,
+  style,
+}: {
+  broadcast: BroadcastInfo;
+  style?: any;
+}) {
+  const players = useRoomVideoPlayback();
+  if (players === null) {
+    return (
+      <RemoteVideo
+        key={nativePlaybackKey(broadcast)}
+        broadcast={broadcast}
+        style={style}
+      />
+    );
+  }
+  const player = players.get(nativePlaybackKey(broadcast));
+  return player ? (
+    <VideoView player={player} style={style ?? StyleSheet.absoluteFill} />
+  ) : null;
+}
 
 function RemoteVideo({
   broadcast,
@@ -68,7 +94,7 @@ export const RoomVideo = memo(function RoomVideo({
     );
   }
   if (broadcast) {
-    return <RemoteVideo broadcast={broadcast as BroadcastInfo} style={style} />;
+    return <OwnedRemoteVideo broadcast={broadcast as BroadcastInfo} style={style} />;
   }
   return null;
 });

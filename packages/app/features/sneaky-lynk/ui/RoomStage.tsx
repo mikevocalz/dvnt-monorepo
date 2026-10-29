@@ -9,6 +9,7 @@ import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-n
 import { Users } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { VideoTile, type VideoParticipant } from "./VideoGrid";
+import { RoomVideoPlaybackProvider } from "./RoomVideoPlayback";
 import { nativeRoomStageLayout, NATIVE_CROWD_HEADER_HEIGHT } from "./native-stage-layout";
 
 interface RoomStageProps {
@@ -22,7 +23,15 @@ interface RoomStageProps {
   hostOverlay?: React.ReactNode;
 }
 
-export const RoomStage = memo(function RoomStage({
+export const RoomStage = memo(function RoomStage(props: RoomStageProps) {
+  return (
+    <RoomVideoPlaybackProvider participants={props.participants}>
+      <RoomStageLayout {...props} />
+    </RoomVideoPlaybackProvider>
+  );
+});
+
+function RoomStageLayout({
   participants,
   activeSpeakers,
   isHost,
@@ -146,7 +155,7 @@ export const RoomStage = memo(function RoomStage({
       </View>
     </View>
   );
-});
+}
 
 const styles = StyleSheet.create({
   root: { flex: 1, minHeight: 0, overflow: "hidden" },

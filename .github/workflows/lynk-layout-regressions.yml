@@ -9,6 +9,7 @@ on:
       - 'packages/ui/src/video/RoomTimer*'
       - 'scripts/test-lynk-layout-browser.cjs'
       - 'scripts/test-lynk-native-stage-lifecycle.cjs'
+      - 'scripts/test-lynk-native-playback-ownership.cjs'
       - 'scripts/test-lynk-guest-gallery-dom.cjs'
       - 'scripts/test-lynk-watermark-dom.cjs'
       - '.github/workflows/lynk-layout-regressions.yml'
@@ -43,7 +44,9 @@ jobs:
       - name: Preserve native media tiles across roster and viewport changes
         env:
           LYNK_PROBE_DEPS: ${{ runner.temp }}/lynk-layout
-        run: node scripts/test-lynk-native-stage-lifecycle.cjs
+        run: |
+          node scripts/test-lynk-native-stage-lifecycle.cjs
+          node scripts/test-lynk-native-playback-ownership.cjs
       - name: Render real room, media tiles, panels and native controls
         env:
           NODE_PATH: ${{ runner.temp }}/lynk-layout/node_modules
