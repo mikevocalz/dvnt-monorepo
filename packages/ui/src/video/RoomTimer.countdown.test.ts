@@ -18,13 +18,16 @@ import {
 const T0 = 1_700_000_000_000;
 const at = (elapsedMs: number) => countdownAt(T0, FREE_ROOM_DURATION_MS, T0 + elapsedMs);
 
-test("stays hidden until the last minute", () => {
-  assert.equal(at(0).visible, false);
-  assert.equal(at(FREE_ROOM_DURATION_MS - COUNTDOWN_THRESHOLD_MS - 1).visible, false);
+test("limited rooms show time from the start, not only the last minute", () => {
+  assert.equal(at(0).visible, true);
+  assert.equal(at(0).display, "5:00");
+  assert.equal(at(FREE_ROOM_DURATION_MS - COUNTDOWN_THRESHOLD_MS - 1).visible, true);
+  assert.equal(at(FREE_ROOM_DURATION_MS - COUNTDOWN_THRESHOLD_MS - 1).warning, false);
 });
 
-test("appears exactly at the threshold", () => {
-  assert.equal(at(FREE_ROOM_DURATION_MS - COUNTDOWN_THRESHOLD_MS).visible, true);
+test("warns exactly at thirty seconds", () => {
+  assert.equal(COUNTDOWN_THRESHOLD_MS, 30_000);
+  assert.equal(at(FREE_ROOM_DURATION_MS - COUNTDOWN_THRESHOLD_MS).warning, true);
 });
 
 test("formats m:ss with a padded seconds field", () => {
@@ -33,9 +36,10 @@ test("formats m:ss with a padded seconds field", () => {
   assert.equal(at(FREE_ROOM_DURATION_MS - 59_000).display, "0:59");
 });
 
-test("hides again once expired rather than showing 0:00 forever", () => {
+test("preserves an explicit expired state instead of silently disappearing", () => {
   const done = at(FREE_ROOM_DURATION_MS);
-  assert.equal(done.visible, false);
+  assert.equal(done.visible, true);
+  assert.equal(done.warning, false);
   assert.equal(done.expired, true);
   assert.equal(done.remainingMs, 0);
 });
@@ -58,4 +62,12 @@ test("a paid room with a longer allowance uses the same rule", () => {
   const c = countdownAt(T0, hour, T0 + hour - 30_000);
   assert.equal(c.visible, true);
   assert.equal(c.display, "0:30");
+});
+
+test("invalid or unlimited deadlines do not invent a timer", () => {
+  for (const deadline of [NaN, Infinity]) {
+    const result = countdownAt(0, deadline, T0);
+    assert.equal(result.visible, false);
+    assert.equal(result.expired, false);
+  }
 });

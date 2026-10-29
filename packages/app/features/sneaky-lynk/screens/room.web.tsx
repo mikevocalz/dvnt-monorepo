@@ -999,7 +999,8 @@ function RoomInner({
   const { entitlements, isLoading: entitlementsLoading } = useEntitlements();
   // Same boolean the legacy check derived (active && plan_id !== "free"):
   // every paid plan grants unlimited session duration. `null` while unresolved,
-  // which is what the store's tri-state and `showTimer` below expect.
+  // which is what the legacy-host fallback expects. Server deadlines display
+  // for every role regardless of their personal subscription.
   const resolvedIsPaidHost = entitlementsLoading
     ? null
     : entitlements.sessionMinutes === null;
@@ -1339,15 +1340,8 @@ function RoomInner({
   // Falls back to the entitlement read only when the backend returned no
   // endsAt field at all (pre-deploy), which is the only case the client still
   // has to guess.
-  const serverLimited = serverEndsAt != null;
-  const showTimer =
-    isHost &&
-    timerStartedAt != null &&
-    (serverEndsAt !== undefined ? serverLimited : isPaidHost === false);
-  const timerDurationMs =
-    serverEndsAt != null && timerStartedAt != null
-      ? new Date(serverEndsAt).getTime() - timerStartedAt
-      : undefined;
+  const showTimer = serverEndsAt != null ||
+    (serverEndsAt === undefined && isHost && timerStartedAt != null && isPaidHost === false);
 
   return (
     <RoomViewport>
@@ -1400,12 +1394,12 @@ function RoomInner({
         onUnmuteAll={unmuteAll}
         onEvent={() => lynkEvent && router.push(`/feed/events/${lynkEvent.id}`)}
         timer={showTimer ? <RoomTimer
-          startedAt={timerStartedAt}
-          durationMs={timerDurationMs}
+          startedAt={timerStartedAt ?? undefined}
+          endsAt={serverEndsAt}
           compact
           onTimeUp={() => {
-            setShowTimeUp(true);
-            // The final-minute badge stays visible; expiry still stops media.
+            if (isHost) setShowTimeUp(true);
+            // Every participant observes the same server deadline.
             lynkRef.current.setCameraEnabled(false);
             lynkRef.current.setMicEnabled(false);
           }}

@@ -8,23 +8,24 @@ import { FREE_ROOM_DURATION_MS, useRoomCountdown } from './RoomTimer.countdown';
 
 export function RoomTimer({
   startedAt,
+  endsAt,
   durationMs = FREE_ROOM_DURATION_MS,
   onTimeUp,
   className,
-  compact = false,
 }: RoomTimerProps) {
-  const { display, visible, remainingMs } = useRoomCountdown(startedAt, durationMs, onTimeUp);
+  const { display, visible, warning, expired } = useRoomCountdown(startedAt, durationMs, onTimeUp, endsAt);
   if (!visible) return null;
 
   return (
-    <span
-      role="timer"
-      aria-live={remainingMs <= 10_000 ? 'assertive' : 'polite'}
-      aria-label={`${display} left in this room`}
-      // motion-safe: the pulse is decoration; the number is the information.
-      className={`flex shrink-0 items-center bg-[#FC253A]/90 font-mono font-bold text-white motion-safe:animate-pulse ${compact ? 'gap-1 rounded-md px-1 py-0 text-[10px] leading-4' : 'gap-1.5 rounded-[10px] px-2.5 py-1.5 text-[13px]'} ${className ?? ''}`}
-    >
-      {compact ? null : <Clock size={14} aria-hidden="true" />} {display}
+    <span data-room-countdown data-warning={warning ? 'true' : 'false'}
+      className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2.5 py-1.5 text-xs ${warning || expired ? 'bg-[#FC253A]/20 text-red-100' : 'bg-white/8 text-white/90'} ${className ?? ''}`}>
+      <Clock size={14} aria-hidden="true" />
+      <span role="timer" aria-live="off" aria-label={expired ? 'Session ended' : `${display} left in this room`} className="whitespace-nowrap font-mono font-bold tabular-nums">
+        {expired ? 'Session ended' : `Time left ${display}`}
+      </span>
+      <span role="status" aria-live="polite" aria-atomic="true" className="font-medium">
+        {expired ? 'This room has ended.' : warning ? 'Ending in 30 seconds or less' : ''}
+      </span>
     </span>
   );
 }
