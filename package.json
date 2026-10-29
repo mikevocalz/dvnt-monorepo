@@ -66,7 +66,7 @@
     "test:comp-tickets": "node --test packages/app/lib/tickets/comp-recipients.test.ts apps/mobile/supabase/functions/bulk-comp-tickets/index.test.cjs apps/mobile/supabase/functions/transfer-ticket/comp-transfer.test.cjs apps/mobile/supabase/functions/transfer-ticket/wallet-race.test.cjs && node scripts/test-comp-quantity-ui.cjs",
     "test:comp-tickets:sql": "node --test apps/mobile/supabase/functions/bulk-comp-tickets/quantity-sql.test.cjs",
     "test:cart-recovery": "node --test apps/mobile/supabase/functions/stripe-webhook/cart-payment-retry.test.cjs apps/mobile/supabase/functions/reconcile-orders/cart-recovery.test.cjs apps/mobile/supabase/functions/_shared/cart-issuance.test.cjs apps/mobile/supabase/functions/_shared/payment-safety.test.cjs",
-    "test:cart-recovery:sql": "node --test apps/mobile/supabase/functions/_shared/paid-cart-sql.test.cjs"
+    "test:cart-recovery:sql": "node --test apps/mobile/supabase/functions/_shared/paid-cart-sql.cjs"
   },
   "keywords": [],
   "author": "",

@@ -1,3 +1,5 @@
+// Explicit-only harness: `npm run test:cart-recovery:sql` in the dedicated PostgreSQL CI job.
+// Keep out of the Deno unit-test discovery glob; subprocess/PostgreSQL dependencies are intentional.
 // Disposable PostgreSQL only: no credentials and no production endpoint.
 const { test }=require('node:test');
 const assert=require('node:assert/strict');
