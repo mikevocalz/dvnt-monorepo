@@ -50,7 +50,10 @@ Deno.serve(async(req: Request) => {
     if(typeof body.locationEnabled!=="boolean"||typeof body.eventsMapEnabled!=="boolean"||
        !Number.isSafeInteger(body.expectedRevision)||body.expectedRevision<0)
       return json({ok:false,error:"Valid settings and revision required"},400);
-    name="member_map_update_settings";
+    if(body.shareDurationHours!==undefined && body.shareDurationHours!==1 && body.shareDurationHours!==4)
+      return json({ok:false,error:"Map sharing duration must be 1 or 4 hours"},400);
+    // Older builds confirmed one hour; only new explicit opt-ins request four.
+    name=body.shareDurationHours===4?"member_map_update_settings_four_hours":"member_map_update_settings";
     args={...args,p_expected_revision:body.expectedRevision,p_location_enabled:body.locationEnabled,
       p_events_map_enabled:body.eventsMapEnabled,p_consent_version:typeof body.consentVersion==="string"?body.consentVersion:null};
   } else {

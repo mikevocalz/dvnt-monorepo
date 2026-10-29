@@ -74,3 +74,15 @@ test('nearby forwards self and peers from the authorized RPC without dropping se
  const result=await harness({rpcData:data}).call({action:'nearby'});
  assert.equal(result.status,200);assert.deepEqual(result.body,{ok:true,data});assert.match(result.cache,/no-store/);
 });
+
+test('four-hour duration requires explicit bounded request; old clients retain original RPC',async()=>{
+ const base={action:'updateSettings',expectedRevision:0,locationEnabled:true,eventsMapEnabled:true,consentVersion:'events-map-v1'};
+ for(const duration of [undefined,1,4]) {
+  const h=harness(); assert.equal((await h.call({...base,...(duration===undefined?{}:{shareDurationHours:duration})})).status,200);
+  assert.equal(h.calls[0].name,duration===4?'member_map_update_settings_four_hours':'member_map_update_settings');
+  assert.equal(h.calls[0].args.p_user_id,'signed-in-viewer');
+ }
+ for(const duration of [null,0,2,24,'4',true]) {
+  const h=harness();assert.equal((await h.call({...base,shareDurationHours:duration})).status,400);assert.equal(h.calls.length,0);
+ }
+});

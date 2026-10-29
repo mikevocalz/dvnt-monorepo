@@ -48,6 +48,15 @@ async function bundle(key, native = false, expoKey = '') {
   assert.equal(await page.getByRole('button',{name:'Night Owl — approximate area'}).getAttribute('data-lat'),'40.71');
   assert.equal(await page.locator('[data-testid="google-map"]').count(),1,'one map holds events and avatars');
   await page.getByRole('button',{name:'You — approximate area'}).waitFor();
+  // Multiple consenting members remain available independently, including a
+  // shared coarse cell. The accessible list must not collapse overlapping pins.
+  await page.evaluate(()=>{const m=window.fixture.data.members[0];window.fixture.data.members.push({...m,id:'fixture-2',username:'second-peer',displayName:'Second Peer'});window.renderFixture()});
+  await page.getByRole('button',{name:'Second Peer — approximate area',exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Night Owl — approximate area',exact:true}).count(),1);
+  await page.getByRole('list',{name:'Nearby members'}).getByRole('button',{name:/Second Peer/}).click();
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/profile/second-peer');
+  await page.evaluate(()=>{window.fixture.data.members=window.fixture.data.members.filter(m=>m.id!=='fixture-2');window.renderFixture()});
+  await page.getByRole('button',{name:'Second Peer — approximate area',exact:true}).waitFor({state:'detached'});
   assert.equal(await page.evaluate(()=>window.fixture.zoom),12);
   await page.evaluate(()=>{window.fixture.selectedEventId='event-1';window.renderFixture()});
   await page.waitForFunction(()=>window.fixture.camera.lat===40.72);
