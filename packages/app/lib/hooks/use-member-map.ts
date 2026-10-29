@@ -31,8 +31,12 @@ export function useLocationSettings() {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
   const [error, setError] = useState<string | null>(null);
+  const [failedEnable, setFailedEnable] = useState<"overall" | "sharing" | null>(null);
+  const errorGeneration = useRef(0);
   useEffect(() => {
     selectLocationOwner(owner);
+    errorGeneration.current += 1;
+    setError(null); setFailedEnable(null);
   }, [owner]);
   const query = useQuery({
     queryKey: memberMapKeys.settings(owner || ""), enabled: !!owner,
@@ -58,7 +62,8 @@ export function useLocationSettings() {
   const sharing = enabled && mapGrantActive(settings, now);
   const update = useCallback(async (kind: "overall" | "sharing", next: boolean) => {
     if (!owner || currentOwner() !== owner) return;
-    setBusy(true); setError(null);
+    errorGeneration.current += 1;
+    setBusy(true); setError(null); setFailedEnable(null);
     let mutationGeneration = useLocationAccessStore.getState().generation;
     if (!next) {
       useLocationAccessStore.getState().stop("Stopping sharing has not yet been confirmed by the server.", true);
@@ -92,14 +97,24 @@ export function useLocationSettings() {
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Location settings could not be saved. Retry.";
       if (currentOwner() === owner) {
+        errorGeneration.current += 1;
         setError(message);
-        if (!next) useLocationAccessStore.getState().stop("Could not confirm server withdrawal. Your device has stopped updating. Retry turning sharing off.", true);
+        setFailedEnable(next ? kind : null);
+        if (!next) useLocationAccessStore.getState().stop("Could not confirm server withdrawal. Your device has stopped updating. Use Turn all location off to retry.", true);
       }
     } finally { setBusy(false); }
   }, [owner, client]);
-  return { settings, enabled, sharing, avatarSessionActive: state.owner === owner && state.avatarSessionActive, busy, loading: !!owner && query.isPending,
+  const refresh = async () => {
+    const generation = errorGeneration.current;
+    const result = await query.refetch();
+    if (!result.isError && currentOwner() === owner && generation === errorGeneration.current) {
+      setError(null); setFailedEnable(null);
+    }
+    return result;
+  };
+  return { needsLocationStop: state.owner === owner && (state.pendingWithdrawal || (state.blocked && settings?.locationEnabled === true)), failedEnable, settings, enabled, sharing, avatarSessionActive: state.owner === owner && state.avatarSessionActive, busy, loading: !!owner && query.isPending,
     error: [(state.owner === owner ? state.error : null) || error || (query.isError ? "Location settings could not be loaded. No location will be used. Retry." : null), locationDurabilityError()].filter(Boolean).join(" ") || null,
-    refresh: query.refetch,
+    refresh,
     setOverall: (next: boolean) => update("overall", next), setSharing: (next: boolean) => update("sharing", next),
   };
 }
