@@ -44,7 +44,7 @@ function harness(config = {}) {
       ? { error: { message: 'RPC unavailable' } }
       : { data: config.soldOut ? { ok: false } : { ok: true, order_id: 'order', tickets: args.p_ticket_rows } };
     if (name === 'ticket_hold_create_atomic' && config.soldOut) return { data: { ok: false, available: 0 } };
-    if (name === 'cart_complete_issuance') return config.rpcError
+    if (name === 'complete_paid_cart_atomic') return config.rpcError
       ? { error: { message: 'issuance failed' } } : { data: { ok: false, error: 'hold_expired' } };
     return { data: { ok: true } };
   }};
@@ -140,15 +140,20 @@ for (const scenario of [{}, { soldOut: true }, { rpcError: true }]) test(`free d
   assert.equal(h.requests.length, 0, 'free sale never calls Stripe');
 });
 for (const rpcError of [false, true]) test(`signed webhook issuance failure stays retryable without refund (RPC error=${rpcError})`, async () => {
-  const h = harness({ rpcError });
+  const h = harness({ rpcError, stripeFetch: async () => Response.json({
+    id: 'pi_old', status: 'succeeded', amount: 1000, amount_received: 1000, currency: 'usd',
+    metadata: { type: 'cart_checkout', cart_id: 'cart', user_id: 'member', event_id: '1' },
+    latest_charge: { payment_intent: 'pi_old', status: 'succeeded', paid: true, captured: true, refunded: false, amount_refunded: 0, disputed: false },
+  }) });
   const timestamp = Math.floor(Date.now() / 1000);
   const body = JSON.stringify({ id: 'evt_test', type: 'payment_intent.succeeded', created: timestamp,
     data: { object: { id: 'pi_old', metadata: { type: 'cart_checkout', cart_id: 'cart', event_id: '1' } } } });
   const signature = createHmac('sha256', 'test').update(`${timestamp}.${body}`).digest('hex');
   const r = await h.invoke('stripe-webhook', body, { 'stripe-signature': `t=${timestamp},v1=${signature}` });
   assert.equal(r.status, 500);
-  assert.ok(h.calls.some(c => c.name === 'cart_complete_issuance'));
-  assert.equal(h.requests.length, 0);
+  assert.ok(h.calls.some(c => c.name === 'complete_paid_cart_atomic'));
+  assert.equal(h.requests.length, 1, 'current Stripe payment read is required before allocation');
+  assert.ok(h.requests.every(r => r.url.includes('/payment_intents/pi_old?expand[]=latest_charge')));
   assert.ok(!h.writes.some(w => w.table === 'stripe_events' && w.payload.processed_at));
 });
 

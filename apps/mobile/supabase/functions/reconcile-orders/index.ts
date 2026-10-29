@@ -151,7 +151,7 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
     }
 
     // ── 2. Find stuck payment_pending orders ─────────────────
-    const { data: pendingOrders, error: ordersError } = await supabase
+    const { data: ordinaryPendingOrders, error: ordersError } = await supabase
       .from("orders")
       .select(
         "id, stripe_payment_intent_id, stripe_checkout_session_id, created_at",
@@ -165,7 +165,19 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
       return json({ error: "Failed to fetch orders" }, 500);
     }
 
-    for (const order of pendingOrders || []) {
+    // Historical failed attempts can already carry a verified paid-but-unissued
+    // marker. Do not reopen every failed checkout: the service-only selector
+    // returns only those marked cart orders; fresh Stripe evidence gates replay.
+    const { data: recoveryOrders, error: recoveryError } = await supabase.rpc(
+      "list_paid_cart_recovery_candidates", { p_created_before: cutoff, p_limit: 50 },
+    );
+    if (recoveryError) throw recoveryError;
+    const pendingOrders = [...new Map(
+      [...(ordinaryPendingOrders || []), ...(recoveryOrders || [])]
+        .map((order) => [order.id, order]),
+    ).values()];
+
+    for (const order of pendingOrders) {
       try {
         let piStatus = "unknown";
         // Session-keyed orders (guest rail) carry no PaymentIntent id of their
@@ -186,6 +198,9 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
             { headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` } },
           );
           const pi = await piRes.json();
+          if (!piRes.ok && pi.error?.code !== "resource_missing") {
+            throw new Error("Stripe payment lookup unavailable; reconciliation will retry");
+          }
           paymentIntentObj = pi;
           if (pi.error) {
             console.error(
@@ -204,6 +219,9 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
               { headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` } },
             );
             checkoutSession = await csRes.json();
+            if (!csRes.ok && checkoutSession.error?.code !== "resource_missing") {
+              throw new Error("Stripe checkout lookup unavailable; reconciliation will retry");
+            }
           }
         }
         // Check Checkout Session status
@@ -213,6 +231,9 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
             { headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` } },
           );
           const cs = await csRes.json();
+          if (!csRes.ok && cs.error?.code !== "resource_missing") {
+            throw new Error("Stripe checkout lookup unavailable; reconciliation will retry");
+          }
           checkoutSession = cs;
           if (cs.error) {
             console.error(
@@ -262,7 +283,7 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
             .from("orders")
             .select("id, user_id, event_id, quantity, cart_id, guest_email")
             .eq("id", order.id)
-            .eq("status", "payment_pending")
+            .in("status", ["payment_pending", "payment_failed"])
             .single();
 
           if (!orderRow) continue; // already handled by a webhook or another run
@@ -274,7 +295,7 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
                 .eq("stripe_payment_intent_id", resolvedPaymentIntentId)
             : { count: 0 };
 
-          if ((alreadyIssued || 0) === 0 && orderRow.cart_id) {
+          if (orderRow.cart_id) {
             // Cart rail: cart_complete_issuance is idempotent
             // (duplicate:true on replay) and flips the order to paid itself.
             if (!paymentIntentObj && resolvedPaymentIntentId) {
@@ -296,28 +317,23 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
               await supabase.from("order_timeline").insert({
                 order_id: order.id,
                 type: "reconcile_blocked",
-                label: "Paid, tickets not issued yet",
+                label: "Paid purchase needs fulfillment review",
                 detail:
                   "Payment confirmed at Stripe but the PaymentIntent has no cart metadata, so this job cannot replay cart issuance. Left pending; retried each run.",
               });
               continue;
             }
-            // NEVER refund from the sweep. A cart hold lives for minutes and
-            // these orders are hours or days old, so `hold_expired` is about
-            // the clock, not inventory — and on 2026-09-18 it refunded six
-            // buyers whose tiers had 97 seats free.
-            await handleCartPaymentIntentSucceeded(supabase, paymentIntentObj, {
-              refundOnAllocationFailure: false,
-            });
-            // The handler returns true for success, duplicate AND the
-            // allocation-failure path (refund + payment_failed) — re-read
-            // the order status to tell them apart.
+            // Revalidate current charge state, then restore inventory and all
+            // purchased units atomically. Expired holds are not an auto-refund.
+            const cartIssued = await handleCartPaymentIntentSucceeded(supabase, paymentIntentObj);
+            // Require both successful complete allocation and committed paid
+            // state; a partial or blocked purchase is not reconciled.
             const { data: postCartOrder } = await supabase
               .from("orders")
               .select("status")
               .eq("id", order.id)
               .single();
-            if (postCartOrder?.status === "paid") {
+            if (cartIssued && postCartOrder?.status === "paid") {
               await supabase.from("order_timeline").insert({
                 order_id: order.id,
                 type: "reconciled",
@@ -331,6 +347,7 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
               );
             } else {
               stats.failed++;
+              stats.needs_attention++;
               console.error(
                 `[reconcile] Order ${order.id} cart issuance did not complete (status=${postCartOrder?.status})`,
               );
@@ -708,6 +725,10 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
         }
         // else: still processing, leave as-is
       } catch (err) {
+        // Verification/transport failures are not a successful zero-work run.
+        // This does not assert a charge succeeded; it flags an unresolved check.
+        stats.failed++;
+        stats.needs_attention++;
         console.error(`[reconcile] Error processing order ${order.id}:`, err);
         // Per-order failures were silently logged before; a stuck paid order
         // is exactly the class of bug that hid for days. Never throws.
