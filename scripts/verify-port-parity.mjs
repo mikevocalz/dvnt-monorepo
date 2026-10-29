@@ -295,7 +295,9 @@ function stripComments(src) {
 
 // ── Extract data-wiring signals from a source file ─────────────────────────
 function extractWiring(rawSrc) {
-  const src = stripComments(rawSrc);
+  // Type-only imports are erased at runtime and cannot carry data wiring.
+  // Keep value/mixed imports subject to the existing parity checks.
+  const src = stripComments(rawSrc).replace(/\bimport\s+type\s+(?:\{[^}]*\}|[A-Za-z_$][\w$]*(?:\s*,\s*\{[^}]*\})?)\s+from\s*["'][^"']+["']\s*;?/g, "");
   const stores = new Set();
   const hooks = new Set();
   // @/lib/stores/<x>  and  @dvnt/app/lib/stores/<x>
