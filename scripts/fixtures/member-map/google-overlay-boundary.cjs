@@ -8,7 +8,7 @@ class OverlayView {
  static preventMapHitsAndGesturesFrom(element){element.dataset.gestureIsolated='true'}
  setMap(value){if(value){this.index=0;while(used.has(this.index))this.index++;used.add(this.index);this.onAdd();this.draw()}else{used.delete(this.index);this.onRemove()}}
  getPanes(){return {overlayMouseTarget:document.querySelector('[data-testid="google-map"],[data-testid="unified-map"]')}}
- getProjection(){return {fromLatLngToDivPixel:position=>{window.reportFixtureMarker?.({...position});return {x:30+(this.index%4)*60,y:80+Math.floor(this.index/4)*70}}}}
+ getProjection(){return {fromLatLngToDivPixel:position=>{window.reportFixtureMarker?.({...position});return fixture().coordinateProjection ? {x:150+(position.lng+74.01)*1000,y:150-(position.lat-40.71)*1000} : {x:30+(this.index%4)*60,y:80+Math.floor(this.index/4)*70}}}}
 }
 const maps={OverlayView};
 export const useMap=()=>map;

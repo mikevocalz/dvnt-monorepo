@@ -24,7 +24,7 @@ async function bundle(key, native = false, expoKey = '') {
     'expo-router': `export const useRouter=()=>({push:p=>window.fixture.route=p});`,
     'expo-image': `const icon={fixtureImage:true};export const useImage=source=>source?icon:null;`,
     '@shopify/react-native-skia': require('./fixtures/native-map-icon-boundary.cjs'),
-    'expo-maps': `import React from 'react';const Map=({markers=[],annotations=[],onMarkerClick,onAnnotationClick,cameraPosition})=>{window.fixture.camera=cameraPosition;return React.createElement('div',{'data-testid':'native-map'},...markers.map(m=>React.createElement('button',{key:m.id,'data-monogram':m.monogram,onClick:()=>onMarkerClick(m)},m.title)),...annotations.map(m=>React.createElement('button',{key:m.id,'data-photo':!!m.icon,onClick:()=>onAnnotationClick(m)},m.title)))};export const AppleMaps={View:Map},GoogleMaps={View:Map};`,
+    'expo-maps': `import React from 'react';const Map=({markers=[],annotations=[],onMarkerClick,onAnnotationClick,cameraPosition})=>{window.fixture.camera=cameraPosition;window.fixture.nativePins=[...markers,...annotations];return React.createElement('div',{'data-testid':'native-map'},...markers.map(m=>React.createElement('button',{key:m.id,'data-monogram':m.monogram,onClick:()=>onMarkerClick(m)},m.title)),...annotations.map(m=>React.createElement('button',{key:m.id,'data-photo':!!m.icon,onClick:()=>onAnnotationClick(m)},m.title)))};export const AppleMaps={View:Map},GoogleMaps={View:Map};`,
   } : {};
   const boundaries = {...mocks, ...platformMocks};
   return build({jsx:'automatic',tsconfigRaw:{},nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';import MemberMap from ${JSON.stringify(path.join(root,`packages/app/features/events/ui/member-map${native ? '' : '.web'}.tsx`))};const r=createRoot(document.getElementById('root'));window.renderFixture=()=>r.render(React.createElement(MemberMap,{eventPins:window.fixture.eventPins,selectedEventId:window.fixture.selectedEventId,onSelectEvent:id=>{window.fixture.selectedEventId=id;window.renderFixture()},onOpenEvent:id=>window.fixture.eventOpened=id}));window.renderFixture();`,resolveDir:root,loader:'tsx'},bundle:true,write:false,format:'iife',platform:'browser',define:{'process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY':JSON.stringify(key),'process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY':JSON.stringify(expoKey)},plugins:[{name:'synthetic-boundaries',setup(b){b.onResolve({filter:/.*/},args=>args.path==='@dvnt/app/lib/events/event-map'?{path:path.join(root,'packages/app/lib/events/event-map.ts')}:args.path==='@dvnt/ui/google-maps-public-config'?{path:path.join(root,'packages/ui/src/google-maps-public-config.ts')}:boundaries[args.path]?{path:args.path,namespace:'fixture'}:undefined);b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:boundaries[args.path],loader:'jsx',resolveDir:root}));}}]});
@@ -35,7 +35,7 @@ async function bundle(key, native = false, expoKey = '') {
  const globals=fs.readFileSync(path.join(root,'apps/web/src/app/(frontend)/globals.css'),'utf8');
  const candidates=(fs.readFileSync(path.join(root,'packages/app/features/events/ui/member-map.web.tsx'),'utf8')+fs.readFileSync(path.join(root,'packages/app/features/events/ui/rounded-map-marker.web.tsx'),'utf8')).match(/[a-zA-Z0-9_!@#%./:[\](),+*=&<>-]+/g)||[];
  const css=(await compile(fs.readFileSync(path.join(tw,'theme.css'),'utf8')+'\n'+fs.readFileSync(path.join(tw,'preflight.css'),'utf8')+'\n@tailwind utilities important;\n'+globals.slice(globals.indexOf('/* ── Deviant brand tokens')))).build(candidates);
- const server=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<style>${css}</style><body style="background:#06070d;color:white"><div id="root"></div><script>window.fixture=${JSON.stringify({status:'loaded',sharing:true,error:false,eventPins:[{id:'event-1',title:'Synthetic Party',latitude:40.72,longitude:-74.02,flyerUrl:'https://fixture.example.test/flyer.png'}],refreshes:0,retries:0,data:{members:[member],self:{...member,id:'self-1',username:'self',displayName:'Self'},center:{latitude:40.7,longitude:-74},expiresAt:'2099-01-01T00:00:00Z'}})};</script><script>${scripts[req.url==='/expo'?'expo':req.url==='/native'?'native':req.url==='/missing'?'missing':'configured']}</script>`);});
+ const server=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<style>${css}</style><body style="background:#06070d;color:white"><div id="root"></div><script>window.fixture=${JSON.stringify({coordinateProjection:req.url==='/stack',status:'loaded',sharing:true,error:false,eventPins:[{id:'event-1',title:'Synthetic Party',latitude:40.72,longitude:-74.02,flyerUrl:'https://fixture.example.test/flyer.png'}],refreshes:0,retries:0,data:{members:[member],self:{...member,id:'self-1',username:'self',displayName:'Self'},center:{latitude:40.7,longitude:-74},expiresAt:'2099-01-01T00:00:00Z'}})};</script><script>${scripts[req.url==='/expo'?'expo':req.url==='/native'?'native':req.url==='/missing'?'missing':'configured']}</script>`);});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  let browser;
  try {
@@ -127,9 +127,48 @@ async function bundle(key, native = false, expoKey = '') {
   await page.goto(`${url}/missing`);await page.getByText('The map is unavailable',{exact:false}).waitFor();
   assert.equal(await page.evaluate(()=>window.fixture.presenceActive),undefined,'missing provider never mounts collection hook');
   assert.equal(await page.getByRole('button',{name:'Synthetic sharing toggle'}).isDisabled(),true);
+  // A coordinate-faithful projection exercises actual DOM stacking instead of
+  // the spaced grid used by unrelated marker/navigation fixtures. No real GPS.
+  await page.goto(`${url}/stack`);
+  await page.getByRole('button',{name:'Night Owl — approximate area',exact:true}).waitFor();
+  await page.evaluate(()=>{const m=window.fixture.data.members[0];window.fixture.data.members.push({...m,id:'fixture-2',username:'second-peer',displayName:'Second Peer'});window.renderFixture()});
+  const stackLabels=['You — approximate area','Night Owl — approximate area','Second Peer — approximate area'];
+  for(const label of stackLabels)await page.getByRole('button',{name:label,exact:true}).waitFor();
+  const stackBounds=await Promise.all(stackLabels.map(label=>page.getByRole('button',{name:label,exact:true}).boundingBox()));
+  assert.deepEqual(stackBounds[1],stackBounds[0],'self and peer occupy the identical pixel rectangle');
+  assert.deepEqual(stackBounds[2],stackBounds[0],'co-located peers stack without jitter or offsets');
+  assert.equal(stackBounds[0].width,44);assert.equal(stackBounds[0].height,44);
+  const stackPoint={x:stackBounds[0].x+22,y:stackBounds[0].y+22};
+  await page.mouse.click(stackPoint.x,stackPoint.y);
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/profile/second-peer','topmost actual overlay receives hit');
+  await page.evaluate(()=>window.renderFixture());
+  await page.mouse.click(stackPoint.x,stackPoint.y);
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/profile/second-peer','ordinary rerender does not reshuffle stack');
+  for(const [label,route] of [['Self','/profile/self'],['Night Owl','/profile/night%20owl'],['Second Peer','/profile/second-peer']]) {
+    await page.getByRole('list',{name:'Nearby members'}).getByRole('button',{name:new RegExp(label)}).click();
+    assert.equal(await page.evaluate(()=>window.fixture.route),route,'covered avatar remains individually accessible');
+  }
+  await page.screenshot({path:'/tmp/dvnt-colocated-avatar-stack.png',fullPage:true});
+  await page.evaluate(()=>{window.fixture.data.members=window.fixture.data.members.filter(m=>m.id!=='fixture-2');window.renderFixture()});
+  await page.getByRole('button',{name:'Second Peer — approximate area',exact:true}).waitFor({state:'detached'});
+  const revealed=page.getByRole('button',{name:'Night Owl — approximate area',exact:true});
+  await revealed.scrollIntoViewIfNeeded();
+  const revealedBounds=await revealed.boundingBox();
+  await page.mouse.click(revealedBounds.x+22,revealedBounds.y+22);
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/profile/night%20owl','removed top marker reveals next peer');
+  await page.getByRole('button',{name:'Synthetic sharing toggle'}).click();
+  assert.equal(await page.locator('[data-map-marker][data-lat="40.71"]').count(),0,'opt-out removes entire avatar stack');
+  assert.equal(await page.getByRole('button',{name:'Event: Synthetic Party',exact:true}).count(),1);
   await page.goto(`${url}/native`);await page.locator('[data-testid="native-map"]').waitFor();
   await page.getByRole('button',{name:'Night Owl · approximate area',exact:true}).waitFor();
   assert.equal(await page.locator('[data-monogram]').count(),0,'initials use a rounded bitmap too');
+  await page.evaluate(()=>{const m=window.fixture.data.members[0];window.fixture.data.members.push({...m,id:'fixture-2',username:'second-peer',displayName:'Second Peer'});window.renderFixture()});
+  await page.getByRole('button',{name:'Second Peer · approximate area',exact:true}).waitFor();
+  const nativeStack=await page.evaluate(()=>window.fixture.nativePins.filter(p=>p.id.startsWith('member:')).map(p=>({id:p.id,coordinates:p.coordinates})));
+  assert.deepEqual(nativeStack.map(p=>p.id),['member:self-1','member:fixture-1','member:fixture-2']);
+  assert.ok(nativeStack.every(p=>p.coordinates.latitude===40.71&&p.coordinates.longitude===-74.01),'native forwards exactly the same coarse coordinates without spreading');
+  await page.getByRole('button',{name:"Open Second Peer's profile",exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/second-peer');
   await page.evaluate(()=>{window.fixture.initialCamera=window.fixture.camera});
   await page.waitForTimeout(1100);
   assert.equal(await page.evaluate(()=>window.fixture.initialCamera===window.fixture.camera),true,'expiry clock must not reset native camera');
@@ -143,6 +182,6 @@ async function bundle(key, native = false, expoKey = '') {
   await page.waitForFunction(()=>window.fixture.camera.coordinates.latitude===42&&window.fixture.camera.zoom===8);
   await page.getByText(/Showing your saved area/).waitFor();
   assert.equal(await page.locator('[data-monogram],[data-photo]').count(),0,'native saved city never invents consented avatars');
-  assert.deepEqual(errors,[]); console.log('PASS: avatar marker, profile route, automatic area/no location buttons, opt-out, refresh failure, expiry, provider auth failure, no-key/no-collection; native custom avatar annotation, initials, profile and opt-out');
+  assert.deepEqual(errors,[]); console.log('PASS: exact co-located avatar pixel stack, top hit/removal and individual list access, native unchanged coordinates; avatar marker, profile route, automatic area/no location buttons, opt-out, refresh failure, expiry, provider auth failure, no-key/no-collection; native custom avatar annotation, initials, profile and opt-out');
  }finally{await browser?.close();server.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

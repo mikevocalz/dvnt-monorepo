@@ -60,5 +60,7 @@ jobs:
         if: always()
         with:
           name: map-marker-corners-${{ github.event.pull_request.head.sha || github.sha }}
-          path: /tmp/dvnt-member-map-renderer-phone.png
+          path: |
+            /tmp/dvnt-member-map-renderer-phone.png
+            /tmp/dvnt-colocated-avatar-stack.png
           if-no-files-found: ignore
