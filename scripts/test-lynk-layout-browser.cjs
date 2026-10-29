@@ -99,6 +99,9 @@ const boundaries = new Map([
   ['react-native-reanimated', `import {View} from 'react-native';const chain={springify:()=>chain,damping:()=>chain,stiffness:()=>chain,duration:()=>chain};export const FadeInRight=chain,FadeOutRight=chain;export default {View};`],
   ['expo-blur', `import {View} from 'react-native';export function BlurView({children,style,pointerEvents}){return <View style={style} pointerEvents={pointerEvents}>{children}</View>}`],
   ['@dvnt/app/lib/safe-native-modules', `export {View as SafeLiquidGlassView} from 'react-native';export const safeIsLiquidGlassSupported=false;`],
+  // Native geometry fixtures intentionally have no broadcasts. Playback is
+  // tested separately by test-lynk-native-playback-ownership.cjs.
+  ['react-native-moq', `export function useVideoPlayer(){throw new Error('Native playback is outside this geometry adapter');}`],
   ['native-media-tile', `
     import {useEffect} from 'react';import {View,Text} from 'react-native';import {f} from 'fixture';
     export function VideoTile({participant,tileWidth,tileHeight}) {
