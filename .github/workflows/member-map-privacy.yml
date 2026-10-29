@@ -41,11 +41,11 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/member-map/node_modules
         run: node --test scripts/test-member-map-sql.cjs apps/mobile/supabase/functions/member-map/index.test.cjs apps/mobile/supabase/functions/member-proximity/master-location.test.cjs apps/mobile/supabase/functions/places-autocomplete/location-policy.test.cjs
       - name: Client consent and stale-result policies
-        run: node --test packages/app/lib/location/*.test.ts packages/app/features/events/ui/member-map-render-policy.test.ts
+        run: node --test packages/app/lib/location/*.test.ts packages/app/features/events/ui/member-map-render-policy.test.ts packages/app/features/events/ui/member-map-area.test.ts
       - name: Import-aware map parity regression
         run: node --test scripts/test-member-map-parity.cjs
-      - name: Install Chromium
-        run: node "$RUNNER_TEMP/member-map/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Install browser engines
+        run: node "$RUNNER_TEMP/member-map/node_modules/playwright/cli.js" install --with-deps chromium webkit
       - name: Renderer and controls
         env:
           NODE_PATH: ${{ runner.temp }}/member-map/node_modules
@@ -55,6 +55,7 @@ jobs:
           node scripts/test-native-map-icon.cjs
           node scripts/test-unified-native-map.cjs
           node scripts/test-member-map-controls.cjs
+          MAP_BROWSER=webkit node scripts/test-member-map-controls.cjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

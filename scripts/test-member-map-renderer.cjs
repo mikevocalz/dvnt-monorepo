@@ -10,6 +10,7 @@ const http = require('node:http');
 const root = path.resolve(__dirname, '..');
 const member = {id:'fixture-1',username:'night owl',displayName:'Night Owl',avatarUrl:null,latitude:40.71,longitude:-74.01,expiresAt:'2099-01-01T00:00:00Z'};
 const mocks = {
+  '@dvnt/app/lib/stores/events-location-store': `export const useEventsLocationStore=selector=>selector({activeCity:window.fixture.savedCity||null});`,
   '@vis.gl/react-google-maps': require('./fixtures/member-map/google-overlay-boundary.cjs'),
   '@tanstack/react-query': `export const useQuery=()=>({data:[],isPending:false,isError:false,refetch:async()=>{}});`,
   '@dvnt/app/lib/api/event-map': `export const eventMapApi={getLocations:async()=>[]};`,
@@ -54,6 +55,14 @@ async function bundle(key, native = false, expoKey = '') {
   assert.equal(await page.getByRole('button',{name:'Update my location',exact:true}).count(),0);
   await page.evaluate(()=>{window.fixture.selectedEventId=null;window.renderFixture()});
   await page.waitForFunction(()=>window.fixture.camera.lat===40.7);
+  await page.evaluate(()=>{window.fixture.savedCity={id:17,name:'Saved City',state:'NY',lat:42,lng:-75};window.fixture.data={members:[],self:null,center:null,expiresAt:null};window.renderFixture()});
+  await page.waitForFunction(()=>window.fixture.camera.lat===42&&window.fixture.zoom===8);
+  assert.equal(await page.getByRole('button',{name:'You — approximate area'}).count(),0,'saved city never invents an avatar');
+  await page.getByText(/Showing your saved area/).waitFor();
+  await page.evaluate(()=>{window.fixture.area={latitude:40.7,longitude:-74,expiresAt:'2099-01-01T00:00:00Z'};window.renderFixture()});
+  await page.waitForFunction(()=>window.fixture.camera.lat===40.7&&window.fixture.zoom===12);
+  await page.evaluate(()=>{window.fixture.area=null;window.fixture.savedCity=null;window.fixture.data={members:[{id:'fixture-1',username:'night owl',displayName:'Night Owl',avatarUrl:null,latitude:40.71,longitude:-74.01,expiresAt:'2099-01-01T00:00:00Z'}],self:{id:'self-1',username:'self',displayName:'Self',avatarUrl:null,latitude:40.71,longitude:-74.01,expiresAt:'2099-01-01T00:00:00Z'},center:{latitude:40.7,longitude:-74},expiresAt:'2099-01-01T00:00:00Z'};window.renderFixture()});
+  await page.getByRole('button',{name:'You — approximate area'}).waitFor();
   await page.locator('[aria-label="Event: Synthetic Party"] img').waitFor();
   for(const label of ['Event: Synthetic Party','You — approximate area','Night Owl — approximate area']) {
     const marker=page.getByRole('button',{name:label,exact:true});
@@ -121,6 +130,10 @@ async function bundle(key, native = false, expoKey = '') {
   await page.getByRole('button',{name:'Synthetic sharing toggle'}).click();
   assert.equal(await page.locator('[data-testid="native-map"]').count(),1,'opt-out retains event map');
   assert.equal(await page.locator('[data-monogram],[data-photo]').count(),0,'opt-out removes all native member markers');
+  await page.evaluate(()=>{window.fixture.savedCity={id:17,name:'Saved City',state:'NY',lat:42,lng:-75};window.renderFixture()});
+  await page.waitForFunction(()=>window.fixture.camera.coordinates.latitude===42&&window.fixture.camera.zoom===8);
+  await page.getByText(/Showing your saved area/).waitFor();
+  assert.equal(await page.locator('[data-monogram],[data-photo]').count(),0,'native saved city never invents consented avatars');
   assert.deepEqual(errors,[]); console.log('PASS: avatar marker, profile route, automatic area/no location buttons, opt-out, refresh failure, expiry, provider auth failure, no-key/no-collection; native custom avatar annotation, initials, profile and opt-out');
  }finally{await browser?.close();server.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});
