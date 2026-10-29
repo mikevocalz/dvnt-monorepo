@@ -118,3 +118,22 @@ test("username and email aliases receive one comp, retaining a skipped explanati
   assert.deepEqual(result.unique.map((r) => r.authId), ["user1", "user2"]);
   assert.equal(result.skipped[0].recipient, "micah@example.com");
 });
+
+test("expired events and host-plan windows cannot strand unstarted guests in waiting", () => {
+  const ticket = { ...noAccess, ticket: true };
+  assert.equal(reason(decideEventRoomAccess(event, ticket, room, start + 300_000)), "session_expired");
+  assert.equal(reason(decideEventRoomAccess({ ...event, end_date: null }, ticket, {}, start + 6 * 3_600_000)), "session_expired");
+});
+
+test("terminal room and lifecycle states refuse admission for guests and organizers", async () => {
+  const linked = { ...event, lynk_room_id: "room", start_date: new Date(Date.now()).toISOString(), end_date: new Date(Date.now() + 3_600_000).toISOString() };
+  const tickets = [{ event_id: 12, user_id: "buyer", status: "active", category: "admission" }];
+  for (const user of ["buyer", "host"]) {
+    for (const state of ["ended", "cancelled"]) {
+      const db = database({ events: [linked], tickets, event_lynk_lifecycle: [{ event_id: 12, state }] });
+      assert.equal(reason(await resolveEventRoomAccess(db, { uuid: "room", status: "open" }, user)), "room_ended");
+    }
+    const db = database({ events: [linked], tickets, event_lynk_lifecycle: [{ event_id: 12, state: "live" }] });
+    assert.equal(reason(await resolveEventRoomAccess(db, { uuid: "room", status: "ended" }, user)), "room_ended");
+  }
+});

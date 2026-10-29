@@ -13,7 +13,7 @@ import {
   TextInput,
 } from "react-native";
 // Galeria → MediaLightbox temporary swap (iOS 26 gesture issue, no native dep)
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
+import { useEventLynkEntry } from "@dvnt/app/lib/hooks/use-event-lynk-entry";
 import { MediaLightbox as Galeria } from "@dvnt/app/components/media/MediaLightbox";
 import { LegendList } from "@dvnt/app/components/list";
 import React, { useEffect, useCallback, useMemo } from "react";
@@ -1165,6 +1165,15 @@ function EventDetailScreenContent() {
     mayHostLynk && !!(eventData as any)?.lynkRoomId,
   );
 
+  const lynkEntry = useEventLynkEntry({
+    eventId, roomId: eventData?.lynkRoomId, viewerId: user?.id, mayHost: mayHostLynk,
+    start: lynkHost.start,
+    navigate: (roomId) => router.push(`/(protected)/sneaky-lynk/room/${roomId}` as any),
+    onError: (message) => showToast("error", "Couldn't open the Lynk", message),
+  });
+  const openEventLynk = lynkEntry.open;
+  const startEventLynk = lynkEntry.open;
+
   // ── WS-9 safe destructive flows ──────────────────────────────────
   // Cancel (auto-refund) / Postpone (reversible, no refunds) / Delete
   // (blocked while paid tickets exist) each get their own confirmed
@@ -1173,11 +1182,11 @@ function EventDetailScreenContent() {
   const handleCancelEvent = useCallback(() => {
     Alert.alert(
       "Cancel Event",
-      "Every paid order is automatically refunded (whole payment, including fees) and every attendee is notified. Guest buyers get an email. This can't be undone.",
+      "Any paid orders are automatically refunded (whole payment, including fees). Free RSVPs have no charge to refund. Every attendee is notified. Guest buyers get an email. This can't be undone.",
       [
         { text: "Keep Event", style: "cancel" },
         {
-          text: "Cancel & Refund",
+          text: "Cancel event",
           style: "destructive",
           onPress: async () => {
             try {
@@ -1854,70 +1863,6 @@ function EventDetailScreenContent() {
     (Math.min(liveScreenWidth, CONTENT_MAX_WIDTH) - 40 - 8) / 2;
   const host = event.host;
 
-  /**
-   * Open the event's Lynk — and make sure there is a live one to open.
-   *
-   * The companion room is created when the EVENT is published, so for an event
-   * weeks out its session expires long before anyone arrives and the card is a
-   * dead link on the day it matters most. A free host's session is capped, so
-   * this is not an edge case for them, it is every time. The host's tap is
-   * therefore "start it": if the linked room is gone, ended, or its session has
-   * run out, mint a fresh one and re-point the event first. An open `status` is
-   * not enough to decide that — the row stays open while `ends_at` passes.
-   */
-  const openEventLynk = async () => {
-    const linked = (event as any)?.lynkRoomId as string | undefined;
-    if (!linked) return;
-    const go = (roomId: string) =>
-      router.push(`/(protected)/sneaky-lynk/room/${roomId}` as any);
-    if (!isHost) {
-      go(linked);
-      return;
-    }
-    let roomId = linked;
-    try {
-      const existing = await sneakyLynkApi.getRoomById(linked);
-      const sessionOver =
-        !!existing?.endsAt && new Date(existing.endsAt).getTime() <= Date.now();
-      if (!existing || existing.status === "ended" || sessionOver) {
-        const fresh = await sneakyLynkApi.createRoom({
-          title: (event as any)?.title || "Event Lynk",
-          topic: "",
-          description: (event as any)?.description || "",
-          hasVideo: true,
-          isPublic: false,
-        });
-        if (fresh.ok && fresh.data?.room?.id) {
-          roomId = String(fresh.data.room.id);
-          await eventsApi.updateEvent(eventId, { lynkRoomId: roomId } as any);
-        }
-      }
-    } catch {
-      // Fall through to the linked room — the room screen states the problem
-      // better than a toast here can.
-    }
-    go(roomId);
-  };
-  /** Host's Start: opens the room for everyone waiting, then enters it. */
-  const startEventLynk = async () => {
-    try {
-      const res = await lynkHost.start();
-      showToast(
-        "success",
-        "Lynk started",
-        res.admitted > 0
-          ? `${res.admitted} waiting ${res.admitted === 1 ? "guest is" : "guests are"} joining`
-          : "Guests can join now",
-      );
-      void openEventLynk();
-    } catch (err) {
-      showToast(
-        "error",
-        "Couldn't start the Lynk",
-        err instanceof Error && err.message ? err.message : "Try again in a moment.",
-      );
-    }
-  };
   // CRITICAL: event.date is the day number ("22"), event.fullDate is the ISO string
   const isoDate = event.fullDate || event.date;
   // Day and time in the venue's zone with its abbreviation ("8:00 PM PDT"),
@@ -2580,9 +2525,11 @@ function EventDetailScreenContent() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={
-                isHost ? "Open your event's Lynk" : "Join the event's Lynk"
+                lynkHost.isTerminal ? "This Lynk has ended" : lynkEntry.isOpening ? "Opening Lynk" : mayHostLynk ? "Open your event's Lynk" : "Join the event's Lynk"
               }
               testID="event-lynk-room"
+              disabled={lynkEntry.isOpening || lynkHost.isTerminal}
+              accessibilityState={{ busy: lynkEntry.isOpening, disabled: lynkEntry.isOpening || lynkHost.isTerminal }}
               onPress={() => void openEventLynk()}
               className="mx-4 mb-4 flex-row items-center gap-3 rounded-2xl bg-card px-4 py-3 active:opacity-80"
             >
@@ -2594,7 +2541,7 @@ function EventDetailScreenContent() {
                   className="text-foreground font-semibold"
                   numberOfLines={1}
                 >
-                  {isHost ? "Open your event's Lynk" : "Join the event's Lynk"}
+                  {lynkHost.isTerminal ? "This Lynk has ended" : lynkEntry.isOpening ? "Opening Lynk…" : mayHostLynk ? "Open your event's Lynk" : "Join the event's Lynk"}
                 </Text>
                 <Text className="text-xs text-muted-foreground mt-0.5">
                   Private video room · only people on this event&apos;s list get
@@ -2603,12 +2550,17 @@ function EventDetailScreenContent() {
               </View>
             </Pressable>
           ) : null}
-          {(event as any).lynkRoomId && mayHostLynk && lynkHost.view ? (
+          {(event as any).lynkRoomId && mayHostLynk && lynkHost.isError ? (
+            <Pressable accessibilityRole="button" onPress={() => void lynkHost.refetch()} className="mx-4 mb-4">
+              <Text className="text-sm text-muted-foreground">Couldn&apos;t load the waiting room. Tap to retry.</Text>
+            </Pressable>
+          ) : null}
+          {(event as any).lynkRoomId && mayHostLynk && lynkHost.view && !lynkHost.isTerminal ? (
             <EventLynkHostPanel
               waiting={lynkHost.view.waiting}
               count={lynkHost.view.count}
               isLive={lynkHost.isLive}
-              isStarting={lynkHost.isStarting}
+              isStarting={lynkEntry.isOpening}
               onStart={() => void startEventLynk()}
             />
           ) : null}

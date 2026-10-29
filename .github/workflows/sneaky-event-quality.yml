@@ -1,0 +1,50 @@
+name: Sneaky event quality
+on:
+  pull_request:
+    paths:
+      - 'packages/app/**'
+      - 'apps/mobile/supabase/functions/**'
+      - 'scripts/test-event-lynk*'
+      - '.github/workflows/sneaky-event-quality.yml'
+permissions:
+  contents: read
+jobs:
+  event-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --prefix "$RUNNER_TEMP/lynk" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 jsdom@26.1.0 @tanstack/react-query@5.90.2
+      - name: Creation, RSVP admission, lifecycle, privacy, free purchase and retry
+        env:
+          NODE_PATH: ${{ runner.temp }}/lynk/node_modules
+        run: |
+          node --test packages/app/lib/events/prepare-event-lynk-room.test.ts packages/app/lib/events/event-access.test.ts packages/app/lib/events/event-lynk.test.ts apps/mobile/supabase/functions/event-lynk-room/index.test.cjs apps/mobile/supabase/functions/event-lynk-invite/index.test.cjs apps/mobile/supabase/functions/process-event-lynk-lifecycle/index.test.cjs
+          node scripts/test-event-lynk-entry-hooks.cjs
+          node scripts/test-guest-event-purchase.cjs
+  event-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --prefix "$RUNNER_TEMP/lynk" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 @tanstack/react-query@5.90.2 playwright@1.58.2
+      - run: node "$RUNNER_TEMP/lynk/node_modules/playwright/cli.js" install --with-deps ${{ matrix.browser }}
+      - name: Actual React hooks in browser with synthetic server and auth
+        env:
+          NODE_PATH: ${{ runner.temp }}/lynk/node_modules
+          LYNK_BROWSER: ${{ matrix.browser }}
+        run: node scripts/test-event-lynk-entry-hooks.cjs --browser

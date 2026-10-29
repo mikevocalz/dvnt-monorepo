@@ -76,10 +76,11 @@ export type EventRoomAccess =
 export function decideEventRoomAccess(
   event: EventAccessRow | null,
   access: { organizer: boolean; ticket: boolean; invited: boolean },
-  room: { created_at?: string | null; ends_at?: string | null },
+  room: { created_at?: string | null; ends_at?: string | null; status?: string | null },
   now = Date.now(),
   /** event_lynk_lifecycle.state === 'live': a host pressed Start. */
   started = false,
+  lifecycleState?: string,
 ): EventRoomAccess {
   const deny = (reason: string, message: string, code: "forbidden" | "conflict" = "forbidden"): EventRoomAccess =>
     ({ ok: false, code, message, detail: { reason } });
@@ -90,12 +91,10 @@ export function decideEventRoomAccess(
   if (!access.organizer && (event.ticketing_enabled ? !access.ticket : !access.ticket && !access.invited))
     return deny(event.ticketing_enabled ? "event_ticket_required" : "event_invite_required",
       event.ticketing_enabled ? "An active admission ticket is required for this event" : "This event requires an invitation");
+  if ((room.status != null && room.status !== "open") || ["ended", "cancelled"].includes(lifecycleState ?? ""))
+    return deny("room_ended", "This Lynk has ended", "conflict");
   const start = Date.parse(event.start_date ?? "");
   if (!Number.isFinite(start)) return deny("event_schedule_missing", "The event schedule is not ready", "conflict");
-  // The room opens when a host starts it, not when the clock reaches
-  // start_date. Until then an eligible guest waits (event-lynk-room "wait").
-  if (!access.organizer && !started)
-    return { ok: false, code: "conflict", message: "Waiting for the host to start", detail: { reason: "waiting_for_host", startsAt: event.start_date } };
   const end = Date.parse(event.end_date ?? "");
   // Free-plan rooms used to expire five minutes after being created, days before
   // a scheduled event. Preserve the plan duration, starting at the event's start.
@@ -119,6 +118,10 @@ export function decideEventRoomAccess(
   }
   if (effectiveEnd !== null && now >= effectiveEnd)
     return deny("session_expired", "This event's live session has ended", "conflict");
+  // The room opens when a host starts it, not when the clock reaches
+  // start_date. Until then an eligible guest waits (event-lynk-room "wait").
+  if (!access.organizer && !started)
+    return { ok: false, code: "conflict", message: "Waiting for the host to start", detail: { reason: "waiting_for_host", startsAt: event.start_date } };
   return { ok: true, linked: true, endsAt: effectiveEnd === null ? null : new Date(effectiveEnd).toISOString() };
 }
 
@@ -131,15 +134,15 @@ export async function resolveEventRoomAccess(db: any, room: any, userId: string)
   const event = events?.[0] ?? null;
   const access = event ? await eventRelationships(db, event, userId)
     : { organizer: false, ticket: false, invited: false };
-  let started = false;
-  if (event && !access.organizer) {
+  let state: string | undefined;
+  if (event) {
     // Fail closed: an unreadable lifecycle row must not let a guest in early.
     const { data: lifecycle, error: lifecycleError } = await db.from("event_lynk_lifecycle")
       .select("state").eq("event_id", event.id).maybeSingle();
     if (lifecycleError) throw new Error("Could not verify the event room state");
-    started = lifecycle?.state === "live";
+    state = lifecycle?.state;
   }
-  const decision = decideEventRoomAccess(event, access, room, Date.now(), started);
+  const decision = decideEventRoomAccess(event, access, room, Date.now(), state === "live", state);
   // video_join_room needs the row to start the room when a host joins.
   return decision.ok && event ? { ...decision, event: { ...event, lynk_room_id: room.uuid } } : decision;
 }

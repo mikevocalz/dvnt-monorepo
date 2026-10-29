@@ -71,7 +71,11 @@ async function handleWait(req: Request, db: any, actor: string, body: any) {
 
   const state = await lifecycleState(db, event.id);
   const access = await eventRelationships(db, event, actor);
-  const decision = decideEventRoomAccess(event, access, {}, Date.now(), state === "live");
+  const { data: room, error: roomError } = await db.from("video_rooms")
+    .select("status,created_at,ends_at").eq("uuid", roomId).maybeSingle();
+  if (roomError) throw new ReadError("room");
+  if (!room) return fail(req, 409, "This Lynk has ended", "room_ended");
+  const decision = decideEventRoomAccess(event, access, room, Date.now(), state === "live", state);
   if (decision.ok) {
     // A host opening their own room starts it. An organizer who is not a
     // host (a scanner) gets in without starting anything.
@@ -130,6 +134,22 @@ async function handleList(req: Request, db: any, actor: string, body: any) {
   const { res, event } = await loadHostedEvent(req, db, actor, body);
   if (res) return res;
   const state = await lifecycleState(db, event.id);
+  const { data: room, error: roomError } = await db.from("video_rooms")
+    .select("status,created_at,ends_at").eq("uuid", event.lynk_room_id).maybeSingle();
+  if (roomError) throw new ReadError("room");
+  const decision = decideEventRoomAccess(
+    event, { organizer: true, ticket: false, invited: false },
+    room ?? { status: "ended" }, Date.now(), state === "live", state,
+  );
+  if (!decision.ok) {
+    if (decision.detail.reason === "event_schedule_missing")
+      return fail(req, 409, decision.message, String(decision.detail.reason));
+    // A stale lifecycle row must not keep a dead room looking live, or expose
+    // a lingering waiting list. This is a read-only effective state.
+    const terminal = state === "cancelled" || ["cancelled", "deleted"].includes(event.status)
+      ? "cancelled" : "ended";
+    return json(req, { ok: true, state: terminal, count: 0, waiting: [] });
+  }
   const since = new Date(Date.now() - WAITING_FRESH_MS).toISOString();
   const { data: rows, error } = await db.from("event_lynk_waiting")
     .select("user_id,joined_at,last_seen_at").eq("event_id", event.id)

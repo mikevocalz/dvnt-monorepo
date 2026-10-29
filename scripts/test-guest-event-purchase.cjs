@@ -83,7 +83,8 @@ app('lib/hooks/use-event-reviews', { useCreateEventReview: () => ({ isPending: f
 app('lib/hooks/use-age-verification', { useAgeVerificationStatus: () => query(null), needsAgeVerification: () => false });
 app('components/event/TicketsOpeningSoonCard.web', { TicketsOpeningSoonCard: () => React.createElement('div', { 'data-testid': 'tickets-opening-soon' }, 'Tickets coming soon') });
 app('lib/hooks/use-event-role', { useEventRole: () => ({ role: null }) });
-app('lib/hooks/use-event-lynk-host', { useEventLynkHost: () => ({}) });
+app('lib/hooks/use-event-lynk-host', { useEventLynkHost: () => scenario.lynkHost || ({}) });
+app('lib/hooks/use-event-lynk-entry', { useEventLynkEntry: () => scenario.lynkEntry || ({open: noop, isOpening:false}) });
 app('lib/color/useEventDominantColor', { useEventDominantColor: () => ({ color: '#000' }) });
 app('lib/stores/auth-store', { useAuthStore: (select) => select(scenario.auth) });
 app('lib/stores/event-detail-ui-store', { useEventDetailUiStore: ui });
@@ -458,4 +459,19 @@ test('actual detail screen preserves ordinary sections and explicit organizer op
     assert.match(document.body.textContent, /Who's going/);
     assert.match(document.body.textContent, /visible-person/);
   }
+});
+
+test('event Lynk detail disables ended rooms and pending entry and exposes waiting-room retry', async () => {
+  scenario.auth = {isAuthenticated:true,user:{id:'host',username:'fixture-host'}};
+  scenario.eventQuery = query({...fixtureEvent,lynkRoomId:'fixture-room'});
+  scenario.lynkHost = {view:{state:'ended',count:0,waiting:[]},isTerminal:true};
+  await render();
+  assert.equal(document.querySelector('[data-lynk-room]').disabled,true);
+  assert.equal(button('Start Lynk'),undefined);
+  scenario.lynkHost = {isError:true,refetch:()=>scenario.retries.push('lynk')};
+  scenario.lynkEntry = {isOpening:true,open:noop};
+  await render();
+  assert.equal(document.querySelector('[data-lynk-room]').disabled,true);
+  const retry=[...document.querySelectorAll('button')].find(b=>b.textContent==='Try again');
+  await click(retry);assert.deepEqual(scenario.retries,['lynk']);
 });

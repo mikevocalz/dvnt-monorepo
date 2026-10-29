@@ -1,3 +1,4 @@
+import { prepareEventLynkRoom } from "@dvnt/app/lib/events/prepare-event-lynk-room";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import { useEffect, useCallback, useMemo, useState, useRef } from "react";
@@ -764,38 +765,22 @@ function CreateEventScreenContent() {
         }
       }
 
-      // Companion Sneaky Lynk room, same rule as web: created BEFORE the event
-      // so its uuid goes in with the insert — one row, one truth, no second
-      // write that can half-fail. A room that cannot be created never blocks
-      // the event: an event without its room is a real event.
-      let lynkRoomId: string | undefined;
-      if (attachLynkRoom) {
-        try {
-          const room = await sneakyLynkApi.createRoom({
-            title: title.trim() || "Event Lynk",
-            topic: eventType || "",
-            description: description.trim(),
-            hasVideo: true,
-            // Private: the guest list is the event's.
-            isPublic: false,
-          });
-          if (room.ok && room.data?.room?.id) {
-            lynkRoomId = String(room.data.room.id);
-          } else {
-            showToast(
-              "warning",
-              "Lynk room not created",
-              "The event will publish without it. You can add one from Edit.",
-            );
-          }
-        } catch {
-          showToast(
-            "warning",
-            "Lynk room not created",
-            "The event will publish without it. You can add one from Edit.",
-          );
-        }
-      }
+      // A requested virtual room is required, not optional publish setup.
+      const lynkRoomId = attachLynkRoom
+        ? await prepareEventLynkRoom({
+            authId: publishingAuthId,
+            currentAuthId: getAuthIdFromStore,
+            getState: useCreateEventStore.getState,
+            save: (preparedLynkRoom) => useCreateEventStore.setState({ preparedLynkRoom }),
+            create: () => sneakyLynkApi.createRoom({
+              title: (title.trim() || "Event Lynk").slice(0, 100),
+              topic: eventType || "",
+              description: description.trim().slice(0, 500),
+              hasVideo: true,
+              isPublic: false,
+            }),
+          })
+        : undefined;
 
       const eventData: Record<string, any> = {
         clientRequestId: useCreateEventStore.getState().getPublishRequestId(),
@@ -1870,8 +1855,9 @@ function CreateEventScreenContent() {
                     Host this event in a Sneaky Lynk
                   </Text>
                   <Text className="text-xs text-muted-foreground mt-0.5 leading-5">
-                    Creates a private video room for this event. Guests join it
-                    from the event page — you can start it any time.
+                    Creates a private video room. Guests RSVP and wait until you start
+                    it from the event page. Leave ticket sales off for free entry.
+                    Your Sneaky Lynk hosting plan’s time and capacity limits still apply.
                   </Text>
                 </View>
                 <Switch

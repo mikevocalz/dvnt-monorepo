@@ -52,7 +52,7 @@ const fixture = `
     host:{id:'fixture-host',username:'community',avatar:'./fixture-avatar.svg'},location:'Brooklyn, NY',
     fullDate:'2099-06-20T23:00:00Z',event_tz:'America/New_York',lineup:['Local selectors'],perks:[],attendees:[]};
   export const useFixture=create(()=>({event,tiers,authenticated:false}));
-  export const f=window.fixture={checkouts:[],rsvps:[],routes:[],storyShares:[],attendancePrivacy:[],ui:useEventDetailUiStore,
+  export const f=window.fixture={baseEvent:event,checkouts:[],rsvps:[],routes:[],storyShares:[],attendancePrivacy:[],ui:useEventDetailUiStore,
     configure:patch=>useFixture.setState(patch),configureTickets:tiers=>useFixture.setState(s=>({tiers,event:{...s.event,ticketTiers:tiers}})),reset:()=>{useEventDetailUiStore.getState().reset();f.checkouts=[];f.rsvps=[];f.routes=[];f.storyShares=[];f.attendancePrivacy=[];useFixture.setState({event,tiers,authenticated:false})}};
   export const store=state=>Object.assign((select=s=>s)=>select(state),{getState:()=>state});
   export const guestCheckout=store({open:false,email:'',eventId:'42',tierId:'',requestKey:'fixture',quantity:1,
@@ -73,6 +73,7 @@ const boundaries = new Map([
   ['@dvnt/app/lib/hooks/use-age-verification', `import {query,mutation} from 'fixture';export const useAgeVerificationStatus=()=>query(null);export const needsAgeVerification=()=>false;export const useStartVerification=()=>mutation;export const useRefreshVerificationStatus=()=>mutation;`],
   ['@dvnt/app/lib/hooks/use-event-role', `export const useEventRole=()=>({role:null});`],
   ['@dvnt/app/lib/hooks/use-event-lynk-host', `export const useEventLynkHost=()=>({});`],
+  ['@dvnt/app/lib/hooks/use-event-lynk-entry', `export const useEventLynkEntry=()=>({open:()=>{},isOpening:false});`],
   ['@dvnt/app/lib/hooks/use-event-realtime', `export const useEventRealtime=()=>{};`],
   ['@dvnt/app/lib/hooks/use-event-organizer', `import {query} from 'fixture';export const useEventOrganizer=()=>query(null);export const useEventCoOrganizers=()=>query([]);`],
   ['@dvnt/app/lib/hooks/use-follow', `import {mutation} from 'fixture';export const useFollow=()=>mutation;`],
@@ -308,6 +309,17 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       assert.deepEqual(await page.evaluate(()=>window.fixture.storyShares),[{type:'event',id:'42'}],'actual story menu dispatches the event at the service boundary');
       assert.equal(await storyShare.count(),0,'successful share closes the actual event menu');
       evidence.checks.push(size.name+': actual story-share menu dispatch and close; service only is a fixture');
+      // Actual production event screen/CSS: free Sneaky afterparty card on every viewport.
+      await page.evaluate(()=>window.fixture.configure({event:{...window.fixture.baseEvent,price:0,ticketingEnabled:false,ticketTiers:[],lynkRoomId:'fixture-lynk',showAttendees:false},tiers:[]}));
+      const lynk=page.locator('[data-lynk-room="fixture-lynk"]');
+      await lynk.waitFor();await lynk.scrollIntoViewIfNeeded();await tick(page);
+      assert.match(await lynk.innerText(),/Join the event's Lynk/);
+      assert.equal(await page.getByRole('heading',{name:"Who's going",exact:true}).count(),0,'protected afterparty attendees hidden');
+      const lynkBox=await lynk.boundingBox();assert.ok(lynkBox.height>=44&&lynkBox.x>=0&&lynkBox.x+lynkBox.width<=size.width,'Lynk action fits viewport and touch target');
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&document.body.scrollWidth<=innerWidth),true,'free Sneaky event does not overflow');
+      const lynkScreenshot=path.join(OUT,size.name+'-free-sneaky-event.png');await page.screenshot({path:lynkScreenshot});
+      evidence.screens.at(-1).screenshots.push(lynkScreenshot);
+      evidence.checks.push(size.name+': actual free Sneaky event card, protected roster hidden, touch target, no overflow');
       await page.close();
     }
     for(const configured of [false,true]){
