@@ -59,7 +59,7 @@ const fixture = `
   };
   export const videoApi = {
     subscribeToMembers:(_id,_change,options)=> {f.membersSync=options.onSync;f.membersError=options.onError;queueMicrotask(()=>f.deliverRoster());return()=>{f.membersSync=null;f.membersError=null}},
-    subscribeToRoomEvents:()=>noop,
+    subscribeToRoomEvents:(_room,_user,callback)=>{f.roomEvent=callback;return()=>{f.roomEvent=null}},
     muteAll:async()=>{f.actions.push('muteAll');return {ok:true}},unmuteAll:async()=>{f.actions.push('unmuteAll');return {ok:true}},mutePeer:async({targetUserId})=>moderationResult('mute',targetUserId),unmutePeer:async({targetUserId})=>moderationResult('unmute',targetUserId),
     promotePeer:async()=>({ok:true}),demotePeer:async()=>({ok:true}),kickUser:async({targetUserId})=>moderationResult('kick',targetUserId),changeRole:async({targetUserId,newRole})=>moderationResult(newRole,targetUserId)
   };
@@ -520,6 +520,30 @@ async function moderationCases(browser,url) {
   }
 }
 
+async function consentCases(browser,url) {
+  for (const initialRole of ['participant','listener']) {
+    const {page,context}=await createPage(browser,url,cases[0],initialRole);
+    try {
+      if(initialRole==='listener') {
+        await page.evaluate(()=>{window.fixture.roomEvent({type:'mute_peer',targetId:'fixture-host'});window.fixture.actions=[];});
+        await tick(page);
+        await page.evaluate(()=>window.fixture.configure({role:'participant'}));await tick(page);
+        const first=await page.evaluate(()=>window.fixture.actions);
+        assert.ok(!first.includes('mic:true'),'first promotion must respect existing host mute');
+      }
+      // Media adapter currently reports both intents false (manual-off state).
+      // Repeated role changes must not write the original pre-join true values.
+      await page.evaluate(()=>{window.fixture.roomEvent({type:'mute_peer',targetId:'fixture-host'});window.fixture.actions=[];});
+      for(let i=0;i<3;i++) {
+        await page.evaluate(()=>window.fixture.configure({role:'listener'}));await tick(page);
+        await page.evaluate(()=>window.fixture.configure({role:'participant'}));await tick(page);
+      }
+      assert.deepEqual(await page.evaluate(()=>window.fixture.actions),[], 'promotion must not reset camera/mic intent or override host mute');
+      console.log('PASS capture consent across repeated demotion/promotion from '+initialRole);
+    } finally {await context.close()}
+  }
+}
+
 async function fillCases(browser,url) {
   for(const c of cases) {
     const context=await browser.newContext({viewport:{width:c.width,height:c.height}});
@@ -931,7 +955,7 @@ async function main() {
     // system executable or change sandbox settings to circumvent a denied run.
     browser=await load('@playwright/test').chromium.launch({headless:true});
     const url='http://127.0.0.1:'+server.address().port;
-    const suites={fill:fillCases,moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
+    const suites={consent:consentCases,fill:fillCases,moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
     for(const name of (process.env.LYNK_LAYOUT_SUITES||Object.keys(suites).join(',')).split(','))await suites[name](browser,url);
     assert.equal(failures.length,0,'Rendered regression failures:\n'+JSON.stringify(failures,null,2));
     console.log('PASS all rendered Lynk viewport, room and control layout regressions');
