@@ -1,4 +1,6 @@
 "use client";
+
+import { AvatarLightbox } from "./avatar-lightbox.web";
 import { slugify } from "@dvnt/app/lib/slug";
 
 /**
@@ -515,26 +517,8 @@ export function UserProfileScreen() {
         />
       ) : null}
 
-      {/* Avatar lightbox */}
       {avatarViewerOpen && profileAvatarUrl ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-6"
-          onClick={() => setAvatarViewerOpen(false)}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={profileAvatarUrl}
-            alt=""
-            className="max-h-full max-w-full object-contain"
-          />
-          <button
-            onClick={() => setAvatarViewerOpen(false)}
-            aria-label="Close"
-            className="absolute top-12 right-5 w-10 h-10 rounded-full bg-white/12 border border-white/18 flex items-center justify-center"
-          >
-            <X size={20} color="#fff" />
-          </button>
-        </div>
+        <AvatarLightbox src={profileAvatarUrl} onClose={() => setAvatarViewerOpen(false)} />
       ) : null}
     </div>
   );

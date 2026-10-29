@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
+import { MessageFilterTabs } from "./message-filter-tabs.web";
 import { useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -832,67 +833,8 @@ export function MessagesScreen() {
           />
         </div>
 
-        {/* Tabs */}
-        <nav
-          className="mb-4 flex gap-2 rounded-2xl border border-white/15 bg-[#18181b]/85 p-2"
-          aria-label="Message filters"
-        >
-          <button
-            type="button"
-            onClick={() => setActiveTab("primary")}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition-colors ${
-              activeTab === "primary"
-                ? "border-[#3FDCFF]/30 bg-[#3FDCFF]/14 text-[#3FDCFF]"
-                : "border-transparent bg-transparent text-white/60"
-            }`}
-          >
-            <Inbox
-              size={16}
-              color={activeTab === "primary" ? "#3FDCFF" : "#6B7280"}
-            />
-            Inbox
-            {inboxUnreadCount > 0 ? (
-              <span className="min-w-5 rounded-[10px] bg-[#3FDCFF] px-1.5 py-0.5 text-center text-[11px] font-bold text-[#06070d]">
-                {inboxUnreadCount > 99 ? "99+" : inboxUnreadCount}
-              </span>
-            ) : null}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("requests")}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition-colors ${
-              activeTab === "requests"
-                ? "border-white/8 bg-white/10 text-white"
-                : "border-transparent bg-transparent text-white/60"
-            }`}
-          >
-            <ShieldAlert
-              size={16}
-              color={activeTab === "requests" ? "#fff" : "#6B7280"}
-            />
-            Requests
-            {spamUnreadCount > 0 ? (
-              <span className="min-w-5 rounded-[10px] bg-white/14 px-1.5 py-0.5 text-center text-[11px] font-bold text-white">
-                {spamUnreadCount > 99 ? "99+" : spamUnreadCount}
-              </span>
-            ) : null}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("lynk")}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition-colors ${
-              activeTab === "lynk"
-                ? "border-[#FF5BFC]/30 bg-[#FF5BFC]/14 text-[#FF8BFD]"
-                : "border-transparent bg-transparent text-white/60"
-            }`}
-          >
-            <Radio
-              size={16}
-              color={activeTab === "lynk" ? "#FF8BFD" : "#6B7280"}
-            />
-            Sneaky Lynk
-          </button>
-        </nav>
+        <MessageFilterTabs activeTab={activeTab} onChange={setActiveTab}
+          inboxUnreadCount={inboxUnreadCount} spamUnreadCount={spamUnreadCount} />
 
         {activeTab === "lynk" ? (
           <SneakyLynkTab />

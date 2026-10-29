@@ -1,0 +1,41 @@
+name: Messages tabs and avatar lightbox
+on:
+  pull_request:
+    paths:
+      - 'packages/app/features/messages/**'
+      - 'packages/app/features/profile/**'
+      - 'scripts/test-tabs-avatar-browser.cjs'
+      - '.github/workflows/tabs-avatar-layout.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated browser tools
+        run: npm install --prefix "$RUNNER_TEMP/ui-layout" --no-save --no-package-lock esbuild@0.25.11 @playwright/test@1.56.1 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 lucide-react@1.17.0 postcss@8.5.26 tailwindcss@4.3.0 @tailwindcss/postcss@4.3.0
+      - name: Install browser
+        run: '"$RUNNER_TEMP/ui-layout/node_modules/.bin/playwright" install --with-deps ${{ matrix.browser }}'
+      - name: Render production tabs and profile lightbox
+        env:
+          NODE_PATH: ${{ runner.temp }}/ui-layout/node_modules
+          UI_BROWSER: ${{ matrix.browser }}
+          UI_EVIDENCE: ${{ runner.temp }}/ui-evidence
+        run: node scripts/test-tabs-avatar-browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tabs-avatar-${{ matrix.browser }}
+          path: ${{ runner.temp }}/ui-evidence
+          retention-days: 7
