@@ -243,7 +243,7 @@ async function bundle() {
     await waitVenues(4);
     assert.equal(await toggle().getAttribute('aria-pressed'), 'true');
     assert.equal(await frame().count(), 1, 'exactly one unified map is rendered');
-    assert.equal(await src(), '37.7749,-122.4194');
+    assert.equal(await src(), '39.5,-98.35', 'without viewer location do not imply first event is nearby');
     assert.equal(await markers().count(),4,'all four authorized event markers share one surface');
     assert.equal(await page.getByRole('group',{name:'Map mode'}).count(),0,'no separate events/people mode');
     assert.deepEqual(await venues().allTextContents(), ['Harbor Lights', 'Mission Night', 'Harbor Afterparty', 'Equator Zero']);
@@ -358,6 +358,8 @@ async function bundle() {
     await page.waitForFunction(()=>window.mapFixture.mapZoom===3);
     await page.evaluate(() => { window.mapFixture.locationError = false; });
     await page.getByRole('button', { name: 'Retry locations', exact: true }).click(); await waitVenues(4);
+    assert.equal(await page.evaluate(()=>window.mapFixture.mapZoom),3,'late event metadata must not pretend to locate the viewer');
+    await select('Mission Night').click();
     await page.waitForFunction(()=>window.mapFixture.mapZoom===12);
     await page.evaluate(() => { const f = window.mapFixture; f.locationError = true; void f.queryClient.invalidateQueries({ queryKey: ['events-map'] }); });
     await page.getByRole('button', { name: 'Retry locations', exact: true }).waitFor();
@@ -386,7 +388,7 @@ async function bundle() {
     await page.goBack(); await waitVenues(4);
     assert.equal(await toggle().getAttribute('aria-pressed'), 'true', 'guest Back returns to the open map');
     assert.equal(await select('Mission Night').getAttribute('aria-pressed'), 'true', 'guest Back preserves the selected event');
-    assert.equal(await src(), '37.7599,-122.4148');
+    assert.equal(await src(), '39.5,-98.35','reopening map defaults to viewer area or broad overview, not persisted event focus');
     check('guest View event uses public stable-id route and Back restores the selected venue');
     assert.equal(await page.locator('iframe').count(),0,'unified map does not add hidden iframe providers');
     assert.deepEqual(await page.evaluate(() => window.geolocationCalls), []);

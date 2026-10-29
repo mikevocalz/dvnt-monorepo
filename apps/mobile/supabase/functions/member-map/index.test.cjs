@@ -3,14 +3,14 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const ts=require('typescript');
-function harness({auth=true,blocked=false,rateError=false,rpcError=null,presence=null,movementDenied=false}={}) {
+function harness({auth=true,blocked=false,rateError=false,rpcError=null,presence=null,movementDenied=false,rpcData={fixture:true}}={}) {
  let handler;const calls=[];const rates=[];
  const source=ts.transpileModule(fs.readFileSync(__dirname+'/index.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  vm.runInNewContext(source,{exports:{},Response,console,
   Deno:{env:{get:()=> 'test'},serve:fn=>handler=fn},
   require:name=>name.includes('supabase-js')?{createClient:()=>({
    from:()=>{const q={select:()=>q,eq:()=>q,maybeSingle:async()=>({data:presence})};return q;},
-   rpc:async(name,args)=>{calls.push({name,args});return {data:{fixture:true},error:rpcError};}
+   rpc:async(name,args)=>{calls.push({name,args});return {data:rpcData,error:rpcError};}
   })}
   :name.includes('verify-session')?{verifySessionDetailed:async()=>auth?{ok:true,userId:'signed-in-viewer'}:{ok:false}}
   :name.includes('verified-admission')?{resolveVerifiedAdmission:async()=>({state:blocked?'blocked':'allowed',message:'Verify'})}
@@ -66,4 +66,11 @@ test('moved cells spend bounded database movement budgets, not same-cell refresh
  assert.deepEqual(moved.rates.filter(args=>String(args[2]).includes('move-')).map(args=>args.slice(2)),[
   ['member-map-move-hour',4,3600],['member-map-move-day',12,86400]
  ]);
+});
+
+test('nearby forwards self and peers from the authorized RPC without dropping self',async()=>{
+ const self={id:'self',username:'fixture',latitude:40.7,longitude:-74,avatarUrl:null,expiresAt:'2099-01-01T00:00:00Z'};
+ const data={self,members:[{...self,id:'peer'}],center:{latitude:40.7,longitude:-74},expiresAt:self.expiresAt};
+ const result=await harness({rpcData:data}).call({action:'nearby'});
+ assert.equal(result.status,200);assert.deepEqual(result.body,{ok:true,data});assert.match(result.cache,/no-store/);
 });
