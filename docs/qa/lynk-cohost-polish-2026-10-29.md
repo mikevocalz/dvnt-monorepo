@@ -53,3 +53,21 @@ follows new messages only while pinned to the latest; otherwise an accessible
 DOM-only scroll geometry adapters. The baseline reproduced a jump from 100 to
 1400; the corrected test covers pinned follow, preserved history, jump, manual
 clear, and reopening. This test is included in the responsive layout CI job.
+
+## Native parity
+
+Native stage long-press, participants roster, and participant action sheet now
+use capability-specific moderation rather than a host boolean. Current server
+role updates and selected-target roster changes are reflected immediately;
+self/host protection, moderator peer-removal restriction, and host-only role
+changes remain enforced in UI without modifying server authorization. The
+release-mute wording explicitly preserves microphone consent.
+
+`node scripts/test-lynk-native-moderation.cjs` mounts the production native stage
+and both sheets with native UI/media boundary adapters. Twelve-member fixtures
+cover four actor roles, hero/crowd selection, accessible action callbacks,
+promotion/demotion, and departed targets. A source assertion verifies the real
+VideoTile forwards long-press without a hidden host-only gate. The baseline
+fails the co-host crowd-tile action assertion. Eight helper matrix tests cover
+additional denied/unknown/missing actor roles and target hierarchy. Physical
+native gesture/media acceptance remains a separate live-device check.

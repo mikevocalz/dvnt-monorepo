@@ -18,9 +18,7 @@
 
 import React, { useCallback, useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import Animated, {
-  FadeInDown,
-} from "react-native-reanimated";
+import Animated, { FadeInDown } from "react-native-reanimated";
 import { useRouter } from "expo-router";
 import {
   Crown,
@@ -37,12 +35,16 @@ import { LegendList } from "@dvnt/app/components/list";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import type { VideoParticipant } from "./VideoGrid";
 import { getSneakyUserLabel } from "./user-labels";
+import {
+  isRoomModerator,
+  participantModeration,
+} from "./moderation-permissions";
 
 interface RoomParticipantsSheetProps {
   visible: boolean;
   participants: VideoParticipant[];
   localUserId: string;
-  isHost: boolean;
+  actorRole: string | null | undefined;
   onDismiss: () => void;
   onMute: (userId: string) => void;
   onUnmute: (userId: string) => void;
@@ -95,7 +97,7 @@ function ParticipantRow({
   item,
   index,
   localUserId,
-  isHost,
+  actorRole,
   colors,
   onProfilePress,
   onMute,
@@ -105,7 +107,7 @@ function ParticipantRow({
   item: VideoParticipant;
   index: number;
   localUserId: string;
-  isHost: boolean;
+  actorRole: string | null | undefined;
   colors: ReturnType<typeof useColorScheme>["colors"];
   onProfilePress: (username: string) => void;
   onMute: (userId: string) => void;
@@ -116,7 +118,12 @@ function ParticipantRow({
   const isAnon = item.user.isAnonymous;
   const displayLabel = isAnon ? "Anonymous" : getSneakyUserLabel(item.user);
   const roleMeta = getRoleMeta(item.role);
-  const canModerate = isHost && !isSelf && item.role !== "host";
+  const permissions = participantModeration(
+    actorRole,
+    localUserId,
+    item.id,
+    item.role,
+  );
   const delay = index < 8 ? index * 50 : 0;
 
   const avatarEl = isAnon ? (
@@ -179,7 +186,7 @@ function ParticipantRow({
             ) : null}
           </Text>
 
-          {(roleMeta || item.isHandRaised) ? (
+          {roleMeta || item.isHandRaised ? (
             <View style={styles.chipsRow}>
               {roleMeta ? (
                 <View
@@ -197,7 +204,9 @@ function ParticipantRow({
                   ]}
                 >
                   {roleMeta.icon(
-                    roleMeta.useAccent ? colors.primaryForeground : colors.primary,
+                    roleMeta.useAccent
+                      ? colors.primaryForeground
+                      : colors.primary,
                   )}
                   <Text
                     style={[
@@ -250,10 +259,12 @@ function ParticipantRow({
             </View>
           ) : null}
 
-          {/* Host-only compact mod buttons */}
-          {canModerate ? (
+          {/* Role-scoped compact moderation buttons */}
+          {permissions.mute ? (
             <>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${item.isMicOn ? "Mute" : "Let unmute"} ${displayLabel}`}
                 onPress={() =>
                   item.isMicOn ? onMute(item.id) : onUnmute(item.id)
                 }
@@ -278,20 +289,24 @@ function ParticipantRow({
                 )}
               </Pressable>
 
-              <Pressable
-                onPress={() => onRemove(item.id)}
-                hitSlop={8}
-                style={({ pressed }) => [
-                  styles.modIcon,
-                  {
-                    backgroundColor: `${colors.destructive}14`,
-                    borderColor: `${colors.destructive}40`,
-                    opacity: pressed ? 0.65 : 1,
-                  },
-                ]}
-              >
-                <UserMinus size={14} color={colors.destructive} />
-              </Pressable>
+              {permissions.remove ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${displayLabel} from the room`}
+                  onPress={() => onRemove(item.id)}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.modIcon,
+                    {
+                      backgroundColor: `${colors.destructive}14`,
+                      borderColor: `${colors.destructive}40`,
+                      opacity: pressed ? 0.65 : 1,
+                    },
+                  ]}
+                >
+                  <UserMinus size={14} color={colors.destructive} />
+                </Pressable>
+              ) : null}
             </>
           ) : null}
         </View>
@@ -306,7 +321,7 @@ export function RoomParticipantsSheet({
   visible,
   participants,
   localUserId,
-  isHost,
+  actorRole,
   onDismiss,
   onMute,
   onUnmute,
@@ -321,10 +336,13 @@ export function RoomParticipantsSheet({
         const aOrder = ROLE_ORDER[a.role] ?? 99;
         const bOrder = ROLE_ORDER[b.role] ?? 99;
         if (aOrder !== bOrder) return aOrder - bOrder;
-        if (!!a.isHandRaised !== !!b.isHandRaised) return a.isHandRaised ? -1 : 1;
+        if (!!a.isHandRaised !== !!b.isHandRaised)
+          return a.isHandRaised ? -1 : 1;
         if (a.id === localUserId) return -1;
         if (b.id === localUserId) return 1;
-        return getSneakyUserLabel(a.user).localeCompare(getSneakyUserLabel(b.user));
+        return getSneakyUserLabel(a.user).localeCompare(
+          getSneakyUserLabel(b.user),
+        );
       }),
     [participants, localUserId],
   );
@@ -346,7 +364,7 @@ export function RoomParticipantsSheet({
         item={item}
         index={index}
         localUserId={localUserId}
-        isHost={isHost}
+        actorRole={actorRole}
         colors={colors}
         onProfilePress={handleProfilePress}
         onMute={onMute}
@@ -354,7 +372,15 @@ export function RoomParticipantsSheet({
         onRemove={onRemove}
       />
     ),
-    [colors, handleProfilePress, isHost, localUserId, onMute, onRemove, onUnmute],
+    [
+      colors,
+      handleProfilePress,
+      actorRole,
+      localUserId,
+      onMute,
+      onRemove,
+      onUnmute,
+    ],
   );
 
   if (!visible) return null;
@@ -385,7 +411,7 @@ export function RoomParticipantsSheet({
               >
                 {participants.length === 1 ? "person" : "people"} in the room
               </Text>
-              {isHost ? (
+              {isRoomModerator(actorRole) ? (
                 <Text
                   style={[styles.hostHint, { color: colors.mutedForeground }]}
                 >
