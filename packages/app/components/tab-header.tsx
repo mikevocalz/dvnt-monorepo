@@ -4,6 +4,8 @@ import { Search, MessageSquare } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import Logo from "@dvnt/app/components/logo";
 import { useUnreadMessageCount } from "@dvnt/app/lib/hooks/use-messages";
+import { UnreadBadge } from "@dvnt/app/components/unread-badge";
+import { unreadAccessibilityLabel } from "@dvnt/app/lib/badges/unread-badge";
 import { useFeedScrollStore } from "@dvnt/app/lib/stores/feed-scroll-store";
 
 export function TabHeaderLogo() {
@@ -100,36 +102,14 @@ export function TabHeaderRight() {
         <Pressable
           hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
           accessibilityRole="button"
-          accessibilityLabel="Messages"
+          accessibilityLabel={unreadAccessibilityLabel("Messages", unreadCount)}
           accessibilityHint="Opens your messages inbox"
           style={{ padding: 6, position: "relative" }}
         >
-          <MessageSquare size={24} color={colors.foreground} />
-          {unreadCount > 0 && (
-            <View
-              style={{
-                position: "absolute",
-                right: 2,
-                top: 2,
-                width: 16,
-                height: 16,
-                borderRadius: 8,
-                backgroundColor: "#8A40CF",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 9,
-                  fontWeight: "700",
-                  color: "#fff",
-                }}
-              >
-                {unreadCount > 99 ? "99+" : unreadCount}
-              </Text>
-            </View>
-          )}
+          <View style={{ position: "relative" }}>
+            <MessageSquare size={24} color={colors.foreground} />
+            <UnreadBadge count={unreadCount} />
+          </View>
         </Pressable>
       </Link>
     </View>

@@ -1,5 +1,5 @@
 // Real Next App Router regression: production shells + popup + Solito + RNW.
-// Only auth/progress/JWT, marketing chrome, and native CSS leaves are fixtures.
+// Only auth/progress/JWT, unread services, marketing chrome, and native CSS leaves are fixtures.
 // Run after installing the workspace dependencies and Playwright Chromium:
 //   node scripts/test-profile-completion-navigation.cjs
 // NODE_PATH may point at an existing read-only dependency installation.

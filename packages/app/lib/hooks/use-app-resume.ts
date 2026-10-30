@@ -1,3 +1,4 @@
+import { readViewerScoped } from "@dvnt/app/lib/query/viewer-scoped-read";
 /**
  * App Resume Refresh Hook
  *
@@ -62,13 +63,13 @@ export function useAppResume() {
         // Refresh badge counts (most important for perceived freshness)
         queryClient.prefetchQuery({
           queryKey: messageKeys.unreadCount(userId),
-          queryFn: () => messagesApiClient.getUnreadCounts(),
+          queryFn: ({ signal }) => readViewerScoped(userId, () => messagesApiClient.getUnreadCounts(), signal),
         }),
 
         // Refresh notification badges
         queryClient.prefetchQuery({
           queryKey: notificationKeys.badges(userId),
-          queryFn: () => notificationsApi.getBadges(),
+          queryFn: ({ signal }) => readViewerScoped(userId, () => notificationsApi.getBadges(), signal),
         }),
 
         // Refresh my profile (follower counts may have changed)

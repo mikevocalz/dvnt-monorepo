@@ -890,18 +890,20 @@ export const notificationsApi = {
   async getBadges() {
     try {
       const userId = getCurrentUserIdSync();
-      if (!userId) return { unread: 0, total: 0 };
+      if (!userId) throw new Error("Sign in to load notification counts");
 
-      const { count: unread } = await supabase
+      const { count: unread, error } = await supabase
         .from("notifications")
         .select("*", { count: "exact", head: true })
         .eq("recipient_id", userId)
         .is("read_at", null);
 
-      return { unread: unread || 0, total: 0 };
+      if (error) throw error;
+      if (unread == null) throw new Error("Notification count unavailable");
+      return { unread, total: 0 };
     } catch (error) {
       console.error("[Notifications] getBadges error:", error);
-      return { unread: 0, total: 0 };
+      throw error;
     }
   },
 };

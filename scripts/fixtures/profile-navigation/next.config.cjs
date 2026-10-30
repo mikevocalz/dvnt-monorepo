@@ -12,6 +12,9 @@ module.exports = {
       ...config.resolve.alias,
       'profile-production': path.join(root, 'apps/web/src/components'),
       '@/components': path.join(root, 'apps/web/src/components'),
+      // Counts are unrelated service boundaries; production chrome stays real.
+      '@dvnt/app/lib/hooks/use-notifications-query$': path.join(source, 'ancillary.tsx'),
+      '@dvnt/app/lib/hooks/use-messages$': path.join(source, 'ancillary.tsx'),
       '@dvnt/app/lib/stores/auth-store$': path.join(source, 'auth.ts'),
       '@dvnt/app/lib/profile/new-member-progress$': path.join(source, 'progress.ts'),
       '@dvnt/app/lib/auth/verified-only-prompt$': path.join(source, 'ancillary.tsx'),
