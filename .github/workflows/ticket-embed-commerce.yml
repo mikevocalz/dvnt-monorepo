@@ -74,12 +74,16 @@ jobs:
             echo "::warning::Initial pnpm install failed; forcing a clean relink once."
             pnpm install --frozen-lockfile --ignore-scripts --force
           fi
+      - name: Organizer free cancellation contracts
+        run: node --test apps/mobile/supabase/functions/_shared/organizer-free-cancellation.test.ts apps/mobile/supabase/functions/_shared/organizer-free-cancellation-handler.test.cjs apps/mobile/supabase/functions/_shared/organizer-refund-free-guard.test.cjs packages/app/features/events/ui/comp-cancel-controller.test.ts packages/app/features/events/ui/comp-cancel-modal.test.ts packages/app/lib/tickets/organizer-comp-cancel.test.ts packages/app/features/events/ui/organizer-paid-selection.test.ts packages/app/lib/api/ticket-cancel-contract.test.ts
       - name: Publication and payment runtime configuration agreement
         run: node --test apps/mobile/supabase/functions/_shared/ticket-embed-runtime.test.cjs
       - run: node --test apps/mobile/supabase/functions/ticket-embed/index.test.cjs apps/mobile/supabase/functions/manage-ticket-embed/index.test.cjs docs/ticketing/responsive-embed.test.cjs
       - run: node --test apps/mobile/supabase/functions/_shared/session-issuance.test.cjs
       - name: Real disposable PostgreSQL inventory and transaction tests
         run: node scripts/verify-ticket-embed.mjs
+      - name: Organizer free-ticket cancellation — isolated PostgreSQL races
+        run: node scripts/verify-organizer-cancel-free.mjs
       - name: Checkout cancellation SQL — isolated PostgreSQL smoke test
         run: |
           set -euo pipefail

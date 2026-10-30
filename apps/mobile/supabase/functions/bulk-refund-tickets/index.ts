@@ -8,7 +8,7 @@
  *   - paid tickets → Stripe partial refund on the ticket's PI (amount =
  *     purchase_amount_cents), with idempotency key bulk-refund-{ticketId}
  *     so retries are exactly-once.
- *   - free tickets → status flipped to 'void' in this fn (no Stripe).
+ *   - free/unknown tickets → refused; use explicit Cancel free ticket review.
  *
  * The Stripe webhook (charge.refunded) will flip paid-ticket status to
  * 'refunded' as the refund event lands. We do not pre-flip here to
@@ -223,20 +223,10 @@ Deno.serve(withSentry("bulk-refund-tickets", async (req: Request) => {
         refundsAttempted.push(t.id);
         if (t.user_id) successUserIds.add(String(t.user_id));
       } else {
-        // Free ticket → void directly.
-        const { error: voidErr } = await supabase
-          .from("tickets")
-          .update({ status: "void" })
-          .eq("id", t.id);
-        if (voidErr) {
-          failures.push({
-            ticketId: t.id,
-            error: "Could not void free ticket",
-          });
-          continue;
-        }
-        voided.push(t.id);
-        if (t.user_id) successUserIds.add(String(t.user_id));
+        failures.push({
+          ticketId: t.id,
+          error: "Use Cancel free ticket from the event attendee roster. Unverified tickets require manual review.",
+        });
       }
     }
 

@@ -12,8 +12,8 @@
  * voided, event_financials decremented) so this endpoint stays small
  * and auditable.
  *
- * Free tickets (no payment_intent) are voided directly here — no
- * Stripe call needed.
+ * Free or unknown-price tickets must use organizer-cancel-free-ticket.
+ * This endpoint never voids them or sends a cancellation message.
  *
  * Important limitation: a payment_intent can back MULTIPLE tickets if
  * the buyer purchased quantity > 1. Stripe refunds are per-PI, so
@@ -29,7 +29,6 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
-import { notifyNextWaitlister } from "../_shared/notify-waitlisters.ts";
 import { withSentry } from "../_shared/sentry.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
@@ -146,52 +145,10 @@ Deno.serve(withSentry("organizer-refund", async (req: Request) => {
       );
     }
 
-    // Free/RSVP tickets: nothing was charged, so nothing is refunded.
-    // Void directly — no Stripe call. The paid path flows through
-    // charge.refunded which handles inventory + waitlist promotion;
-    // do the same inline here.
+    // Do not retain a second, non-atomic free-cancellation path. Old clients
+    // must refresh/use the explicit reviewed cancellation action.
     if (!isPaid) {
-      const { error: updateErr } = await supabase
-        .from("tickets")
-        .update({ status: "void" })
-        .eq("id", ticketId);
-      if (updateErr) {
-        console.error("[organizer-refund] void error:", updateErr);
-        return errorResponse("Could not void ticket", 500);
-      }
-
-      if (ticket.ticket_type_id) {
-        const { data: tt } = await supabase
-          .from("ticket_types")
-          .select("quantity_sold, name, event_id")
-          .eq("id", ticket.ticket_type_id)
-          .maybeSingle();
-        if (tt) {
-          await supabase
-            .from("ticket_types")
-            .update({
-              quantity_sold: Math.max(0, (tt.quantity_sold ?? 0) - 1),
-            })
-            .eq("id", ticket.ticket_type_id);
-          const { data: ev } = await supabase
-            .from("events")
-            .select("title")
-            .eq("id", ticket.event_id)
-            .maybeSingle();
-          await notifyNextWaitlister(supabase, {
-            eventId: ticket.event_id,
-            ticketTypeId: String(ticket.ticket_type_id),
-            tierName: tt.name,
-            eventTitle: ev?.title ?? null,
-          });
-        }
-      }
-
-      return jsonResponse({
-        ok: true,
-        free: true,
-        message: "Ticket voided (no charge to refund)",
-      });
+      return errorResponse("Use Cancel free ticket from the event attendee roster. Unverified tickets require manual review.", 409);
     }
 
     // Paid path — issue a Stripe refund. Stripe's charge.refunded

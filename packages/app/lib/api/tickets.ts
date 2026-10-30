@@ -21,6 +21,7 @@ export interface RosterCursor {
 }
 
 export interface TicketRecord {
+  organizer_free_cancel?: { eligible: boolean; reason: string | null };
   /** Who this pass is for. The door reads it before the account name. */
   attendee_name?: string | null;
   /** Better Auth id of whoever handed this pass over, set on transfer accept. */
@@ -877,6 +878,28 @@ export const ticketsApi = {
       console.error("[Tickets] requestRefund error:", error);
       return { error: error.message || "Refund request failed" };
     }
+  },
+
+  /** Organizer correction: never calls a refund or issues a replacement. */
+  async cancelOrganizerFreeTicket(params: { ticket_id: string; event_id: number; expected_owner_id: string; reason: string }): Promise<{ ok?: boolean; error?: string }> {
+    const fallback = "Cancellation could not be confirmed. Refresh the roster before trying again.";
+    try {
+      const token = await requireBetterAuthToken();
+      const { data, error } = await supabase.functions.invoke("organizer-cancel-free-ticket", {
+        body: params, headers: { Authorization: `Bearer ${token}` },
+      });
+      if (error) {
+        const response = error.context;
+        if (response && response.status >= 400 && response.status < 500) {
+          const body = await response.clone().json();
+          const message = typeof body?.error === "string" ? body.error : body?.error?.message;
+          if (typeof message === "string" && message.length < 300 && !/[<>\u0000-\u001f]/.test(message)) return { error: message };
+        }
+        return { error: fallback };
+      }
+      const result = typeof data === "string" ? JSON.parse(data) : data;
+      return result?.ok === true ? { ok: true } : { error: fallback };
+    } catch { return { error: fallback }; }
   },
 
   /** Explicit zero-money cancellation. The server rechecks eligibility atomically. */

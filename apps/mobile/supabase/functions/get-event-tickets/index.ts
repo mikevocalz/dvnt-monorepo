@@ -26,6 +26,8 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 
+import { organizerFreeCancellation } from "../_shared/organizer-free-cancellation.ts";
+
 // ── Membership tier resolution (Host & Guest WS-1) ─────────────────────────
 // Deno can't import packages/app, so PLAN_RANK and the entitlement rules are
 // mirrored here from lib/subscription/plans.ts + entitlements.ts. Keep in
@@ -143,7 +145,7 @@ Deno.serve(async (req: Request) => {
     // get a PII-redacted payload when their role is 'scanner'.
     const { data: event } = await supabase
       .from("events")
-      .select("id, host_id")
+      .select("id, host_id, title, location")
       .eq("id", eventIdNum)
       .maybeSingle();
     if (!event) return errorResponse("Event not found", 404);
@@ -305,6 +307,25 @@ Deno.serve(async (req: Request) => {
       return errorResponse("Could not fetch tickets", 500);
     }
 
+    // Fail closed if verification dependencies are unavailable. This is only a
+    // roster hint; the cancellation RPC rechecks all facts under row locks.
+    const cancellationOrders = new Map<string, any>();
+    const cancellationTransfers = new Set<string>();
+    let cancellationVerified = false;
+    if (isOwner && (data || []).length > 0) {
+      const orderIds = [...new Set((data || []).map((t: any) => t.order_id).filter(Boolean))];
+      const ticketIds = (data || []).map((t: any) => t.id);
+      const [orders, transfers] = await Promise.all([
+        orderIds.length ? supabase.from("orders").select("id,user_id,event_id,type,status,total_cents,subtotal_cents,discount_cents,stripe_payment_intent_id,stripe_checkout_session_id,cart_id,promo_code_id").in("id", orderIds) : Promise.resolve({ data: [], error: null }),
+        supabase.from("ticket_transfers").select("ticket_id").in("ticket_id", ticketIds).in("status", ["pending", "accepted"]),
+      ]);
+      cancellationVerified = !orders.error && !transfers.error;
+      if (cancellationVerified) {
+        for (const order of orders.data || []) cancellationOrders.set(order.id, order);
+        for (const transfer of transfers.data || []) cancellationTransfers.add(transfer.ticket_id);
+      }
+    }
+
     // ── Batched holder + tier lookup (WS-1). Two queries for the whole page,
     //    never one per row. `tickets.user_id` is the Better Auth auth id (see
     //    the table comment), which is exactly what effective_membership_tiers
@@ -395,6 +416,14 @@ Deno.serve(async (req: Request) => {
       // Owner/admin/editor get the full row
       return {
         ...t,
+        ...(isOwner ? {
+          username: nameByUser.get(t.user_id) || undefined,
+          event_title: event.title,
+          event_location: event.location,
+          organizer_free_cancel: cancellationVerified
+            ? organizerFreeCancellation(t, cancellationOrders.get(t.order_id), cancellationTransfers.has(t.id))
+            : { eligible: false, reason: "Cancellation eligibility is unavailable. Refresh the roster." },
+        } : {}),
         ticket_type_name: t.ticket_types?.name || "General",
         holder_name: holderName,
         membership_tier,

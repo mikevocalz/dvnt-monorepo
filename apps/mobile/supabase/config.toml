@@ -589,3 +589,6 @@ verify_jwt = false
 # Better Auth session verified internally; service-only consent/presence RPCs.
 [functions.member-map]
 verify_jwt = false
+
+[functions.organizer-cancel-free-ticket]
+verify_jwt = false

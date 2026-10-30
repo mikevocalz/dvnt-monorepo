@@ -49,17 +49,14 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { BroadcastModal } from "@dvnt/app/features/events";
+import { CompCancelModal } from "@dvnt/app/features/events/ui/comp-cancel-modal";
+import { useCompCancelStore } from "@dvnt/app/lib/stores/comp-cancel-store";
 import { CompTicketsModal } from "@dvnt/app/features/events";
 import { RefundConfirmModal } from "@dvnt/app/features/events";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 type StatusFilter =
-  | "all"
-  | "active"
-  | "scanned"
-  | "refunded"
-  | "transfer_pending"
-  | "void";
+  "all" | "active" | "scanned" | "refunded" | "transfer_pending" | "void";
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -94,6 +91,18 @@ function statusBadge(status: string): {
   }
 }
 
+/** Free/unknown-value tickets must never enter the monetary refund flow. */
+export function isOrganizerPaidRefundCandidate(ticket: {
+  status: string;
+  purchase_amount_cents?: number | null;
+  checked_in_at?: string | null;
+}): boolean {
+  return (ticket.status === "active" || ticket.status === "transfer_pending") &&
+    typeof ticket.purchase_amount_cents === "number" &&
+    Number.isSafeInteger(ticket.purchase_amount_cents) &&
+    ticket.purchase_amount_cents > 0 && !ticket.checked_in_at;
+}
+
 export default function EventAttendeesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const eventId = parseInt(id || "0", 10);
@@ -118,8 +127,7 @@ export default function EventAttendeesScreen() {
         status: statusFilter,
         search: searchDebounced.trim(),
       }),
-    getNextPageParam: (last) =>
-      last.hasMore ? last.page + 1 : undefined,
+    getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
     initialPageParam: 1,
     enabled: Number.isFinite(eventId) && eventId > 0,
   });
@@ -128,11 +136,9 @@ export default function EventAttendeesScreen() {
     () => query.data?.pages.flatMap((p) => p.tickets) ?? [],
     [query.data],
   );
-  const total =
-    query.data?.pages[query.data.pages.length - 1]?.total ?? null;
+  const total = query.data?.pages[query.data.pages.length - 1]?.total ?? null;
   const role = query.data?.pages[0]?.role ?? null;
-  const canExport =
-    role === "owner" || role === "admin" || role === "editor";
+  const canExport = role === "owner" || role === "admin" || role === "editor";
   const canBroadcast = role === "owner" || role === "admin";
   const canComp = role === "owner" || role === "admin";
   const canRefund = role === "owner";
@@ -145,16 +151,10 @@ export default function EventAttendeesScreen() {
   const showToast = useUIStore((s) => s.showToast);
   const queryClient = useQueryClient();
 
-  // Refund-eligible (paid/free, not already refunded/scanned/void)
-  const isRefundable = useCallback((status: string) => {
-    return (
-      status === "active" || status === "transfer_pending"
-    );
-  }, []);
-
   const toggleSelect = useCallback(
-    (id: string, status: string) => {
-      if (!isRefundable(status)) return;
+    (id: string) => {
+      const ticket = flat.find((item) => item.id === id);
+      if (!ticket || !isOrganizerPaidRefundCandidate(ticket)) return;
       setSelected((prev) => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
@@ -162,7 +162,7 @@ export default function EventAttendeesScreen() {
         return next;
       });
     },
-    [isRefundable],
+    [flat],
   );
 
   const exitSelect = useCallback(() => {
@@ -173,13 +173,15 @@ export default function EventAttendeesScreen() {
   const selectedTotalCents = useMemo(() => {
     let s = 0;
     for (const t of flat) {
-      if (selected.has(t.id))
-        s += Number(t.purchase_amount_cents || 0);
+      if (selected.has(t.id) && isOrganizerPaidRefundCandidate(t)) s += Number(t.purchase_amount_cents);
     }
     return s;
   }, [flat, selected]);
 
-  const selectedIds = useMemo(() => Array.from(selected), [selected]);
+  const selectedIds = useMemo(
+    () => flat.filter((ticket) => selected.has(ticket.id) && isOrganizerPaidRefundCandidate(ticket)).map((ticket) => ticket.id),
+    [flat, selected],
+  );
 
   const handleExport = useCallback(async () => {
     if (exporting) return;
@@ -220,18 +222,18 @@ export default function EventAttendeesScreen() {
     ({ item }: { item: any }) => {
       const { Icon, color, label } = statusBadge(item.status);
       const tier = item.ticket_type_name || "General";
-      const refundable = isRefundable(item.status);
+      const refundable = isOrganizerPaidRefundCandidate(item);
       const isSelected = selected.has(item.id);
       const handlePress = () => {
         if (selecting) {
-          toggleSelect(item.id, item.status);
+          toggleSelect(item.id);
         }
       };
       const handleLongPress = () => {
         if (!canRefund) return;
         if (!refundable) return;
         setSelecting(true);
-        toggleSelect(item.id, item.status);
+        toggleSelect(item.id);
       };
       return (
         <Pressable
@@ -281,14 +283,9 @@ export default function EventAttendeesScreen() {
             </Text>
             <View style={styles.metaRow}>
               <View
-                style={[
-                  styles.tierBadge,
-                  { borderColor: tierAccent("ga") },
-                ]}
+                style={[styles.tierBadge, { borderColor: tierAccent("ga") }]}
               >
-                <Text
-                  style={[styles.tierText, { color: tierAccent("ga") }]}
-                >
+                <Text style={[styles.tierText, { color: tierAccent("ga") }]}>
                   {tier}
                 </Text>
               </View>
@@ -299,6 +296,21 @@ export default function EventAttendeesScreen() {
               )}
             </View>
           </View>
+          {canRefund && !selecting && item.organizer_free_cancel ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Review free-ticket cancellation"
+              onPress={(e) => {
+                e.stopPropagation();
+                useCompCancelStore.getState().open(item);
+              }}
+              style={{ padding: 10 }}
+            >
+              <Text style={{ color: "#fca5a5", fontSize: 12 }}>
+                Review cancellation
+              </Text>
+            </Pressable>
+          ) : null}
           <View style={styles.statusWrap}>
             <Icon size={14} color={color} />
             <Text style={[styles.statusText, { color }]}>{label}</Text>
@@ -314,7 +326,7 @@ export default function EventAttendeesScreen() {
         </Pressable>
       );
     },
-    [isRefundable, selected, selecting, toggleSelect, canRefund],
+    [selected, selecting, toggleSelect, canRefund],
   );
 
   return (
@@ -348,7 +360,10 @@ export default function EventAttendeesScreen() {
                   hitSlop={12}
                   style={[
                     styles.exportBtn,
-                    { borderColor: "rgba(63,220,255,0.32)", backgroundColor: "rgba(63,220,255,0.12)" },
+                    {
+                      borderColor: "rgba(63,220,255,0.32)",
+                      backgroundColor: "rgba(63,220,255,0.12)",
+                    },
                   ]}
                   accessibilityLabel="Comp tickets"
                 >
@@ -385,6 +400,7 @@ export default function EventAttendeesScreen() {
         </View>
       </View>
 
+      {canRefund ? <CompCancelModal eventId={eventId} /> : null}
       <BroadcastModal
         visible={broadcastOpen}
         onClose={() => setBroadcastOpen(false)}
@@ -440,10 +456,7 @@ export default function EventAttendeesScreen() {
               style={[styles.chip, selected && styles.chipSelected]}
             >
               <Text
-                style={[
-                  styles.chipText,
-                  selected && styles.chipTextSelected,
-                ]}
+                style={[styles.chipText, selected && styles.chipTextSelected]}
               >
                 {f.label}
               </Text>
@@ -497,9 +510,7 @@ export default function EventAttendeesScreen() {
       {selecting && (
         <View style={styles.selectionBar}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.selectionCount}>
-              {selected.size} selected
-            </Text>
+            <Text style={styles.selectionCount}>{selectedIds.length} selected</Text>
             {selectedTotalCents > 0 && (
               <Text style={styles.selectionSub}>
                 ~${(selectedTotalCents / 100).toFixed(2)} to refund
@@ -514,11 +525,11 @@ export default function EventAttendeesScreen() {
             <Text style={styles.selectionCancelText}>Cancel</Text>
           </Pressable>
           <Pressable
-            onPress={() => setRefundOpen(true)}
-            disabled={selected.size === 0}
+            onPress={() => { if (selectedIds.length > 0) setRefundOpen(true); }}
+            disabled={selectedIds.length === 0}
             style={[
               styles.selectionRefund,
-              selected.size === 0 && { opacity: 0.4 },
+              selectedIds.length === 0 && { opacity: 0.4 },
             ]}
           >
             <RotateCcw size={14} color="#fff" />
