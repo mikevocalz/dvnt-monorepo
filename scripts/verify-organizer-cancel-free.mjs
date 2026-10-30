@@ -85,6 +85,9 @@ CREATE TABLE checkins(ticket_id uuid NOT NULL,event_id integer,scanned_by text,d
 ALTER TABLE tickets ADD COLUMN qr_payload text,ADD COLUMN attendee_name text,ADD COLUMN guest_name text,ADD COLUMN wallet_serial_number text,ADD COLUMN wallet_auth_token text,ADD COLUMN wallet_pass_type_id text;
 CREATE TABLE event_rsvps(event_id integer,user_id text,status text);
 CREATE TABLE event_financials(event_id integer PRIMARY KEY,gross_cents integer,refunds_cents integer,dvnt_fee_cents integer,stripe_fee_cents integer,net_cents integer,calculated_at timestamptz);
+-- Neutral fixture for non-accounting authorization/race tests. The dedicated
+-- compatibility test below replaces this with the exact production function.
+CREATE FUNCTION recompute_event_financials(p_event_id integer) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;
 `);
 await sql(readFileSync(join(MIGRATIONS,'20261030043000_organizer_cancel_free_ticket.sql'),'utf8'));
 // Execute repository migrations, not reconstructed scanner/attendance logic.
@@ -185,6 +188,18 @@ await check('exact live financial trigger delta refuses and rolls back the whole
  assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);
  assert.deepEqual(await sql(`SELECT * FROM orders ORDER BY id`),ordersBefore);
  assert.equal((await sql(`SELECT status FROM tickets WHERE qr_token='paid-qr'`))[0].status,'active');
+ // Stale cache already equal to the would-be post-cancel values cannot bypass
+ // the guard; pre-mutation recompute must also roll back its timestamp.
+ await sql(`UPDATE event_financials SET dvnt_fee_cents=125,net_cents=875,calculated_at='2020-01-01T00:00:00Z'`);
+ const staleBefore=await sql(`SELECT * FROM event_financials`);
+ assert.equal((await cancel(f)).error,'financial_review_required');
+ assert.deepEqual(await sql(`SELECT * FROM event_financials`),staleBefore);
+ assert.deepEqual(await sql(`SELECT * FROM tickets ORDER BY id`),ticketsBefore);
+ assert.deepEqual(await sql(`SELECT * FROM event_rsvps`),rsvpsBefore);
+ assert.deepEqual(await sql(`SELECT * FROM events ORDER BY id`),eventsBefore);
+ assert.equal((await sql(`SELECT quantity_sold FROM ticket_types`))[0].quantity_sold,2);
+ assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);
+ assert.deepEqual(await sql(`SELECT * FROM orders ORDER BY id`),ordersBefore);
  // This runner talks only to the Unix-socket disposable Postgres, never Stripe.
  // Changing only the isolated fixture's fee counter models compatible zero-fee
  // accounting. No production financial migration is performed or authorized.

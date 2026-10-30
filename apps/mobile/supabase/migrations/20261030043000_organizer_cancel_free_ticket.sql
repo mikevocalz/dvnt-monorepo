@@ -106,6 +106,16 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'financial_review_required');
   END IF;
   BEGIN
+    -- A stale summary can accidentally equal the post-cancellation value.
+    -- Establish that it matches authoritative accounting BEFORE mutation.
+    -- This recomputation is inside the rollback block: refusal cannot repair
+    -- or change even calculated_at on the stored financial snapshot.
+    PERFORM public.recompute_event_financials(p_event_id);
+    SELECT jsonb_build_array(gross_cents, refunds_cents, dvnt_fee_cents, stripe_fee_cents, net_cents)
+      INTO v_financial_after FROM public.event_financials WHERE event_id = p_event_id;
+    IF NOT FOUND OR v_financial_after IS DISTINCT FROM v_financial_before THEN
+      RAISE EXCEPTION USING ERRCODE = 'P0C01', MESSAGE = 'financial_review_required';
+    END IF;
     v_now := clock_timestamp();
     INSERT INTO public.organizer_free_ticket_cancellations
       (ticket_id, event_id, actor_id, owner_id, reason, previous_status, previous_quantity_sold, cancelled_at)
