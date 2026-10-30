@@ -5,7 +5,7 @@
  *
  * An email with no DVNT account gets a guest ticket emailed as a claim
  * link. Issuing and emailing are separate outcomes, so the result shows
- * both: how many tickets exist, and who the email actually reached.
+ * both: how many tickets exist, and which emails were accepted for sending.
  *
  * A phone number gets a single-use claim link that DVNT does not send. The
  * result lists one row per ticket and opens the host's own Messages composer
@@ -45,6 +45,7 @@ import {
   compClaimLinkLabel,
   canSubmitComp,
   parseCompRecipients,
+  compEmailPresentation,
 } from "@dvnt/app/lib/tickets/comp-recipients";
 import { canPickContact, pickContactPhone } from "@dvnt/app/lib/tickets/pick-contact-phone";
 import { useCompClaimSendStore } from "@dvnt/app/lib/stores/comp-claim-send-store";
@@ -85,6 +86,7 @@ export function CompTicketsModal({
   const [note, setNote] = useState("");
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<CompResult | null>(null);
+  const email = result ? compEmailPresentation(result) : null;
   const loadClaimLinks = useCompClaimSendStore((s) => s.load);
   const resetClaimLinks = useCompClaimSendStore((s) => s.reset);
 
@@ -171,7 +173,7 @@ export function CompTicketsModal({
       const guestIssued = (res.guest_issued ?? 0) + (res.phone_guest_issued ?? 0);
       const toText = res.claim_links?.length ?? 0;
       const undelivered = (res.delivery ?? []).filter(
-        (d) => d.status !== "delivered",
+        (d) => d.status === "failed" || d.status === "not_available",
       ).length;
       if (res.issued + guestIssued > 0) {
         showToast(
@@ -179,9 +181,9 @@ export function CompTicketsModal({
           "Tickets comped",
           [
             `${res.issued + guestIssued} issued`,
-            res.guest_issued ? `${res.guest_issued} by email` : "",
+            res.guest_issued ? `${res.guest_issued} guest tickets` : "",
             toText ? `${toText} to text` : "",
-            undelivered ? `${undelivered} email${undelivered === 1 ? "" : "s"} failed` : "",
+            undelivered ? `${undelivered} email${undelivered === 1 ? "" : "s"} not confirmed sent` : "",
             res.skipped.length ? `${res.skipped.length} skipped` : "",
           ]
             .filter(Boolean)
@@ -264,29 +266,33 @@ export function CompTicketsModal({
                     {result.guest_issued === 1 ? "" : "s"} created
                   </Text>
                 )}
+                <Text style={[styles.resultLine, { marginTop: 8 }]}>{email!.label}</Text>
+                <Text style={styles.skipLine}>{email!.detail}</Text>
+                <Text style={styles.skipLine}>{email!.explanation}</Text>
+                {email!.unknown && <Text style={styles.skipLine}>{email!.unknown}</Text>}
+                {email!.phoneNotice && <Text style={styles.skipLine}>{email!.phoneNotice}</Text>}
                 {(result.delivery?.length ?? 0) > 0 && (
                   <>
                     <Text style={[styles.resultLine, { marginTop: 8 }]}>
-                      Email delivery
+                      Email status
                     </Text>
                     {result.delivery!.map((d, i) => (
                       <Text
                         key={i}
                         style={[
                           styles.skipLine,
-                          d.status === "failed" && { color: "#F87171" },
+                          (d.status === "failed" || d.status === "not_available") && { color: "#F87171" },
                         ]}
                       >
                         • {d.recipient} —{" "}
                         {d.status === "delivered"
-                          ? "emailed"
-                          : d.error || "not delivered"}
+                          ? "accepted for sending"
+                          : d.status === "queued" ? "queued" : d.error || "not confirmed sent"}
                       </Text>
                     ))}
-                    {result.delivery!.some((d) => d.status === "failed") && (
+                    {result.delivery!.some((d) => d.status === "failed" || d.status === "not_available") && (
                       <Text style={[styles.skipLine, { marginTop: 6 }]}>
-                        Those tickets exist and stay valid. Send the link again
-                        or check the address.
+                        {email!.failureNotice}
                       </Text>
                     )}
                   </>
@@ -437,7 +443,7 @@ export function CompTicketsModal({
                 </Text>
               )}
               <Text style={styles.helper}>
-                A DVNT username lands in that member's wallet and activity. An email with no account gets guest ticket links by email. A phone number gets one claim link per ticket that you text from your own phone; they sign in to claim each ticket, and each link works once. Separate entries by comma, semicolon, or new line. Up to 100 per batch.
+                A DVNT username gets wallet tickets, activity, and a ticket email when a verified account email is available. An email with no account gets guest ticket links by email. A phone number gets one claim link per ticket that you text from your own phone; they sign in to claim each ticket, and each link works once. Separate entries by comma, semicolon, or new line. Up to 100 per batch.
               </Text>
 
               <Text style={styles.sectionLabel}>NOTE (optional)</Text>

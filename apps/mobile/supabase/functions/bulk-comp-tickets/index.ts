@@ -48,12 +48,8 @@ import {
   normalizeCompRecipient as normRecipient,
   dedupeCompAccounts,
   routeCompRecipient,
-  summarizeCompDelivery,
 } from "../_shared/comp-recipients.ts";
-import {
-  sendResendEmail,
-  ticketConfirmation,
-} from "../_shared/send-resend-email.ts";
+import { deliverTicketReceipts } from "../_shared/ticket-receipt-delivery.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import {
   type CompClaimLink,
@@ -330,10 +326,11 @@ Deno.serve(async (req: Request) => {
     // Dedupe identities after resolution: @name and name@email may be one user.
     const accounts = dedupeCompAccounts(resolved);
     skipped.push(...accounts.skipped);
+    const receiptIds: string[] = [];
     let inserted: { id: string; user_id: string }[] = [];
     let toIssue: Resolved[] = [];
     if (accounts.unique.length > 0) {
-      const { data: issuance, error: issueError } = await supabase.rpc("issue_comp_tickets_atomic", {
+      const { data: issuance, error: issueError } = await supabase.rpc("issue_comp_tickets_with_receipts", {
         p_event_id: eventId,
         p_tier_id: tierId,
         p_actor_id: authId,
@@ -350,6 +347,7 @@ Deno.serve(async (req: Request) => {
           remaining: issuance?.remaining,
         });
       }
+      receiptIds.push(...(issuance.receipt_ids || []));
       inserted = (issuance.tickets || []) as { id: string; user_id: string }[];
       const issuedIds = new Set(inserted.map((ticket) => ticket.user_id));
       toIssue = accounts.unique.filter((recipient) => issuedIds.has(recipient.authId));
@@ -368,7 +366,7 @@ Deno.serve(async (req: Request) => {
     let guestIssued: { id: string; guest_email: string; guest_lookup_token: string }[] = [];
     if (guests.length > 0) {
       const { data: guestIssuance, error: guestError } = await supabase.rpc(
-        "issue_guest_comp_tickets_atomic",
+        "issue_guest_comp_tickets_with_receipts",
         {
           p_event_id: eventId,
           p_tier_id: tierId,
@@ -379,16 +377,18 @@ Deno.serve(async (req: Request) => {
       );
       if (guestError) {
         console.error("[bulk-comp-tickets] guest issuance failed:", guestError.code);
-        return err("Could not issue guest tickets. Try again.", 500, req);
+        // Earlier member issuance is already committed; preserve its outcome.
+        for (const g of guests) skipped.push({ recipient: g.raw, reason: "Guest ticket issuance could not be confirmed. Check the roster before trying again." });
       }
-      if (!guestIssuance?.ok) {
+      if (!guestError && !guestIssuance?.ok) {
         // Capacity is a per-recipient outcome here, not a batch failure: the
         // member half may already be issued and the host needs both numbers.
         const reason = guestIssuance?.would_exceed === true
           ? `Tier capacity reached — ${guestIssuance?.remaining ?? 0} left, no guest tickets issued`
           : guestIssuance?.error || "Could not issue guest ticket";
         for (const g of guests) skipped.push({ recipient: g.raw, reason });
-      } else {
+      } else if (!guestError) {
+        receiptIds.push(...(guestIssuance.receipt_ids || []));
         guestIssued = (guestIssuance.tickets || []) as {
           id: string;
           guest_email: string;
@@ -421,14 +421,14 @@ Deno.serve(async (req: Request) => {
       );
       if (phoneIssueError) {
         console.error("[bulk-comp-tickets] phone issuance failed:", phoneIssueError.code);
-        return err("Could not issue phone guest tickets. Try again.", 500, req);
+        for (const g of phoneGuests) skipped.push({ recipient: g.raw, reason: "Phone ticket issuance could not be confirmed. Check the roster before trying again." });
       }
-      if (!phoneIssuance?.ok) {
+      if (!phoneIssueError && !phoneIssuance?.ok) {
         const reason = phoneIssuance?.would_exceed === true
           ? `Tier capacity reached — ${phoneIssuance?.remaining ?? 0} left, no phone guest tickets issued`
           : phoneIssuance?.error || "Could not issue phone guest ticket";
         for (const g of phoneGuests) skipped.push({ recipient: g.raw, reason });
-      } else {
+      } else if (!phoneIssueError) {
         const issuedLinks = (phoneIssuance.links || []) as IssuedPhoneLink[];
         const claimed = new Set<string>((phoneIssuance.claimed || []) as string[]);
         const rawByPhone = new Map(phoneGuests.map((g) => [g.phone, g.raw]));
@@ -515,77 +515,24 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Email every guest ticket. A send that throws leaves the ticket alone:
-    // it exists, it just hasn't reached anyone yet, and the host is told so.
-    const rawByEmail = new Map(guests.map((g) => [g.email, g.raw]));
-    const guestNote = (body.note || "").toString().trim().slice(0, 240);
-    const dateLine = event.date
-      ? new Date(event.date).toLocaleString("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        })
-      : null;
-    const ticketsByEmail = new Map<string, typeof guestIssued>();
-    for (const ticket of guestIssued) {
-      const tickets = ticketsByEmail.get(ticket.guest_email) ?? [];
-      tickets.push(ticket);
-      ticketsByEmail.set(ticket.guest_email, tickets);
+    // Receipt rows commit with issuance. Email failures never reissue tickets;
+    // the service-only worker retries these same future-only durable receipts.
+    let delivery: { recipient: string; status: string; error?: string }[] = [];
+    try {
+      const outcomes = await deliverTicketReceipts(supabase, receiptIds);
+      const recipientLabels = new Map(accounts.unique.map((r) => [r.authId, r.raw]));
+      for (const g of guests) recipientLabels.set(g.email, g.raw);
+      delivery = outcomes.map((r) => ({
+        recipient: recipientLabels.get(r.recipient) || "Ticket recipient",
+        status: r.status,
+        ...(r.error ? { error: r.error } : {}),
+      }));
+    } catch {
+      // Safe response even if the mail transport / queue read is unavailable.
+      console.warn("[bulk-comp-tickets] receipt processing unavailable");
+      delivery = [...new Set([...toIssue.map((r) => r.raw), ...guestIssued.map((t) => t.guest_email)])]
+        .map((recipient) => ({ recipient, status: "queued", error: "Ticket issued; email confirmation is pending." }));
     }
-    const sends = await Promise.all(
-      [...ticketsByEmail].map(async ([email, tickets]) => {
-        const recipient = rawByEmail.get(email) || email;
-        try {
-          const messageId = await sendResendEmail({
-            to: email,
-            ...ticketConfirmation({
-              eventTitle: event.title || "your event",
-              flyerUrl: event.flyer_image_url ?? null,
-              dominantColor: event.dominant_color ?? null,
-              dateLine,
-              location: event.location ?? null,
-              toEmail: email,
-              guestNudge: true,
-              greeting:
-                guestNote ||
-                `The host comped you ${tickets.length} ticket${tickets.length === 1 ? "" : "s"} to ${event.title || "their event"}. Open each ticket below — the QR at the door is inside, no account needed.`,
-              tickets: tickets.map((ticket) => ({
-                tier: tier.name,
-                lookupUrl: `${SITE_URL}/public/tickets/guest/${ticket.guest_lookup_token}`,
-              })),
-            }),
-          });
-          // sendResendEmail returns null when RESEND_API_KEY is unset — nothing
-          // was sent, so that is a delivery failure, not a quiet success.
-          if (!messageId) {
-            return { recipient, delivered: false, error: "Email provider not configured" };
-          }
-          return { recipient, delivered: true, ticketIds: tickets.map((ticket) => ticket.id) };
-        } catch (sendErr: any) {
-          console.error("[bulk-comp-tickets] guest email failed:", sendErr?.name || "send error");
-          return { recipient, delivered: false, error: "Email delivery failed" };
-        }
-      }),
-    );
-    const deliveredIds = sends
-      .filter((s) => s.delivered)
-      .flatMap((s) => (s as { ticketIds: string[] }).ticketIds);
-    if (deliveredIds.length > 0) {
-      // ponytail: one timestamp, no failure reason column and no retry queue.
-      // Upgrade path is a Resend webhook writing bounce/complaint state here.
-      const { error: stampError } = await supabase
-        .from("tickets")
-        .update({ guest_email_sent_at: new Date().toISOString() })
-        .eq("event_id", eventId)
-        .eq("ticket_type_id", tierId)
-        .in("id", deliveredIds);
-      if (stampError) {
-        console.warn("[bulk-comp-tickets] delivery stamp failed:", stampError.code);
-      }
-    }
-    const emailDelivery = summarizeCompDelivery(sends);
 
     return json(
       {
@@ -595,7 +542,7 @@ Deno.serve(async (req: Request) => {
           guest_issued: guestIssued.length,
           phone_guest_issued: claimLinks.filter((l) => !l.reissued).length,
           skipped,
-          delivery: emailDelivery.results,
+          delivery,
           claim_links: claimLinks,
           tier: tier.name,
         },

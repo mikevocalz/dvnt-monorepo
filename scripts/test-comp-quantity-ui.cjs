@@ -9,8 +9,8 @@ const ROOT = path.resolve(__dirname, "..");
 const nodePaths = (process.env.NODE_PATH || "").split(path.delimiter).filter(Boolean);
 const resolve = (name) => require.resolve(name, { paths: [ROOT, ...nodePaths] });
 const fixtures = {
-  "comp-fixture": `export const state={calls:[],toasts:[],defer:false,release:null,fail:false,closes:0,links:[]};`,
-  "@dvnt/app/lib/supabase/client": `import {state} from 'comp-fixture';export const supabase={functions:{invoke:async(name,input)=>{state.calls.push({name,...input});if(state.defer)await new Promise(resolve=>{state.release=resolve;});return state.fail?{error:{message:'Connection interrupted'}}:{data:{ok:true,data:{issued:input.body.quantity,skipped:[],claim_links:state.links}}};}}};`,
+  "comp-fixture": `export const state={calls:[],toasts:[],defer:false,release:null,fail:false,closes:0,links:[],result:null};`,
+  "@dvnt/app/lib/supabase/client": `import {state} from 'comp-fixture';export const supabase={functions:{invoke:async(name,input)=>{state.calls.push({name,...input});if(state.defer)await new Promise(resolve=>{state.release=resolve;});return state.fail?{error:{message:'Connection interrupted'}}:{data:{ok:true,data:state.result??{issued:input.body.quantity,skipped:[],claim_links:state.links}}};}}};`,
   "@dvnt/app/lib/auth/identity": `export const requireBetterAuthToken=async()=> 'fixture-auth';export const updateUserRowCache=()=>{};export const clearUserRowCache=()=>{};`,
   "@dvnt/app/lib/api/tickets": `export const ticketsApi={getTicketTypes:async()=>[{id:'tier1',name:'GA',is_active:true,quantity_total:100,quantity_sold:0}]};`,
   "@dvnt/app/lib/api/search": `export const searchApi={searchUsers:async()=>({docs:[]})};`,
@@ -87,6 +87,32 @@ const source = `export {default as React,act} from 'react';export {createRoot} f
       for (const n of [1,2,3]) assert.ok(byLabel(`Text link to ${phone} · Ticket ${n} of 3`));
       await click(byLabel(`Text link to ${phone} · Ticket 2 of 3`));
       assert.deepEqual(f.claimStore.getState().statuses,{ticket2:'opened'});
+      await click(byText('Done'));
+      for (const [name,result,accepted,failed] of [
+        ['member grouped', {issued:3,skipped:[],delivery:[{recipient:'@nova',status:'delivered'}]},1,0],
+        ['mixed partial', {issued:3,guest_issued:2,skipped:[],delivery:[{recipient:'@nova',status:'failed',error:'No email address on account'},{recipient:'guest@example.invalid',status:'delivered'}]},1,1],
+        ['phone only', {issued:0,phone_guest_issued:3,skipped:[]},0,0],
+        ['queued missing address', {issued:6,skipped:[],delivery:[{recipient:'@nova',status:'queued'},{recipient:'@missing',status:'not_available',error:'No email address on account'}]},0,1],
+        ['legacy unknown', {issued:3,skipped:[]},0,0],
+      ]) {
+        f.state.result=result;f.state.links=[];
+        await flush(()=>{visible=true;f.store.getState().openComp();render();});await flush();
+        if(platform==='web')await flush(()=>f.store.getState().setCompRecipients('@nova'));
+        else await flush(()=>{const input=document.querySelector('textarea');input.value='@nova';input.dispatchEvent(new window.Event('input',{bubbles:true}));});
+        await click(byText('Comp up to 1 ticket'));await flush();
+        const text=document.body.textContent;
+        assert.match(text,/Ticket emails sent/,platform+': '+name);
+        assert.match(text,new RegExp((name==='legacy unknown'?'—':accepted)+' accepted for sending'));
+        assert.match(text,/Email counts are messages, not ticket quantities/);
+        assert.match(text,/Inbox delivery is not guaranteed/);
+        if(failed){assert.match(text,/No email address on account/);assert.match(text,/Do not comp again to retry email/);assert.match(text,/tickets stay valid/);}
+        if(name==='phone only')assert.match(text,/follows account claim/);
+        if(name==='queued missing address')assert.match(text,/1 queued/);
+        if(name==='legacy unknown')assert.match(text,/Email status is unavailable/);
+        assert.doesNotMatch(text,/comp it again|Every guest email went out|email didn.t arrive/);
+        await click(byText('Done'));passed++;console.log('PASS '+platform+': '+name+' email result');
+      }
+      f.state.result=null;
       await flush(()=>root.unmount());client.clear();host.remove();passed++;console.log('PASS '+platform+': quantity, payload, pending guard, reopen default, failed retry, independent phone links');
     }
     f.state.calls=[];await f.bulkCompTickets(1,'tier1',['@nova']);assert.equal(f.state.calls[0].body.quantity,1);passed++;console.log('PASS legacy API callers default to one ticket');

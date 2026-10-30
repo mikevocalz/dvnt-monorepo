@@ -17,12 +17,12 @@ function fakeDb(orderAddons, { failAddonId } = {}) {
   return {
     ops,
     async rpc(name, args) {
-      assert.equal(name, 'accept_ticket_transfer_atomic');
+      assert.equal(name, 'accept_ticket_transfer_with_receipt');
       assert.equal(args.p_transfer_id, 'tr1');
       assert.equal(args.p_recipient_id, 'recipient');
       assert.equal(args.p_event_id, 7);
       ops.push({ table: 'tickets', operation: 'atomic_accept', payload: args });
-      return { data: { ok: true, ticket_id: TICKET.id }, error: null };
+      return { data: { ok: true, ticket_id: TICKET.id, receipt_ids: ["receipt-transfer"] }, error: null };
     },
     from(table) {
       const op = { table, operation: 'select', payload: null, eq: {}, in: {} };
@@ -63,7 +63,8 @@ function fakeDb(orderAddons, { failAddonId } = {}) {
   };
 }
 
-function load(db) {
+function load(db, { receiptFails = false } = {}) {
+  const receipts = [], directEmails = [];
   let handler;
   const minted = [];
   const stubs = {
@@ -74,7 +75,8 @@ function load(db) {
       return qr;
     } },
     'wallet-push.ts': { voidWalletPass: async () => {} },
-    'send-resend-email.ts': { sendResendEmail: async () => {}, ticketConfirmation: () => ({}) },
+    'send-resend-email.ts': { sendResendEmail: async () => { directEmails.push(true); }, ticketConfirmation: () => ({}) },
+    'ticket-receipt-delivery.ts': { deliverTicketReceipts: async (client, ids) => { assert.equal(client, db); receipts.push([...ids]); if (receiptFails) throw Error('mail unavailable'); } },
   };
   const file = path.resolve(__dirname, 'index.ts');
   const source = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
@@ -86,7 +88,7 @@ function load(db) {
     fetch: async () => Response.json({}),
     require: (name) => name.includes('supabase-js') ? { createClient: () => db } : stubs[path.basename(name)],
   });
-  return { minted, accept: () => handler(new Request('http://test', { method: 'POST',
+  return { minted, receipts, directEmails, accept: () => handler(new Request('http://test', { method: 'POST',
     body: JSON.stringify({ action: 'accept', transfer_id: 'tr1' }) })) };
 }
 
@@ -127,4 +129,11 @@ test('one add-on write failing does not fail the accepted transfer or skip the o
   const r = await load(db).accept();
   assert.equal(r.status, 200, 'the ticket already moved; a 500 here strands the add-ons with no retry');
   assert.ok(db.ops.some((o) => o.table === 'order_addons' && o.operation === 'update' && o.eq.id === 'oa2'));
+});
+
+for (const receiptFails of [false, true]) test(`acceptance invokes queued receipt once and survives worker failure=${receiptFails}`, async () => {
+  const f = load(fakeDb([]), { receiptFails });
+  assert.equal((await f.accept()).status, 200);
+  assert.deepEqual(f.receipts, [["receipt-transfer"]]);
+  assert.deepEqual(f.directEmails, []);
 });

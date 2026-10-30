@@ -41,6 +41,7 @@ import {
   canSubmitComp,
   parseCompRecipients,
   summarizeCompResult,
+  compEmailPresentation,
 } from "@dvnt/app/lib/tickets/comp-recipients";
 
 const MAX_NOTE = 240;
@@ -72,7 +73,8 @@ interface Props {
  */
 function ResultPanel({ result }: { result: CompResult }) {
   const s = summarizeCompResult(result);
-  const failed = (result.delivery ?? []).filter((d) => d.status !== "delivered");
+  const email = compEmailPresentation(result);
+  const failed = (result.delivery ?? []).filter((d) => d.status === "failed" || d.status === "not_available");
   return (
     <div>
       <div className="grid grid-cols-2 overflow-hidden rounded-2xl border border-white/10">
@@ -95,37 +97,35 @@ function ResultPanel({ result }: { result: CompResult }) {
             className="text-[32px] font-bold leading-none tabular-nums"
             style={{ color: s.undelivered > 0 ? "#F59E0B" : ACCENT }}
           >
-            {s.delivered}
+            {email.unknown ? "—" : s.delivered}
           </p>
           <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-white/45">
-            Claim emails sent
+            {email.label}
           </p>
           <p className="mt-1 text-[13px] text-white/50">
-            {s.undelivered > 0
-              ? `${s.undelivered} didn't go out`
-              : s.guestIssued === 0
-                ? "No guest emails in this batch"
-                : "Every guest email went out"}
+            {email.detail}
           </p>
         </div>
       </div>
 
+      <p className="mt-3 text-[13px] text-white/60">{email.explanation}</p>
+      {email.unknown && <p className="mt-2 text-[13px] text-amber-300">{email.unknown}</p>}
+      {email.phoneNotice && <p className="mt-2 text-[13px] text-white/60">{email.phoneNotice}</p>}
+
       {failed.length > 0 ? (
         <div className="mt-4 rounded-2xl border border-amber-400/25 bg-amber-400/8 p-4">
           <p className="flex items-center gap-2 text-[13px] font-semibold text-amber-300">
-            <Mail size={14} /> These tickets exist but the email didn&apos;t
-            arrive
+            <Mail size={14} /> Tickets issued; email needs attention
           </p>
           <ul className="mt-2 space-y-1">
             {failed.map((d, index) => (
               <li key={`${d.recipient}-${index}`} className="text-[13px] text-white/60">
-                {d.recipient} — {d.error || "not delivered"}
+                {d.recipient} — {d.error || "not confirmed sent"}
               </li>
             ))}
           </ul>
           <p className="mt-2 text-[13px] text-white/45">
-            The tickets stay valid. Check the address and comp it again, or
-            pass the claim link on yourself.
+            {email.failureNotice}
           </p>
         </div>
       ) : null}
@@ -325,10 +325,10 @@ export function CompTicketsModal({
           "Tickets comped",
           [
             `${s.totalIssued} issued`,
-            s.guestIssued ? `${s.guestIssued} by email` : "",
+            s.guestIssued ? `${s.guestIssued} guest tickets` : "",
             s.claimLinks ? `${s.claimLinks} to text` : "",
             s.undelivered
-              ? `${s.undelivered} email${s.undelivered === 1 ? "" : "s"} failed`
+              ? `${s.undelivered} email${s.undelivered === 1 ? "" : "s"} not confirmed sent`
               : "",
             s.skipped ? `${s.skipped} skipped` : "",
           ]
@@ -625,7 +625,7 @@ export function CompTicketsModal({
               </p>
             ) : null}
             <p className="mt-2 text-[13px] leading-relaxed text-white/45">
-              A DVNT username lands in that member&apos;s wallet. An email with
+              A DVNT username gets wallet tickets and a ticket email when a verified account email is available. An email with
               no account gets guest ticket links by email. A phone number gets
               one claim link per ticket that you text from your own phone; they
               sign in to claim each ticket, and each link works once. Separate entries with a

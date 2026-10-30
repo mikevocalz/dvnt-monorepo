@@ -31,7 +31,7 @@ function fixture(options = {}) {
     events: [{ id: 7, host_id: 'staff', start_date: new Date(Date.now() + 7 * 864e5).toISOString(), ...options.event }],
     ticket_types: [{ id: 'tier', name: 'GA' }],
   };
-  const writes = [], wallets = [], rpcCalls = [], warnings = [];
+  const writes = [], wallets = [], rpcCalls = [], warnings = [], receipts = [], directEmails = [];
   let sequence = 0, beforeWrite = options.beforeWrite;
   const db = {
     from(table) {
@@ -78,7 +78,7 @@ function fixture(options = {}) {
     },
     async rpc(name, args) {
       rpcCalls.push({ name, args });
-      if (name === 'accept_ticket_transfer_atomic') {
+      if (name === 'accept_ticket_transfer_with_receipt') {
         const transfer = tables.ticket_transfers.find(t => t.id === args.p_transfer_id);
         const ticket = tables.tickets.find(t => t.id === transfer?.ticket_id);
         beforeWrite?.({ table: 'ticket_transfers', operation: 'update', payload: { status: 'accepted' }, tables });
@@ -93,7 +93,7 @@ function fixture(options = {}) {
           wallet_pass_type_id: null, wallet_voided_at: null, wallet_last_pushed_at: null };
         Object.assign(ticket, patch); Object.assign(transfer, { status: 'accepted', resolved_at: new Date().toISOString() });
         writes.push({ table: 'tickets', operation: 'update', payload: patch });
-        return options.acceptanceError ? { data: null, error: { message: 'response lost after commit' } } : { data: { ok: true, ticket_id: ticket.id }, error: null };
+        return options.acceptanceError ? { data: null, error: { message: 'response lost after commit' } } : { data: { ok: true, ticket_id: ticket.id, receipt_ids: [`receipt-${transfer.id}`] }, error: null };
       }
       assert.equal(name, 'redeem_ticket');
       const t = tables.tickets.find(t => t.qr_token === args.p_qr_token);
@@ -109,7 +109,8 @@ function fixture(options = {}) {
     'verify-session.ts': { verifySession: async (_db, req) => req.headers.get('test-user') },
     'hmac-qr.ts': qr,
     'wallet-push.ts': { voidWalletPass: async (_db, id, owner) => { assert.equal(owner, 'sender'); wallets.push(id); } },
-    'send-resend-email.ts': { sendResendEmail: async () => 'email', ticketConfirmation: () => ({}) },
+    'send-resend-email.ts': { sendResendEmail: async () => { directEmails.push(true); return 'email'; }, ticketConfirmation: () => ({}) },
+    'ticket-receipt-delivery.ts': { deliverTicketReceipts: async (client, ids) => { assert.equal(client, db); receipts.push([...ids]); if (options.receiptError) throw Error('mail unavailable'); } },
   };
   vm.runInNewContext(moduleCode(path.resolve(__dirname, 'index.ts')), {
     exports: {}, Response, Request, crypto, console: { log() {}, error() {}, warn(...args) { warnings.push(args); } },
@@ -118,7 +119,7 @@ function fixture(options = {}) {
     require: name => name.includes('supabase-js') ? { createClient: () => db } : stubs[path.basename(name)],
   });
   return {
-    tables, writes, wallets, rpcCalls, warnings,
+    tables, writes, wallets, rpcCalls, warnings, receipts, directEmails,
     setBeforeWrite(fn) { beforeWrite = fn; },
     async invoke(user, body) {
       return handler(new Request('http://offline.test', { method: 'POST', headers: user ? { 'test-user': user } : {}, body: JSON.stringify(body) }));
@@ -371,3 +372,17 @@ for(const failure of ['notifications','users','events']) {
   assert.ok(!JSON.stringify(f.warnings).includes('private-recipient-sentinel'));
  });
 }
+
+for (const receiptError of [false, true]) test(`receipt processing is acceptance-only and does not change ownership outcome (${receiptError})`, async () => {
+ const f = fixture({receiptError});
+ const id = await initiate(f, 1, 'one');
+ assert.deepEqual(f.receipts, []);
+ assert.equal((await f.invoke('other', {action:'accept',transfer_id:id})).status, 403);
+ assert.deepEqual(f.receipts, []);
+ assert.equal((await f.invoke('one', {action:'accept',transfer_id:id})).status, 200);
+ assert.equal(f.tables.tickets[0].user_id,'one');
+ assert.deepEqual(f.receipts, [[`receipt-${id}`]]);
+ assert.deepEqual(f.directEmails, []);
+ assert.notEqual((await f.invoke('one', {action:'accept',transfer_id:id})).status, 200);
+ assert.equal(f.receipts.length, 1);
+});
