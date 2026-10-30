@@ -61,7 +61,7 @@ async function main() {
     await query('CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN;');
     async function setup() {
       await query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-      await query(fixture.replace(/CREATE ROLE \w+ NOLOGIN;/g,'').replace('CREATE FUNCTION pg_temp.assert_fin', 'CREATE OR REPLACE FUNCTION pg_temp.assert_fin'));
+      await query(fixture.replace('CREATE FUNCTION pg_temp.assert_fin', 'CREATE OR REPLACE FUNCTION pg_temp.assert_fin'));
       await query("ALTER TABLE events ADD COLUMN payout_status text DEFAULT 'pending';");
       await query(section7);
       await query(migration('20261006223500_stripe_processing_fee_ledger.sql'));

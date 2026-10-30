@@ -20,9 +20,9 @@ const section7 = read('20260922100000_free_ticket_orders_and_event_financials.sq
   .match(/\n-- ── 7\. Live event_financials[\s\S]*$/)?.[0];
 assert.ok(section7, 'financials migration section 7 is required');
 const fixture = `
-CREATE ROLE anon NOLOGIN;
-CREATE ROLE authenticated NOLOGIN;
-CREATE ROLE service_role NOLOGIN;
+DO $roles$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon NOLOGIN; END IF; END $roles$;
+DO $roles$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF; END $roles$;
+DO $roles$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN CREATE ROLE service_role NOLOGIN; END IF; END $roles$;
 CREATE TABLE events(id integer PRIMARY KEY);
 CREATE TABLE orders(
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_id integer REFERENCES events(id),
