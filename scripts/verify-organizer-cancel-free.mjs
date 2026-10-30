@@ -188,6 +188,12 @@ await check('exact live financial trigger delta refuses and rolls back the whole
  assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);
  assert.deepEqual(await sql(`SELECT * FROM orders ORDER BY id`),ordersBefore);
  assert.equal((await sql(`SELECT status FROM tickets WHERE qr_token='paid-qr'`))[0].status,'active');
+ await sql(`DROP TRIGGER tickets_financials_refresh_upd ON tickets`);
+ assert.equal((await cancel(f)).error,'financial_review_required');
+ assert.deepEqual(await sql(`SELECT * FROM event_financials`),financesBefore);
+ assert.deepEqual(await sql(`SELECT * FROM tickets ORDER BY id`),ticketsBefore);
+ assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);
+ await sql(trigger);
  // Stale cache already equal to the would-be post-cancel values cannot bypass
  // the guard; pre-mutation recompute must also roll back its timestamp.
  await sql(`UPDATE event_financials SET dvnt_fee_cents=125,net_cents=875,calculated_at='2020-01-01T00:00:00Z'`);

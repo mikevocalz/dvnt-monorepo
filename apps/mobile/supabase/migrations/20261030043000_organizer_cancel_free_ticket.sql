@@ -130,6 +130,8 @@ BEGIN
     END IF;
     -- Existing attendance triggers own event counters. No refund, order rewrite,
     -- reissue, push, email or waitlist promotion is performed here.
+    -- Also verify the authoritative result if a deployment lacks the trigger.
+    PERFORM public.recompute_event_financials(p_event_id);
     SELECT jsonb_build_array(gross_cents, refunds_cents, dvnt_fee_cents, stripe_fee_cents, net_cents)
       INTO v_financial_after FROM public.event_financials WHERE event_id = p_event_id;
     IF NOT FOUND OR v_financial_after IS DISTINCT FROM v_financial_before THEN
