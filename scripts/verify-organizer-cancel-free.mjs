@@ -165,7 +165,7 @@ await check('concurrent untiered cancellation writes one audit and touches no in
  const f=await untieredFixture();const r=await Promise.all([cancel(f),cancel(f)]);assert.ok(r.every(x=>x.ok));assert.equal(r.filter(x=>x.changed).length,1);
  assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,1);assert.equal((await sql(`SELECT quantity_sold FROM ticket_types`))[0].quantity_sold,1);
 });
-for(const change of ["status='scanned',checked_in_at=now()","status='transfer_pending'","user_id='new-holder'","purchase_amount_cents=1"]){
+for(const change of ["status='scanned',checked_in_at=now()","status='transfer_pending'","user_id='new-holder'","purchase_amount_cents=1","purchase_amount_cents=NULL","order_id=NULL","guest_email='synthetic@example.invalid'","transferred_from='previous'"]){
  await check(`untiered guards reject ${change}`,async()=>{const f=await untieredFixture();await sql(`UPDATE tickets SET ${change}`);assert.equal((await cancel(f)).ok,false);assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);});
 }
 await check('tier assigned while cancellation waits on ticket lock requires fresh review',async()=>{
