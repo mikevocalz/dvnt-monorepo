@@ -15,7 +15,7 @@
  *  Storage bucket (mirror also lives in apps/web/public/ for a future web
  *  deploy). The same PNGs are uploaded to both. */
 const ASSET_BASE = (
-  Deno.env.get("EMAIL_ASSET_BASE") ||
+  (typeof Deno !== "undefined" && Deno.env.get("EMAIL_ASSET_BASE")) ||
   "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email"
 ).replace(/\/+$/, "");
 
@@ -54,8 +54,8 @@ export const COLORS = {
 
   text: "#ffffff",
   textBody: "#a1a1aa",
-  textMuted: "#71717a",
-  textFaint: "#52525b",
+  textMuted: "#a1a1aa",
+  textFaint: "#92929d",
 
   /** Core brand accents (match tier-colors.ts + landing theme). */
   cyan: "#3FDCFF",
@@ -75,19 +75,19 @@ export const COLORS = {
 export const GRADIENTS = {
   /** Primary CTA — teal-blue → purple (the wordmark's own ramp extended). */
   brand: {
-    css: `linear-gradient(135deg, ${COLORS.teal} 0%, ${COLORS.purpleDeep} 100%)`,
+    css: `linear-gradient(135deg, #24749f 0%, ${COLORS.purpleDeep} 100%)`,
     /** Outlook/VML & solid-fallback color. */
-    solid: COLORS.teal,
+    solid: "#24749f",
     /** VML gradient endpoints (Outlook reads fillcolor + the <v:fill> stops). */
-    vmlFrom: COLORS.teal,
+    vmlFrom: "#24749f",
     vmlTo: COLORS.purpleDeep,
   },
   /** Deviant — purple → magenta. Used for accents / secondary emphasis. */
   deviant: {
-    css: `linear-gradient(135deg, ${COLORS.purple} 0%, ${COLORS.magenta} 100%)`,
-    solid: COLORS.purple,
-    vmlFrom: COLORS.purple,
-    vmlTo: COLORS.magenta,
+    css: `linear-gradient(135deg, #852dc2 0%, #a21b9f 100%)`,
+    solid: "#852dc2",
+    vmlFrom: "#852dc2",
+    vmlTo: "#a21b9f",
   },
   /** Thin header rule under the wordmark. */
   rule: {
@@ -105,36 +105,41 @@ export type TierLevel = "free" | "ga" | "vip" | "table" | "comp";
 
 export const TIERS: Record<
   TierLevel,
-  { accent: string; soft: string; grad: string; label: string }
+  { accent: string; soft: string; fill: string; grad: string; label: string }
 > = {
   free: {
     accent: "#3FDCFF",
     soft: "#3FDCFF",
-    grad: "linear-gradient(135deg, #3FDCFF 0%, #34A2DF 100%)",
+    fill: "#11627b",
+    grad: "linear-gradient(135deg, #11627b 0%, #0f4961 100%)",
     label: "FREE",
   },
   ga: {
     accent: "#34A2DF",
     soft: "#34A2DF",
-    grad: "linear-gradient(135deg, #34A2DF 0%, #0f4961 100%)",
+    fill: "#11627b",
+    grad: "linear-gradient(135deg, #11627b 0%, #0f4961 100%)",
     label: "GA",
   },
   vip: {
     accent: "#8A40CF",
     soft: "#C084FC",
+    fill: "#8A40CF",
     grad: "linear-gradient(135deg, #8A40CF 0%, #5b2c81 100%)",
     label: "VIP",
   },
   table: {
     accent: "#FF5BFC",
     soft: "#FF5BFC",
-    grad: "linear-gradient(135deg, #FF5BFC 0%, #8A40CF 100%)",
+    fill: "#9b248e",
+    grad: "linear-gradient(135deg, #9b248e 0%, #632d96 100%)",
     label: "TABLE",
   },
   comp: {
     accent: "#E8C766",
     soft: "#F4E2A6",
-    grad: "linear-gradient(135deg, #F4E2A6 0%, #C9A227 100%)",
+    fill: "#715615",
+    grad: "linear-gradient(135deg, #715615 0%, #58420b 100%)",
     label: "COMP",
   },
 };

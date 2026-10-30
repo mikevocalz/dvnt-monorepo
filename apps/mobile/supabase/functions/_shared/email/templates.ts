@@ -21,6 +21,7 @@ import {
   qrBlock,
   tierBadge,
 } from "./components.ts";
+import { protectText } from "./dark-mode.ts";
 import { brandEmailWrapper } from "./wrapper.ts";
 
 export interface EmailContent {
@@ -539,7 +540,7 @@ export const WELCOME_COPY: ReadonlyArray<{
  * heading(), sized down and emitted as h2 so the email keeps a single h1.
  */
 function sectionHeading(text: string): string {
-  return `<h2 style="margin:32px 0 12px;font-family:${FONTS.display};font-size:17px;line-height:1.3;font-weight:700;letter-spacing:0.04em;color:${COLORS.text};text-align:left">${esc(text)}</h2>`;
+  return `<h2 style="margin:32px 0 12px;font-family:${FONTS.display};font-size:17px;line-height:1.3;font-weight:700;letter-spacing:0.04em;color:${COLORS.text};text-align:left">${protectText(esc(text))}</h2>`;
 }
 
 /**

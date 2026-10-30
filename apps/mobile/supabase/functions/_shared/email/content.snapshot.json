@@ -1,0 +1,216 @@
+{
+  "verification": {
+    "subject": "123456 is your DVNT code",
+    "text": "123456 — your DVNT verification code&nbsp;Confirm your RSVPEnter this code to confirm. It expires in 10 minutes.123456This code expires in 10 minutes. For your security, don't share it with anyone.&nbsp;Didn't request this? You can safely ignore this email — no action is needed.&nbsp;&copy; Deviant LLC &middot; Counter Culture Society",
+    "links": [],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "transfer": {
+    "subject": "Your ticket for Preview “Night Out”",
+    "text": "Your ticket for Preview “Night Out”&nbsp;You're in 🎟️@preview_host sent you a ticket for Preview “Night Out” — it&#39;s yours now.&nbsp;Preview “Night Out”Sun, Nov 1, 2:00 AMPreview VenueINFLUENCERYour ticketView in app&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "comp": {
+    "subject": "Your ticket for Complimentary preview",
+    "text": "Your ticket for Complimentary preview&nbsp;You're in 🎟️Your ticket is confirmed. Open the app to access your tickets.&nbsp;Complimentary previewCOMPYour ticketGuest of the hostView in app&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "guest": {
+    "subject": "Your ticket for Guest preview <special> & friends",
+    "text": "Your ticket for Guest preview &lt;special&gt; &amp; friends&nbsp;You're in 🎟️Your ticket is confirmed. Show the QR code below at the door — each ticket has its own.&nbsp;Guest preview &lt;special&gt; &amp; friendsVIPView ticket &rarr;Add to Wallet &rarr;Manage your tickets &rarr;Total$20.00&nbsp;Add this ticket to a DVNT account with preview@example.test — one tap, no password. Your tickets move with you: wallet passes, transfers, and re-downloads anytime.Add to my accountWe'll email you a secure one-time sign-in link. Nothing happens without it.&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://dvntapp.live/api/auth/guest-claim?email=preview%40example.test",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=PREVIEW-ONLY-QR%3C%26%3E",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "multiple": {
+    "subject": "Your 5 tickets for Multiple ticket preview",
+    "text": "5 tickets for Multiple ticket preview&nbsp;You're in 🎟️Your tickets are confirmed. Show the QR codes below at the door — each ticket has its own.&nbsp;Multiple ticket previewFREETicket 1 of 5View ticket &rarr;GATicket 2 of 5View ticket &rarr;VIPTicket 3 of 5View ticket &rarr;TABLETicket 4 of 5View ticket &rarr;COMPTicket 5 of 5View ticket &rarr;&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=PREVIEW-0",
+      "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=PREVIEW-1",
+      "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=PREVIEW-2",
+      "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=PREVIEW-3",
+      "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=PREVIEW-4",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "broadcast": {
+    "subject": "Preview Event: a message from the host",
+    "text": "A message about Preview Event&nbsp;Preview EventFrom Preview HostFirst lineSecond &lt;line&gt; &amp; moreOpen event&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "payout": {
+    "subject": "Payout statement — Preview Event",
+    "text": "Payout statement for Preview Event&nbsp;Payout statementFunds for Preview Event have been transferred to your connected bank account.Tickets sold2Tickets refunded1Gross revenue$40.00Refunds-$20.00DVNT platform fee-$2.00&nbsp;Net payout$18.00&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "welcome": {
+    "subject": "Welcome to the cookout — DVNT",
+    "text": "The “Cookout” for Black, Brown &amp; Queer community.&nbsp;Welcome to DVNT,The “Cookout” for Black, Brown &amp; Queer community.Pull up a chair. You belong here.DVNT is a digital community built with Black and Brown Queer people at its center. It’s also open to invited-allies who respect, support, and celebrate us fully.REAL PEOPLE. REAL COMMUNITY.DVNT is for real ones. To fully participate in the platform, members must VERIFY their identity and confirm they meet the applicable age requirement for adult access (18+ in the United States).We do this to help create a safer, more accountable community where people can connect with confidence.ONLINE AND IRLDVNT is intentionally sexy, sophisticated, and accessible from your phone or computer—designed to keep our community connected both online and in real life.Express yourself. Share what’s on your mind. Discover what’s happening around you. Or create something of your own.Hosting a kickback? Party? Professional Mixer? Picnic? Game night? Group Fitness? First Date? Movie Night?Put it on DVNT.DVNT is also an economic empowerment platform for our community’s curators, hosts, content creators, and entrepreneurs. We want more of our community’s attention, opportunities, and dollars circulating among the people creating our culture.OUR CULTURE. OUR EXPRESSION. OUR SPACE.Our bodies, expression, culture, conversations, and events deserve space to exist without being unnecessarily censored or shamed.DVNT was built to protect that freedom of expression —not police it.And freedom here comes with responsibility for how we treat one another. Social responsibility.NO HATE. NO HARASSMENT. NO EXCEPTIONS.There is no place on DVNT for transphobia, homophobia, biphobia, racism, anti-Blackness, xenophobia, sexism, ableism, harassment, or discrimination of any kind.Members who violate our Community Standards may lose access to DVNT, including permanent removal from the platform and restrictions against creating replacement accounts.THE RULES ARE SIMPLE.Be bold. Be sexy. Be yourself.Mind the business that pays you.Be kind. Be considerate. Respect boundaries and get consent.Don’t body-shame. Don’t slut-shame. Don’t harass people because they aren’t interested in you or interesting to you.Leave the prejudice, judgment, and unnecessary hangups at home. Here is where we come to connect and do so safely, with real people, among real community.Welcome to DVNT.Open DVNT&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://dvntapp.live/feed",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "welcomeCheckout": {
+    "subject": "Welcome to the cookout — DVNT",
+    "text": "The “Cookout” for Black, Brown &amp; Queer community.&nbsp;Welcome to DVNT,The “Cookout” for Black, Brown &amp; Queer community.Pull up a chair. You belong here.DVNT is a digital community built with Black and Brown Queer people at its center. It’s also open to invited-allies who respect, support, and celebrate us fully.REAL PEOPLE. REAL COMMUNITY.DVNT is for real ones. To fully participate in the platform, members must VERIFY their identity and confirm they meet the applicable age requirement for adult access (18+ in the United States).We do this to help create a safer, more accountable community where people can connect with confidence.ONLINE AND IRLDVNT is intentionally sexy, sophisticated, and accessible from your phone or computer—designed to keep our community connected both online and in real life.Express yourself. Share what’s on your mind. Discover what’s happening around you. Or create something of your own.Hosting a kickback? Party? Professional Mixer? Picnic? Game night? Group Fitness? First Date? Movie Night?Put it on DVNT.DVNT is also an economic empowerment platform for our community’s curators, hosts, content creators, and entrepreneurs. We want more of our community’s attention, opportunities, and dollars circulating among the people creating our culture.OUR CULTURE. OUR EXPRESSION. OUR SPACE.Our bodies, expression, culture, conversations, and events deserve space to exist without being unnecessarily censored or shamed.DVNT was built to protect that freedom of expression —not police it.And freedom here comes with responsibility for how we treat one another. Social responsibility.NO HATE. NO HARASSMENT. NO EXCEPTIONS.There is no place on DVNT for transphobia, homophobia, biphobia, racism, anti-Blackness, xenophobia, sexism, ableism, harassment, or discrimination of any kind.Members who violate our Community Standards may lose access to DVNT, including permanent removal from the platform and restrictions against creating replacement accounts.THE RULES ARE SIMPLE.Be bold. Be sexy. Be yourself.Mind the business that pays you.Be kind. Be considerate. Respect boundaries and get consent.Don’t body-shame. Don’t slut-shame. Don’t harass people because they aren’t interested in you or interesting to you.Leave the prejudice, judgment, and unnecessary hangups at home. Here is where we come to connect and do so safely, with real people, among real community.Welcome to DVNT.We made this profile when you got your ticket. Posting, comments, messages and Lynk rooms open after you verify your ID: sign in with this email address, then tap Verify your ID at the top of your feed. Your tickets work at the door either way.Open DVNT&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://dvntapp.live/feed",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "promoter": {
+    "subject": "You're a promoter for Preview Event",
+    "text": "Your promoter code for Preview Event&nbsp;You're a promoter@preview added you as a promoter for Preview Event.Your code: PREVIEWShare it with your people. Set up payouts on your promoter dashboard so your earnings can reach you.Open promoter dashboard&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://dvntapp.live/feed/events/42/promoter",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "magicLink": {
+    "subject": "Your DVNT sign-in link",
+    "text": "One tap to get back into DVNT&nbsp;Pick up where you left offTap the button and you're in — no password needed. The link works once and expires in 15 minutes.Open DVNT&nbsp;Didn't ask for this? You can safely ignore it — nothing happens without the link.&nbsp;&copy; Deviant LLC &middot; Counter Culture Society",
+    "links": [
+      "https://example.test/action?token=preview-only&amp;source=email"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "linked": {
+    "subject": "Your Google account is now linked to DVNT",
+    "text": "Your Google sign-in now opens your DVNT account&nbsp;One account, two ways inHey Preview,You signed in with Google, and it matched the email on your existing DVNT account (preview@example.test). We've merged them — same profile, same events, same crew.• Nothing about your profile or data changed• Sign in with Google or your password — both open the same account• Your saved events, messages, and follows are right where you left them&nbsp;Wasn't you? Reset your password right away — that locks the account back down.&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://dvntapp.live/auth/forgot-password",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "reset": {
+    "subject": "Reset your DVNT password",
+    "text": "Reset your DVNT password&nbsp;Reset Your PasswordWe received a request to reset your password. Tap the button below to choose a new one. This link expires in 1 hour.Reset PasswordIf you didn't request this, you can safely ignore this email.Or copy this link:https://example.test/action?token=preview-only&amp;source=email&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "verifyLink": {
+    "subject": "Confirm your DVNT email",
+    "text": "Confirm your DVNT email address&nbsp;Confirm Your EmailHey Preview,Tap the button below to verify your email address. This link expires in 24 hours.Confirm EmailIf you didn't create an account, you can safely ignore this email.Or copy this link:https://example.test/action?token=preview-only&amp;source=email&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  },
+  "verifyAlias": {
+    "subject": "Confirm your DVNT email",
+    "text": "Confirm your DVNT email address&nbsp;Confirm Your EmailHey Preview,Tap the button below to verify your email address. This link expires in 24 hours.Confirm EmailIf you didn't create an account, you can safely ignore this email.Or copy this link:https://example.test/action?token=preview-only&amp;source=email&nbsp;&copy; Deviant LLC &middot; Counter Culture SocietyPrivacy·FAQ·dvntapp.live",
+    "links": [
+      "https://example.test/action?token=preview-only&amp;source=email",
+      "https://dvntapp.live/privacy",
+      "https://dvntapp.live/faq",
+      "https://dvntapp.live"
+    ],
+    "images": [
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-logo@2x.png",
+      "https://npfjanxturvmjyevoyfo.supabase.co/storage/v1/object/public/assets/email/dvnt-email-glyph.png"
+    ]
+  }
+}
