@@ -106,9 +106,8 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
-      <Text style={{ color: '#bbb', fontSize: 13 }}>Party flyers and member avatars share this map. Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</Text>
       {!ownArea ? <Text accessibilityRole="text" style={{ color: '#bbb', fontSize: 13 }}>{savedArea ? `Showing your saved area: ${savedArea.label}. This is not a current device location.` : 'Showing a broad overview of public event locations, not your current location.'}</Text> : null}
-      <LocationControls allowSharing={Boolean(NativeMap)} />
+      {!NativeMap ? <LocationControls allowSharing={false} /> : null}
       {!NativeMap ? <Text accessibilityRole="alert" style={{ color: '#ddd' }}>This map requires a build with native maps. No location is collected here. You can still turn sharing off.</Text> : null}
       {presence.error ? <Text accessibilityRole="alert" style={{ color: '#ffb4b4' }}>{presence.error}</Text> : null}
       {nearby.isError ? <View><Text accessibilityRole="alert" style={{ color: '#ddd' }}>Nearby people could not be refreshed. Member locations have been hidden.</Text><Pressable accessibilityRole="button" onPress={() => void nearby.refetch()} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>Retry nearby people</Text></Pressable></View> : null}
@@ -138,6 +137,8 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
               uiSettings={{ myLocationButtonEnabled: false }}
             />
           </View>
+          <Text style={{ color: '#bbb', fontSize: 13 }}>Party flyers and member avatars share this map. Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</Text>
+          <LocationControls allowSharing={Boolean(NativeMap)} />
           <Text style={{ color: '#bbb' }}>{`${eventPins.length} public event locations · ${members.length} sharing avatars`}</Text>
           {locations.isError ? <View><Text accessibilityRole="alert" style={{ color: '#ddd' }}>Event locations could not be refreshed. Event pins have been hidden.</Text><Pressable accessibilityRole="button" onPress={() => void locations.refetch()}><Text style={{ color: '#3FDCFF', paddingVertical: 12 }}>Retry event locations</Text></Pressable></View> : null}
           {eventPins.map(pin => <Pressable key={pin.id} accessibilityRole="button" accessibilityLabel={`Open event ${pin.title}`} onPress={() => openEvent(pin.id)} style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 }}>

@@ -47,6 +47,10 @@ async function bundle(key, native = false, expoKey = '') {
   await page.goto(url);await page.getByRole('button',{name:'Night Owl — approximate area'}).waitFor();
   assert.equal(await page.getByRole('button',{name:'Night Owl — approximate area'}).getAttribute('data-lat'),'40.71');
   assert.equal(await page.locator('[data-testid="google-map"]').count(),1,'one map holds events and avatars');
+  assert.ok(await page.locator('[data-testid="google-map"]').evaluate(map=>Boolean(map.compareDocumentPosition(document.querySelector('[aria-label="Synthetic sharing toggle"]'))&Node.DOCUMENT_POSITION_FOLLOWING)),'location sharing controls follow the map in document and keyboard order');
+  const firstMapBounds=await page.locator('[data-testid="google-map"]').boundingBox();
+  const sharingBounds=await page.getByRole('button',{name:'Synthetic sharing toggle'}).boundingBox();
+  assert.ok(sharingBounds.y>=firstMapBounds.y+firstMapBounds.height,'location sharing section is visually below the map');
   await page.getByRole('button',{name:'You — approximate area'}).waitFor();
   // Multiple consenting members remain available independently, including a
   // shared coarse cell. The accessible list must not collapse overlapping pins.
@@ -165,6 +169,7 @@ async function bundle(key, native = false, expoKey = '') {
   await chooser.getByRole('button',{name:/Self/}).waitFor();
   assert.equal(await cluster.count(),1,'same coarse cell remains accessible even at maximum zoom');
   await page.evaluate(()=>{window.fixture.data.members=window.fixture.data.members.filter(m=>m.id!=='fixture-2');window.renderFixture()});
+  await chooser.getByRole('button',{name:/Second Peer/}).waitFor({state:'detached'});
   assert.equal(await chooser.getByRole('button',{name:/Second Peer/}).count(),0,'removed users disappear from an open chooser');
   await page.getByRole('button',{name:clusterName(2),exact:true}).waitFor();
   await page.evaluate(()=>{window.fixture.data.members[0].latitude=40.7101;window.setFixtureZoom(12);window.renderFixture()});
@@ -181,6 +186,7 @@ async function bundle(key, native = false, expoKey = '') {
   assert.equal(await page.getByRole('button',{name:'Event: Synthetic Party',exact:true}).count(),1);
   await page.goto(`${url}/native`);await page.locator('[data-testid="native-map"]').waitFor();
   await page.getByRole('button',{name:'2 people including you · approximate area',exact:true}).waitFor();
+  assert.ok(await page.locator('[data-testid="native-map"]').evaluate(map=>Boolean(map.compareDocumentPosition(document.querySelector('[aria-label="Synthetic sharing toggle"]'))&Node.DOCUMENT_POSITION_FOLLOWING)),'native location controls follow the map');
   assert.equal(await page.locator('[data-monogram]').count(),0,'initials use a rounded bitmap too');
   await page.evaluate(()=>{const m=window.fixture.data.members[0];window.fixture.data.members.push({...m,id:'fixture-2',username:'second-peer',displayName:'Second Peer'});window.renderFixture()});
   await page.getByRole('button',{name:'3 people including you · approximate area',exact:true}).waitFor();

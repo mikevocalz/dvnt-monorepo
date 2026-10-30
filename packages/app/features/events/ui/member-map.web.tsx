@@ -55,15 +55,14 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
 
   return (
     <section aria-label="Events and people map" className="p-4 space-y-4">
-      <p className="text-sm text-white/65">Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</p>
-      <LocationControls allowSharing={ready} />
-      {!ready ? <p role={failed ? 'alert' : 'status'}>{failed ? 'Google Maps could not load. Sharing cannot be enabled here. You can still turn existing sharing off above.' : 'Loading nearby map…'}</p> : null}
+      {!ready ? <p role={failed ? 'alert' : 'status'}>{failed ? 'Google Maps could not load. Sharing cannot be enabled here. You can still turn existing sharing off below.' : 'Loading nearby map…'}</p> : null}
       {presence.error ? <p role="alert">{presence.error}</p> : null}
       {nearby.isError ? (
         <div role="alert"><p>Nearby people could not be refreshed. Locations have been hidden.</p><button className="min-h-11 px-4 rounded-xl bg-white/10" onClick={() => void nearby.refetch()}>Retry nearby people</button></div>
       ) : null}
       {ready && sharing && !center && !nearby.isError ? <p role="status">{presence.isUpdating || nearby.isPending ? 'Updating your approximate location…' : 'A fresh location is needed to show nearby people.'}</p> : null}
       {ready && !ownArea ? <p role="status">{savedArea ? `Showing your saved area: ${savedArea.label}. This is not a current device location.` : 'Showing public event locations, not events near you. Your location has not been established on this map.'}</p> : null}
+      {!ready ? <LocationControls allowSharing={false} /> : null}
       {ready ? (
         <>
           <div className="relative h-[360px] sm:h-[440px] overflow-hidden rounded-xl" aria-label="Event flyers and approximate member locations">
@@ -73,6 +72,8 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
               <ClusteredMembers members={members} selfId={nearby.data?.self?.id} initialZoom={mapZoom} onOpen={open} />
             </Map>
           </div>
+          <p className="text-sm text-white/65">Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</p>
+          <LocationControls allowSharing={ready} />
           <p role="status" className="text-sm text-white/60">{members.length ? `${members.length} ${members.length === 1 ? 'avatar' : 'avatars'} sharing an approximate area` : sharing ? 'Your avatar will appear when a fresh permitted location is available.' : 'Turn on avatar sharing to show yourself and nearby members.'}</p>
           <ul aria-label="Nearby members" className="grid sm:grid-cols-2 gap-2">
             {members.map((member) => (
