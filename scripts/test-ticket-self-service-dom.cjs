@@ -22,7 +22,7 @@ const { build } = require(resolveDependency("esbuild"));
 const fixture = {
   "ticket-test-fixture": `import {create} from 'zustand';
     export const state = {edgeCalls:[],edgeResponse:{ok:true},edgeError:null,tokenError:false,calls:[],toasts:[],navigations:[],invalidations:[],queries:[],defer:false,releases:[],response:undefined,throwError:false};
-    export const useFixture=create(()=>({routeId:'ticket-a',viewerId:'viewer-a',ticket:null,group:null,isLoading:false,isError:false,addons:[],storeTicket:undefined,pendingError:false,incoming:[],outgoing:[]}));
+    export const useFixture=create(()=>({routeId:'ticket-a',viewerId:'viewer-a',ticket:null,group:null,routeRows:null,isLoading:false,isError:false,addons:[],storeTicket:undefined,pendingError:false,incoming:[],outgoing:[]}));
     export const router={back:()=>state.navigations.push('back'),push:p=>state.navigations.push(p),replace:p=>state.navigations.push(p)};
     export const queryClient={cancelQueries:async()=>{},setQueriesData:(filter,update)=>{const s=useFixture.getState();if(filter.queryKey[1]!==s.viewerId)return;const next=update(s.ticket?[s.ticket]:[]);if(next?.[0])useFixture.setState({ticket:next[0]});},invalidateQueries:async input=>{state.invalidations.push(input.queryKey);}};
     export async function perform(method,args){
@@ -42,7 +42,7 @@ const fixture = {
   "solito/navigation": `import {useFixture,router} from 'ticket-test-fixture';export const useParams=()=>({id:useFixture(s=>s.routeId)});export const useRouter=()=>router;`,
   "expo-router": `import {useFixture,router} from 'ticket-test-fixture';export const useLocalSearchParams=()=>({id:useFixture(s=>s.routeId)});export const useRouter=()=>router;`,
   "@tanstack/react-query": `import {state,useFixture,queryClient} from 'ticket-test-fixture';export const useQueryClient=()=>queryClient;export const useQuery=input=>{const s=useFixture();state.queries.push(input.queryKey);return {data:input.queryKey[0]==='my-order-addons'?s.addons:input.queryKey[0]==='ticket-transfers'?{outgoing:s.outgoing,incoming:s.incoming}:[],isLoading:false,isError:input.queryKey[0]==='ticket-transfers'&&s.pendingError,refetch:()=>{state.calls.push({method:'retryTransferStatus'});useFixture.setState({pendingError:false,outgoing:[{id:'transfer-a',ticket_id:'ticket-a'}]});}};};`,
-  "@dvnt/app/lib/hooks/use-tickets": `import {useFixture,state} from 'ticket-test-fixture';export const useTicketViewerId=()=>useFixture(s=>s.viewerId);export const useTicketRoute=()=>{const s=useFixture();return {resolution:s.ticket?{kind:'ticket',ticket:s.ticket,group:s.group??[s.ticket],index:0}:{kind:'not-found'},eventId:s.ticket?String(s.ticket.event_id):undefined,isLoading:s.isLoading,isError:s.isError,isRefetching:false,refetch:()=>{}};};export const useMyTickets=()=>{const s=useFixture();return {data:s.ticket?[s.ticket]:[],isLoading:s.isLoading,isPending:s.isLoading,isError:s.isError,isRefetching:false,refetch:()=>{}};};export const useTicketViewerAuthId=()=>useFixture(s=>s.viewerId);export const ticketKeys={};export const usePendingTransfers=()=>{const s=useFixture();return {data:s.incoming,isError:s.pendingError,isRefetching:false,refetch:()=>{state.calls.push({method:'retryTransfers'});useFixture.setState({pendingError:false,incoming:[{id:'incoming-a',tickets:{events:{title:'Incoming concert'}}}]});}};};export const useTransferSender=()=>({data:null});export const useSetAttendeeName=()=>({isPending:false,mutateAsync:async()=>({})});`,
+  "@dvnt/app/lib/hooks/use-tickets": `import {useFixture,state} from 'ticket-test-fixture';import {classifyTicketRouteParam,resolveTicketRoute} from '@dvnt/app/lib/tickets/ticket-identity';export const useTicketViewerId=()=>useFixture(s=>s.viewerId);export const useTicketRoute=()=>{const s=useFixture();const resolved=s.routeRows?resolveTicketRoute(classifyTicketRouteParam(s.routeId),s.routeRows):null;return {resolution:resolved??(s.ticket?{kind:'ticket',ticket:s.ticket,group:s.group??[s.ticket],index:0}:{kind:'not-found'}),eventId:resolved?.kind==='group'?String(resolved.group[0].event_id):resolved?.kind==='ticket'?String(resolved.ticket.event_id):s.ticket?String(s.ticket.event_id):undefined,isLoading:s.isLoading,isError:s.isError,isRefetching:false,refetch:()=>{}};};export const useMyTickets=()=>{const s=useFixture();return {data:s.ticket?[s.ticket]:[],isLoading:s.isLoading,isPending:s.isLoading,isError:s.isError,isRefetching:false,refetch:()=>{}};};export const useTicketViewerAuthId=()=>useFixture(s=>s.viewerId);export const ticketKeys={};export const usePendingTransfers=()=>{const s=useFixture();return {data:s.incoming,isError:s.pendingError,isRefetching:false,refetch:()=>{state.calls.push({method:'retryTransfers'});useFixture.setState({pendingError:false,incoming:[{id:'incoming-a',tickets:{events:{title:'Incoming concert'}}}]});}};};export const useTransferSender=()=>({data:null});export const useSetAttendeeName=()=>({isPending:false,mutateAsync:async()=>({})});`,
   "@dvnt/app/lib/supabase/client": `import {state} from 'ticket-test-fixture';export const supabase={functions:{invoke:async(name,input)=>{state.edgeCalls.push({name,input});return {data:state.edgeResponse,error:state.edgeError};}}};`,
   "@dvnt/app/lib/api/auth-helper": `export const getCurrentUserAuthId=async()=> 'viewer-a';`,
   "@dvnt/app/lib/auth/identity": `import {state} from 'ticket-test-fixture';export const requireBetterAuthToken=async()=>{if(state.tokenError)throw new Error('Authentication required');return 'fixture-auth-token';};`,
@@ -276,6 +276,7 @@ function record(overrides = {}) {
         viewerId: "viewer-a",
         ticket,
         group: null,
+        routeRows: null,
         isLoading: false,
         isError: false,
         addons: [],
@@ -311,6 +312,29 @@ function record(overrides = {}) {
         node.remove();
       }
     };
+    // Actual identity resolver + production screen: an event notification may
+    // name several credentials. It must not show Not Found or a cached first QR.
+    for (const quantity of [2, 3]) {
+      await test('web', `${quantity} comp passes open a chooser and the selected exact credential`, async ({reset, change}) => {
+        const ids = ['3f2504e0-4f89-41d3-9a0c-0305e82c3301', '3f2504e0-4f89-41d3-9a0c-0305e82c3302', '3f2504e0-4f89-41d3-9a0c-0305e82c3303'];
+        const rows = ids.slice(0, quantity).map((id, index) => record({id, qr_token:`comp-qr-${index}`, created_at:`2026-01-0${index+1}T00:00:00Z`}));
+        for (const storeTicket of [undefined, {id:'stale-ticket',eventId:'71',eventTitle:'Stale cached pass',qrToken:'stale-qr',status:'valid',tier:'ga'}]) {
+          await reset(null, {routeId:'71',routeRows:[...rows].reverse(),storeTicket});
+          assert.ok(!document.body.textContent.includes('Ticket Not Found'), 'multiple owned passes are not missing');
+          assert.match(document.body.textContent, new RegExp(`${quantity} passes`));
+          assert.equal(document.querySelector('[data-ticket-qr], img[src^="data:image/png;base64,fixture-"]'), null, 'chooser exposes no arbitrary credential');
+          assert.ok(!document.body.textContent.includes('Stale cached pass'), 'event-level cache cannot override group');
+          const choices = [...document.querySelectorAll('button')].filter(b => /Ticket \d+ of \d+/.test(b.textContent));
+          assert.equal(choices.length, quantity, 'one explicitly numbered choice per credential');
+          await flush(() => choices[1].click());
+          assert.equal(f.state.navigations.at(-1), `/feed/ticket/${ids[1]}`, 'stable issue order selects exact second UUID');
+          await change({routeId:ids[1],storeTicket:undefined});
+          assert.ok(!document.body.textContent.includes('Ticket Not Found'));
+          assert.ok(document.querySelector(`img[src="data:image/png;base64,fixture-comp-qr-1"]`), 'selected pass displays its own QR');
+        }
+      });
+    }
+
     const confirm = async (label) => {
       await flush(() => requireButton(label).click());
       requireButton("Yes, Cancel");

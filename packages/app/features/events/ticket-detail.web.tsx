@@ -188,9 +188,11 @@ export function TicketDetailScreen() {
   const dbTicket =
     route.resolution.kind === "ticket" ? route.resolution.ticket : undefined;
   const storeTicket = useTicketStore((s) => s.getTicketByEventId(routeId));
-  const ticket: Ticket | undefined = dbTicket
-    ? dbToTicket(dbTicket)
-    : storeTicket;
+  const ticket: Ticket | undefined = route.resolution.kind === "group"
+    ? undefined
+    : dbTicket
+      ? dbToTicket(dbTicket)
+      : storeTicket;
   // Door time in the venue's zone with its abbreviation ("8:00 PM PDT").
   const ticketZone = {
     eventTz: ticket?.eventTz ?? null,
@@ -572,6 +574,53 @@ export function TicketDetailScreen() {
         <div className="mx-auto w-full max-w-xl px-4 py-6">
           <div className="h-64 animate-pulse rounded-3xl border border-white/8 bg-white/4" />
           <div className="mt-6 h-72 animate-pulse rounded-3xl border border-white/8 bg-white/4" />
+        </div>
+      </div>
+    );
+  }
+
+  // Event-id links (notifications, push and calendar) can name several
+  // owned passes. Make the viewer choose a credential, just like native.
+  // This must precede the missing-ticket branch and any legacy store pass.
+  if (route.resolution.kind === "group") {
+    const passes = route.resolution.group;
+    return (
+      <div className="min-h-[100dvh] bg-[#06070d] text-white">
+        <div className="sticky top-0 z-20 flex items-center gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 py-3 backdrop-blur">
+          <button onClick={() => router.back()} aria-label="Back" className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 active:scale-95">
+            <ArrowLeft size={18} color="#fff" />
+          </button>
+          <h1 className="flex-1 text-[17px] font-semibold">Your tickets</h1>
+        </div>
+        <div className="mx-auto w-full max-w-xl px-5 py-8">
+          <h2 className="text-2xl font-bold">{passes[0].event_title || "Your passes"}</h2>
+          <p className="mt-2 text-sm leading-relaxed text-white/60">
+            You have {passes.length} passes for this event. Choose the one to show at the door or transfer.
+          </p>
+          <div className="mt-6 space-y-3">
+            {passes.map((pass, index) => {
+              const label = pass.category === "coat_check" ? "Coat check" : pass.ticket_type_name || "Admission";
+              const status = pass.status === "active" ? "Ready to scan"
+                : pass.status === "scanned" ? "Already used"
+                : pass.status === "transfer_pending" ? "Transfer pending"
+                : pass.status === "void" ? "Cancelled"
+                : pass.status === "refunded" ? "Refunded" : pass.status;
+              return (
+                <button key={pass.id} onClick={() => router.replace(`/feed/ticket/${pass.id}`)}
+                  aria-label={`Ticket ${index + 1} of ${passes.length}: ${label}, ${status}`}
+                  className="flex w-full items-center gap-4 rounded-2xl border border-white/10 bg-white/4 p-4 text-left transition-colors hover:bg-white/8 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400">
+                  <TicketIcon size={24} className="shrink-0 text-cyan-400" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-white/50">Ticket {index + 1} of {passes.length}</p>
+                    <p className="mt-1 font-semibold">{label}</p>
+                    {pass.attendee_name && <p className="mt-1 break-words text-sm text-white/70">{pass.attendee_name}</p>}
+                    <p className="mt-1 text-sm text-white/60">{status}</p>
+                  </div>
+                  <ChevronRight size={18} className="shrink-0 text-white/40" />
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     );
