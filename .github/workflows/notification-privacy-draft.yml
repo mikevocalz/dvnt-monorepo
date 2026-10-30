@@ -1,0 +1,26 @@
+name: Notification privacy draft (isolated SQL only)
+on:
+  pull_request:
+    paths:
+      - 'docs/security/notification-privacy-*'
+      - 'scripts/test-notification-privacy-sql.cjs'
+      - '.github/workflows/notification-privacy-draft.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-policy-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --prefix "$RUNNER_TEMP/notification-privacy" --ignore-scripts --no-audit --no-fund --no-save pg@8.21.0
+      - name: Baseline and proposed policy on disposable socket-only PostgreSQL
+        env:
+          NODE_PATH: ${{ runner.temp }}/notification-privacy/node_modules
+        run: node --test scripts/test-notification-privacy-sql.cjs
