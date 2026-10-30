@@ -75,3 +75,10 @@ test("successful empty lists and transfers remain intact", async () => {
   assert.equal(empty.incoming.length, 0);
   assert.equal(empty.outgoing.length, 0);
 });
+
+test("missing session cannot masquerade as an empty signed-in inbox", async () => {
+  await assert.rejects(
+    fixture([], null).getPendingTransfers(),
+    /Could not load ticket transfers/,
+  );
+});

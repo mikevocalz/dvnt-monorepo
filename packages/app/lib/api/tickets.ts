@@ -819,7 +819,7 @@ export const ticketsApi = {
   }> {
     try {
       const authId = await getCurrentUserAuthId();
-      if (!authId) return { incoming: [], outgoing: [] };
+      if (!authId) throw new Error("Authentication required");
 
       const { data: incoming, error: incomingError } = await supabase
         .from("ticket_transfers")
