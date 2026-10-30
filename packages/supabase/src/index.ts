@@ -5,5 +5,6 @@ export {
   setBridgeAccessToken,
   setBridgeTokenMinter,
   getBridgeRequestEpoch,
+  ensureBridgeRealtimeAuth,
   setFunctionResponseObserver,
 } from "./client.web";

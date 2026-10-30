@@ -26,7 +26,7 @@ human-named public/true policies. Existing duplicate cleanup was not hardening.
 - `notificationsApi.getNotifications` / `getBadges` query the table directly;
   `markAsRead` / `markAllAsRead` update directly. Realtime INSERT subscriptions
   are filtered by recipient but a client filter is not an authorization rule.
-- Current `bootstrap-notifications` verifies a session but selects a nonexistent
+- At the audit baseline, `bootstrap-notifications` verifies a session but selects a nonexistent
   `notifications.content` column, omits `entity_payload`, and ignores the query
   error. It cannot be adopted blindly as a secure fallback. Its route is not a
   substitute for read-state writes or Realtime authorization.
@@ -85,3 +85,38 @@ Supabase [RLS guidance](https://supabase.com/docs/guides/database/postgres/row-l
 requires both grants and row policies; adding a restrictive policy does not
 remove existing permissive grants/policies. The draft also revokes unnecessary
 client sequence privileges (observed USAGE/SELECT) while retaining service access.
+
+## Current-client compatibility work in this draft
+
+The draft also hardens the current client without treating that as server
+protection: notification reads, badges and read-state calls verify the canonical
+account/JWT bridge, attach an account epoch, and fail visibly on verification
+failure. The shared transport refuses anon requests specifically to the private
+notifications endpoint. Existing bootstrap schema selection/error handling is
+repaired and ticket payloads are preserved through hydration. Realtime work
+awaits explicit socket authentication and checks lifecycle boundaries.
+These fixtures do not prove that an already-installed older binary has the new
+code. Deployment of client/edge changes is separate from applying the SQL.
+The least-disruptive enforcement decision is to require/update unsupported
+native versions before applying RLS; indefinite anonymous compatibility cannot
+be retained safely for private notifications.
+
+## Verified evidence and remaining deployment gate
+
+- Exact SQL draft at initial PR210 head passed real disposable PostgreSQL CI:
+  7 checks, no failures/skips (run 40998311175). It reproduces only synthetic
+  account data and the metadata-observed grants/policies, not a live attack.
+- Read-only last-24-hour mint endpoint aggregates on 2026-10-30 showed 598
+  POST 200 and 139 OPTIONS 204 responses. This shows observed bridge operation,
+  not native-version coverage or token validity on every installed device.
+- Current-client API/bridge/bootstrap/Realtime fixture suite: 74 passing checks.
+  Realtime explicit auth writes now serialize, preventing a delayed prior-user
+  write from overwriting the latest queued account/logout credential.
+- Local Chromium launch was blocked by OS socket restrictions; browser DTO and
+  bundling preflight passed. CI browser interaction remains the acceptance gate.
+
+Smallest remaining user decision after staged supported-client tests: approve
+production notification policy enforcement **with an update/re-auth requirement
+for unsupported old native clients**, or defer enforcement while accepting the
+known overbroad access. There is no safe exception that lets anonymous clients
+choose a recipient. This draft does not make that decision or execute it.
