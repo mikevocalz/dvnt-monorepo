@@ -76,7 +76,7 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
     const currentIds = selectedMembers.map(member => member.id);
     if (currentIds.length !== selectedIds.length) setSelectedIds(currentIds);
   }, [selectedMembers.map(member => member.id).join('|'), selectedIds.length]);
-  const clusterTitle = (groupMembers: MapMember[]) => `${groupMembers.length} people${groupMembers.some(member => member.id === nearby.data?.self?.id) ? ' including you' : ''} · approximate area`;
+  const clusterTitle = (groupMembers: MapMember[]) => `${groupMembers.length} ${groupMembers.length === 1 ? 'person' : 'people'}${groupMembers.some(member => member.id === nearby.data?.self?.id) ? ' including you' : ''} · approximate area`;
   const open = (member: MapMember) => router.push(mapMemberProfilePath(member.username, true) as any);
   const onMarker = (event: { id?: string }) => {
     if (event.id?.startsWith('event:')) {
@@ -122,7 +122,7 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
               <View accessibilityViewIsModal style={{ width: '100%', maxWidth: 480, maxHeight: '80%', backgroundColor: '#18151e', borderRadius: 16, padding: 16, gap: 12 }}>
                 <Text accessibilityRole="header" style={{ color: '#fff', fontSize: 18, fontWeight: '700' }}>{clusterTitle(selectedMembers)}</Text>
                 <Pressable accessibilityRole="button" accessibilityLabel="Close people cluster" onPress={() => setSelectedIds([])} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>Close</Text></Pressable>
-                <ScrollView>{selectedMembers.map(member => <Pressable key={member.id} accessibilityRole="button" accessibilityLabel={`View ${member.displayName || member.username}${member.id === nearby.data?.self?.id ? ' (You)' : ''} profile`} onPress={() => { setSelectedIds([]); open(member); }} style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12 }}><Avatar member={member} /><Text style={{ color: '#fff', flex: 1 }}>{member.displayName || member.username}{member.id === nearby.data?.self?.id ? ' (You)' : ''}</Text></Pressable>)}</ScrollView>
+                <ScrollView style={{ flexShrink: 1 }}>{selectedMembers.map(member => <Pressable key={member.id} accessibilityRole="button" accessibilityLabel={`View ${member.displayName || member.username}${member.id === nearby.data?.self?.id ? ' (You)' : ''} profile`} onPress={() => { setSelectedIds([]); open(member); }} style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12 }}><Avatar member={member} /><Text style={{ color: '#fff', flex: 1 }}>{member.displayName || member.username}{member.id === nearby.data?.self?.id ? ' (You)' : ''}</Text></Pressable>)}</ScrollView>
               </View>
             </View>
           </Modal>
