@@ -1,3 +1,4 @@
+import type { ActivityCursor } from "../activity/activity-history";
 import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import { getCurrentUserIdSync } from "./auth-helper";
@@ -433,7 +434,7 @@ export const notificationsApi = {
    * Get notifications for current user
    * DB schema: recipient_id (int), actor_id (int) → users(id), type enum, entity_type enum, entity_id varchar, read_at timestamp
    */
-  async getNotifications(limit: number = 50) {
+  async getNotifications(limit: number = 50, cursor?: ActivityCursor) {
     try {
       const userId = getCurrentUserIdSync();
       // Throw, never return an empty page. The activity query is keyed on the
@@ -443,7 +444,11 @@ export const notificationsApi = {
       // its empty state over rows that exist.
       if (!userId) throw new Error("notifications: no authenticated user yet");
 
-      const { data, error, count } = await supabase
+      if (cursor && (!/^[1-9]\d*$/.test(cursor.id) || !Number.isSafeInteger(Number(cursor.id)) ||
+        !/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.test(cursor.createdAt) || !Number.isFinite(Date.parse(cursor.createdAt)))) {
+        throw new Error("Invalid activity cursor");
+      }
+      let pageQuery = supabase
         .from("notifications")
         .select(
           `
@@ -467,7 +472,12 @@ export const notificationsApi = {
         )
         .eq("recipient_id", userId)
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(limit);
+      if (cursor) pageQuery = pageQuery.or(
+        `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+      );
+      const { data, error, count } = await pageQuery;
 
       if (error) {
         console.error(
@@ -761,7 +771,11 @@ export const notificationsApi = {
         };
       });
 
-      return { docs, totalDocs: count || 0 };
+      const last = rawNotifications[rawNotifications.length - 1];
+      return { docs, totalDocs: count || 0, headCursor: rawNotifications[0]
+        ? { createdAt: String(rawNotifications[0].created_at), id: String(rawNotifications[0].id) } : null,
+        nextCursor: rawNotifications.length === limit && last
+        ? { createdAt: String(last.created_at), id: String(last.id) } : null };
     } catch (error) {
       console.error("[Notifications] getNotifications error:", error);
       // Rethrow for the same reason as above — the caller decides how to show
@@ -819,12 +833,21 @@ export const notificationsApi = {
    */
   async markAsRead(notificationId: string) {
     try {
-      const { error } = await supabase
+      const userId = getCurrentUserIdSync();
+      if (!userId) throw new Error("Not authenticated");
+      if (!/^[1-9]\d*$/.test(notificationId) || !Number.isSafeInteger(Number(notificationId))) {
+        throw new Error("Invalid notification");
+      }
+      const { data, error } = await supabase
         .from("notifications")
         .update({ read_at: new Date().toISOString() })
-        .eq("id", parseInt(notificationId));
+        .eq("id", Number(notificationId))
+        .eq("recipient_id", userId)
+        .select("id")
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) throw new Error("Notification was not updated");
       return { success: true };
     } catch (error) {
       console.error("[Notifications] markAsRead error:", error);
@@ -887,8 +910,8 @@ export const notificationsApi = {
 export const notificationsApiClient = {
   get: async (options: { limit?: number } = {}) =>
     notificationsApi.getNotifications(options.limit || 50),
-  getNotifications: (limit?: number) =>
-    notificationsApi.getNotifications(limit || 50),
+  getNotifications: (limit?: number, cursor?: ActivityCursor) =>
+    notificationsApi.getNotifications(limit || 50, cursor),
   getLikedActivity: (limit?: number) =>
     notificationsApi.getLikedActivity(limit || 50),
   markAsRead: (id: string) => notificationsApi.markAsRead(id),

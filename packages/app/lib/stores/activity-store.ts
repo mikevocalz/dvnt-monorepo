@@ -100,7 +100,7 @@ interface ActivityState {
   getUnreadCount: () => number;
   getRouteForActivity: (activity: Activity) => string;
   syncUnreadCount: () => void;
-  subscribeToNotifications: () => (() => void) | undefined;
+  subscribeToNotifications: (onRefresh?: () => void) => (() => void) | undefined;
   fetchFollowingState: () => Promise<void>;
   reset: () => void;
 }
@@ -218,6 +218,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   // Mark single activity as read - persists to backend
   markActivityAsRead: async (activityId) => {
+    const viewerId = getCurrentUserIdSync();
+    const previous = get().activities.find((a) => a.id === activityId)?.isRead;
     // Optimistic update
     set((state) => ({
       activities: state.activities.map((a) =>
@@ -231,7 +233,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       await notificationsApiClient.markAsRead(activityId);
       console.log("[ActivityStore] Marked as read:", activityId);
     } catch (error) {
-      console.error("[ActivityStore] Failed to mark as read:", error);
+      if (getCurrentUserIdSync() === viewerId && previous !== undefined) {
+        set((state) => ({ activities: state.activities.map((a) =>
+          a.id === activityId ? { ...a, isRead: previous } : a) }));
+        get().syncUnreadCount();
+      }
+      throw error;
     }
   },
 
@@ -405,7 +412,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   },
 
   // Subscribe to realtime notifications for instant updates
-  subscribeToNotifications: () => {
+  subscribeToNotifications: (onRefresh) => {
     const userId = getCurrentUserIdSync();
     if (!userId) {
       console.log("[ActivityStore] No user ID for realtime subscription");
@@ -432,7 +439,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
           filter: `recipient_id=eq.${userId}`,
         },
         async (payload) => {
-          if (cancelled) {
+          if (cancelled || getCurrentUserIdSync() !== userId) {
             console.log(
               "[ActivityStore] Ignoring notification - subscription cancelled",
             );
@@ -444,11 +451,14 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
           );
           // Refetch all notifications to get full actor data (the INSERT payload
           // doesn't include the joined actor info)
-          await get().fetchFromBackend();
+          if (onRefresh) onRefresh();
+          else await get().fetchFromBackend();
         },
       )
       .subscribe((status, err) => {
-        if (cancelled) return;
+        if (cancelled || getCurrentUserIdSync() !== userId) return;
+        // Catch up rows inserted before subscription or while disconnected.
+        if (status === "SUBSCRIBED") onRefresh?.();
         console.log("[ActivityStore] Realtime subscription status:", status);
         if (err) {
           console.error("[ActivityStore] Subscription error:", err);

@@ -1,3 +1,4 @@
+import { markActivityRead, markAllActivityRead } from "@dvnt/app/lib/activity/mark-activity-read";
 import { activitySenderLabel } from "@dvnt/app/lib/activity/event-activity";
 import { View, Text, Pressable, ScrollView } from "react-native";
 import { LegendList } from "@dvnt/app/components/list";
@@ -46,8 +47,7 @@ import { navigateToPost } from "@dvnt/app/lib/routes/post-routes";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
 import { useBootstrapNotifications } from "@dvnt/app/lib/hooks/use-bootstrap-notifications";
 import { notificationsApiClient } from "@dvnt/app/lib/api/notifications";
-import { notificationKeys } from "@dvnt/app/lib/hooks/use-notifications-query";
-import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
+import { useBadges } from "@dvnt/app/lib/hooks/use-notifications-query";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { roomInviteActivityText } from "@dvnt/app/lib/events/event-lynk";
@@ -156,7 +156,7 @@ function getActivityText(activity: Activity): string {
     case "event_promoter_added":
       return ` added you as a promoter for ${activity.event?.title || "an event"}.`;
     case "ticket_transfer_initiated":
-      return ` sent you a ticket transfer. Tap to accept or decline.`;
+      return ` sent you a ticket transfer. View your tickets.`;
     case "ticket_transfer_accepted":
       return ` accepted your ticket transfer.`;
     case "ticket_transfer_declined":
@@ -648,9 +648,6 @@ function ActivityScreenContent() {
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const queryClient = useQueryClient();
   const viewerId = useAuthStore((s) => s.user?.id) || "";
-  const setNotificationsUnread = useUnreadCountsStore(
-    (s) => s.setNotificationsUnread,
-  );
   const showToast = useUIStore((s) => s.showToast);
   useBootstrapNotifications();
 
@@ -658,7 +655,8 @@ function ActivityScreenContent() {
   const {
     data: queryActivities,
     isLoading: queryLoading,
-    refetch,
+    isError: queryError,
+    refetch, hasMore, loadingMore, loadMoreError, loadMore,
   } = useActivitiesQuery();
   const {
     data: likedQueryActivities,
@@ -667,7 +665,7 @@ function ActivityScreenContent() {
   } = useLikedActivitiesQuery();
 
   // Store — follow state + mutations only (query is source of truth for activities)
-  const { markActivityAsRead, subscribeToNotifications } = useActivityStore();
+  const { markActivityAsRead } = useActivityStore();
 
   // REACTIVE follow state — subscribe to followedUsers Set so component re-renders
   const followedUsers = useActivityStore((s) => s.followedUsers);
@@ -722,10 +720,8 @@ function ActivityScreenContent() {
   const likedActivities: LikedActivity[] = (likedQueryActivities ||
     []) as LikedActivity[];
 
-  const unreadCount = useMemo(
-    () => activities.filter((a) => !a.isRead).length,
-    [activities],
-  );
+  const { data: notificationBadges } = useBadges();
+  const unreadCount = notificationBadges?.unread ?? activities.filter((a) => !a.isRead).length;
   const tabCounts = useMemo(
     () => ({
       All: activities.length,
@@ -744,13 +740,7 @@ function ActivityScreenContent() {
     [activities, likedActivities],
   );
 
-  // Realtime subscription for instant notifications (follow, like, comment, etc.)
-  useEffect(() => {
-    const unsubscribe = subscribeToNotifications();
-    return () => {
-      unsubscribe?.();
-    };
-  }, [subscribeToNotifications]);
+  // Realtime query refresh is owned by useActivitiesQuery on both platforms.
 
   // Soft refetch on tab focus — only if data is stale (> 60s old)
   // Replaces aggressive invalidateQueries which forced refetch on EVERY tab switch
@@ -892,14 +882,9 @@ function ActivityScreenContent() {
 
   const handleActivityPress = useCallback(
     (activity: Activity) => {
-      // Mark as read (persists to backend + patches query cache)
-      markActivityAsRead(activity.id);
-      // Also patch query cache for instant UI update
-      queryClient.setQueryData(
-        activityKeys.list(viewerId),
-        (old: Activity[] | undefined) =>
-          old?.map((a) => (a.id === activity.id ? { ...a, isRead: true } : a)),
-      );
+      void markActivityRead(queryClient, viewerId, activity, markActivityAsRead,
+        () => useAuthStore.getState().user?.id || "",
+        () => showToast("error", "Couldn't mark read", "Check your connection and try again."));
 
       // Use entityType/entityId-based routing for correct navigation
       const route = getRouteForActivity(activity);
@@ -910,7 +895,7 @@ function ActivityScreenContent() {
       });
       router.push(route as any);
     },
-    [markActivityAsRead, queryClient, viewerId, router],
+    [markActivityAsRead, queryClient, viewerId, router, showToast],
   );
 
   const handleLikedPress = useCallback(
@@ -929,50 +914,12 @@ function ActivityScreenContent() {
   const handleMarkAllAsRead = useCallback(async () => {
     if (activeTab === "Liked" || unreadCount === 0 || isMarkingAllRead) return;
 
-    const previousActivities =
-      queryClient.getQueryData<Activity[]>(activityKeys.list(viewerId)) || [];
-    const previousBadges = queryClient.getQueryData(
-      notificationKeys.badges(viewerId),
-    );
-
     setIsMarkingAllRead(true);
-
-    queryClient.setQueryData(
-      activityKeys.list(viewerId),
-      (old: Activity[] | undefined) =>
-        old?.map((activity) => ({ ...activity, isRead: true })) ?? old,
-    );
-    queryClient.setQueryData(notificationKeys.badges(viewerId), (old: any) => ({
-      ...(old || {}),
-      unread: 0,
-      unreadCount: 0,
-      total: old?.total || 0,
-    }));
-    setNotificationsUnread(0);
-
     try {
-      await notificationsApiClient.markAllAsRead();
-      await queryClient.invalidateQueries({
-        queryKey: activityKeys.list(viewerId),
-      });
-      await queryClient.invalidateQueries({
-        queryKey: notificationKeys.badges(viewerId),
-      });
-    } catch (error) {
-      console.error("[Activity] mark all as read failed:", error);
-      queryClient.setQueryData(activityKeys.list(viewerId), previousActivities);
-      queryClient.setQueryData(
-        notificationKeys.badges(viewerId),
-        previousBadges,
-      );
-      setNotificationsUnread(
-        previousActivities.filter((activity) => !activity.isRead).length,
-      );
-      showToast(
-        "error",
-        "Couldn't mark all read",
-        "Check your connection and try again.",
-      );
+      await markAllActivityRead(queryClient, viewerId,
+        () => notificationsApiClient.markAllAsRead(),
+        () => useAuthStore.getState().user?.id || "",
+        () => showToast("error", "Couldn't mark all read", "Check your connection and try again."));
     } finally {
       setIsMarkingAllRead(false);
     }
@@ -982,7 +929,6 @@ function ActivityScreenContent() {
     isMarkingAllRead,
     queryClient,
     viewerId,
-    setNotificationsUnread,
     showToast,
   ]);
 
@@ -1245,6 +1191,14 @@ function ActivityScreenContent() {
           background stopped short of the edges and left a band either
           side. The cap belongs on the content, not the canvas. */}
       <View className="flex-1 w-full max-w-3xl self-center">
+      {queryError && activeTab !== "Liked" && (
+        <View accessibilityRole="alert" className="px-4 py-3">
+          <Text className="text-foreground">Notifications couldn't refresh. Your saved activity is still available.</Text>
+          <Pressable accessibilityRole="button" onPress={() => void refetch()}>
+            <Text className="text-primary py-2">Retry</Text>
+          </Pressable>
+        </View>
+      )}
       {activeTab === "Liked" ? (
         <LegendList
           data={likedActivities}
@@ -1264,6 +1218,13 @@ function ActivityScreenContent() {
         <LegendList
           data={filteredActivities}
           renderItem={renderItem}
+          ListFooterComponent={hasMore ? (
+            <Pressable onPress={() => void loadMore()} disabled={loadingMore}
+              accessibilityRole="button" className="items-center py-5">
+              <Text className="text-primary">{loadingMore ? "Loading…" : loadMoreError
+                ? "Retry loading older notifications" : "Load older notifications"}</Text>
+            </Pressable>
+          ) : null}
           keyExtractor={keyExtractor}
           contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={{ paddingBottom: tabBarInset }}

@@ -68,7 +68,7 @@ const boundaries = {
   '@dvnt/app/lib/hooks/use-bootstrap-notifications': 'export const useBootstrapNotifications=()=>({});',
   '@dvnt/app/features/sneaky-lynk/ui/web/CohostInvites': 'export const PendingCohostInvites=()=>null;',
   '@dvnt/app/lib/api/notifications': 'export const notificationsApiClient={formatTimeAgo:()=>"3m ago"};',
-  '@dvnt/app/lib/hooks/use-notifications-query': 'export const notificationKeys={};',
+  '@dvnt/app/lib/hooks/use-notifications-query': 'export const notificationKeys={};export const useBadges=()=>({});',
   '@dvnt/app/lib/stores/unread-counts-store': 'export const useUnreadCountsStore=()=>({});',
   '@dvnt/app/lib/stores/ui-store': 'export const useUIStore=()=>({});',
   '@dvnt/app/lib/api/users': 'export const usersApi={};',
@@ -104,6 +104,7 @@ const boundaries = {
    window.renderTicket(i);await new Promise(r=>setTimeout(r,30));
    for(const platform of ['web','native']){
     const section=window.document.querySelector('#'+platform);assert.ok(section.textContent.trim());
+    if(i===1){assert.ok(section.textContent.includes("View your tickets"));assert.equal(section.textContent.includes("Tap to accept or decline"),false);}
     const expected=i===0 ? (platform==='web'?'/feed/ticket/':'/(protected)/ticket/')+'00000000-0000-4000-8000-000000000001' : platform==='web'?'/feed/events/my-tickets':'/(protected)/events/my-tickets';
     const target=section.querySelector('[role="button"],button')||section.firstElementChild;
     for(let repeat=0;repeat<2;repeat++){const before=window.routes.length;target.click();assert.equal(window.routes.length,before+1);assert.equal(window.routes.at(-1),expected);}
