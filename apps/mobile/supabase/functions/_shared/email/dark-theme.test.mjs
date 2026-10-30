@@ -145,3 +145,14 @@ test('logos, flyers and QR images never enter a Gmail text-blending wrapper', ()
     }
   }
 });
+
+test('Outlook fixed-width fallback and narrow-screen override remain paired', () => {
+  assert.match(fixtures.transfer.html, /class="dvnt-card"[^>]*width="600"[^>]*style="width:600px;max-width:600px/);
+  assert.match(fixtures.transfer.html, /max-width:600px\)\{\.dvnt-card\{width:100%!important/);
+});
+
+test('QR scan margin is protected white without blending the credential image', () => {
+  const qr = fixtures.guest.html.match(/<img[^>]*alt="QR code"[^>]*>/)?.[0];
+  assert.ok(qr);
+  assert.match(qr, /background-color:#ffffff;background-image:linear-gradient\(#ffffff,#ffffff\)/);
+});
