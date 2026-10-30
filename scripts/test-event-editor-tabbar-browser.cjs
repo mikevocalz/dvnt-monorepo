@@ -18,6 +18,9 @@ function options(file) {
   return [...read(file).matchAll(/export const [A-Z_]+[^=]*= \[[\s\S]*?\n\];/g)].map(m => m[0]).join('\n');
 }
 const mocks = {
+    // This fixture covers layout; unread data/lifecycle is exercised separately.
+    '@dvnt/app/lib/hooks/use-notifications-query': `export const useBadges=()=>({data:{unread:0,total:0}});`,
+    '@dvnt/app/lib/hooks/use-messages': `export const useUnreadMessageCount=()=>({data:0,spamCount:0});`,
   '@dvnt/ui/sticky-save-bar-web': `export {StickySaveBar} from '${root}/packages/ui/src/form/StickySaveBar.web';`,
   '@legendapp/list/react-native': `export const LegendList=()=>null;`,
   '@dvnt/supabase': `export const supabase={};`,

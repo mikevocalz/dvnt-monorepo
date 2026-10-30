@@ -27,6 +27,11 @@ const source = file => baseline && [commentFile, cssFile].includes(file)
 const out = process.env.BLOG_COMMENT_OUTPUT_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'blog-comment-focus-'));
 fs.mkdirSync(out, { recursive: true });
 const boundaries = new Map([
+  // Isolate new count services while preserving real chrome/formatting/layout.
+  ['@dvnt/app/lib/hooks/use-notifications-query', `export const useBadges=()=>({data:{unread:0,total:0}});`],
+  ['@dvnt/app/lib/hooks/use-messages', `export const useUnreadMessageCount=()=>({data:0,spamCount:0});`],
+  ['@dvnt/app/lib/badges/unread-badge', source('packages/app/lib/badges/unread-badge.ts')],
+  ['@dvnt/app/lib/web-chrome', source('packages/app/lib/web-chrome.ts')],
   ['@dvnt/app/lib/auth-client', `export const getSession=async()=>({data:{session:location.search.includes('guest')?null:{token:'fixture-token'}}});`],
   ['@dvnt/app/lib/stores/auth-store', `export const useAuthStore=selector=>selector({user:{username:'fixture'},isAuthenticated:true});`],
   ['solito/navigation', `export const usePathname=()=>'/posts/fixture';export const useRouter=()=>({push:url=>{throw Error('Unexpected navigation: '+url)}});`],

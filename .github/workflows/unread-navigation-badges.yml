@@ -30,7 +30,8 @@ permissions:
   contents: read
 jobs:
   unread-badges:
-    runs-on: ubuntu-latest
+    # The pinned Playwright release supports Ubuntu 24.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
