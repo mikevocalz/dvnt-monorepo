@@ -1,8 +1,9 @@
+import { readViewerScoped } from "@dvnt/app/lib/query/viewer-scoped-read";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
 import { messagesApi as messagesApiClient } from "@dvnt/app/lib/api/messages-impl";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
+import { useUnreadRealtime } from "@dvnt/app/lib/hooks/use-unread-realtime";
+import { normalizeUnreadCount } from "@dvnt/app/lib/badges/unread-badge";
 import { STALE_TIMES, GC_TIMES } from "@dvnt/app/lib/perf/stale-time-config";
 import { messageKeys } from "@dvnt/app/lib/messages/query-keys";
 import {
@@ -23,49 +24,28 @@ export { messageKeys } from "@dvnt/app/lib/messages/query-keys";
  * Boot prefetch primes this cache so the badge renders instantly.
  */
 export function useUnreadMessageCount() {
-  const setMessagesUnread = useUnreadCountsStore((s) => s.setMessagesUnread);
-  const setSpamUnread = useUnreadCountsStore((s) => s.setSpamUnread);
-  const realtimeInbox = useUnreadCountsStore((s) => s.messagesUnread);
-  const realtimeSpam = useUnreadCountsStore((s) => s.spamUnread);
-  const lastMessagesRefresh = useUnreadCountsStore(
-    (s) => s.lastMessagesRefresh,
-  );
-  const user = useAuthStore((s) => s.user);
-  const viewerId = user?.id;
+  const viewerId = useAuthStore((s) => s.user?.id);
+  useUnreadRealtime(viewerId, "messages");
 
   const query = useQuery<{ inbox: number; spam: number }>({
     queryKey: messageKeys.unreadCount(viewerId),
-    queryFn: () => messagesApiClient.getUnreadCounts(),
+    queryFn: ({ signal }) => readViewerScoped(viewerId, () => messagesApiClient.getUnreadCounts(), signal),
     enabled: !!viewerId,
     staleTime: STALE_TIMES.unreadCounts,
     gcTime: GC_TIMES.short,
     refetchOnMount: "always",
     refetchOnReconnect: "always",
-    refetchInterval: 30000, // Background refresh every 30s
+    refetchOnWindowFocus: "always",
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
   });
 
-  // Sync with unread counts store for push notification increments
-  useEffect(() => {
-    if (query.data) {
-      setMessagesUnread(query.data.inbox);
-      setSpamUnread(query.data.spam);
-    }
-  }, [query.data, setMessagesUnread, setSpamUnread]);
-
-  const cacheIsNewerThanQuery =
-    lastMessagesRefresh > 0 && lastMessagesRefresh >= query.dataUpdatedAt;
-  const inboxCount = cacheIsNewerThanQuery
-    ? realtimeInbox
-    : (query.data?.inbox ?? realtimeInbox ?? 0);
-  const spamCount = cacheIsNewerThanQuery
-    ? realtimeSpam
-    : (query.data?.spam ?? realtimeSpam ?? 0);
-
-  // Return just the inbox count for backwards compatibility
+  // The viewer-keyed query is the only badge authority. A global store or
+  // push increment can leak another account's count or count one thread twice.
   return {
     ...query,
-    data: inboxCount,
-    spamCount,
+    data: viewerId ? normalizeUnreadCount(query.data?.inbox) : 0,
+    spamCount: viewerId ? normalizeUnreadCount(query.data?.spam) : 0,
   };
 }
 

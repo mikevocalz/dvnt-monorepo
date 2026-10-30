@@ -1,3 +1,4 @@
+import { readViewerScoped } from "@dvnt/app/lib/query/viewer-scoped-read";
 /**
  * Tab Prefetch Registrations
  *
@@ -50,7 +51,7 @@ registerPrefetch("activity", (qc, userId) => {
   const { notificationsApiClient: nApi } = require("@dvnt/app/lib/api/notifications");
   qc.prefetchQuery({
     queryKey: activityKeys.list(userId),
-    queryFn: async () => {
+    queryFn: ({ signal }) => readViewerScoped(userId, async () => {
       // One transform for this cache key. This used to keep its own inline
       // copy that dropped `payload` and blanked `timeAgo`; whichever writer
       // landed last won, so a broadcast could render with no title.
@@ -61,12 +62,12 @@ registerPrefetch("activity", (qc, userId) => {
       return (result.docs || [])
         .map(notificationToActivity)
         .filter(Boolean);
-    },
+    }, signal),
     staleTime: STALE_TIMES.activities,
   });
   qc.prefetchQuery({
     queryKey: activityKeys.liked(userId),
-    queryFn: async () => {
+    queryFn: ({ signal }) => readViewerScoped(userId, async () => {
       const result = await nApi.getLikedActivity(50);
       return (result.docs || []).map((item: any) => ({
         id: String(item.id),
@@ -82,7 +83,7 @@ registerPrefetch("activity", (qc, userId) => {
         timeAgo: nApi.formatTimeAgo(item.createdAt || new Date().toISOString()),
         createdAt: item.createdAt || new Date().toISOString(),
       }));
-    },
+    }, signal),
     staleTime: STALE_TIMES.activities,
   });
 });
@@ -105,7 +106,7 @@ registerPrefetch("profile", (qc, userId) => {
 registerPrefetch("badges", (qc, userId) => {
   qc.prefetchQuery({
     queryKey: messageKeys.unreadCount(userId),
-    queryFn: () => messagesApiClient.getUnreadCounts(),
+    queryFn: ({ signal }) => readViewerScoped(userId, () => messagesApiClient.getUnreadCounts(), signal),
     staleTime: STALE_TIMES.unreadCounts,
   });
 });
@@ -114,7 +115,7 @@ registerPrefetch("badges", (qc, userId) => {
 registerPrefetch("conversations", (qc, userId) => {
   qc.prefetchQuery({
     queryKey: messageKeys.conversations(userId),
-    queryFn: messagesApiClient.getConversations,
+    queryFn: ({ signal }) => readViewerScoped(userId, () => messagesApiClient.getConversations(), signal),
     staleTime: STALE_TIMES.conversations,
   });
 });

@@ -13,8 +13,9 @@ import {
   useActivityStore,
   type ActivityType,
 } from "@dvnt/app/lib/stores/activity-store";
-import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
-import { messagesApi as messagesApiClient } from "@dvnt/app/lib/api/messages-impl";
+import { getQueryClient } from "@dvnt/app/lib/auth-client";
+import { messageKeys } from "@dvnt/app/lib/messages/query-keys";
+import { notificationKeys } from "@dvnt/app/lib/notifications/query-keys";
 import {
   registerForPushNotificationsAsync,
   savePushTokenToBackend,
@@ -118,36 +119,24 @@ export function useNotifications() {
 
             // CRITICAL: Messages are handled SEPARATELY from Activity notifications
             if (notificationType === "message") {
-              // Message notification - update Messages badge, NOT Activity
-              console.log(
-                "[Notifications] Message received - updating Messages badge",
-              );
-
-              // Check if sender is followed (Inbox) or not (Spam)
-              const senderId = data.senderId as string;
-              if (senderId) {
-                const followingState =
-                  await messagesApiClient.getFollowingState();
-                const isInbox =
-                  !followingState.isAuthoritative ||
-                  followingState.ids.includes(senderId);
-
-                if (isInbox) {
-                  // Only increment Messages badge for Inbox messages
-                  useUnreadCountsStore.getState().incrementMessages();
-                  console.log(
-                    "[Notifications] Inbox message - Messages badge incremented",
-                  );
-                } else {
-                  useUnreadCountsStore.getState().incrementSpam();
-                  console.log(
-                    "[Notifications] Spam message - Requests count incremented",
-                  );
-                }
+              // A push is a refresh hint, not a new unread conversation. Duplicate
+              // delivery or multiple messages in one thread must never inflate it.
+              const viewerId = useAuthStore.getState().user?.id;
+              if (viewerId) {
+                void getQueryClient()?.invalidateQueries({
+                  queryKey: messageKeys.unreadCount(viewerId), exact: true,
+                });
               }
 
               // Do NOT add to Activity store for messages (policy decision)
               return;
+            }
+
+            const viewerId = useAuthStore.getState().user?.id;
+            if (viewerId) {
+              void getQueryClient()?.invalidateQueries({
+                queryKey: notificationKeys.badges(viewerId), exact: true,
+              });
             }
 
             // Non-message notifications go to Activity feed

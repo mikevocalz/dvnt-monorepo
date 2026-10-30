@@ -1,4 +1,5 @@
 import type { Conversation } from "./messages";
+import { fetchUnreadConversationCounts, type UnreadConversationCounts } from "@dvnt/app/lib/messages/unread-counts";
 import type { ThreadCursor, ThreadPage } from "./messages";
 import { threadPageBounds, threadPageFromRows } from "./thread-pagination";
 import { supabase } from "../supabase/client";
@@ -789,34 +790,13 @@ export const messagesApi = {
     return spam;
   },
 
-  /**
-   * PERF: Combined unread counts — fetches conversations + followingIds ONCE
-   * and computes both inbox and spam counts in a single pass.
-   * Old pattern: 4 heavy queries (2× getConversations + 2× getFollowingIds).
-   * New pattern: 2 queries total (1× getConversations + 1× getFollowingIds).
-   */
-  async getUnreadCounts(): Promise<{ inbox: number; spam: number }> {
-    try {
-      const [authId, conversations, followingState] = await Promise.all([
-        getCurrentUserAuthId(),
-        this.getConversations(),
-        this.getFollowingState(),
-      ]);
-      if (!authId) return { inbox: 0, spam: 0 };
-
-      const { primary, requests } = partitionConversationsByFollowState(
-        conversations,
-        followingState.ids,
-        { isAuthoritative: followingState.isAuthoritative },
-      );
-      return {
-        inbox: primary.filter((c: any) => c.unread).length,
-        spam: requests.filter((c: any) => c.unread).length,
-      };
-    } catch (error) {
-      console.error("[Messages] getUnreadCounts error:", error);
-      return { inbox: 0, spam: 0 };
-    }
+  /** Count unread threads without loading or truncating message history. */
+  async getUnreadCounts(): Promise<UnreadConversationCounts> {
+    const [authId, viewerId] = await Promise.all([
+      getCurrentUserAuthId(), resolveVisitorIdInt(),
+    ]);
+    if (!authId || !viewerId) throw new Error("Sign in to load unread messages");
+    return fetchUnreadConversationCounts(supabase, authId, viewerId);
   },
 
   /**

@@ -11,6 +11,8 @@ import { useFeedScrollStore } from "@dvnt/app/lib/stores/feed-scroll-store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import "@dvnt/app/lib/perf/tab-prefetches"; // Register prefetch functions for tab navigation
 import { color } from "@dvnt/app/lib/theme";
+import { useBadges } from "@dvnt/app/lib/hooks/use-notifications-query";
+import { UNREAD_BADGE_COLOR, unreadBadgeText } from "@dvnt/app/lib/badges/unread-badge";
 
 function isHomeTabPathname(pathname: string): boolean {
   return (
@@ -33,6 +35,8 @@ function HomeSpicyToggleAccessory() {
 }
 
 export default function TabsLayout() {
+  const { data: badges } = useBadges();
+  const activityBadge = unreadBadgeText(badges?.unread);
   const triggerScrollToTop = useFeedScrollStore((s) => s.triggerScrollToTop);
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -61,6 +65,8 @@ export default function TabsLayout() {
       backgroundColor="#000"
       blurEffect="systemChromeMaterialDark"
       tintColor="#FFFFFF"
+      badgeBackgroundColor={UNREAD_BADGE_COLOR}
+      badgeTextColor="#FFFFFF"
     >
         {supportsBottomAccessory ? (
           <NativeTabs.BottomAccessory>
@@ -114,6 +120,9 @@ export default function TabsLayout() {
             md="favorite"
           />
           <NativeTabs.Trigger.Label>Activity</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Badge hidden={!activityBadge}>
+            {activityBadge}
+          </NativeTabs.Trigger.Badge>
         </NativeTabs.Trigger>
 
         <NativeTabs.Trigger name="profile">
