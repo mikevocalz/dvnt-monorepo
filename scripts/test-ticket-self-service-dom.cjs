@@ -22,7 +22,7 @@ const { build } = require(resolveDependency("esbuild"));
 const fixture = {
   "ticket-test-fixture": `import {create} from 'zustand';
     export const state = {edgeCalls:[],edgeResponse:{ok:true},edgeError:null,tokenError:false,calls:[],toasts:[],navigations:[],invalidations:[],queries:[],defer:false,releases:[],response:undefined,throwError:false};
-    export const useFixture=create(()=>({routeId:'ticket-a',viewerId:'viewer-a',ticket:null,group:null,isLoading:false,isError:false,addons:[],storeTicket:undefined}));
+    export const useFixture=create(()=>({routeId:'ticket-a',viewerId:'viewer-a',ticket:null,group:null,isLoading:false,isError:false,addons:[],storeTicket:undefined,pendingError:false,incoming:[],outgoing:[]}));
     export const router={back:()=>state.navigations.push('back'),push:p=>state.navigations.push(p),replace:p=>state.navigations.push(p)};
     export const queryClient={cancelQueries:async()=>{},setQueriesData:(filter,update)=>{const s=useFixture.getState();if(filter.queryKey[1]!==s.viewerId)return;const next=update(s.ticket?[s.ticket]:[]);if(next?.[0])useFixture.setState({ticket:next[0]});},invalidateQueries:async input=>{state.invalidations.push(input.queryKey);}};
     export async function perform(method,args){
@@ -41,8 +41,8 @@ const fixture = {
     };`,
   "solito/navigation": `import {useFixture,router} from 'ticket-test-fixture';export const useParams=()=>({id:useFixture(s=>s.routeId)});export const useRouter=()=>router;`,
   "expo-router": `import {useFixture,router} from 'ticket-test-fixture';export const useLocalSearchParams=()=>({id:useFixture(s=>s.routeId)});export const useRouter=()=>router;`,
-  "@tanstack/react-query": `import {state,useFixture,queryClient} from 'ticket-test-fixture';export const useQueryClient=()=>queryClient;export const useQuery=input=>{const s=useFixture();state.queries.push(input.queryKey);return {data:input.queryKey[0]==='my-order-addons'?s.addons:input.queryKey[0]==='ticket-transfers'?{outgoing:[],incoming:[]}:[],isLoading:false,isError:false};};`,
-  "@dvnt/app/lib/hooks/use-tickets": `import {useFixture} from 'ticket-test-fixture';export const useTicketViewerId=()=>useFixture(s=>s.viewerId);export const useTicketRoute=()=>{const s=useFixture();return {resolution:s.ticket?{kind:'ticket',ticket:s.ticket,group:s.group??[s.ticket],index:0}:{kind:'not-found'},eventId:s.ticket?String(s.ticket.event_id):undefined,isLoading:s.isLoading,isError:s.isError,isRefetching:false,refetch:()=>{}};};export const useTransferSender=()=>({data:null});export const useSetAttendeeName=()=>({isPending:false,mutateAsync:async()=>({})});`,
+  "@tanstack/react-query": `import {state,useFixture,queryClient} from 'ticket-test-fixture';export const useQueryClient=()=>queryClient;export const useQuery=input=>{const s=useFixture();state.queries.push(input.queryKey);return {data:input.queryKey[0]==='my-order-addons'?s.addons:input.queryKey[0]==='ticket-transfers'?{outgoing:s.outgoing,incoming:s.incoming}:[],isLoading:false,isError:input.queryKey[0]==='ticket-transfers'&&s.pendingError,refetch:()=>{state.calls.push({method:'retryTransferStatus'});useFixture.setState({pendingError:false,outgoing:[{id:'transfer-a',ticket_id:'ticket-a'}]});}};};`,
+  "@dvnt/app/lib/hooks/use-tickets": `import {useFixture,state} from 'ticket-test-fixture';export const useTicketViewerId=()=>useFixture(s=>s.viewerId);export const useTicketRoute=()=>{const s=useFixture();return {resolution:s.ticket?{kind:'ticket',ticket:s.ticket,group:s.group??[s.ticket],index:0}:{kind:'not-found'},eventId:s.ticket?String(s.ticket.event_id):undefined,isLoading:s.isLoading,isError:s.isError,isRefetching:false,refetch:()=>{}};};export const useMyTickets=()=>{const s=useFixture();return {data:s.ticket?[s.ticket]:[],isLoading:s.isLoading,isPending:s.isLoading,isError:s.isError,isRefetching:false,refetch:()=>{}};};export const useTicketViewerAuthId=()=>useFixture(s=>s.viewerId);export const ticketKeys={};export const usePendingTransfers=()=>{const s=useFixture();return {data:s.incoming,isError:s.pendingError,isRefetching:false,refetch:()=>{state.calls.push({method:'retryTransfers'});useFixture.setState({pendingError:false,incoming:[{id:'incoming-a',tickets:{events:{title:'Incoming concert'}}}]});}};};export const useTransferSender=()=>({data:null});export const useSetAttendeeName=()=>({isPending:false,mutateAsync:async()=>({})});`,
   "@dvnt/app/lib/supabase/client": `import {state} from 'ticket-test-fixture';export const supabase={functions:{invoke:async(name,input)=>{state.edgeCalls.push({name,input});return {data:state.edgeResponse,error:state.edgeError};}}};`,
   "@dvnt/app/lib/api/auth-helper": `export const getCurrentUserAuthId=async()=> 'viewer-a';`,
   "@dvnt/app/lib/auth/identity": `import {state} from 'ticket-test-fixture';export const requireBetterAuthToken=async()=>{if(state.tokenError)throw new Error('Authentication required');return 'fixture-auth-token';};`,
@@ -54,13 +54,23 @@ const fixture = {
   "@dvnt/app/lib/api/addons": `export const addonsApi={getMyAddonsForEvent:async()=>[]};`,
   "@dvnt/app/lib/stores/ticket-store": `import {useFixture} from 'ticket-test-fixture';export const useTicketStore=selector=>{const s=useFixture();return selector({getTicketByEventId:()=>s.storeTicket});};`,
   "@dvnt/app/lib/stores/ui-store": `import {state} from 'ticket-test-fixture';const value={showToast:(...args)=>state.toasts.push(args)};export const useUIStore=selector=>selector(value);useUIStore.getState=()=>value;`,
+  "@tanstack/react-virtual": `export const useVirtualizer=({count})=>({getTotalSize:()=>count*150,getVirtualItems:()=>Array.from({length:count},(_,index)=>({index,start:index*150})),measureElement:()=>{}});`,
+  "@dvnt/app/lib/hooks/use-scroll-restoration.web": `export const useScrollRestoration=()=>{};`,
+  "@dvnt/app/components/ui/card-link.web": `export const CardLink=({children,href})=><a href={href}>{children}</a>;`,
+  "@dvnt/app/lib/navigation/use-motion-tier": `export const useMotionTier=()=> 'lite';`,
+  sonner: `export const toast=Object.assign(()=>{}, {error:()=>{},success:()=>{}});`,
+  "react-native-reanimated": `const Fade={duration:()=>Fade,delay:()=>Fade,springify:()=>Fade};export const FadeIn=Fade;export const FadeInDown=Fade;export default {View:({children})=><div>{children}</div>};`,
+  "expo-image": `export const Image=()=>null;`,
+  "@dvnt/app/components/list": `export const LegendList=({data,renderItem})=><div>{data.map((item,index)=><div key={index}>{renderItem({item,index})}</div>)}</div>;`,
+  "@dvnt/app/components/ui/skeleton": `export const Skeleton=()=>null;`,
+  "@dvnt/app/lib/theme": `export const color={};`,
   "@dvnt/app/lib/hooks/use-event-realtime": `export const useEventRealtime=()=>{};`,
   "@dvnt/app/lib/hooks/use-search": `export const useSearchUsers=()=>({data:{docs:[{id:"recipient",username:"friend",name:"Friend"}]},isFetching:false});`,
   "@dvnt/app/lib/stores/events-location-store": `export const useEventsLocationStore=selector=>selector({activeCity:null,deviceLat:null,deviceLng:null});`,
   "@dvnt/ui": `export const Dialog=({open,children,title})=>open?<div role="dialog" aria-label={title}>{children}</div>:null;`,
   qrcode: `export default {toDataURL:async value=>'data:image/png;base64,fixture-'+value};`,
   "react-native-qrcode-svg": `export default ()=>null;`,
-  "react-native": `export const View=({children,testID})=><div data-testid={testID}>{children}</div>;
+  "react-native": `export const Alert={alert:()=>{}};export const View=({children,testID})=><div data-testid={testID}>{children}</div>;
     export const Text=({children})=><span>{children}</span>;
     export const ScrollView=View;export const KeyboardAvoidingView=View;
     export const Modal=({visible,children})=>visible?<div role="dialog">{children}</div>:null;
@@ -80,10 +90,13 @@ const fixture = {
   "@dvnt/app/features/ticket/helpers": `export const addToWallet=()=>{throw new Error('Unexpected wallet write')};`,
   "@dvnt/app/components/ui/screen-skeleton": `export const ScreenSkeleton=()=> <div>Loading ticket</div>;`,
   "@dvnt/app/features/events": `export const WeatherStrip=()=>null;`,
-  "@dvnt/app/components/layout/screen-shell": `export const CONTENT_MAX_WIDTH=600;`,
+  "@dvnt/app/components/layout/screen-shell": `export const CONTENT_MAX_WIDTH=600;export const DETAIL_HEADER_ROW={};`,
   "@dvnt/app/components/layout/detail-header": `export const DetailBackButton=()=>null;`,
 };
 const icons = [
+  "Calendar",
+  "QrCode",
+  "CloudOff",
   "Check",
   "Share2",
   "ArrowLeft",
@@ -119,13 +132,15 @@ fixture["lucide-react"] = fixture["lucide-react-native"] = [...new Set(icons)]
 
 const source = `import React,{act} from 'react';import {createRoot} from 'react-dom/client';
   import {TicketDetailScreen} from './packages/app/features/events/ticket-detail.web';
+  import {MyTicketsScreen as WebLibrary} from './packages/app/features/events/my-tickets.web';
+  import NativeLibrary from './packages/app/features/routes/screens/(protected)/events/my-tickets';
   import NativeTicketScreen from './packages/app/features/routes/screens/(protected)/ticket/[id]';
   import {state,useFixture} from 'ticket-test-fixture';
   import {useTicketDetailUIStore} from './packages/app/lib/stores/ticket-detail-ui-store';
   import {qk} from './packages/app/lib/query/keys';
   import {ticketsApi as actualTicketsApi} from '${ROOT}/packages/app/lib/api/tickets.ts';
   export {act,state,useFixture,useTicketDetailUIStore,qk,actualTicketsApi};
-  export const mount=(node,platform)=>{const root=createRoot(node);let mounted=true;return {render:()=>root.render(<React.StrictMode>{platform==='web'?<TicketDetailScreen/>:<NativeTicketScreen/>}</React.StrictMode>),unmount:()=>{if(mounted){mounted=false;root.unmount();}}};};`;
+  export const mount=(node,platform)=>{const root=createRoot(node);let mounted=true;return {render:()=>root.render(<React.StrictMode>{platform==='web-list'?<WebLibrary/>:platform==='native-list'?<NativeLibrary/>:platform==='web'?<TicketDetailScreen/>:<NativeTicketScreen/>}</React.StrictMode>),unmount:()=>{if(mounted){mounted=false;root.unmount();}}};};`;
 
 function record(overrides = {}) {
   return {
@@ -265,6 +280,9 @@ function record(overrides = {}) {
         isError: false,
         addons: [],
         storeTicket: undefined,
+        pendingError: false,
+        incoming: [],
+        outgoing: [],
         ...extra,
       });
     };
@@ -326,7 +344,53 @@ function record(overrides = {}) {
       return recipient;
     };
 
+    for (const platform of ["web-list", "native-list"]) {
+      await test(
+        platform,
+        "pending inbox failures preserve passes and expose working retry",
+        async ({ change }) => {
+          await change({ pendingError: true });
+          assert.match(
+            document.body.textContent,
+            /Could not refresh incoming transfers/,
+          );
+          assert.match(document.body.textContent, /Fixture concert/);
+          await flush(() => requireButton("Retry transfers").click());
+          assert.equal(
+            f.state.calls.filter((c) => c.method === "retryTransfers").length,
+            1,
+          );
+          assert.doesNotMatch(
+            document.body.textContent,
+            /Could not refresh incoming transfers/,
+          );
+          assert.match(document.body.textContent, /Incoming concert/);
+        },
+      );
+    }
     for (const platform of ["web", "native"]) {
+      await test(
+        platform,
+        "failed outgoing lookup exposes retry rather than silently losing cancellation",
+        async ({ change }) => {
+          await change({
+            ticket: record({ status: "transfer_pending" }),
+            pendingError: true,
+          });
+          assert.match(
+            document.body.textContent,
+            /Could not refresh transfer status/,
+          );
+          await flush(() => requireButton("Retry transfer status").click());
+          assert.equal(
+            f.state.calls.filter((c) => c.method === "retryTransferStatus")
+              .length,
+            1,
+          );
+          requireButton("Cancel");
+        },
+      );
+
       await test(
         platform,
         "successful transfer immediately refreshes owner credentials",

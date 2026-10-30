@@ -821,7 +821,7 @@ export const ticketsApi = {
       const authId = await getCurrentUserAuthId();
       if (!authId) return { incoming: [], outgoing: [] };
 
-      const { data: incoming } = await supabase
+      const { data: incoming, error: incomingError } = await supabase
         .from("ticket_transfers")
         .select(
           "*, tickets(id, event_id, ticket_types(name), events(title, start_date))",
@@ -831,7 +831,9 @@ export const ticketsApi = {
         .gt("expires_at", new Date().toISOString())
         .order("initiated_at", { ascending: false });
 
-      const { data: outgoing } = await supabase
+      if (incomingError) throw incomingError;
+
+      const { data: outgoing, error: outgoingError } = await supabase
         .from("ticket_transfers")
         .select(
           "*, tickets(id, event_id, ticket_types(name), events(title, start_date))",
@@ -840,13 +842,15 @@ export const ticketsApi = {
         .eq("status", "pending")
         .order("initiated_at", { ascending: false });
 
+      if (outgoingError) throw outgoingError;
+
       return {
         incoming: incoming || [],
         outgoing: outgoing || [],
       };
     } catch (error) {
       console.error("[Tickets] getPendingTransfers error:", error);
-      return { incoming: [], outgoing: [] };
+      throw new Error("Could not load ticket transfers. Please try again.");
     }
   },
 
