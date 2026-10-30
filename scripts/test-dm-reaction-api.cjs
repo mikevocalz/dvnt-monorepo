@@ -23,13 +23,13 @@ function loader(stubs, globals = {}) {
 }
 const plain = value => JSON.parse(JSON.stringify(value));
 function apiFixture() {
-  const state = {viewer:'101',epoch:0,calls:[],token:async()=> 'fixture-token',response:{data:{ok:true,data:{reactions:[{emoji:'❤️',userId:101,username:'fixture'}],toggled:'added',present:true}},error:null}};
+  const state = {viewer:'101',epoch:0,ready:true,calls:[],token:async()=> 'fixture-token',response:{data:{ok:true,data:{reactions:[{emoji:'❤️',userId:101,username:'fixture'}],toggled:'added',present:true}},error:null}};
   const load=loader({
     '../stores/auth-store':{useAuthStore:{getState:()=>({user:{id:state.viewer}})}},
     '../auth/identity':{requireBetterAuthToken:()=>state.token(),getCurrentUserId:async()=>101},
     './auth-helper':{getCurrentUserIdSync:()=>101,getCurrentUserAuthId:async()=> 'fixture-auth',resolveUserIdInt:async()=>101},
     '../supabase/client':{supabase:{functions:{invoke:async(...args)=>{state.calls.push(plain(args));return state.response;}}}},
-    '../auth/session-lifecycle':{getSessionLifecycle:()=>({epoch:state.epoch,ready:true})},
+    '../auth/session-lifecycle':{getSessionLifecycle:()=>({epoch:state.epoch,ready:state.ready})},
   });
   return {state,api:load(path.join(root,'packages/app/lib/api/messages-impl.ts')).messagesApi};
 }
@@ -48,6 +48,19 @@ test('API rejects malformed/temp IDs, account changes during token retrieval, an
   assert.equal(f.state.calls.length,0);
   const g=apiFixture();g.state.response={data:{ok:true},error:null};
   await assert.rejects(g.api.reactToMessage('41','❤️'),/confirm reaction/);
+});
+test('API refuses reactions before session readiness and if readiness changes during token retrieval', async()=>{
+  const f=apiFixture();
+  f.state.ready=false;
+  let tokenCalls=0;
+  f.state.token=async()=>{tokenCalls++;return 'fixture-token';};
+  await assert.rejects(f.api.reactToMessage('41','❤️',{expectedViewerId:'101',expectedSessionEpoch:0}),/Account changed/);
+  assert.equal(tokenCalls,0);
+  assert.equal(f.state.calls.length,0);
+  const g=apiFixture();
+  g.state.token=async()=>{g.state.ready=false;return 'fixture-token';};
+  await assert.rejects(g.api.reactToMessage('41','❤️',{expectedViewerId:'101',expectedSessionEpoch:0}),/Account changed/);
+  assert.equal(g.state.calls.length,0);
 });
 function edgeFixture() {
   const state={session:{ok:true,userId:'verified-fixture'},calls:[],result:{data:{ok:true,reactions:[],present:false,toggled:'removed'},error:null}};

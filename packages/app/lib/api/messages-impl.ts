@@ -1041,7 +1041,7 @@ export const messagesApi = {
   async reactToMessage(messageId: string, emoji: string, options: { desiredPresent?: boolean; expectedViewerId?: string; expectedSessionEpoch?: number } = {}) {
     try {
       const assertAccount = () => {
-        if ((options.expectedViewerId && useAuthStore.getState().user?.id !== options.expectedViewerId) ||
+        if (!getSessionLifecycle().ready || (options.expectedViewerId && useAuthStore.getState().user?.id !== options.expectedViewerId) ||
             (options.expectedSessionEpoch !== undefined && getSessionLifecycle().epoch !== options.expectedSessionEpoch)) throw new Error("Account changed");
       };
       if (!/^[1-9]\d*$/.test(messageId) || !Number.isSafeInteger(Number(messageId))) throw new Error("This message is not sent yet");

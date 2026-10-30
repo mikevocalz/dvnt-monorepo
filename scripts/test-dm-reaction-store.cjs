@@ -21,7 +21,7 @@ const deferred = () => {
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function fixture() {
-  const state = { user: { id: '101', authId: 'auth-viewer', username: 'viewer' }, calls: [], toasts: [], loads: 0, epoch: 0 };
+  const state = { user: { id: '101', authId: 'auth-viewer', username: 'viewer' }, calls: [], toasts: [], loads: 0, epoch: 0, ready: true };
   const pending = [];
   const cache = new Map();
   const api = {
@@ -39,7 +39,7 @@ function fixture() {
     '@dvnt/app/lib/stores/auth-store': { useAuthStore: { getState: () => ({ user: state.user }) } },
     '@dvnt/app/lib/stores/ui-store': { useUIStore: { getState: () => ({ showToast: (...args) => state.toasts.push(args) }) } },
     '@dvnt/app/lib/auth/auth-logger': { logChat() {} },
-    '@dvnt/app/lib/auth/session-lifecycle': { getSessionLifecycle: () => ({ epoch: state.epoch, ready: true }) },
+    '@dvnt/app/lib/auth/session-lifecycle': { getSessionLifecycle: () => ({ epoch: state.epoch, ready: state.ready }) },
     '@dvnt/app/lib/auth-client': { invalidateTokenCache() {}, getQueryClient: () => null },
     '@dvnt/app/lib/connectivity/guard': { ensureOnlineOrToast: () => false },
     zustand: { create: initialize => {
@@ -277,4 +277,14 @@ test('a newer realtime recipient snapshot is not replaced by an older HTTP ackno
   finish(f.pending[0], [mine], true);
   await operation;
   assert.deepEqual(f.reactions().sort((a, b) => a.userId.localeCompare(b.userId)), [mine, theirs]);
+});
+
+
+test('an unready session cannot start an optimistic reaction or backend write', { timeout: 5000 }, async () => {
+  const f = fixture();
+  f.state.ready = false;
+  await f.store.getState().reactToMessage('7', '41', '❤️');
+  assert.deepEqual(f.reactions(), []);
+  assert.deepEqual(f.state.calls, []);
+  assert.deepEqual(f.state.toasts, []);
 });

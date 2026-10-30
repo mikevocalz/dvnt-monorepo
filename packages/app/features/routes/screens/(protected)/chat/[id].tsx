@@ -58,7 +58,7 @@ import {
   MediaAttachment,
 } from "@dvnt/app/lib/stores/chat-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { getSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { getSessionLifecycle, subscribeSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
 import { reactionsFromMetadata } from "@dvnt/app/lib/messages/reactions";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useChatScreenStore } from "@dvnt/app/lib/stores/chat-screen-store";
@@ -75,6 +75,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
 import {
   useRef,
+  useSyncExternalStore,
   useCallback,
   useMemo,
   useEffect,
@@ -530,6 +531,7 @@ function ChatScreenContent() {
   const refreshMessageCounts = useRefreshMessageCounts();
   const currentUser = useAuthStore((s) => s.user);
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const sessionLifecycle = useSyncExternalStore(subscribeSessionLifecycle, getSessionLifecycle, getSessionLifecycle);
 
   // CRITICAL: Declare queryClient early so it can be passed to async functions
   // This prevents illegal hook calls inside async/nested functions
@@ -663,7 +665,8 @@ function ChatScreenContent() {
 
     // Unique channel ID prevents collisions on rapid navigation
     const viewerId = currentUserId;
-    const sessionEpoch = getSessionLifecycle().epoch;
+    if (!sessionLifecycle.ready) return;
+    const sessionEpoch = sessionLifecycle.epoch;
     const isCurrentViewer = () => !cancelled &&
       useAuthStore.getState().user?.id === viewerId && getSessionLifecycle().epoch === sessionEpoch;
     const channelId = `chat-${convId}-${Date.now()}`;
@@ -826,7 +829,7 @@ function ChatScreenContent() {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, [activeConvId, currentUserId, isInitialHydrationComplete, mergeRealtimeMessage]);
+  }, [activeConvId, currentUserId, sessionLifecycle, isInitialHydrationComplete, mergeRealtimeMessage]);
   // Selector-per-field. Selecting `recipient` alongside `editText` via
   // destructure meant every keystroke while editing a message re-rendered
   // the whole chat screen (including the message list). Same for

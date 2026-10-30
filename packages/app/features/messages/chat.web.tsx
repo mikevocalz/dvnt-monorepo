@@ -34,6 +34,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useSyncExternalStore,
   useState,
 } from "react";
 import { useParams, useRouter } from "solito/navigation";
@@ -59,7 +60,7 @@ import {
 } from "@dvnt/app/lib/stores/chat-store";
 import { useChatScreenStore } from "@dvnt/app/lib/stores/chat-screen-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { getSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { getSessionLifecycle, subscribeSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
 import { reactionsFromMetadata } from "@dvnt/app/lib/messages/reactions";
 import { normalizeChatParams } from "@dvnt/app/lib/navigation/chat-routes";
 import { messagesApiClient } from "@dvnt/app/lib/api/messages";
@@ -660,6 +661,7 @@ export function ChatScreen() {
 
   const currentUser = useAuthStore((s) => s.user);
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const sessionLifecycle = useSyncExternalStore(subscribeSessionLifecycle, getSessionLifecycle, getSessionLifecycle);
   const refreshMessageCounts = useRefreshMessageCounts();
 
   const resolvedConvIdRef = useRef<string | null>(null);
@@ -845,7 +847,8 @@ export function ChatScreen() {
     let cancelled = false;
     const userIntId = getCurrentUserIdSync();
     const viewerId = currentUserId;
-    const sessionEpoch = getSessionLifecycle().epoch;
+    if (!sessionLifecycle.ready) return;
+    const sessionEpoch = sessionLifecycle.epoch;
     const isCurrentViewer = () => !cancelled &&
       useAuthStore.getState().user?.id === viewerId && getSessionLifecycle().epoch === sessionEpoch;
     const channelId = `chat-${convId}-${Date.now()}`;
@@ -947,7 +950,7 @@ export function ChatScreen() {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, [activeConvId, currentUserId, mergeRealtimeMessage, refreshMessageCounts]);
+  }, [activeConvId, currentUserId, sessionLifecycle, mergeRealtimeMessage, refreshMessageCounts]);
 
   // ── Live call in this group ──
   // A call started from this chat carries conversation_id on its video_rooms

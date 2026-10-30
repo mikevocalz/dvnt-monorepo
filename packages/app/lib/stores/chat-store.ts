@@ -942,7 +942,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   reactToMessage: async (conversationId, messageId, emoji) => {
     const user = useAuthStore.getState().user;
     const message = get().messages[conversationId]?.find((m) => m.id === messageId);
-    if (!user || !message || !/^[1-9]\d*$/.test(messageId) ||
+    if (!getSessionLifecycle().ready || !user || !message || !/^[1-9]\d*$/.test(messageId) ||
         !Number.isSafeInteger(Number(messageId)) || message.status === "sending" || message.status === "failed") return;
     if (ensureOnlineOrToast("Try reacting again when you’re back online.", "No connection")) return;
 
