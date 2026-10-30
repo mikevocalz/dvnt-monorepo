@@ -1,0 +1,26 @@
+name: Activity bootstrap schema contracts
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/bootstrap-notifications/**'
+      - '.github/workflows/activity-bootstrap-schema.yml'
+permissions:
+  contents: read
+jobs:
+  handler-contract:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --prefix "$RUNNER_TEMP/bootstrap-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.2
+      - name: Actual handler with schema-shaped persistence fixture
+        env:
+          NODE_PATH: ${{ runner.temp }}/bootstrap-tests/node_modules
+        run: node --test apps/mobile/supabase/functions/bootstrap-notifications/schema.test.cjs
+      - name: Existing edge configuration invariants
+        run: node scripts/verify-edge-functions.mjs

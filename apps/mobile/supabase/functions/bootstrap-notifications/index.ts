@@ -16,26 +16,27 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verifySession } from "../_shared/verify-session.ts";
+import { verifySession, CORS_HEADERS } from "../_shared/verify-session.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 Deno.serve(async (req: Request) => {
+  const responseHeaders = {
+    ...CORS_HEADERS,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+  };
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, Authorization, x-auth-token",
-      },
+      headers: responseHeaders,
     });
   }
 
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: responseHeaders });
   }
 
   const t0 = Date.now();
@@ -55,7 +56,7 @@ Deno.serve(async (req: Request) => {
     if (!sessionUserId) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
-        headers: { "Content-Type": "application/json" },
+        headers: responseHeaders,
       });
     }
 
@@ -71,7 +72,7 @@ Deno.serve(async (req: Request) => {
     if (!intUserId) {
       return new Response(JSON.stringify({ error: "User not found" }), {
         status: 404,
-        headers: { "Content-Type": "application/json" },
+        headers: responseHeaders,
       });
     }
 
@@ -83,7 +84,7 @@ Deno.serve(async (req: Request) => {
         .from("notifications")
         .select(
           `
-          id, type, created_at, read_at, content,
+          id, type, created_at, read_at, entity_payload,
           entity_type, entity_id, actor_id,
           sender:users!notifications_actor_id_fk(
             id, username, avatar:avatar_id(url)
@@ -102,17 +103,23 @@ Deno.serve(async (req: Request) => {
         .is("read_at", null),
     ]);
 
+    if (notificationsResult.error || unreadCountResult.error) {
+      console.warn("[bootstrap-notifications] activity query unavailable");
+      return new Response(JSON.stringify({ error: "Could not load activity. Please retry." }), {
+        status: 503, headers: responseHeaders,
+      });
+    }
     const notifications = notificationsResult.data || [];
     const isCommentActivity = (notification: any) =>
       notification.type === "comment" || notification.type === "mention";
 
-    // ── Resolve event titles for event_invite / event_update notifications ──
+    // ── Resolve event titles for event activity, including ticket notices ──
     const eventNotifIds = [
       ...new Set(
         notifications
           .filter(
             (n: any) =>
-              (n.type === "event_invite" || n.type === "event_update") &&
+              (n.entity_type === "event" || n.type === "event_invite" || n.type === "event_update") &&
               n.entity_id,
           )
           .map((n: any) => parseInt(String(n.entity_id), 10))
@@ -338,9 +345,10 @@ Deno.serve(async (req: Request) => {
           n.entity_type === "comment" && n.entity_id
             ? String(n.entity_id)
             : commentContext?.commentId,
-        commentText: commentContext?.content || n.content || undefined,
+        commentText: commentContext?.content || undefined,
+        payload: n.entity_payload ?? null,
         event:
-          (n.type === "event_invite" || n.type === "event_update") && n.entity_id
+          (n.entity_type === "event" || n.type === "event_invite" || n.type === "event_update") && n.entity_id
             ? {
                 id: String(n.entity_id),
                 title: eventTitleById.get(parseInt(String(n.entity_id), 10)) || undefined,
@@ -367,16 +375,13 @@ Deno.serve(async (req: Request) => {
 
     return new Response(JSON.stringify(response), {
       status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "private, max-age=15",
-      },
+      headers: responseHeaders,
     });
   } catch (err: any) {
-    console.error("[bootstrap-notifications] Error:", err);
+    console.error("[bootstrap-notifications] request unavailable");
     return new Response(
-      JSON.stringify({ error: err.message || "Internal error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
+      JSON.stringify({ error: "Could not load activity. Please retry." }),
+      { status: 500, headers: responseHeaders },
     );
   }
 });
