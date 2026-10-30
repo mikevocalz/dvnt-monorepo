@@ -37,6 +37,7 @@ import {
   Undo2,
   Nfc,
 } from "lucide-react-native";
+import { organizerRosterMetrics } from "@dvnt/app/lib/tickets/organizer-roster-metrics";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
@@ -53,7 +54,8 @@ interface Ticket {
     name?: string;
     avatar?: string;
   };
-  status: "valid" | "checked_in" | "revoked";
+  status: "active" | "scanned" | "refunded" | "void" | "transfer_pending" | "valid" | "checked_in" | "revoked";
+  checked_in_at?: string | null;
   checkedInAt?: string;
   createdAt: string;
 }
@@ -245,10 +247,7 @@ function EventOrganizerScreenContent() {
     });
   };
 
-  const checkedInCount = eventTickets.filter(
-    (t) => t.status === "checked_in",
-  ).length;
-  const totalCount = eventTickets.length;
+  const { issued: totalCount, checkedIn: checkedInCount, awaitingCheckIn: remainingCount } = organizerRosterMetrics(eventTickets);
 
   return (
     <SafeAreaView
@@ -316,7 +315,7 @@ function EventOrganizerScreenContent() {
               marginTop: 4,
             }}
           >
-            Total Tickets
+            Issued tickets
           </Text>
         </View>
         <View style={{ width: 1, backgroundColor: colors.border }} />
@@ -339,7 +338,7 @@ function EventOrganizerScreenContent() {
           <Text
             style={{ fontSize: 24, fontWeight: "bold", color: colors.primary }}
           >
-            {totalCount - checkedInCount}
+            {remainingCount}
           </Text>
           <Text
             style={{
@@ -348,7 +347,7 @@ function EventOrganizerScreenContent() {
               marginTop: 4,
             }}
           >
-            Remaining
+            Awaiting check-in
           </Text>
         </View>
       </View>

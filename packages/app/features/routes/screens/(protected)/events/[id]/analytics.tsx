@@ -307,11 +307,11 @@ function EventAnalyticsContent() {
           <StatCard
             icon={<Ticket size={16} color="#3b82f6" />}
             iconColor="#3b82f6"
-            label="Tickets sold"
+            label="Tickets issued"
             value={String(ticketStats.total)}
             sublabel={
               totalCapacity > 0
-                ? `${remainingTickets} remaining`
+                ? `${remainingTickets} tier inventory remaining`
                 : undefined
             }
           />
@@ -345,9 +345,9 @@ function EventAnalyticsContent() {
           </Text>
           <View style={{ flexDirection: "row", gap: 12 }}>
             {[
-              ["RSVP", attendanceBreakdown.rsvp],
-              ["Paid", attendanceBreakdown.paid],
-              ["Total", attendanceBreakdown.total],
+              ["RSVP people", attendanceBreakdown.rsvp],
+              ["Paid tickets", attendanceBreakdown.paid],
+              ["Going", attendanceBreakdown.total],
             ].map(([label, value]) => (
               <View key={String(label)} style={{ flex: 1 }}>
                 <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
@@ -360,7 +360,7 @@ function EventAnalyticsContent() {
             ))}
           </View>
           <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 10 }}>
-            Total includes paid, free/comp tickets, and RSVP-only guests without double-counting.
+            Going counts valid ticket units (including free/comp) plus RSVP-only guests. Refunded and cancelled tickets are excluded; issued tickets above include their history.
           </Text>
         </View>
 

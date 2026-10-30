@@ -47,6 +47,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { tickets, ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { organizerRosterMetrics } from "@dvnt/app/lib/tickets/organizer-roster-metrics";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
@@ -395,12 +396,10 @@ export function EventOrganizerScreen() {
     [showToast, loadTickets, setRefundingTicketId],
   );
 
-  const checkedInCount = useMemo(
-    () => roster.filter(isCheckedIn).length,
+  const { issued: totalCount, checkedIn: checkedInCount, awaitingCheckIn: remainingCount } = useMemo(
+    () => organizerRosterMetrics(roster),
     [roster],
   );
-  const totalCount = roster.length;
-  const remainingCount = totalCount - checkedInCount;
 
   // ── Virtualized roster (TanStack Virtual, never FlatList/FlashList) ──
   const parentRef = useRef<HTMLDivElement>(null);
@@ -438,11 +437,11 @@ export function EventOrganizerScreen() {
       <main className="mx-auto w-full max-w-2xl px-4">
         {/* Stats bar */}
         <div className="flex items-center gap-3 border-b border-white/8 py-4">
-          <StatCard value={totalCount} label="Total Tickets" color="#fff" />
+          <StatCard value={totalCount} label="Issued tickets" color="#fff" />
           <span className="h-10 w-px bg-white/10" />
           <StatCard value={checkedInCount} label="Checked In" color="#22c55e" />
           <span className="h-10 w-px bg-white/10" />
-          <StatCard value={remainingCount} label="Remaining" color="#3FDCFF" />
+          <StatCard value={remainingCount} label="Awaiting check-in" color="#3FDCFF" />
         </div>
 
         {/* Actions */}
