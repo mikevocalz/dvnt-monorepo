@@ -78,7 +78,7 @@ export async function loadOrderTicketBundle(
   if (orderError || !order) return null;
 
   const select =
-    "id, qr_token, guest_lookup_token, guest_name, attendee_name, status, " +
+    "id, qr_token, guest_lookup_token, guest_name, attendee_name, status, transferred_from, " +
     "ticket_type:ticket_types(name, category)";
 
   // deno-lint-ignore no-explicit-any
@@ -125,7 +125,12 @@ export async function loadOrderTicketBundle(
   for (const row of rows) {
     // Refunded/void tickets are not deliverable credentials — a partially
     // refunded order resends only the tickets that still admit someone.
-    if (row.status === "refunded" || row.status === "void") continue;
+    if (row.status === "refunded" || row.status === "void" || row.status === "transfer_pending") continue;
+    // The order remains the original buyer's receipt after ownership moves.
+    // Never send the recipient's rotated credential back to that buyer on a
+    // manual resend or email-recovery retry. Claimed, untransferred tickets
+    // retain their original delivery path (user_id alone is not a transfer).
+    if (row.transferred_from != null) continue;
     const id = String(row.id);
     if (seen.has(id)) continue;
     seen.add(id);
@@ -270,6 +275,10 @@ export async function deliverTicketBundleEmail(
         })),
       }),
     });
+
+    // A disabled sender or a provider response without a receipt is not
+    // delivery. Keep it retryable instead of silently marking it sent.
+    if (!messageId) throw new Error("Email provider did not confirm delivery");
 
     await supabase
       .from("orders")

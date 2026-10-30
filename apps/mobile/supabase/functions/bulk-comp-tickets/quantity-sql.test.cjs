@@ -19,11 +19,13 @@ const schema = `
 CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
 CREATE SCHEMA extensions; CREATE EXTENSION pgcrypto SCHEMA extensions;
 CREATE TABLE events(id serial PRIMARY KEY,host_id text,status text,date timestamptz,start_date timestamptz,end_date timestamptz);
-CREATE TABLE users(id serial PRIMARY KEY,auth_id text UNIQUE);
+CREATE TABLE users(id serial PRIMARY KEY,auth_id text UNIQUE,username varchar UNIQUE);
+CREATE TABLE "user"(id text PRIMARY KEY,username text);
 CREATE TABLE event_co_organizers(event_id integer,user_id text,role text,accepted boolean);
 CREATE TABLE ticket_types(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),event_id integer REFERENCES events,quantity_total integer,quantity_sold integer DEFAULT 0,is_active boolean DEFAULT true,category text);
 CREATE TABLE orders(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),type text,status text,currency text,subtotal_cents integer,total_cents integer,event_id integer,quantity integer,user_id text,guest_email text,paid_at timestamptz);
-CREATE TABLE tickets(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),event_id integer REFERENCES events,ticket_type_id uuid REFERENCES ticket_types,status text DEFAULT 'active',user_id text,guest_email text,guest_lookup_token text,purchase_amount_cents integer,category text,qr_token text UNIQUE NOT NULL,qr_payload text,checked_in_at timestamptz,transferred_from text,attendee_name text,guest_name text,guest_phone text,wallet_serial_number text,wallet_auth_token text,wallet_pass_type_id text,wallet_voided_at timestamptz,wallet_last_pushed_at timestamptz,order_id uuid REFERENCES orders,order_index integer,order_count integer,CONSTRAINT tickets_user_or_guest CHECK(user_id IS NOT NULL OR guest_email IS NOT NULL));
+CREATE TABLE tickets(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),event_id integer REFERENCES events,ticket_type_id uuid REFERENCES ticket_types,status text DEFAULT 'active',user_id text,guest_email text,guest_lookup_token text,purchase_amount_cents integer,category text,qr_token text UNIQUE NOT NULL,qr_payload text,checked_in_at timestamptz,checked_in_by text,transferred_from text,attendee_name text,guest_name text,guest_phone text,wallet_serial_number text,wallet_auth_token text,wallet_pass_type_id text,wallet_voided_at timestamptz,wallet_last_pushed_at timestamptz,order_id uuid REFERENCES orders,order_index integer,order_count integer,CONSTRAINT tickets_user_or_guest CHECK(user_id IS NOT NULL OR guest_email IS NOT NULL));
+CREATE TABLE checkins(id serial PRIMARY KEY,ticket_id uuid REFERENCES tickets,event_id integer NOT NULL REFERENCES events,scanned_by text,device_id text,result text CHECK(result IN ('valid','already_scanned','refunded','wrong_event','invalid')),offline boolean);
 CREATE TABLE ticket_transfers(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),ticket_id uuid REFERENCES tickets,from_user_id text,to_user_id text,status text DEFAULT 'pending',expires_at timestamptz,resolved_at timestamptz);
 CREATE TABLE cart_holds(tier_id uuid,qty integer,released boolean DEFAULT false,expires_at timestamptz);
 CREATE TABLE ticket_holds(ticket_type_id uuid,quantity integer,status text,expires_at timestamptz);
@@ -47,10 +49,22 @@ test(process.env.POSTGRES_SINGLE_USER ? 'comp quantity sequential real PostgreSQ
   run('pg_ctl',['-D',data,'-o',`-k ${socket} -c listen_addresses='' -c fsync=off -c full_page_writes=off`,'-w','-l',path.join(data,'server.log'),'start']);
   pool=new Pool({host:socket,user:'harness',database:'postgres',max:12});
   await pool.query(schema);
+  await t.test('canonical handles use literal case-insensitive SQL and auth linkage, not stale auth usernames', async () => {
+    await pool.query(`INSERT INTO "user"(id,username) VALUES ('handle-owner','old-name'),('wrong-owner','mixed_handle');
+      INSERT INTO users(auth_id,username) VALUES ('handle-owner','Mixed_Handle'),('wrong-owner','mixedXhandle');`);
+    // Same two queries as the handler, including escaped LIKE underscores.
+    const profile = await pool.query('SELECT auth_id FROM users WHERE username ILIKE $1', ['mixed\\_handle']);
+    assert.equal(profile.rows.length, 1);
+    assert.equal(profile.rows[0].auth_id, 'handle-owner');
+    const account = await pool.query('SELECT id FROM "user" WHERE id=$1', [profile.rows[0].auth_id]);
+    assert.equal(account.rows[0].id, 'handle-owner');
+    assert.equal((await pool.query('SELECT id FROM "user" WHERE username=$1',['mixed_handle'])).rows[0].id, 'wrong-owner');
+  });
   await pool.query(readFileSync(path.join(migrations,'20261002190000_phone_comp_claim_links.sql'),'utf8'));
   const migration=readFileSync(path.join(migrations,'20261027212000_three_comp_tickets.sql'),'utf8');
   await pool.query(migration);await pool.query(migration);
   await pool.query(acceptanceMigration());await pool.query(acceptanceMigration());
+  await pool.query(readFileSync(path.join(migrations,'20260806100200_door_single_checkin_cas.sql'),'utf8'));
   // Production attendance triggers UPDATE events when user_id changes.
   // Reproduce that lock dependency rather than masking claim/issuer deadlocks.
   await pool.query(`CREATE FUNCTION fixture_claim_attendance() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -215,6 +229,68 @@ test(process.env.POSTGRES_SINGLE_USER ? 'comp quantity sequential real PostgreSQ
       assert.equal((await pending).ok, false);
       assert.equal((await pool.query('SELECT status FROM ticket_transfers WHERE id=$1', [ev.transfer])).rows[0].status, 'pending');
     } finally { await a.query('ROLLBACK'); a.release(); b.release(); }
+  });
+  // These run the real service-only redeem_ticket CAS, not a JS imitation.
+  // Staff authorization is independently exercised by ticket-scan/staff-access.test.cjs.
+  const scan = (token, event, actor = 'scanner', client = pool) => client.query(
+    "SELECT redeem_ticket($1,$2,$3,'fixture-device',false) AS r", [token, event, actor],
+  ).then(r => r.rows[0].r);
+  const ticketRow = async id => (await pool.query('SELECT * FROM tickets WHERE id=$1', [id])).rows[0];
+  await t.test('transferred comp rejects old QR, admits current owner once and preserves original check-in', async () => {
+    const ev = await startTransfer(); const original = await ticketRow(ev.ticket);
+    assert.equal((await scan(original.qr_token, ev.event)).result, 'invalid');
+    assert.equal((await accept(ev)).ok, true);
+    const current = await ticketRow(ev.ticket);
+    assert.equal(current.user_id, 'recipient'); assert.equal(current.purchase_amount_cents, 0);
+    assert.notEqual(current.qr_token, original.qr_token);
+    assert.equal((await scan(original.qr_token, ev.event)).result, 'invalid');
+    assert.equal((await ticketRow(ev.ticket)).status, 'active');
+    const admitted = await scan(current.qr_token, ev.event, 'admin');
+    assert.equal(admitted.result, 'valid'); assert.equal(admitted.checkedInBy, 'admin');
+    const repeat = await scan(current.qr_token, ev.event, 'scanner');
+    assert.equal(repeat.result, 'already_scanned');
+    assert.equal(repeat.checkedInBy, 'admin'); assert.equal(repeat.checkedInAt, admitted.checkedInAt);
+    assert.equal((await ticketRow(ev.ticket)).user_id, 'recipient');
+  });
+  await t.test('eight concurrent scanners admit a ticket exactly once with consistent original attribution', async () => {
+    const ev = await make(); const issued = await issue('member', ev, 1);
+    const ticket = await ticketRow(issued.tickets[0].id);
+    const results = await Promise.all(Array.from({length:8}, (_,i) => scan(ticket.qr_token, ev.event, `staff-${i}`)));
+    const winner = results.find(r => r.result === 'valid');
+    assert.equal(results.filter(r => r.result === 'valid').length, 1);
+    assert.equal(results.filter(r => r.result === 'already_scanned').length, 7);
+    for (const r of results) { assert.equal(r.checkedInBy, winner.checkedInBy); assert.equal(r.checkedInAt, winner.checkedInAt); }
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM checkins WHERE ticket_id=$1 AND result='valid'", [ticket.id])).rows[0].n, 1);
+  });
+  await t.test('wrong-event, refunded, void and transfer-pending tickets never admit or change ownership', async () => {
+    const ev = await make(); const other = await make(); const issued = await issue('member', ev, 1);
+    const ticket = await ticketRow(issued.tickets[0].id);
+    assert.equal((await scan(ticket.qr_token, other.event)).result, 'wrong_event');
+    assert.equal((await ticketRow(ticket.id)).status, 'active');
+    for (const state of ['refunded', 'void', 'transfer_pending']) {
+      await pool.query('UPDATE tickets SET status=$2 WHERE id=$1', [ticket.id, state]);
+      const result = await scan(ticket.qr_token, ev.event);
+      assert.equal(result.result, state === 'refunded' ? 'refunded' : 'invalid');
+      const after = await ticketRow(ticket.id);
+      assert.equal(after.status, state); assert.equal(after.checked_in_at, null); assert.equal(after.user_id, 'member');
+    }
+  });
+  await t.test('scanner blocked behind refund cannot admit after the refund commits', async () => {
+    const ev = await make(); const issued = await issue('member', ev, 1);
+    const ticket = await ticketRow(issued.tickets[0].id);
+    const a = await pool.connect(), b = await pool.connect();
+    try {
+      await a.query('BEGIN'); await a.query("UPDATE tickets SET status='refunded' WHERE id=$1", [ticket.id]);
+      const pending = scan(ticket.qr_token, ev.event, 'scanner', b);
+      await waitBlocked(b.processID); await a.query('COMMIT');
+      assert.equal((await pending).result, 'refunded');
+      assert.equal((await ticketRow(ticket.id)).checked_in_at, null);
+    } finally { await a.query('ROLLBACK'); a.release(); b.release(); }
+  });
+  await t.test('redemption cannot be called directly by anon or authenticated API roles', async () => {
+    for (const role of ['anon', 'authenticated']) assert.equal((await pool.query(
+      "SELECT has_function_privilege($1,'redeem_ticket(text,integer,text,text,boolean)','EXECUTE') AS allowed", [role],
+    )).rows[0].allowed, false);
   });
   await t.test('all old and new function signatures remain service-role only',async()=>{
    for(const name of Object.values(names))for(const signature of ['integer,uuid,text,text[]','integer,uuid,text,text[],integer']){

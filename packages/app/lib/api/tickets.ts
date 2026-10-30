@@ -2,6 +2,7 @@ import { supabase } from "../supabase/client";
 import { getCurrentUserAuthId } from "./auth-helper";
 import { requireBetterAuthToken } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
+import { ticketTransferError } from "./ticket-transfer-error";
 import { scanFailureReasonForStatus } from "../tickets/scan-verdict";
 import { getPendingPromoterRef } from "../stores/promoter-ref-store";
 import {
@@ -739,7 +740,7 @@ export const ticketsApi = {
       return result;
     } catch (error: any) {
       console.error("[Tickets] initiateTransfer error:", error);
-      return { error: error.message || "Transfer failed" };
+      return { error: await ticketTransferError(error) };
     }
   },
 
@@ -764,7 +765,7 @@ export const ticketsApi = {
       return result;
     } catch (error: any) {
       console.error("[Tickets] acceptTransfer error:", error);
-      return { error: error.message || "Accept failed" };
+      return { error: await ticketTransferError(error) };
     }
   },
 
@@ -786,7 +787,7 @@ export const ticketsApi = {
       return result;
     } catch (error: any) {
       console.error("[Tickets] declineTransfer error:", error);
-      return { error: error.message || "Decline failed" };
+      return { error: await ticketTransferError(error) };
     }
   },
 
@@ -808,7 +809,7 @@ export const ticketsApi = {
       return result;
     } catch (error: any) {
       console.error("[Tickets] cancelTransfer error:", error);
-      return { error: error.message || "Cancel failed" };
+      return { error: await ticketTransferError(error) };
     }
   },
 
