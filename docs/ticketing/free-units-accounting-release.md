@@ -11,7 +11,10 @@ Per-unit discount allocation in mixed carts remains a separate ledger concern.
 
 The source migration changes only the existing calculation. For a live rollout,
 use `free-units-accounting-release.sql`: one transaction installs the function,
-locks the targeted rows, verifies approved bounds and repairs derived caches.
+first locks source tables with SHARE NOWAIT, then locks targeted rows, verifies
+approved bounds and repairs derived caches. Existing writers make it refuse;
+new writers briefly wait, while ordinary reads remain available. Each statement
+has a five-second timeout (not a whole-transaction deadline).
 A failed guard rolls back the function definition and every cache write.
 Do not apply the formula and cache repair as separate live transactions.
 

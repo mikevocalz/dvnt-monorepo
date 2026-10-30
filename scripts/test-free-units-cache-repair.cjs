@@ -100,7 +100,11 @@ async function main() {
     await setup();
     const before = await snapshot();
     const ledgerBefore = await query("SELECT 'tickets' AS source,to_jsonb(t) AS row FROM tickets t UNION ALL SELECT 'orders',to_jsonb(o) FROM orders o UNION ALL SELECT 'order_addons',to_jsonb(a) FROM order_addons a ORDER BY source,row");
+    const releaseStarted = performance.now();
     await query(artifact); // Exact template after synthetic bound substitution; transaction and guards unchanged.
+    const releaseDurationMs = performance.now() - releaseStarted;
+    console.log(`INFO: synthetic transactional release duration ${releaseDurationMs.toFixed(1)}ms`);
+    assert.ok(releaseDurationMs < 5000, 'synthetic release must finish inside five-second statement bound');
     const after = await snapshot();
     assert.deepEqual(await query("SELECT 'tickets' AS source,to_jsonb(t) AS row FROM tickets t UNION ALL SELECT 'orders',to_jsonb(o) FROM orders o UNION ALL SELECT 'order_addons',to_jsonb(a) FROM order_addons a ORDER BY source,row"),ledgerBefore,'release must not mutate source ledger');
     assert.equal(before.reduce((s,r,i)=>s+r.dvnt_fee_cents-after[i].dvnt_fee_cents,0),3100);
@@ -151,14 +155,16 @@ async function main() {
         const writer = await connect();
         try {
           await query(`BEGIN; ${barrier}`);
-          await writer.query("BEGIN; SET LOCAL lock_timeout='100ms'");
+          await writer.query("BEGIN; SET LOCAL lock_timeout='100ms'; SET LOCAL statement_timeout='1s'");
+          const readResult = await writer.query(`SELECT count(*) AS count FROM ${table}`);
+          assert.ok(readResult.rows.length === 1, `${table} reads remain available under SHARE`);
           await assert.rejects(() => writer.query(write), /lock timeout/, `${table} writer must not enter while release holds SHARE`);
           await writer.query('ROLLBACK');
           await query('ROLLBACK');
           await writer.query('BEGIN');
           await writer.query(write); // Barrier released: same write can now complete.
           await writer.query('ROLLBACK');
-          console.log(`PASS: ${table} new writer blocked during release and permitted after rollback`); count++;
+          console.log(`PASS: ${table} reads available; new writer blocked during release and permitted after rollback`); count++;
         } finally { await query('ROLLBACK'); await writer.query('ROLLBACK'); writer.release(); }
       }
       for (const table of ['events','event_financials']) {
