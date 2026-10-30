@@ -24,6 +24,7 @@ export const Skia={
   const element=document.createElement('canvas');element.width=width;element.height=height;
   const context=element.getContext('2d');
   return {dispose,flush:()=>{},getCanvas:()=>({
+   save:()=>context.save(),restore:()=>context.restore(),
    clear:()=>context.clearRect(0,0,width,height),
    clipRRect:({rect,rx,ry},op,antialias)=>{window.fixture.iconClips=(window.fixture.iconClips||[]).concat({width,height,rx,ry,op,antialias});context.beginPath();context.roundRect(rect.x,rect.y,rect.width,rect.height,rx);context.clip()},
    drawPaint:paint=>{context.fillStyle=paint.color;context.fillRect(0,0,width,height)},

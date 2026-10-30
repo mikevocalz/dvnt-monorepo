@@ -41,7 +41,7 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/member-map/node_modules
         run: node --test scripts/test-member-map-sql.cjs apps/mobile/supabase/functions/member-map/index.test.cjs apps/mobile/supabase/functions/member-proximity/master-location.test.cjs apps/mobile/supabase/functions/places-autocomplete/location-policy.test.cjs
       - name: Client consent and stale-result policies
-        run: node --test packages/app/lib/location/*.test.ts packages/app/features/events/ui/member-map-render-policy.test.ts packages/app/features/events/ui/member-map-area.test.ts
+        run: node --test packages/app/lib/location/*.test.ts packages/app/features/events/ui/member-map-render-policy.test.ts packages/app/features/events/ui/member-map-area.test.ts packages/app/features/events/ui/member-map-clusters.test.ts
       - name: Import-aware map parity regression
         run: node --test scripts/test-member-map-parity.cjs
       - name: Install browser engines
@@ -62,5 +62,6 @@ jobs:
           name: map-marker-corners-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             /tmp/dvnt-member-map-renderer-phone.png
-            /tmp/dvnt-colocated-avatar-stack.png
+            /tmp/dvnt-avatar-cluster-phone.png
+            /tmp/dvnt-avatar-cluster-chooser-phone.png
           if-no-files-found: ignore

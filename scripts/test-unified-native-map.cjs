@@ -9,10 +9,10 @@ const event={id:1,title:'Party',image:'https://fixture.example/flyer.png'};
 const row={id:1,title:'Party',visibility:'public',is_hidden:false,publish_at:null,status:'active',is_online:false,location_type:'venue',location:'Public venue',location_name:null,location_lat:33.78,location_lng:-84.41};
 const mocks={
  '@shopify/react-native-skia':require('./fixtures/native-map-icon-boundary.cjs'),
- 'react-native':`import React from 'react';export const Platform={OS:window.fixture.platform};const Box=({children,accessibilityLabel})=>React.createElement('div',{'aria-label':accessibilityLabel},children);export const View=Box,Text=Box,ScrollView=Box,ActivityIndicator=()=>null;export const Pressable=({children,onPress,accessibilityLabel,disabled})=>React.createElement('button',{onClick:onPress,'aria-label':accessibilityLabel,disabled},children);export const Image=()=>null;`,
+ 'react-native':`import React from 'react';export const Platform={OS:window.fixture.platform};const Box=({children,accessibilityLabel})=>React.createElement('div',{'aria-label':accessibilityLabel},children);export const View=Box,Text=Box,ScrollView=Box,ActivityIndicator=()=>null;export const Modal=({visible,children})=>visible?React.createElement("div",{role:"dialog"},children):null;export const Pressable=({children,onPress,accessibilityLabel,disabled})=>React.createElement('button',{onClick:onPress,'aria-label':accessibilityLabel,disabled},children);export const Image=()=>null;`,
  'expo-router':`export const useRouter=()=>({push:p=>window.fixture.route=p});`,
  'expo-image':`const icons=new Map();export const useImage=s=>{if(typeof s!=='string'||!s)throw Error('Expo useImage requires a source');if(!icons.has(s))icons.set(s,{source:s});return icons.get(s)};`,
- 'expo-maps':`import React from 'react';const Map=({markers,annotations=[],onMarkerClick,onAnnotationClick,cameraPosition,properties})=>{window.fixture.camera=cameraPosition;window.fixture.properties=properties;return React.createElement('div',{'data-map':true},...[...markers,...annotations].map(m=>React.createElement('button',{'data-marker':m.id,'data-image':m.icon?.source,'data-lat':m.coordinates.latitude,key:m.id,onClick:()=>m.icon&&window.fixture.platform==='ios'?onAnnotationClick(m):onMarkerClick(m)},m.title)))};export const AppleMaps={View:Map},GoogleMaps={View:Map};`,
+ 'expo-maps':`import React from 'react';const Map=({markers,annotations=[],onMarkerClick,onAnnotationClick,cameraPosition,properties,onCameraMove})=>{window.fixture.moveCamera=onCameraMove;window.fixture.camera=cameraPosition;window.fixture.properties=properties;return React.createElement('div',{'data-map':true},...[...markers,...annotations].map(m=>React.createElement('button',{'data-marker':m.id,'data-image':m.icon?.source,'data-lat':m.coordinates.latitude,key:m.id,onClick:()=>m.icon&&window.fixture.platform==='ios'?onAnnotationClick(m):onMarkerClick(m)},m.title)))};export const AppleMaps={View:Map},GoogleMaps={View:Map};`,
  '@tanstack/react-query':`export const useQuery=()=>({data:window.fixture.rows,isError:window.fixture.eventError,refetch:()=>{window.fixture.retries++}});`,
  '@dvnt/app/lib/api/event-map':`export const eventMapApi={getLocations:async()=>[]};`,
  '@dvnt/app/features/settings/ui/LocationControls':`import React from 'react';export const LocationControls=()=>React.createElement('button',{onClick:()=>{window.fixture.sharing=false;window.renderFixture()}},'Stop sharing');`,
@@ -79,6 +79,39 @@ const mocks={
   const fallbackPixels=await page.evaluate(async uri=>{const image=new Image();image.src=uri;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);return {corner:ctx.getImageData(0,0,1,1).data[3],edge:ctx.getImageData(5,0,1,1).data[3]};},failedPlaceholder);
   assert.equal(fallbackPixels.corner,0,'no-photo/failed-photo fallback stays rounded');assert.equal(fallbackPixels.edge,255,'fallback is small-radius, not a circle');
   await page.locator('[data-marker="member:self"]').click();assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture','failed image fallback keeps navigation');
+  // Nearby avatars cluster by displayed proximity; same-cell members remain reachable at max zoom.
+  await page.evaluate(()=>{window.fixture.data.members=[{...window.fixture.data.self,id:'peer',username:'peer',displayName:'Peer'}];window.renderFixture()});
+  const cluster=page.locator('[data-marker^="cluster:"]');
+  await cluster.waitFor();
+  assert.equal(await page.locator('[data-marker="member:self"]').count(),0,'no obscured self under a peer');
+  assert.equal(await cluster.innerText(),'2 people including you · approximate area');
+  const composite=await cluster.getAttribute('data-image');
+  const size=await page.evaluate(async uri=>{const image=new Image();image.src=uri;await image.decode();return [image.width,image.height]},composite);
+  assert.deepEqual(size,[76,56],'cluster contains two separate rounded avatar previews and count');
+  await page.evaluate(()=>window.fixture.moveCamera({zoom:22}));
+  await cluster.click();
+  await page.getByRole('button',{name:'View Fixture (You) profile',exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture');
+  await cluster.click();await page.getByRole('button',{name:'View Peer profile',exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/peer');
+  await cluster.click();await page.getByRole('button',{name:'Close people cluster'}).click();
+  assert.equal(await page.getByRole('dialog').count(),0);
+  await page.evaluate(()=>{window.fixture.data.members[0].longitude+=0.001;window.renderFixture()});
+  await page.locator('[data-marker="member:self"]').waitFor();
+  assert.equal(await cluster.count(),0,'nearby distinct coordinates split at higher zoom');
+  await page.evaluate(()=>window.fixture.moveCamera({zoom:12}));await cluster.waitFor();
+  await cluster.click();
+  await page.evaluate(()=>{window.fixture.data.members=[];window.renderFixture()});
+  await page.locator('[data-marker="member:self"]').waitFor();
+  assert.equal(await page.getByRole('button',{name:'View Peer profile',exact:true}).count(),0,'revoked member leaves open chooser immediately');
+  await page.getByRole('button',{name:'Close people cluster'}).click();
+  await page.evaluate(()=>{window.fixture.data.members=[{...window.fixture.data.self,id:'peer',username:'peer',displayName:'Peer'}];window.renderFixture()});
+  await cluster.waitFor();await cluster.click();
+  await page.getByRole('button',{name:'Stop sharing'}).click();
+  await page.getByRole('dialog').waitFor({state:'detached'});
+  await page.evaluate(()=>{window.fixture.sharing=true;window.fixture.data.members=[];window.renderFixture()});
+  await page.locator('[data-marker="member:self"]').waitFor();
+  assert.equal(await page.getByRole('dialog').count(),0,'sharing again does not reopen revoked chooser');
   await page.evaluate(()=>{window.fixture.data.self.avatarUrl='https://fixture.example/slow.png';window.renderFixture()});
   await page.evaluate(()=>window.fixture.initialCamera=window.fixture.camera);await page.waitForTimeout(1100);assert.equal(await page.evaluate(()=>window.fixture.camera===window.fixture.initialCamera),true);
   await page.getByRole('button',{name:'Stop sharing'}).click();await page.locator('[data-marker="member:self"]').waitFor({state:'detached'});assert.equal(await page.locator('[data-map]').count(),1);assert.equal(await page.locator('[data-marker="event:1"]').count(),1);

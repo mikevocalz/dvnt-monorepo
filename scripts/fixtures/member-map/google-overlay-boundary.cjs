@@ -2,7 +2,9 @@
 module.exports = `
 import React,{useSyncExternalStore} from 'react';
 const fixture=()=>window.mapFixture||window.fixture;
-const map={panTo:p=>{fixture().camera=p;fixture().mapFocus=p},setZoom:z=>{fixture().zoom=z;fixture().mapZoom=z}};
+const zoomListeners=new Set();
+const map={panTo:p=>{fixture().camera=p;fixture().mapFocus=p},getZoom:()=>fixture().zoom||12,addListener:(name,callback)=>{if(name==='zoom_changed')zoomListeners.add(callback);return{remove:()=>zoomListeners.delete(callback)}},setZoom:z=>{fixture().zoom=z;fixture().mapZoom=z;zoomListeners.forEach(cb=>cb())}};
+window.setFixtureZoom=z=>map.setZoom(z);
 const used=new Set();
 class OverlayView {
  static preventMapHitsAndGesturesFrom(element){element.dataset.gestureIsolated='true'}
