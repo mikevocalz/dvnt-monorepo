@@ -10,6 +10,8 @@ on:
       - 'packages/app/lib/api/ticket-cancel-contract.test.ts'
       - 'packages/app/lib/tickets/**'
       - 'scripts/test-ticket-self-service-dom.cjs'
+      - 'scripts/test-ticket-transfer-cache.cjs'
+      - 'packages/app/features/ticket/ui/TicketActionsBar.tsx'
       - 'scripts/test-order-refund-dom.cjs'
       - 'packages/app/features/settings/order-detail.web.tsx'
       - 'packages/app/features/routes/screens/settings/order/**'
@@ -33,7 +35,7 @@ jobs:
         with:
           node-version: '24'
       - name: Install isolated offline test dependencies
-        run: npm install --prefix "$RUNNER_TEMP/ticket-actions" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.28.1 typescript@5.9.2 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 happy-dom@20.10.3 zod@4.6.5 pg@8.21.0
+        run: npm install --prefix "$RUNNER_TEMP/ticket-actions" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.28.1 typescript@5.9.2 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @tanstack/react-query@5.90.5 happy-dom@20.10.3 zod@4.6.5 pg@8.21.0
       - name: Mounted web/native actions and real endpoint contracts
         env:
           NODE_PATH: ${{ runner.temp }}/ticket-actions/node_modules

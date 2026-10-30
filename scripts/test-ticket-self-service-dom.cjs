@@ -24,7 +24,7 @@ const fixture = {
     export const state = {edgeCalls:[],edgeResponse:{ok:true},edgeError:null,tokenError:false,calls:[],toasts:[],navigations:[],invalidations:[],queries:[],defer:false,releases:[],response:undefined,throwError:false};
     export const useFixture=create(()=>({routeId:'ticket-a',viewerId:'viewer-a',ticket:null,group:null,isLoading:false,isError:false,addons:[],storeTicket:undefined}));
     export const router={back:()=>state.navigations.push('back'),push:p=>state.navigations.push(p),replace:p=>state.navigations.push(p)};
-    export const queryClient={invalidateQueries:async input=>{state.invalidations.push(input.queryKey);}};
+    export const queryClient={cancelQueries:async()=>{},setQueriesData:(filter,update)=>{const s=useFixture.getState();if(filter.queryKey[1]!==s.viewerId)return;const next=update(s.ticket?[s.ticket]:[]);if(next?.[0])useFixture.setState({ticket:next[0]});},invalidateQueries:async input=>{state.invalidations.push(input.queryKey);}};
     export async function perform(method,args){
       state.calls.push({method,args});
       if(state.defer) await new Promise(resolve=>state.releases.push(resolve));
@@ -37,7 +37,7 @@ const fixture = {
       requestLineRefund:input=>perform('requestLineRefund',input),
       getPendingTransfers:async()=>({outgoing:[],incoming:[]}),
       cancelTransfer:id=>perform('cancelTransfer',id),
-      initiateTransfer:()=>{throw new Error('Unexpected transfer')}
+      initiateTransfer:(id,username)=>perform('initiateTransfer',{id,username})
     };`,
   "solito/navigation": `import {useFixture,router} from 'ticket-test-fixture';export const useParams=()=>({id:useFixture(s=>s.routeId)});export const useRouter=()=>router;`,
   "expo-router": `import {useFixture,router} from 'ticket-test-fixture';export const useLocalSearchParams=()=>({id:useFixture(s=>s.routeId)});export const useRouter=()=>router;`,
@@ -55,22 +55,28 @@ const fixture = {
   "@dvnt/app/lib/stores/ticket-store": `import {useFixture} from 'ticket-test-fixture';export const useTicketStore=selector=>{const s=useFixture();return selector({getTicketByEventId:()=>s.storeTicket});};`,
   "@dvnt/app/lib/stores/ui-store": `import {state} from 'ticket-test-fixture';const value={showToast:(...args)=>state.toasts.push(args)};export const useUIStore=selector=>selector(value);useUIStore.getState=()=>value;`,
   "@dvnt/app/lib/hooks/use-event-realtime": `export const useEventRealtime=()=>{};`,
-  "@dvnt/app/lib/hooks/use-search": `export const useSearchUsers=()=>({data:{docs:[]},isFetching:false});`,
+  "@dvnt/app/lib/hooks/use-search": `export const useSearchUsers=()=>({data:{docs:[{id:"recipient",username:"friend",name:"Friend"}]},isFetching:false});`,
   "@dvnt/app/lib/stores/events-location-store": `export const useEventsLocationStore=selector=>selector({activeCity:null,deviceLat:null,deviceLng:null});`,
   "@dvnt/ui": `export const Dialog=({open,children,title})=>open?<div role="dialog" aria-label={title}>{children}</div>:null;`,
   qrcode: `export default {toDataURL:async value=>'data:image/png;base64,fixture-'+value};`,
   "react-native-qrcode-svg": `export default ()=>null;`,
   "react-native": `export const View=({children,testID})=><div data-testid={testID}>{children}</div>;
     export const Text=({children})=><span>{children}</span>;
-    export const ScrollView=View;
-    export const Pressable=({children,onPress,disabled,accessibilityLabel})=><button onClick={onPress} disabled={disabled} aria-label={accessibilityLabel}>{typeof children==='function'?children({pressed:false}):children}</button>;
+    export const ScrollView=View;export const KeyboardAvoidingView=View;
+    export const Modal=({visible,children})=>visible?<div role="dialog">{children}</div>:null;
+    export const TextInput=({value,onChangeText,placeholder})=><input value={value} placeholder={placeholder} onChange={e=>onChangeText(e.target.value)}/>;
+    export const Pressable=({children,onPress,disabled,accessibilityLabel,style})=>{const Tag=style?.borderTopLeftRadius||style?.justifyContent==='flex-end'?'div':'button';return <Tag onClick={onPress} disabled={disabled} aria-label={accessibilityLabel}>{typeof children==='function'?children({pressed:false}):children}</Tag>;};
     export const StyleSheet={create:x=>x,absoluteFillObject:{},hairlineWidth:1};
     export const ActivityIndicator=()=> <span role="progressbar"/>;
     export const Platform={OS:'ios',select:x=>x.ios??x.default};`,
   "react-native-safe-area-context": `export const useSafeAreaInsets=()=>({top:0,right:0,bottom:0,left:0});`,
   "@legendapp/motion": `export const Motion={View:({children})=><div>{children}</div>};`,
   "@dvnt/app/components/error-boundary": `export const ErrorBoundary=({children})=>children;`,
-  "@dvnt/app/features/ticket/ui": `export const TicketHeroCard=({ticket})=><h1>{ticket.eventTitle}</h1>;export const TicketQRCode=({ticket})=><div data-ticket-qr={ticket?.qrToken}/>;export const TicketAccessDetails=()=>null;export const TicketActionsBar=()=>null;`,
+  "@dvnt/app/features/ticket/ui": `export const TicketHeroCard=({ticket})=><h1>{ticket.eventTitle}</h1>;export const TicketQRCode=({ticket})=><div data-ticket-qr={ticket?.qrToken}/>;export const TicketAccessDetails=()=>null;export {TicketActionsBar} from '${ROOT}/packages/app/features/ticket/ui/TicketActionsBar.tsx';`,
+  "expo-haptics": `export const impactAsync=async()=>{};export const ImpactFeedbackStyle={Light:'light'};`,
+  "@dvnt/app/features/ticket/helpers/add-to-calendar": `export const addTicketToCalendar=async()=>({success:true});`,
+  "@dvnt/app/features/ticket/helpers/share-ticket": `export const shareTicket=async()=>({success:true});`,
+  "@dvnt/app/components/ui/avatar": `export const Avatar=()=>null;`,
   "@dvnt/app/features/ticket/helpers": `export const addToWallet=()=>{throw new Error('Unexpected wallet write')};`,
   "@dvnt/app/components/ui/screen-skeleton": `export const ScreenSkeleton=()=> <div>Loading ticket</div>;`,
   "@dvnt/app/features/events": `export const WeatherStrip=()=>null;`,
@@ -78,6 +84,8 @@ const fixture = {
   "@dvnt/app/components/layout/detail-header": `export const DetailBackButton=()=>null;`,
 };
 const icons = [
+  "Check",
+  "Share2",
   "ArrowLeft",
   "CalendarDays",
   "CalendarPlus",
@@ -105,7 +113,7 @@ const icons = [
   "RefreshCw",
   "WalletCards",
 ];
-fixture["lucide-react"] = fixture["lucide-react-native"] = icons
+fixture["lucide-react"] = fixture["lucide-react-native"] = [...new Set(icons)]
   .map((name) => `export const ${name}=()=>null;`)
   .join("\n");
 
@@ -292,7 +300,150 @@ function record(overrides = {}) {
     const submit = async () =>
       flush(() => requireButton("Yes, Cancel").click());
 
+    const chooseRecipient = async (platform) => {
+      await flush(() => requireButton("Transfer").click());
+      if (platform === "web")
+        await flush(() =>
+          f.useTicketDetailUIStore.getState().setTransferQuery("friend"),
+        );
+      else {
+        const input = document.querySelector(
+          'input[placeholder="Search users"]',
+        );
+        await flush(() => {
+          Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype,
+            "value",
+          ).set.call(input, "friend");
+          input.dispatchEvent(new window.Event("input", { bubbles: true }));
+          input.dispatchEvent(new window.Event("change", { bubbles: true }));
+        });
+      }
+      const recipient = [...document.querySelectorAll("button")].find(
+        (b) => b.textContent.includes("@friend") && !b.querySelector("button"),
+      );
+      assert.ok(recipient, "recipient result is visible");
+      return recipient;
+    };
+
     for (const platform of ["web", "native"]) {
+      await test(
+        platform,
+        "successful transfer immediately refreshes owner credentials",
+        async () => {
+          f.state.response = { transfer_id: "transfer-a" };
+          const recipient = await chooseRecipient(platform);
+          await flush(() => recipient.click());
+          assert.equal(
+            f.state.calls.filter((c) => c.method === "initiateTransfer").length,
+            1,
+          );
+          assert.ok(
+            f.state.invalidations.some(
+              (key) =>
+                JSON.stringify(key) ===
+                JSON.stringify(f.qk.tickets.mine("viewer-a")),
+            ),
+            "refreshes the credential query actually used by this screen",
+          );
+          assert.equal(
+            f.useFixture.getState().ticket.status,
+            "transfer_pending",
+            "confirmed pending transfer immediately disables old pass",
+          );
+        },
+      );
+
+      await test(
+        platform,
+        "same-frame recipient taps submit once",
+        async () => {
+          f.state.defer = true;
+          f.state.response = { transfer_id: "transfer-a" };
+          const recipient = await chooseRecipient(platform);
+          await flush(() => {
+            recipient.click();
+            recipient.click();
+          });
+          assert.equal(f.state.calls.length, 1);
+          assert.equal(
+            f.useFixture.getState().ticket.status,
+            "active",
+            "no speculative ownership update",
+          );
+          await flush(() => f.state.releases.shift()());
+          assert.equal(
+            f.useFixture.getState().ticket.status,
+            "transfer_pending",
+          );
+        },
+      );
+      await test(
+        platform,
+        "failed or unconfirmed transfers preserve ticket and permit retry",
+        async ({ reset }) => {
+          for (const response of [{ error: "Recipient is unavailable" }, {}]) {
+            await reset(
+              record({
+                id: response.error ? "ticket-failure" : "ticket-unconfirmed",
+              }),
+            );
+            f.state.response = response;
+            {
+              const recipient = await chooseRecipient(platform);
+              await flush(() => recipient.click());
+            }
+            assert.equal(f.useFixture.getState().ticket.status, "active");
+            assert.equal(successToasts().length, 0);
+            assert.equal(f.state.invalidations.length, 0);
+            f.state.response = { transfer_id: "transfer-retry" };
+            {
+              const recipient = await chooseRecipient(platform);
+              await flush(() => recipient.click());
+            }
+            assert.equal(
+              f.useFixture.getState().ticket.status,
+              "transfer_pending",
+            );
+          }
+        },
+      );
+      await test(
+        platform,
+        "unmounted transfer completion refreshes cache without late toast",
+        async ({ app }) => {
+          f.state.defer = true;
+          f.state.response = { transfer_id: "transfer-a" };
+          const recipient = await chooseRecipient(platform);
+          await flush(() => recipient.click());
+          await flush(() => app.unmount());
+          await flush(() => f.state.releases.shift()());
+          assert.equal(successToasts().length, 0);
+          assert.equal(
+            f.useFixture.getState().ticket.status,
+            "transfer_pending",
+          );
+        },
+      );
+      await test(
+        platform,
+        "account switch suppresses old transfer UI and preserves new owner cache",
+        async ({ change }) => {
+          f.state.defer = true;
+          f.state.response = { transfer_id: "transfer-a" };
+          const recipient = await chooseRecipient(platform);
+          await flush(() => recipient.click());
+          await change({
+            viewerId: "viewer-b",
+            ticket: record({ id: "ticket-b", user_id: "viewer-b" }),
+          });
+          await flush(() => f.state.releases.shift()());
+          assert.equal(successToasts().length, 0);
+          assert.equal(f.useFixture.getState().ticket.status, "active");
+          assert.equal(f.useFixture.getState().ticket.id, "ticket-b");
+        },
+      );
+
       await test(
         platform,
         "free admission cancels only the selected RSVP",
