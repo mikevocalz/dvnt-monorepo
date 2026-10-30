@@ -38,6 +38,8 @@ export type CartPricing = {
   quantity: number;
   /** Units on ticket-tier lines only. */
   ticketQuantity: number;
+  /** Only positive-price units can carry a flat platform fee. */
+  feeQuantity: number;
   /** Units on add-on lines only. */
   addonQuantity: number;
   /** Promoter discounts apply to admission tickets only. */
@@ -58,6 +60,7 @@ export function priceCartLines(
   const currency = String(cart.currency || "usd").toLowerCase();
   let subtotalCents = 0;
   let quantity = 0;
+  let feeQuantity = 0;
   let ticketQuantity = 0;
   let addonQuantity = 0;
   let admissionSubtotalCents = 0;
@@ -90,6 +93,7 @@ export function priceCartLines(
     const lineTotal = unitPriceCents * line.quantity;
     subtotalCents += lineTotal;
     quantity += line.quantity;
+    if (unitPriceCents > 0) feeQuantity += line.quantity;
     if (isTicket) ticketQuantity += line.quantity;
     else addonQuantity += line.quantity;
 
@@ -104,6 +108,7 @@ export function priceCartLines(
     subtotalCents,
     quantity,
     ticketQuantity,
+    feeQuantity,
     addonQuantity,
     admissionSubtotalCents,
     admissionQuantity,
