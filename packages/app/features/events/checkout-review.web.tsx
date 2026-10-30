@@ -60,7 +60,7 @@ import {
   reviewedCartKey,
   snapshotReviewedCart,
 } from "@dvnt/app/lib/checkout/reviewed-cart";
-import { calculateCartSubtotalCents } from "@dvnt/app/lib/contracts/invariants";
+import { calculateCartSubtotalCents, calculateCartFeeQuantity } from "@dvnt/app/lib/contracts/invariants";
 import { computeFees, formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { cartApi } from "@dvnt/app/lib/api/cart";
 import { useCheckoutPhoneStore } from "@dvnt/app/lib/stores/checkout-phone-store";
@@ -748,12 +748,13 @@ export function CheckoutReviewScreen() {
       quantity,
     ],
   );
+  const feeQuantity = calculateCartFeeQuantity(lineItems);
   const fees = useMemo(
     () =>
-      quantity > 0
-        ? computeFees(effectiveSubtotal, quantity)
+      feeQuantity > 0
+        ? computeFees(effectiveSubtotal, feeQuantity)
         : { buyer_fee: 0, customer_charge_amount: 0 },
-    [quantity, effectiveSubtotal],
+    [feeQuantity, effectiveSubtotal],
   );
 
   // Fresh promo state per cart, and none left behind on unmount. Then seed

@@ -32,6 +32,7 @@ on:
       - "scripts/verify-cart-addon-followups.mjs"
       - "scripts/verify-event-financials-addons.mjs"
       - "scripts/test-free-rsvp-financials.cjs"
+      - "scripts/test-free-units-always-zero.cjs"
       - "scripts/verify-call-capacity.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
@@ -57,6 +58,7 @@ on:
       - "scripts/verify-cart-addon-followups.mjs"
       - "scripts/verify-event-financials-addons.mjs"
       - "scripts/test-free-rsvp-financials.cjs"
+      - "scripts/test-free-units-always-zero.cjs"
       - "scripts/verify-call-capacity.mjs"
 
 jobs:
@@ -292,3 +294,8 @@ jobs:
           sudo systemctl start postgresql
           sudo -u postgres createdb dvnt_free_rsvp_financials
           node scripts/test-free-rsvp-financials.cjs --sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_free_rsvp_financials
+      - name: Strict free units never incur flat fees (isolated PostgreSQL)
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb dvnt_strict_free_financials
+          node scripts/test-free-units-always-zero.cjs --sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_strict_free_financials
