@@ -49,6 +49,8 @@ function hydrateFromNotificationsBootstrap(
       },
       entityType: a.entityType,
       entityId: a.entityId,
+      event: a.event,
+      payload: a.payload ?? null,
       post: a.post
         ? { id: a.post.id, thumbnail: a.post.thumbnailUrl }
         : undefined,

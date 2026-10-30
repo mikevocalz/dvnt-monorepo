@@ -4,6 +4,7 @@ on:
     paths:
       - 'packages/app/lib/activity/**'
       - 'packages/app/lib/api/notifications.ts'
+      - 'packages/app/lib/api/bootstrap.ts'
       - 'packages/app/lib/hooks/use-activities-query.ts'
       - 'packages/app/lib/hooks/use-bootstrap-notifications.ts'
       - 'packages/app/lib/stores/activity-store.ts'
@@ -36,3 +37,19 @@ jobs:
       - name: Actual web and native row interactions
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node scripts/test-event-notification-browser.cjs
 
+
+  mounted-ticket-rows:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --prefix "$RUNNER_TEMP/activity-rows" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.28.1 typescript@5.9.2 react@19.2.3 react-dom@19.2.3 happy-dom@20.10.3
+      - name: Actual DTO and mounted web/native ticket rows
+        env:
+          NODE_PATH: ${{ runner.temp }}/activity-rows/node_modules
+        run: node scripts/test-ticket-notification-dom.cjs
