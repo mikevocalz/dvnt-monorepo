@@ -495,6 +495,14 @@ function MyTicketsContent() {
         </View>
       ) : null}
 
+      {transfers.isError ? (
+        <View className="mx-4 mb-2 flex-row items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
+          <Text className="flex-1 text-xs text-muted-foreground">Could not refresh incoming transfers. Your saved tickets are still shown below.</Text>
+          <Pressable onPress={() => transfers.refetch()} accessibilityRole="button" hitSlop={12}>
+            <Text className="text-xs font-sans-semibold text-foreground">Retry transfers</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {viewState === "loading" ? (
         <View className="flex-1 pt-2">
           {Array.from({ length: 4 }).map((_, index) => (

@@ -480,6 +480,12 @@ export function MyTicketsScreen() {
           })}
         </div>
 
+        {transfers.isError ? (
+          <div role="status" className="mb-3 flex items-center gap-3 rounded-xl border border-white/10 p-3 text-sm text-white/70">
+            <span className="flex-1">Could not refresh incoming transfers. Your saved tickets are still shown below.</span>
+            <button type="button" onClick={() => transfers.refetch()} className="font-semibold text-cyan-400">Retry transfers</button>
+          </div>
+        ) : null}
         {isLoading ? (
           <div className="flex flex-col gap-3">
             {Array.from({ length: 4 }).map((_, i) => (
