@@ -90,6 +90,14 @@ async function main() {
       console.log(`PASS: ${label}, full-row rollback`); count++;
     }
     await setup();
+    const unboundBefore = await snapshot();
+    const unboundFunctions = await functionSnapshot();
+    await assert.rejects(() => query(read('docs/ticketing/free-units-accounting-release.sql')), /__expected_|does not exist|syntax error/i);
+    await query('ROLLBACK');
+    assert.deepEqual(await snapshot(), unboundBefore);
+    assert.deepEqual(await functionSnapshot(), unboundFunctions);
+    console.log('PASS: missing operator substitutions refuse and roll back function/cache'); count++;
+    await setup();
     const before = await snapshot();
     const ledgerBefore = await query("SELECT 'tickets' AS source,to_jsonb(t) AS row FROM tickets t UNION ALL SELECT 'orders',to_jsonb(o) FROM orders o UNION ALL SELECT 'order_addons',to_jsonb(a) FROM order_addons a ORDER BY source,row");
     await query(artifact); // Exact template after synthetic bound substitution; transaction and guards unchanged.
