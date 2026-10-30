@@ -90,6 +90,7 @@ CREATE TABLE event_financials(event_id integer PRIMARY KEY,gross_cents integer,r
 CREATE FUNCTION recompute_event_financials(p_event_id integer) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;
 `);
 await sql(readFileSync(join(MIGRATIONS,'20261030043000_organizer_cancel_free_ticket.sql'),'utf8'));
+await sql(readFileSync(join(MIGRATIONS,'20261030121000_untiered_free_ticket_cancellation.sql'),'utf8'));
 // Execute repository migrations, not reconstructed scanner/attendance logic.
 for (const name of ['20260806100200_door_single_checkin_cas.sql',
  '20261006225000_public_event_people_going.sql','20261027212100_atomic_ticket_transfer_acceptance.sql'])
@@ -152,6 +153,27 @@ for(const field of ['gross_cents','refunds_cents','dvnt_fee_cents','stripe_fee_c
   assert.equal((await cancel(f)).error,'financial_review_required');assert.equal((await sql(`SELECT status FROM tickets`))[0].status,'active');assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);assert.deepEqual(await sql(`SELECT * FROM event_financials`),before);
  });
 }
+async function untieredFixture(){const f=await fixture();await sql(`UPDATE tickets SET ticket_type_id=NULL`);return f;}
+await check('untiered free admission cancels with NULL audit inventory, RSVP cleanup, invalid QR and idempotency',async()=>{
+ const f=await untieredFixture();assert.equal((await cancel(f)).changed,true);assert.equal((await cancel(f)).changed,false);
+ assert.equal((await sql(`SELECT previous_quantity_sold FROM organizer_free_ticket_cancellations`))[0].previous_quantity_sold,null);
+ assert.equal((await sql(`SELECT quantity_sold FROM ticket_types`))[0].quantity_sold,1);
+ assert.equal((await sql(`SELECT status FROM event_rsvps`))[0].status,'not_going');
+ assert.equal((await sql(`SELECT redeem_ticket('old-qr',1,'door',NULL,false) AS r`))[0].r.result,'invalid');
+});
+await check('concurrent untiered cancellation writes one audit and touches no inventory',async()=>{
+ const f=await untieredFixture();const r=await Promise.all([cancel(f),cancel(f)]);assert.ok(r.every(x=>x.ok));assert.equal(r.filter(x=>x.changed).length,1);
+ assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,1);assert.equal((await sql(`SELECT quantity_sold FROM ticket_types`))[0].quantity_sold,1);
+});
+for(const change of ["status='scanned',checked_in_at=now()","status='transfer_pending'","user_id='new-holder'","purchase_amount_cents=1","purchase_amount_cents=NULL","order_id=NULL","guest_email='synthetic@example.invalid'","transferred_from='previous'"]){
+ await check(`untiered guards reject ${change}`,async()=>{const f=await untieredFixture();await sql(`UPDATE tickets SET ${change}`);assert.equal((await cancel(f)).ok,false);assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);});
+}
+await check('tier assigned while cancellation waits on ticket lock requires fresh review',async()=>{
+ const f=await untieredFixture(),c=await pool.connect();try{await c.query('BEGIN');await c.query(`UPDATE tickets SET ticket_type_id=$1 WHERE id=$2`,[f.tier,f.id]);const pending=cancel(f);await new Promise(r=>setTimeout(r,100));await c.query('COMMIT');assert.equal((await pending).error,'ticket_changed');assert.equal((await sql(`SELECT status FROM tickets`))[0].status,'active');assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);assert.equal((await sql(`SELECT quantity_sold FROM ticket_types`))[0].quantity_sold,1);}finally{await c.query('ROLLBACK');c.release();}
+});
+await check('untiered scanner-first race preserves admitted ticket',async()=>{
+ const f=await untieredFixture(),c=await pool.connect();try{await c.query('BEGIN');assert.equal((await c.query(`SELECT redeem_ticket('old-qr',1,'door',NULL,false) AS r`)).rows[0].r.result,'valid');const pending=cancel(f);await new Promise(r=>setTimeout(r,100));await c.query('COMMIT');assert.equal((await pending).ok,false);assert.equal((await sql(`SELECT status FROM tickets`))[0].status,'scanned');}finally{await c.query('ROLLBACK');c.release();}
+});
 // Compatibility regression for the legacy fee formula retained in repository
 // history. The cancellation must refuse any monetary change and never repair
 // accounting implicitly. Fixtures are disposable and use no customer records.
@@ -205,6 +227,14 @@ await check('legacy financial trigger delta refuses and rolls back the whole can
  assert.equal((await sql(`SELECT quantity_sold FROM ticket_types`))[0].quantity_sold,2);
  assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);
  assert.deepEqual(await sql(`SELECT * FROM orders ORDER BY id`),ordersBefore);
+ // The same accounting rollback guarantee applies with no tier inventory.
+ await sql(`UPDATE tickets SET ticket_type_id=NULL WHERE id=$1`,[f.id]);
+ const untieredBefore=await sql(`SELECT * FROM tickets ORDER BY id`),untieredMoney=await sql(`SELECT * FROM event_financials`);
+ assert.equal((await cancel(f)).error,'financial_review_required');
+ assert.deepEqual(await sql(`SELECT * FROM tickets ORDER BY id`),untieredBefore);
+ assert.deepEqual(await sql(`SELECT * FROM event_financials`),untieredMoney);
+ assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);
+ await sql(`UPDATE tickets SET ticket_type_id=$1 WHERE id=$2`,[f.tier,f.id]);
  // This runner talks only to the Unix-socket disposable Postgres, never Stripe.
  // Integration prerequisite: PR #213 supplies the real accounting migration.
  // Never substitute a synthetic function or copy its migration into this PR.
@@ -224,6 +254,13 @@ await check('legacy financial trigger delta refuses and rolls back the whole can
  assert.deepEqual((await sql(`SELECT gross_cents,dvnt_fee_cents,net_cents FROM event_financials WHERE event_id=1`))[0],{gross_cents:1000,dvnt_fee_cents:125,net_cents:875});
  assert.equal((await cancel(f)).changed,false);
  console.log('Legacy financial drift safely refused; compatible accounting succeeds without changing monetary values.');
+});
+await check('untiered cancellation succeeds with actual corrected accounting without changing money',async()=>{
+ const f=await untieredFixture();await sql(`SELECT recompute_event_financials(1)`);
+ const before=(await sql(`SELECT gross_cents,refunds_cents,dvnt_fee_cents,stripe_fee_cents,net_cents FROM event_financials WHERE event_id=1`))[0];
+ assert.equal((await cancel(f)).changed,true);assert.equal((await cancel(f)).changed,false);
+ assert.deepEqual((await sql(`SELECT gross_cents,refunds_cents,dvnt_fee_cents,stripe_fee_cents,net_cents FROM event_financials WHERE event_id=1`))[0],before);
+ assert.equal((await sql(`SELECT previous_quantity_sold FROM organizer_free_ticket_cancellations`))[0].previous_quantity_sold,null);
 });
 console.log(`${passed} organizer cancellation PostgreSQL checks passed`);
 await pool.end();

@@ -57,3 +57,10 @@ test("confirmation tells truth about offline scanning and no replacement or mess
 test("account confirmation never substitutes a free-form attendee label", () => {
   assert.equal(compCancelHolder({ ...ticket, holder_name: "Someone else" }), "Account original");
 });
+
+test('untiered General admission uses the same explicit server eligibility and confirmation', () => {
+  const general = { ...ticket, ticket_type_id: null, ticket_type_name: 'General' };
+  assert.equal(canSubmitCompCancellation(general, 80, 'Wrong event'), true);
+  assert.equal(canSubmitCompCancellation({ ...general, organizer_free_cancel: { eligible: false, reason: 'Unverified order' } }, 80, 'Wrong event'), false);
+  assert.equal(canSubmitCompCancellation(general, 81, 'Wrong event'), false);
+});
