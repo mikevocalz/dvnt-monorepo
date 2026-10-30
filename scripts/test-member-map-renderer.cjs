@@ -143,6 +143,14 @@ async function bundle(key, native = false, expoKey = '') {
   await cluster.waitFor();
   assert.equal(await cluster.locator('[data-preview-member]').first().getAttribute('data-preview-member'),'self-1','self preview is never hidden');
   assert.equal(await cluster.locator('[data-preview-member]').count(),2,'cluster uses avatar previews rather than count only');
+  assert.equal(await cluster.innerText(),'','photo clusters show only avatars, without YOU, counts or View people');
+  assert.equal(await cluster.getAttribute('title'),null,'no visible label tooltip is added to the avatar stack');
+  const clusterFrame=await cluster.evaluate(element=>{const style=getComputedStyle(element);return {background:style.backgroundColor,border:style.borderTopWidth,shadow:style.boxShadow,width:element.offsetWidth,height:element.offsetHeight}});
+  assert.deepEqual(clusterFrame,{background:'rgba(0, 0, 0, 0)',border:'0px',shadow:'none',width:76,height:44},'avatar stack has no purple card, container border or shadow');
+  const previews=cluster.locator('[data-preview-member]');
+  const selfBounds=await previews.nth(0).boundingBox(),peerBounds=await previews.nth(1).boundingBox();
+  assert.ok(peerBounds.x>selfBounds.x&&peerBounds.x<selfBounds.x+selfBounds.width,'avatars overlap while both remain visible');
+  assert.ok(await previews.nth(0).evaluate(element=>Number(getComputedStyle(element).zIndex)>Number(getComputedStyle(element.nextElementSibling).zIndex)),'your avatar is in front of the stack');
   assert.equal(await page.getByRole('button',{name:'You — approximate area',exact:true}).count(),0,'self belongs to cluster rather than a covered marker');
   assert.equal(await page.getByRole('button',{name:'Event: Synthetic Party',exact:true}).count(),1,'events do not enter avatar clusters');
   await cluster.focus();await page.keyboard.press('Enter');
