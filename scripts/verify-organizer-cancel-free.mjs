@@ -152,18 +152,17 @@ for(const field of ['gross_cents','refunds_cents','dvnt_fee_cents','stripe_fee_c
   assert.equal((await cancel(f)).error,'financial_review_required');assert.equal((await sql(`SELECT status FROM tickets`))[0].status,'active');assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);assert.deepEqual(await sql(`SELECT * FROM event_financials`),before);
  });
 }
-// Compatibility regression for the exact production financial function read
-// 2026-10-30. It matches this older repository migration, NOT the later source
-// free-ticket accounting fix. This test exposes a release blocker; it does not
-// authorize changing accounting or deploying that unrelated fix.
-await check('exact live financial trigger delta refuses and rolls back the whole cancellation',async()=>{
+// Compatibility regression for the legacy fee formula retained in repository
+// history. The cancellation must refuse any monetary change and never repair
+// accounting implicitly. Fixtures are disposable and use no customer records.
+await check('legacy financial trigger delta refuses and rolls back the whole cancellation',async()=>{
  const f=await fixture();
  await sql(`ALTER TABLE orders ADD COLUMN stripe_fee_cents integer,ADD COLUMN paid_at timestamptz;
  CREATE TABLE order_addons(event_id integer,unit_price_cents integer,quantity integer,refunded_amount_cents integer,status text);
 `);
  const financialSource=readFileSync(join(MIGRATIONS,'20261009020000_event_financials_addon_revenue.sql'),'utf8');
  const recompute=financialSource.match(/CREATE OR REPLACE FUNCTION public\.recompute_event_financials[\s\S]*?\$function\$;/)?.[0];
- assert.ok(recompute,'reviewed live-compatible financial function must exist');await sql(recompute);
+ assert.ok(recompute,'legacy financial function fixture must exist');await sql(recompute);
  const triggerSource=readFileSync(join(MIGRATIONS,'20260922100000_free_ticket_orders_and_event_financials.sql'),'utf8');
  const fn=triggerSource.match(/CREATE OR REPLACE FUNCTION public\.tickets_financials_refresh_upd[\s\S]*?\$function\$;/)?.[0];
  const trigger=triggerSource.match(/CREATE TRIGGER tickets_financials_refresh_upd[\s\S]*?EXECUTE FUNCTION public\.tickets_financials_refresh_upd\(\);/)?.[0];
@@ -214,7 +213,7 @@ await check('exact live financial trigger delta refuses and rolls back the whole
  assert.equal((await cancel(f)).ok,true);
  assert.deepEqual((await sql(`SELECT gross_cents,dvnt_fee_cents,net_cents FROM event_financials WHERE event_id=1`))[0],{gross_cents:1000,dvnt_fee_cents:125,net_cents:875});
  assert.equal((await cancel(f)).changed,false);
- console.log('Exact live financial drift safely refused; compatible accounting succeeds without changing monetary values.');
+ console.log('Legacy financial drift safely refused; compatible accounting succeeds without changing monetary values.');
 });
 console.log(`${passed} organizer cancellation PostgreSQL checks passed`);
 await pool.end();

@@ -47,7 +47,7 @@ export function CompCancelModal({ eventId }: { eventId: number }) {
               onChange={(e) => s.setReason(e.target.value)}
               minLength={5}
               maxLength={240}
-              placeholder="For example: issued DC instead of New York"
+              placeholder="For example: issued the wrong event"
               className="mt-2 block w-full rounded-lg border border-white/15 bg-white/5 p-3"
             />
           </label>

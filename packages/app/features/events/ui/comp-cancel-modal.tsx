@@ -89,7 +89,7 @@ export function CompCancelModal({ eventId }: { eventId: number }) {
                 onChangeText={s.setReason}
                 maxLength={240}
                 multiline
-                placeholder="For example: issued DC instead of New York"
+                placeholder="For example: issued the wrong event"
                 placeholderTextColor="#888"
                 style={{
                   color: "white",
