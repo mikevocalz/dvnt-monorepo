@@ -9,6 +9,9 @@ on:
       - 'packages/app/lib/api/tickets.ts'
       - 'packages/app/lib/api/ticket-cancel-contract.test.ts'
       - 'packages/app/lib/tickets/**'
+      - 'packages/app/lib/hooks/use-activities-query.ts'
+      - 'packages/app/lib/stores/activity-store.ts'
+      - 'scripts/test-ticket-notification-*.cjs'
       - 'scripts/test-ticket-self-service-dom.cjs'
       - 'scripts/test-order-refund-dom.cjs'
       - 'packages/app/features/settings/order-detail.web.tsx'
@@ -43,3 +46,11 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/ticket-actions/node_modules
         # A disposable local DB only, no project secrets and no skip fallback.
         run: npm run test:ticket-cancellation-sql
+      - name: Ticket notification PostgreSQL schema and recipient isolation
+        env:
+          NODE_PATH: ${{ runner.temp }}/ticket-actions/node_modules
+        run: node --test apps/mobile/supabase/functions/transfer-ticket/notification-schema.test.cjs
+      - name: Mounted ticket notifications and both feed ingestion paths
+        env:
+          NODE_PATH: ${{ runner.temp }}/ticket-actions/node_modules
+        run: node scripts/test-ticket-notification-dom.cjs && node scripts/test-ticket-notification-dedup.cjs
