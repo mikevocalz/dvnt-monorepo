@@ -14,6 +14,8 @@ import {
   getCurrentUserId as getCurrentUserIdAsync,
 } from "../auth/identity";
 import { useAuthStore } from "../stores/auth-store";
+import { getSessionLifecycle } from "../auth/session-lifecycle";
+import { parseMessageReactions } from "../messages/reactions";
 import { MAX_GROUP_CHAT_MEMBERS } from "@dvnt/app/lib/constants/group-chat";
 
 /**
@@ -1036,20 +1038,25 @@ export const messagesApi = {
    * React to a message with an emoji (toggle)
    * Stores reactions in the metadata JSONB column as an array
    */
-  async reactToMessage(messageId: string, emoji: string, options: { desiredPresent?: boolean; expectedViewerId?: string } = {}) {
+  async reactToMessage(messageId: string, emoji: string, options: { desiredPresent?: boolean; expectedViewerId?: string; expectedSessionEpoch?: number } = {}) {
     try {
-      if (options.expectedViewerId && useAuthStore.getState().user?.id !== options.expectedViewerId) throw new Error("Account changed");
+      const assertAccount = () => {
+        if ((options.expectedViewerId && useAuthStore.getState().user?.id !== options.expectedViewerId) ||
+            (options.expectedSessionEpoch !== undefined && getSessionLifecycle().epoch !== options.expectedSessionEpoch)) throw new Error("Account changed");
+      };
+      if (!/^[1-9]\d*$/.test(messageId) || !Number.isSafeInteger(Number(messageId))) throw new Error("This message is not sent yet");
+      assertAccount();
       const token = await requireBetterAuthToken();
-      if (options.expectedViewerId && useAuthStore.getState().user?.id !== options.expectedViewerId) throw new Error("Account changed");
+      assertAccount();
 
       // Use Edge Function to bypass RLS (messages table RLS checks auth.uid()
       // which is null for Better Auth sessions — direct updates silently fail)
       const { data: response, error } = await supabase.functions.invoke<{
         ok: boolean;
-        data?: { reactions: any[]; toggled: string };
+        data?: { reactions: unknown[]; toggled: string; present: boolean };
         error?: { code: string; message: string };
       }>("react-message", {
-        body: { messageId: parseInt(messageId), emoji, ...(options.desiredPresent === undefined ? {} : { desiredPresent: options.desiredPresent }) },
+        body: { messageId: Number(messageId), emoji, ...(options.desiredPresent === undefined ? {} : { desiredPresent: options.desiredPresent }) },
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -1057,13 +1064,9 @@ export const messagesApi = {
       if (!response?.ok) {
         throw new Error(response?.error?.message || "Failed to react");
       }
-
-      console.log(
-        "[Messages] reactToMessage success:",
-        messageId,
-        emoji,
-        response.data?.toggled,
-      );
+      assertAccount();
+      if (!Array.isArray(response.data?.reactions)) throw new Error("Could not confirm reaction");
+      return { ...response.data, reactions: parseMessageReactions(response.data.reactions) };
     } catch (error) {
       console.error("[Messages] reactToMessage error:", error);
       throw error;

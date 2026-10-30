@@ -58,6 +58,8 @@ import {
   MediaAttachment,
 } from "@dvnt/app/lib/stores/chat-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { getSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { reactionsFromMetadata } from "@dvnt/app/lib/messages/reactions";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useChatScreenStore } from "@dvnt/app/lib/stores/chat-screen-store";
 import { normalizeChatParams } from "@dvnt/app/lib/navigation/chat-routes";
@@ -660,6 +662,10 @@ function ChatScreenContent() {
     const userIntId = getCurrentUserIdSync();
 
     // Unique channel ID prevents collisions on rapid navigation
+    const viewerId = currentUserId;
+    const sessionEpoch = getSessionLifecycle().epoch;
+    const isCurrentViewer = () => !cancelled &&
+      useAuthStore.getState().user?.id === viewerId && getSessionLifecycle().epoch === sessionEpoch;
     const channelId = `chat-${convId}-${Date.now()}`;
     console.log("[Chat] Subscribing to realtime messages:", channelId);
 
@@ -673,7 +679,7 @@ function ChatScreenContent() {
           filter: `conversation_id=eq.${convId}`,
         },
         (payload) => {
-          if (cancelled) return;
+          if (!isCurrentViewer()) return;
           const newMsg = payload.new as any;
           console.log("[Chat RT] Received message:", {
             id: newMsg.id,
@@ -793,8 +799,22 @@ function ChatScreenContent() {
             .catch(() => {});
         },
       )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages", filter: `conversation_id=eq.${convId}` },
+        (payload) => {
+          if (!isCurrentViewer()) return;
+          const row = payload.new;
+          if (String(row.conversation_id) !== convId) return;
+          const reactions = reactionsFromMetadata(row.metadata);
+          if (reactions !== undefined) {
+            // Do not skip our own messages: the other participant can react to them.
+            useChatStore.getState().updateMessageReactions(convId, String(row.id), reactions);
+          }
+        },
+      )
       .subscribe((status, err) => {
-        if (cancelled) return;
+        if (!isCurrentViewer()) return;
         console.log("[Chat] Realtime subscription status:", status);
         if (err) {
           console.error("[Chat] Subscription error:", err);
@@ -806,7 +826,7 @@ function ChatScreenContent() {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, [activeConvId, isInitialHydrationComplete, mergeRealtimeMessage]);
+  }, [activeConvId, currentUserId, isInitialHydrationComplete, mergeRealtimeMessage]);
   // Selector-per-field. Selecting `recipient` alongside `editText` via
   // destructure meant every keystroke while editing a message re-rendered
   // the whole chat screen (including the message list). Same for
@@ -1924,6 +1944,7 @@ function ChatScreenContent() {
                         <SharedPostBubble
                           sharedPost={item.sharedPost}
                           isOwnMessage={isMe}
+                          onLongPress={() => handleLongPressMessage(item)}
                         />
                         <Text
                           className={`text-[11px] mt-1 px-1 ${
@@ -1946,6 +1967,7 @@ function ChatScreenContent() {
                           storyReply={item.storyReply}
                           replyText={item.text}
                           isOwnMessage={isMe}
+                          onLongPress={() => handleLongPressMessage(item)}
                         />
                         <Text
                           className={`text-[11px] mt-1 px-1 ${
@@ -1967,6 +1989,7 @@ function ChatScreenContent() {
                         <EventShareBubble
                           eventShare={item.eventShare}
                           isOwnMessage={isMe}
+                          onLongPress={() => handleLongPressMessage(item)}
                         />
                         <Text
                           className={`text-[11px] mt-1 px-1 ${

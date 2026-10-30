@@ -21,6 +21,9 @@ import { invalidateTokenCache, getQueryClient } from "@dvnt/app/lib/auth-client"
 import { messageKeys } from "@dvnt/app/lib/messages/query-keys";
 import type { Conversation } from "@dvnt/app/lib/api/messages";
 import { ensureOnlineOrToast } from "@dvnt/app/lib/connectivity/guard";
+import { getSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { parseMessageReactions, setReactionPresence, type MessageReaction } from "@dvnt/app/lib/messages/reactions";
+export type { MessageReaction } from "@dvnt/app/lib/messages/reactions";
 
 /**
  * Optimistically move the just-sent conversation to the top of the list
@@ -96,12 +99,6 @@ export interface EventShareContext {
   eventLocation?: string | null;
 }
 
-export interface MessageReaction {
-  emoji: string;
-  userId: string;
-  username: string;
-}
-
 export type MessageStatus = "sending" | "sent" | "failed";
 
 export interface Message {
@@ -167,6 +164,7 @@ interface ChatState {
     messageId: string,
     emoji: string,
   ) => Promise<void>;
+  updateMessageReactions: (conversationId: string, messageId: string, reactions: MessageReaction[]) => void;
   addSystemMessage: (chatId: string, text: string) => void;
   retryMessage: (conversationId: string, messageId: string) => Promise<void>;
   mergeRealtimeMessage: (conversationId: string, message: Message) => void;
@@ -273,6 +271,20 @@ function areMessagesEqual(a: Message[], b: Message[]): boolean {
   });
 }
 
+type ReactionIntent = { reaction: MessageReaction; present: boolean };
+type ReactionQueue = {
+  confirmed: MessageReaction[];
+  pending: ReactionIntent[];
+  tail: Promise<void>;
+  realtimeRevision: number;
+};
+const reactionQueues = new Map<string, ReactionQueue>();
+const reactionKey = (viewerId: string, conversationId: string, messageId: string, epoch = getSessionLifecycle().epoch) =>
+  JSON.stringify([epoch, viewerId, conversationId, messageId]);
+const withPendingReactions = (queue: ReactionQueue) => queue.pending.reduce(
+  (reactions, intent) => setReactionPresence(reactions, intent.reaction, intent.present), queue.confirmed,
+);
+
 // Module-level timestamp for isSending staleness check
 let _sendStartedAt = 0;
 
@@ -293,9 +305,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loadMessages: async (conversationId: string) => {
     try {
       const user = useAuthStore.getState().user;
+      const epoch = getSessionLifecycle().epoch;
+      const reactionRevisions = new Map([...reactionQueues].map(([key, queue]) => [key, queue.realtimeRevision]));
+      const reactionSnapshots = new Map((get().messages[conversationId] || []).map((m) => [m.id, m.reactions]));
       const backendMessages =
         await messagesApiClient.getMessages(conversationId);
 
+      if (useAuthStore.getState().user?.id !== user?.id || getSessionLifecycle().epoch !== epoch) return;
+
+      const currentMessages = new Map((get().messages[conversationId] || []).map((m) => [m.id, m]));
       // Transform to local message format
       const localMessages: Message[] = backendMessages.map((msg: any) => {
         const content = msg.content || msg.text || "";
@@ -423,8 +441,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
           eventShare,
           storyShare: parseStoryShareContext(meta),
           reactions: (() => {
-            const r = meta?.reactions;
-            return Array.isArray(r) ? r : [];
+            const reactions = parseMessageReactions(meta?.reactions);
+            const key = user && reactionKey(user.id, conversationId, String(msg.id), epoch);
+            const queue = key && reactionQueues.get(key);
+            // A load started before an optimistic click must not erase it.
+            // Keep its server snapshot for rollback too, unless a newer realtime
+            // event/acknowledgement arrived while this fetch was in flight.
+            if (key && queue && queue.realtimeRevision === (reactionRevisions.get(key) ?? 0)) {
+              queue.confirmed = reactions;
+              queue.realtimeRevision++;
+            }
+            if (queue) return withPendingReactions(queue);
+            const current = currentMessages.get(String(msg.id));
+            return current && current.reactions !== reactionSnapshots.get(String(msg.id))
+              ? current.reactions : reactions;
           })(),
         };
       });
@@ -911,42 +941,80 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   reactToMessage: async (conversationId, messageId, emoji) => {
     const user = useAuthStore.getState().user;
-    if (!user) return;
+    const message = get().messages[conversationId]?.find((m) => m.id === messageId);
+    if (!user || !message || !/^[1-9]\d*$/.test(messageId) ||
+        !Number.isSafeInteger(Number(messageId)) || message.status === "sending" || message.status === "failed") return;
+    if (ensureOnlineOrToast("Try reacting again when you’re back online.", "No connection")) return;
 
-    const reaction: MessageReaction = {
-      emoji,
-      userId: user.id,
-      username: user.username,
+    const epoch = getSessionLifecycle().epoch;
+    const key = reactionKey(user.id, conversationId, messageId, epoch);
+    const queue: ReactionQueue = reactionQueues.get(key) || {
+      confirmed: parseMessageReactions(message.reactions), pending: [], tail: Promise.resolve(), realtimeRevision: 0,
     };
+    reactionQueues.set(key, queue);
+    const intent = {
+      reaction: { emoji, userId: user.id, username: user.username },
+      present: !(message.reactions || []).some((r) => r.emoji === emoji && String(r.userId) === user.id),
+    };
+    queue.pending.push(intent);
+    const isCurrent = () => useAuthStore.getState().user?.id === user.id &&
+      getSessionLifecycle().epoch === epoch && reactionQueues.get(key) === queue;
+    const publish = () => {
+      if (!isCurrent()) return;
+      set((state) => {
+        const messages = state.messages[conversationId];
+        if (!messages?.some((m) => m.id === messageId)) return state;
+        return { messages: { ...state.messages, [conversationId]: messages.map((m) =>
+          m.id === messageId ? { ...m, reactions: withPendingReactions(queue) } : m) } };
+      });
+    };
+    publish();
 
-    // Optimistic update
-    set((state) => ({
-      messages: {
-        ...state.messages,
-        [conversationId]: (state.messages[conversationId] || []).map((m) => {
-          if (m.id !== messageId) return m;
-          const existing = m.reactions || [];
-          // Toggle: remove if same emoji from same user, otherwise add
-          const alreadyReacted = existing.find(
-            (r) => r.emoji === emoji && r.userId === user.id,
-          );
-          const newReactions = alreadyReacted
-            ? existing.filter(
-                (r) => !(r.emoji === emoji && r.userId === user.id),
-              )
-            : [...existing, reaction];
-          return { ...m, reactions: newReactions };
-        }),
-      },
-    }));
+    // Serialize each message's desired-state writes; rapid taps cannot arrive
+    // out of order or undo an acknowledged reaction by retrying a toggle.
+    const operation = queue.tail.then(async () => {
+      try {
+        if (!isCurrent()) return;
+        const revision = queue.realtimeRevision;
+        const result = await messagesApiClient.reactToMessage(messageId, emoji, {
+          desiredPresent: intent.present, expectedViewerId: user.id, expectedSessionEpoch: epoch,
+        });
+        if (!isCurrent()) return;
+        // An UPDATE from another participant may arrive while the RPC response
+        // is in flight. Preserve that newer snapshot, changing only our intent.
+        queue.confirmed = revision === queue.realtimeRevision
+          ? parseMessageReactions(result.reactions)
+          : setReactionPresence(queue.confirmed, intent.reaction, intent.present);
+        queue.realtimeRevision++;
+      } catch {
+        if (isCurrent()) {
+          console.error("[ChatStore] reactToMessage failed");
+          useUIStore.getState().showToast("error", "Reaction not saved", "Please try again.");
+        }
+      } finally {
+        queue.pending = queue.pending.filter((pending) => pending !== intent);
+        publish();
+        if (!queue.pending.length && reactionQueues.get(key) === queue) reactionQueues.delete(key);
+      }
+    });
+    queue.tail = operation;
+    await operation;
+  },
 
-    try {
-      await messagesApiClient.reactToMessage(messageId, emoji);
-    } catch (error) {
-      console.error("[ChatStore] reactToMessage error:", error);
-      // Reload messages to restore correct state on failure
-      await get().loadMessages(conversationId);
+  updateMessageReactions: (conversationId, messageId, reactions) => {
+    const viewerId = useAuthStore.getState().user?.id;
+    const queue = viewerId && reactionQueues.get(reactionKey(viewerId, conversationId, messageId));
+    if (queue) {
+      queue.confirmed = parseMessageReactions(reactions);
+      queue.realtimeRevision++;
     }
+    const next = queue ? withPendingReactions(queue) : parseMessageReactions(reactions);
+    set((state) => {
+      const messages = state.messages[conversationId];
+      if (!messages?.some((m) => m.id === messageId)) return state;
+      return { messages: { ...state.messages, [conversationId]: messages.map((m) =>
+        m.id === messageId ? { ...m, reactions: next } : m) } };
+    });
   },
 
   addSystemMessage: (chatId, text) => {
@@ -1081,6 +1149,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // CRITICAL: Clear conversation messages on unmount to prevent leakage
   // Messages are server state - should be fetched fresh, not persisted
   clearConversation: (conversationId) => {
+    for (const key of reactionQueues.keys()) {
+      if (JSON.parse(key)[2] === conversationId) reactionQueues.delete(key);
+    }
     set((state) => {
       const { [conversationId]: removed, ...rest } = state.messages;
       console.log("[ChatStore] Cleared conversation:", conversationId);

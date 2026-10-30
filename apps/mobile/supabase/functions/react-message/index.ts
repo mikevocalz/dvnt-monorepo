@@ -84,7 +84,12 @@ Deno.serve(async (req) => {
       p_emoji: emoji,
       p_desired_present: desiredPresent ?? null,
     });
-    if (error) return errorResponse("update_failed", "Could not update reaction");
+    if (error) {
+      // Codes diagnose missing release prerequisites without logging message,
+      // participant, session or reaction payloads.
+      console.error("[Edge:react-message] RPC failed", { code: error.code });
+      return errorResponse("update_failed", "Could not update reaction");
+    }
     if (!result?.ok) return errorResponse(result?.code || "forbidden", "This message is unavailable");
     return jsonResponse({ ok: true, data: {
       reactions: result.reactions, toggled: result.toggled, present: result.present,

@@ -1,0 +1,36 @@
+name: DM reaction regressions
+on:
+  pull_request:
+    paths:
+      - 'packages/app/lib/messages/reactions*'
+      - 'packages/app/lib/stores/chat-store.ts'
+      - 'packages/app/lib/api/messages-impl.ts'
+      - 'packages/app/features/messages/chat.web.tsx'
+      - 'packages/app/features/routes/screens/(protected)/chat/**'
+      - 'packages/app/components/chat/**'
+      - 'apps/mobile/supabase/functions/react-message/**'
+      - 'apps/mobile/supabase/migrations/*message_reactions.sql'
+      - 'scripts/test-dm-reaction-*'
+      - 'scripts/verify-dm-reactions-readiness.sql'
+      - '.github/workflows/dm-reactions.yml'
+permissions:
+  contents: read
+jobs:
+  reactions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated, pinned offline-test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/dm-reaction-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 @electric-sql/pglite@0.3.14
+      - name: Shared store, API, Edge, SQL and web/native input/realtime regressions
+        run: NODE_PATH="$RUNNER_TEMP/dm-reaction-tests/node_modules" npm run test:dm-reactions
+      - name: Pure reaction helpers typecheck
+        run: node "$RUNNER_TEMP/dm-reaction-tests/node_modules/typescript/bin/tsc" --strict --noEmit --target es2022 --module nodenext packages/app/lib/messages/reactions.ts
+      - name: Release and identifier contracts
+        run: node scripts/verify-release-regression.mjs && node scripts/verify-no-live-identifiers.mjs
