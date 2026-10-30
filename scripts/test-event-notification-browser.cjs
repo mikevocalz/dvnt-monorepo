@@ -57,7 +57,7 @@ const boundaries = {
   '@dvnt/app/lib/hooks/use-bootstrap-notifications': 'export const useBootstrapNotifications=()=>({});',
   '@dvnt/app/features/sneaky-lynk/ui/web/CohostInvites': 'export const PendingCohostInvites=()=>null;',
   '@dvnt/app/lib/api/notifications': 'export const notificationsApiClient={formatTimeAgo:()=>"3m ago"};',
-  '@dvnt/app/lib/hooks/use-notifications-query': 'export const notificationKeys={};',
+  '@dvnt/app/lib/hooks/use-notifications-query': 'export const notificationKeys={};export const useBadges=()=>({});',
   '@dvnt/app/lib/stores/unread-counts-store': 'export const useUnreadCountsStore=()=>({});',
   '@dvnt/app/lib/stores/ui-store': 'export const useUIStore=()=>({});',
   '@dvnt/app/lib/api/users': 'export const usersApi={};',

@@ -5,12 +5,14 @@ on:
       - 'packages/app/lib/activity/**'
       - 'packages/app/lib/api/notifications.ts'
       - 'packages/app/lib/hooks/use-activities-query.ts'
+      - 'packages/app/lib/hooks/use-bootstrap-notifications.ts'
       - 'packages/app/lib/stores/activity-store.ts'
       - 'packages/app/lib/notifications/**'
       - 'packages/app/features/activity/**'
       - 'packages/app/features/routes/screens/(protected)/(tabs)/activity.tsx'
       - 'apps/mobile/supabase/functions/event-broadcast-message/**'
       - 'scripts/test-event-notification-browser.cjs'
+      - 'scripts/test-activity-*.cjs'
       - '.github/workflows/event-notifications.yml'
 permissions:
   contents: read
@@ -27,6 +29,8 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Sender identity, routes, and broadcast persistence
         run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node --test packages/app/lib/activity/*.test.ts packages/app/lib/activity/*.test.cjs packages/app/lib/notifications/event-broadcast-routing.test.cjs apps/mobile/supabase/functions/event-broadcast-message/index.test.cjs
+      - name: Activity refresh and read-state contracts
+        run: NODE_PATH="$PWD/apps/web/node_modules:$PWD/node_modules" node --test scripts/test-activity-live-refresh.cjs scripts/test-activity-read-state.cjs scripts/test-activity-history.cjs scripts/test-activity-bootstrap.cjs
       - name: Install Chromium
         run: pnpm --filter web exec playwright install --with-deps chromium
       - name: Actual web and native row interactions

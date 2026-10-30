@@ -11,7 +11,11 @@
 
 import { eventActivityRoute } from "@dvnt/app/lib/activity/event-activity";
 import { ticketActivityRoute } from "@dvnt/app/lib/activity/ticket-activity";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useReducer } from "react";
+import { createActivityHistory, type ActivityCursor } from "@dvnt/app/lib/activity/activity-history";
+import { useActivityStore } from "@dvnt/app/lib/stores/activity-store";
+import { notificationKeys } from "@dvnt/app/lib/hooks/use-notifications-query";
 import {
   getPostDetailCommentsRoute,
   getPostDetailRoute,
@@ -194,8 +198,8 @@ export function notificationToActivity(notif: Notification): Activity | null {
 /**
  * Fetch, transform, and deduplicate activities.
  */
-async function fetchActivities(): Promise<Activity[]> {
-  const result = await notificationsApiClient.getNotifications(50);
+async function fetchActivityPage(cursor?: ActivityCursor) {
+  const result = await notificationsApiClient.getNotifications(50, cursor);
   const allActivities = (result.docs || [])
     .map((n: Notification) => notificationToActivity(n))
     .filter((a): a is Activity => a !== null);
@@ -203,7 +207,7 @@ async function fetchActivities(): Promise<Activity[]> {
   // Deduplicate: first by ID, then by composite key (type + actor + entity)
   const seenIds = new Set<string>();
   const seenKeys = new Set<string>();
-  return allActivities.filter((a) => {
+  const rows = allActivities.filter((a) => {
     if (seenIds.has(a.id)) return false;
     seenIds.add(a.id);
     // Ticket actions and broadcasts are distinct occurrences, even from the same sender/event.
@@ -218,6 +222,11 @@ async function fetchActivities(): Promise<Activity[]> {
     seenKeys.add(compositeKey);
     return true;
   });
+  return { rows, nextCursor: result.nextCursor || null, headCursor: result.headCursor || null };
+}
+
+async function fetchActivities(): Promise<Activity[]> {
+  return (await fetchActivityPage()).rows;
 }
 
 async function fetchLikedActivities(): Promise<LikedActivity[]> {
@@ -250,16 +259,75 @@ async function fetchLikedActivities(): Promise<LikedActivity[]> {
  */
 export function useActivitiesQuery() {
   const viewerId = useAuthStore((s) => s.user?.id) || "";
+  const queryClient = useQueryClient();
+  const [, historyChanged] = useReducer((n: number) => n + 1, 0);
+  const history = useMemo(() => {
+    let restartHead = false;
+    return createActivityHistory<Activity>({
+      fetchPage: fetchActivityPage,
+      read: () => queryClient.getQueryData<Activity[]>(activityKeys.list(viewerId)) || [],
+      write: (rows) => queryClient.setQueryData(activityKeys.list(viewerId), rows),
+      beforeWrite: async () => {
+        const filter = { queryKey: activityKeys.list(viewerId), exact: true };
+        restartHead = queryClient.isFetching(filter) > 0;
+        await queryClient.cancelQueries(filter, { revert: false });
+      },
+      afterWrite: () => {
+        if (restartHead && useAuthStore.getState().user?.id === viewerId) {
+          void queryClient.invalidateQueries({ queryKey: activityKeys.list(viewerId), exact: true }).catch(() => {});
+        }
+        restartHead = false;
+      },
+      isCurrent: () => !!viewerId && useAuthStore.getState().user?.id === viewerId,
+      changed: historyChanged,
+    });
+  }, [viewerId, queryClient]);
 
-  return useQuery({
+  // The screen renders this query, not the legacy Zustand activities array.
+  // Subscribe here so both platforms refresh the actual visible cache and
+  // resubscribe when the viewer changes (including cold-start hydration).
+  useEffect(() => {
+    if (!viewerId) return;
+    let active = true;
+    const unsubscribe = useActivityStore.getState().subscribeToNotifications(() => {
+      if (!active || useAuthStore.getState().user?.id !== viewerId) return;
+      void Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: activityKeys.list(viewerId), exact: true,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: notificationKeys.list(viewerId), exact: true,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: notificationKeys.badges(viewerId), exact: true,
+        }),
+      ]).catch(() => {
+        // Keep cached rows; the query retains its error/retry state.
+        console.warn("[ActivitiesQuery] Notification refresh unavailable");
+      });
+    });
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [viewerId, queryClient]);
+
+  const query = useQuery({
     queryKey: activityKeys.list(viewerId),
-    queryFn: fetchActivities,
+    queryFn: () => history.refresh(),
     enabled: !!viewerId,
-    // Notifications are time-sensitive — override global refetchOnMount: false
-    // Shows MMKV cache instantly, then silently refetches in background
-    refetchOnMount: true,
+    // Rebuild this mount's raw-page cursor while cached rows render instantly.
+    refetchOnMount: "always",
     staleTime: STALE_TIMES.activities,
+    // Realtime is best-effort (and may not publish this table). Keep a bounded
+    // foreground fallback; native AppState is wired to TanStack focusManager.
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
+  return { ...query, hasMore: history.hasMore, loadingMore: history.loadingMore,
+    loadMoreError: history.loadMoreError, loadMore: () => history.loadMore() };
 }
 
 export function useLikedActivitiesQuery() {

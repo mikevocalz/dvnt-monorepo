@@ -16,12 +16,18 @@ async function readActivities(readPath, docs) {
     getNotifications: async () => ({ docs }),
     formatTimeAgo: () => "now",
   };
+  const authStore = select => select({ user: { id: "23" } });
+  authStore.getState = () => ({ user: { id: "23" } });
+  const historyExports = {};
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(lib, "activity/activity-history.ts"), "utf8"), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText, {exports:historyExports});
   const fixtures = {
+    "react": {useEffect(){},useReducer:()=>[0,()=>{}],useMemo:fn=>fn()},
+    "@dvnt/app/lib/activity/activity-history": historyExports,
     "@dvnt/app/lib/api/notifications": { notificationsApiClient: api },
     "@dvnt/app/lib/stores/auth-store": {
-      useAuthStore: select => select({ user: { id: "23" } }),
+      useAuthStore: authStore,
     },
-    "@tanstack/react-query": { useQuery: options => options },
+    "@tanstack/react-query": { useQuery: options => options, useQueryClient:()=>({getQueryData:()=>undefined,setQueryData(){}}) },
     "@dvnt/app/lib/perf/stale-time-config": { STALE_TIMES: {} },
     "@dvnt/app/lib/query-keys": { activityKeys: { list: id => ["activity", id] } },
     "@dvnt/app/lib/api/auth-helper": { getCurrentUserIdSync: () => 23 },

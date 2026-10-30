@@ -4,7 +4,7 @@
  * When `perf_bootstrap_notifications` flag is ON, fetches all activity
  * above-the-fold data in a single request and hydrates the TanStack Query cache.
  *
- * Eliminates: useActivitiesQuery + fetchFollowingState + getBadges waterfall.
+ * Seeds only absent activity data; canonical unread counts load independently.
  */
 
 import { useEffect, useLayoutEffect, useRef } from "react";
@@ -16,7 +16,6 @@ import {
   type BootstrapNotificationsResponse,
 } from "@dvnt/app/lib/api/bootstrap";
 import { activityKeys } from "@dvnt/app/lib/hooks/use-activities-query";
-import { notificationKeys } from "@dvnt/app/lib/hooks/use-notifications-query";
 import { useActivityStore } from "@dvnt/app/lib/stores/activity-store";
 import { useScreenTrace } from "@dvnt/app/lib/perf/screen-trace";
 
@@ -25,6 +24,10 @@ function hydrateFromNotificationsBootstrap(
   userId: string,
   data: BootstrapNotificationsResponse,
 ) {
+  // A late bootstrap must not replace fetched history, read-state, or even an
+  // authoritative empty result. Follow state belongs to that same snapshot.
+  if (queryClient.getQueryData(activityKeys.list(userId)) !== undefined) return false;
+
   // viewerFollowing is now keyed by USERNAME (fixed server-side)
   const viewerFollowingByUsername = data.viewerFollowing || {};
 
@@ -60,12 +63,9 @@ function hydrateFromNotificationsBootstrap(
 
   queryClient.setQueryData(activityKeys.list(userId), activities);
 
-  // 2. Seed badge count
-  queryClient.setQueryData(notificationKeys.badges(userId), {
-    unreadCount: data.unreadCount,
-  });
+  // Badge data has an independent canonical query; never seed a partial shape.
 
-  // 3. Seed follow state in activity store — NOW USING USERNAMES (not IDs)
+  // 2. Seed follow state in activity store — NOW USING USERNAMES (not IDs)
   const followedSet = new Set(
     Object.entries(viewerFollowingByUsername)
       .filter(([, isFollowing]) => isFollowing)
@@ -77,13 +77,17 @@ function hydrateFromNotificationsBootstrap(
     `[BootstrapNotifications] Hydrated cache: ${activities.length} activities, ` +
       `${data.unreadCount} unread, ${followedSet.size} followed (by username)`,
   );
+  return true;
 }
 
 export function useBootstrapNotifications() {
   const queryClient = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id) || "";
-  const hasSyncSeeded = useRef(false);
-  const hasAsyncRun = useRef(false);
+  const seedRef = useRef({ userId, sync: false, async: false });
+  if (seedRef.current.userId !== userId) {
+    seedRef.current = { userId, sync: false, async: false };
+  }
+  const seed = seedRef.current;
   const trace = useScreenTrace("Activity");
 
   const enabled = isFeatureEnabled("perf_bootstrap_notifications");
@@ -93,7 +97,7 @@ export function useBootstrapNotifications() {
   // populated before the user sees stale data. Avoids the React warning:
   // "Cannot update a component while rendering a different component".
   useLayoutEffect(() => {
-    if (hasSyncSeeded.current || !enabled || !userId) return;
+    if (seed.sync || !enabled || !userId || useAuthStore.getState().user?.id !== userId) return;
 
     const existingActivities = queryClient.getQueryData(
       activityKeys.list(userId),
@@ -112,28 +116,32 @@ export function useBootstrapNotifications() {
           }
         }
         useActivityStore.setState({ followedUsers: followedSet });
-        hasSyncSeeded.current = true;
+        seed.sync = true;
         trace.markCacheHit();
         trace.markUsable();
       }
     }
-  }, [enabled, userId, queryClient, trace]);
+  }, [enabled, userId, queryClient, trace, seed]);
 
   // ── ASYNC: Fetch from server if sync seeding didn't run (stale/missing cache) ──
   useEffect(() => {
-    if (!enabled || !userId || hasAsyncRun.current) return;
-    hasAsyncRun.current = true;
+    if (!enabled || !userId || seed.async || seed.sync) return;
+    seed.async = true;
+    let cancelled = false;
+    let settled = false;
 
-    // Skip server fetch if already seeded synchronously from cache
-    if (hasSyncSeeded.current) return;
-
-    // Stale or missing — fetch fresh from server
     bootstrapApi.notifications({ userId }).then((data) => {
-      if (!data) return;
-      hydrateFromNotificationsBootstrap(queryClient, userId, data);
-      trace.markUsable();
-    });
-  }, [enabled, userId, queryClient, trace]);
+      if (!data || cancelled || useAuthStore.getState().user?.id !== userId) return;
+      if (hydrateFromNotificationsBootstrap(queryClient, userId, data)) trace.markUsable();
+    }).catch(() => {
+      // Optional bootstrap failure must not clear independently fetched data.
+    }).finally(() => { settled = true; });
+    return () => {
+      cancelled = true;
+      // StrictMode/remount may cancel the first request before it can seed.
+      if (!settled) seed.async = false;
+    };
+  }, [enabled, userId, queryClient, trace, seed]);
 
   return { enabled };
 }
