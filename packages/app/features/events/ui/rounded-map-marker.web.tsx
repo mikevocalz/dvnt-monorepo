@@ -5,9 +5,9 @@ import { createPortal } from "react-dom";
 import { useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 
 /** DOM overlays can clip remote images without a CORS canvas or a new map ID. */
-export function RoundedMapMarker({ latitude, longitude, title, source, fallback, height = 44, width = 44, children, onClick }: {
+export function RoundedMapMarker({ latitude, longitude, title, source, fallback, height = 44, width = 44, unframed = false, children, onClick }: {
   latitude: number; longitude: number; title: string; source: string | null;
-  fallback: string; height?: number; width?: number; children?: ReactNode; onClick: () => void;
+  fallback: string; height?: number; width?: number; unframed?: boolean; children?: ReactNode; onClick: () => void;
 }) {
   const map = useMap();
   const maps = useMapsLibrary("maps");
@@ -36,9 +36,9 @@ export function RoundedMapMarker({ latitude, longitude, title, source, fallback,
 
   if (!container) return null;
   return createPortal(
-    <button type="button" aria-label={title} title={title} onClick={onClick}
+    <button type="button" aria-label={title} title={unframed ? undefined : title} onClick={onClick}
       data-map-marker data-lat={latitude} data-lng={longitude}
-      className="rounded-sm overflow-hidden bg-[#8A40CF] text-white font-bold text-xs flex items-center justify-center border-2 border-white shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      className={`rounded-sm text-white font-bold text-xs flex items-center justify-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${unframed ? 'overflow-visible bg-transparent border-0 p-0' : 'overflow-hidden bg-[#8A40CF] border-2 border-white shadow-md'}`}
       style={{ width, height }}>
       {children || (source && failedSource !== source
         ? <img key={source} src={source} alt="" referrerPolicy="no-referrer" draggable={false}

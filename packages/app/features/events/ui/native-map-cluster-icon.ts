@@ -2,10 +2,10 @@ import { ClipOp, ImageFormat, Skia, matchFont } from '@shopify/react-native-skia
 import { mapAvatarUrl, mapMemberInitials, type MapMember } from './member-map-render-policy';
 
 export const CLUSTER_ICON_WIDTH = 76;
-export const CLUSTER_ICON_HEIGHT = 56;
+export const CLUSTER_ICON_HEIGHT = 44;
 let queue: Promise<unknown> = Promise.resolve();
 
-/** Two separate rounded avatar previews, plus the full group count. No location offsets. */
+/** Overlapping rounded avatar previews on a transparent canvas. No location offsets. */
 export function nativeMapClusterIcon(members: MapMember[], selfId: string | undefined, isCurrent: () => boolean): Promise<string | null> {
   const job = queue.then(() => renderCluster(members, selfId, isCurrent, true)).catch(() => null);
   queue = job;
@@ -27,21 +27,23 @@ async function renderCluster(members: MapMember[], selfId: string | undefined, i
     try {
       paint = Skia.Paint();
       fontManager = Skia.FontMgr.System();
-      font = matchFont({ fontSize: 12, fontWeight: 'bold' }, fontManager);
+      font = matchFont({ fontSize: 14, fontWeight: 'bold' }, fontManager);
       const canvas = surface.getCanvas();
       canvas.clear(Skia.Color('transparent'));
       const previews = [...members].sort((a, b) => Number(b.id === selfId) - Number(a.id === selfId)).slice(0, 2);
-      for (let index = 0; index < previews.length; index++) {
+      // Draw back to front so the first preview, including self, stays fully visible.
+      for (let index = previews.length - 1; index >= 0; index--) {
         if (!isCurrent()) return null;
         const member = previews[index];
-        const x = index * 40;
+        const x = index * 32;
         canvas.save();
-        canvas.clipRRect(Skia.RRectXY(Skia.XYWHRect(x, 0, 36, 36), 4, 4), ClipOp.Intersect, true);
+        canvas.clipRRect(Skia.RRectXY(Skia.XYWHRect(x, 0, 44, 44), 4, 4), ClipOp.Intersect, true);
         paint.setColor(Skia.Color(member.id === selfId ? '#3FDCFF' : '#8A40CF'));
         canvas.drawPaint(paint);
         const text = mapMemberInitials(member);
+        const measured = font.measureText(text);
         paint.setColor(Skia.Color('#ffffff'));
-        canvas.drawText(text, x + 7, 23, paint, font);
+        canvas.drawText(text, x + (44 - measured.width) / 2 - measured.x, (44 - measured.height) / 2 - measured.y, paint, font);
         const source = mapAvatarUrl(member.avatarUrl);
         if (source && loadPhotos) {
           let data: Awaited<ReturnType<typeof Skia.Data.fromURI>> | null = null;
@@ -54,22 +56,14 @@ async function renderCluster(members: MapMember[], selfId: string | undefined, i
               const side = Math.min(image.width(), image.height());
               // Leave a cyan outline around your preview so self stays recognizable.
               const inset = member.id === selfId ? 2 : 0;
-              canvas.clipRRect(Skia.RRectXY(Skia.XYWHRect(x + inset, inset, 36 - inset * 2, 36 - inset * 2), 4, 4), ClipOp.Intersect, true);
-              canvas.drawImageRect(image, Skia.XYWHRect((image.width() - side) / 2, (image.height() - side) / 2, side, side), Skia.XYWHRect(x + inset, inset, 36 - inset * 2, 36 - inset * 2), paint);
+              canvas.clipRRect(Skia.RRectXY(Skia.XYWHRect(x + inset, inset, 44 - inset * 2, 44 - inset * 2), 4, 4), ClipOp.Intersect, true);
+              canvas.drawImageRect(image, Skia.XYWHRect((image.width() - side) / 2, (image.height() - side) / 2, side, side), Skia.XYWHRect(x + inset, inset, 44 - inset * 2, 44 - inset * 2), paint);
             }
           } catch { /* Keep initials when a preview cannot load. */ }
           finally { image?.dispose(); data?.dispose(); }
         }
         canvas.restore();
       }
-      canvas.save();
-      canvas.clipRRect(Skia.RRectXY(Skia.XYWHRect(12, 36, 52, 20), 4, 4), ClipOp.Intersect, true);
-      paint.setColor(Skia.Color('#292033')); canvas.drawPaint(paint);
-      const count = String(members.length);
-      const measured = font.measureText(count);
-      paint.setColor(Skia.Color('#ffffff'));
-      canvas.drawText(count, (CLUSTER_ICON_WIDTH - measured.width) / 2 - measured.x, 50, paint, font);
-      canvas.restore();
       surface.flush(); snapshot = surface.makeImageSnapshot();
       const encoded = snapshot.encodeToBase64(ImageFormat.PNG);
       return encoded && isCurrent() ? `data:image/png;base64,${encoded}` : null;

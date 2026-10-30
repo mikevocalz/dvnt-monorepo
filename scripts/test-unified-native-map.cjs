@@ -87,7 +87,7 @@ const mocks={
   assert.equal(await cluster.innerText(),'2 people including you · approximate area');
   const composite=await cluster.getAttribute('data-image');
   const size=await page.evaluate(async uri=>{const image=new Image();image.src=uri;await image.decode();return [image.width,image.height]},composite);
-  assert.deepEqual(size,[76,56],'cluster contains two separate rounded avatar previews and count');
+  assert.deepEqual(size,[76,44],'cluster contains only overlapping rounded avatar previews');
   await page.evaluate(()=>window.fixture.moveCamera({zoom:22}));
   await cluster.click();
   await page.getByRole('button',{name:'View Fixture (You) profile',exact:true}).click();

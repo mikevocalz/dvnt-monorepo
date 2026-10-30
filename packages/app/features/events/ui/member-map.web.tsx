@@ -149,14 +149,13 @@ function ClusteredMembers({ members, selfId, initialZoom, onOpen }: { members: M
       const previews = [...cluster.members].sort((a, b) => Number(b.id === selfId) - Number(a.id === selfId)).slice(0, 2);
       return <RoundedMapMarker key={cluster.id} latitude={cluster.latitude} longitude={cluster.longitude}
         title={`${cluster.members.length} people in this area${includesSelf ? ', including you' : ''}. View people`}
-        source={null} fallback={String(cluster.members.length)} width={108} height={62}
+        source={null} fallback="" width={76} height={44} unframed
         onClick={() => { trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSelectedIds(cluster.members.map(member => member.id)); }}>
-        <span className="flex flex-col items-center gap-0.5" data-avatar-cluster>
-          <span className="flex items-center gap-1">
-            {previews.map(member => <span key={member.id} className="relative" data-preview-member={member.id}><span className="block" style={{ width: 30, height: 30, overflow: 'hidden', borderRadius: 4 }}><span className="block origin-top-left" style={{ transform: 'scale(0.682)' }}><Avatar member={member} /></span></span>{member.id === selfId ? <span className="absolute -bottom-1 left-0 right-0 bg-black/80 text-white" style={{ fontSize: 8, lineHeight: '10px' }}>YOU</span> : null}</span>)}
-            <span className="text-sm font-bold">{cluster.members.length}</span>
-          </span>
-          <span style={{ fontSize: 9, lineHeight: '12px' }}>View people</span>
+        <span className="relative block h-11" style={{ width: 76 }} data-avatar-cluster aria-hidden="true">
+          {previews.map((member, index) => <span key={member.id}
+            className="absolute top-0 block rounded-sm ring-2 ring-white shadow-md"
+            style={{ left: index * 32, zIndex: previews.length - index }}
+            data-preview-member={member.id}><Avatar member={member} /></span>)}
         </span>
       </RoundedMapMarker>;
     })}

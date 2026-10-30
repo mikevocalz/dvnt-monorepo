@@ -376,7 +376,9 @@ async function bundle() {
     assert.equal(await frame().count(),0,'provider failure cannot render map');
     assert.equal(await page.getByRole('switch',{name:'Show my avatar on Events map'}).isDisabled(),true);
     await page.evaluate(()=>{window.mapFixture.providerStatus='loaded';dispatchEvent(new Event('fixturechange'));});
-    await frame().waitFor();assert.equal(await markers().count(),4);
+    await frame().waitFor();
+    await page.waitForFunction(() => document.querySelectorAll('[data-map-marker]').length === 4);
+    assert.equal(await markers().count(),4);
     await page.getByRole('button', { name: 'Show event list', exact: true }).click();await frame().waitFor({state:'detached'});
     check('provider auth failure hides map and disables new sharing; recovery preserves event markers');
 
