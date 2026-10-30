@@ -1,43 +1,29 @@
-# Configured free units never incur a flat fee
+# Configured free units do not incur flat fees
 
-## Narrow rule
-- Configured zero-price ticket and add-on units contribute **zero** flat fees,
-  including when a paid item shares the cart. Inventory/order quantity still
-  counts every unit; fee quantity counts positive-price units only.
-- Zero-total fee-calculator inputs return zero buyer/organizer/platform fees and
-  zero charge. The existing all-free cart rail safely refuses before Stripe;
-  this change does not invent free cart fulfillment.
-- Existing paid-unit percentage, rounding, refund, fee-mode and promoter/promo
-  behavior stays unchanged. Effective per-unit allocation for discounts (such
-  as BOGO or fully discounted admission beside a paid add-on) is a separate
-  unresolved ledger concern; this patch does not claim to solve it.
+Configured zero-price ticket/add-on units contribute zero flat fees, even when
+a paid item shares the cart. Inventory quantity still counts all units; fee
+quantity counts positive-price units. Zero-total calculators return zero fees.
+The existing all-free cart rail still refuses before Stripe; this does not add
+free-cart fulfillment. Existing paid and discount behavior stays unchanged.
+Per-unit discount allocation in mixed carts remains a separate ledger concern.
 
-## Verified production evidence (read-only, 2026-10-30 04:43 UTC)
-- `cart-checkout` v41 passes all units to fee calculation; its live pricing
-  helper increments quantity for zero-price lines too.
-- Live accounting counts every nonvoid/nonrefunded ticket as a $1 fee unit.
-- 950 zero-price active tickets in26 events;6 mixed-revenue events. Excluding
-  zero-price units reduces calculated fees by$950 and increases pre-promoter
-  event net by$763. Current cached totals match those deltas. No affected event
-  is marked payout released; no missing cached summaries.
-- No paid order with zero subtotal and positive total; no zero-total order with
-  nonzero fee columns. Two zero-price tickets are on fee-bearing paid mixed
-  orders. These facts are NOT proof of provider-settled charges on free tickets.
-- `payouts-release` v55 recomputes event financials, then subtracts promoter cuts
-  before creating Stripe transfers. This is financially material, not UI-only.
+## Transactional deployment template
 
-## Approval / release boundary
-The source migration `20261030050000_free_units_never_have_fees.sql` replaces
-only the existing calculation and preserves its grants. It does not repair
-cached rows. Applying it affects future recomputations and future payouts.
-The separate `free-units-cache-repair.sql` is an operator artifact, **not an
-automatic migration**. It must not run without explicit approval of the measured
-fee/net changes and coordination that no payout execution is racing it. Its
-aggregate checks abort/roll back if the reviewed snapshot has changed.
+The source migration changes only the existing calculation. For a live rollout,
+use `free-units-accounting-release.sql`: one transaction installs the function,
+locks the targeted rows, verifies approved bounds and repairs derived caches.
+A failed guard rolls back the function definition and every cache write.
+Do not apply the formula and cache repair as separate live transactions.
 
-No refund, payment, payout, ticket ownership or recipient message is authorized
-by this patch. Preserve live dependency drift when publishing cart-checkout and
-any explicitly reviewed fee-helper closure. Web merge does not deliver native UI.
+The `__EXPECTED_*__` tokens MUST be filled from a separately reviewed, private
+read-only audit immediately before execution. Never commit production financial
+measurements or approval conversations to this repository. Missing substitutions
+fail closed. Review affected event/unit counts, fee/net changes, unknown prices,
+current payout states and in-flight payment exposure. Coordinate payout runs.
 
-The older PR181 migration keeps zero-price mixed-cart units fee-bearing when
-an order recorded fees; do not deploy it as this stricter rule.
+This operation changes future derived net calculations; it does not issue
+refunds, payments, transfers, ticket changes or recipient messages. Existing
+PaymentIntents are not repriced or cancelled. Preserve unrelated deployed helper
+drift and verify exact published sources after an approved release.
+
+Tests use unrelated synthetic fixtures and a disposable PostgreSQL instance.

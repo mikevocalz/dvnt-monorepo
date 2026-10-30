@@ -299,3 +299,5 @@ jobs:
           set -euo pipefail
           sudo -u postgres createdb dvnt_strict_free_financials
           node scripts/test-free-units-always-zero.cjs --sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_strict_free_financials
+      - name: Exact reviewed cache-repair artifact and rollback guards (native PostgreSQL)
+        run: node scripts/test-free-units-cache-repair.cjs
