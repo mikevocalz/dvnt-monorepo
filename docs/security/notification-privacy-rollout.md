@@ -97,9 +97,10 @@ repaired and ticket payloads are preserved through hydration. Realtime work
 awaits explicit socket authentication and checks lifecycle boundaries.
 These fixtures do not prove that an already-installed older binary has the new
 code. Deployment of client/edge changes is separate from applying the SQL.
-The least-disruptive enforcement decision is to require/update unsupported
-native versions before applying RLS; indefinite anonymous compatibility cannot
-be retained safely for private notifications.
+The user requires no disruption to legacy users. Do not require native updates,
+new verification, re-authentication or change their access as a rollout shortcut.
+Prove existing-version compatibility first; anonymous private access cannot be
+retained as a claimed security fix.
 
 ## Verified evidence and remaining deployment gate
 
@@ -115,11 +116,11 @@ be retained safely for private notifications.
 - Local Chromium launch was blocked by OS socket restrictions; browser DTO and
   bundling preflight passed. CI browser interaction remains the acceptance gate.
 
-Smallest remaining user decision after staged supported-client tests: approve
-production notification policy enforcement **with an update/re-auth requirement
-for unsupported old native clients**, or defer enforcement while accepting the
-known overbroad access. There is no safe exception that lets anonymous clients
-choose a recipient. This draft does not make that decision or execute it.
+The user explicitly requires that legacy users not be bothered. Enforcement
+cannot proceed by forcing updates, migrations, email verification or re-auth.
+Current-client behavior and existing installed-native compatibility must first
+be proven non-disruptive; if that cannot be established, report the remaining
+safety/compatibility blocker rather than preserving the vulnerability as a fix.
 
 ## STOP: identity-table prerequisite discovered during final review
 
@@ -141,3 +142,39 @@ own-profile policies with immutable auth_id. Check signup/auth-sync/native
 compatibility and all privileged functions before choosing. Do not silently
 expand this notification migration to lock down users. This prerequisite makes
 live notification RLS approval premature even if all client CI passes.
+
+## Legacy compatibility facts, not a deployment guarantee
+
+A read-only aggregate on 2026-10-30 found zero current profiles with null/empty
+`auth_id`. Existing linked profile mappings therefore need no backfill. This
+must not be generalized to every installed client or future unlinked profile.
+Deployed auth-sync v83 still has an unconditional email-based auth_id rebind.
+The proposed smallest nondisruptive safeguard is to refuse replacement of a
+non-null different link while preserving found-by-auth_id and unlinked/new
+flows. The draft now implements this null-only compare-and-set safeguard, with
+14 actual-handler fixture tests and a separate real PostgreSQL concurrent
+predicate test in CI. It is not deployed. Same-account retries are idempotent;
+a different established link fails closed without returning that profile.
+The future unlinked email-matching ownership-proof risk is intentionally not
+solved by this minimal safeguard: no verification requirement was added.
+Do not present this as complete identity assurance for future unlinked accounts.
+No verification prompt or legacy-account mutation has been introduced.
+
+## Smallest staged proposal (no production execution authorized here)
+
+1. Validate the auth-sync guard and current bridge/browser contracts in CI;
+   validate existing installed clients without asking users to re-auth or update.
+2. Separately approve deploying the linked-account-only auth-sync safeguard.
+   Normal linked login, unlinked matching and new-profile creation stay intact.
+3. Only after supported clients are proven to use service edges for profile
+   writes and signed notification reads, request action-time approval for the
+   users identity-write prerequisite plus notification ownership SQL. Preserve
+   all existing users SELECT access; service profile/signup writes remain.
+4. If installed legacy clients rely on anonymous notification access or direct
+   profile writes, enforcement remains blocked pending a non-disruptive compatible
+   route. Do not retain anonymous private access and call it secure.
+
+Read-only current-source scan found no direct client users writes; two
+authenticated RPCs matching users/auth_id resolve ownership and write other
+tables, not users identity links. This is bounded source/metadata evidence,
+not an exhaustive deployed-version or future-privileged-writer guarantee.

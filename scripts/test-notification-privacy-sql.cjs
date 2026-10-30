@@ -15,11 +15,15 @@ test('metadata-matched permissive baseline then least-privilege notification dra
   await pool.query(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
    CREATE SCHEMA auth; GRANT USAGE ON SCHEMA auth TO authenticated;
    CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$ SELECT coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb $$;
-   CREATE TABLE users(id integer PRIMARY KEY,auth_id text UNIQUE NOT NULL);
-   INSERT INTO users VALUES(1,'better-auth-A'),(2,'better-auth-B'),(3,'better-auth-C');
-   GRANT SELECT ON users TO authenticated;
+   CREATE TABLE users(id integer PRIMARY KEY,auth_id text UNIQUE,first_name text,role text DEFAULT 'member');
+   INSERT INTO users(id,auth_id) VALUES(1,'better-auth-A'),(2,'better-auth-B'),(3,'better-auth-C');
+   GRANT SELECT,INSERT,UPDATE ON users TO anon,authenticated;
+   GRANT ALL ON users TO service_role;
    ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-   CREATE POLICY profile_self ON users FOR SELECT TO authenticated USING(auth_id=auth.jwt()->>'sub');
+   CREATE POLICY "Users are viewable by everyone" ON users FOR SELECT TO public USING(true);
+   CREATE POLICY "Users can update own profile" ON users FOR UPDATE TO public USING(true);
+   CREATE POLICY users_insert_anon ON users FOR INSERT TO anon WITH CHECK(true);
+   CREATE POLICY users_insert_authenticated ON users FOR INSERT TO authenticated WITH CHECK(true);
    CREATE TYPE entity_kind AS ENUM('post','comment','story','user','message','event','lynk_room');
    CREATE TYPE notification_kind AS ENUM('ticket_transfer_initiated','ticket_transfer_accepted','ticket_transfer_declined','ticket_transfer_cancelled','ticket_comped');
    CREATE TABLE notifications(id serial PRIMARY KEY,recipient_id integer NOT NULL REFERENCES users,actor_id integer REFERENCES users,type notification_kind NOT NULL,entity_type entity_kind,entity_id varchar,created_at timestamptz NOT NULL DEFAULT now(),read_at timestamptz,updated_at timestamptz NOT NULL DEFAULT now(),entity_payload jsonb);
@@ -41,12 +45,48 @@ test('metadata-matched permissive baseline then least-privilege notification dra
   // Also prove explicit column grants cannot survive table-level cleanup.
   await pool.query('GRANT UPDATE(recipient_id,entity_payload), SELECT(entity_payload) ON notifications TO anon,authenticated');
   const draft=fs.readFileSync(path.resolve(__dirname,'../docs/security/notification-privacy-draft.sql'),'utf8');
-  await t.test('policy refuses to trust a client-writable identity mapping',async()=>{
-   await pool.query('GRANT UPDATE(auth_id) ON users TO authenticated');
-   await assert.rejects(pool.query(draft),/canonical user identity writes/);
-   // Draft begins a transaction, so failed preflight requires explicit rollback.
-   await pool.query('ROLLBACK');
-   await pool.query('REVOKE UPDATE(auth_id) ON users FROM authenticated');
+  const prerequisite=fs.readFileSync(path.resolve(__dirname,'../docs/security/users-identity-write-prerequisite.sql'),'utf8');
+  await t.test('policy refuses current writable identity mapping before notification grants change',async()=>{
+   const c=await pool.connect();try{await assert.rejects(c.query(draft),/canonical user identity writes/);}finally{await c.query('ROLLBACK');c.release();}
+  });
+  await t.test('unique auth_id alone does not stop a client rewriting canonical ownership',async()=>{
+   await as('authenticated',{sub:'better-auth-A'},async c=>{
+    // Only synthetic rows: detach A, then claim B. Even a UNIQUE binding allows this.
+    await c.query("UPDATE users SET auth_id='detached-A' WHERE id=1");
+    await c.query("UPDATE users SET auth_id='better-auth-A' WHERE id=2");
+    const r=await c.query("SELECT recipient_id FROM notifications WHERE recipient_id=(SELECT min(id) FROM users WHERE auth_id=auth.jwt()->>'sub' HAVING count(*)=1)");
+    assert.deepEqual(r.rows,[{recipient_id:2}]);
+   });
+   await pool.query("UPDATE users SET auth_id='better-auth-B' WHERE id=2;UPDATE users SET auth_id='better-auth-A' WHERE id=1");
+  });
+  await t.test('identity prerequisite rejects unknown ALL policy without silently changing SELECT',async()=>{
+   await pool.query('CREATE POLICY unexpected_all ON users FOR ALL TO authenticated USING(true) WITH CHECK(true)');
+   const c=await pool.connect();try{await assert.rejects(c.query(prerequisite),/Review users ALL policies/);}finally{await c.query('ROLLBACK');c.release();}
+   await pool.query('DROP POLICY unexpected_all ON users');
+  });
+  // Test surviving per-column and PUBLIC grants, not only table grants.
+  await pool.query('GRANT UPDATE(auth_id,id,role),INSERT(auth_id,id),REFERENCES(auth_id) ON users TO PUBLIC,anon,authenticated');
+  await pool.query(prerequisite);await pool.query(prerequisite);
+  await t.test('all direct user identity/profile/role writes are denied but profile reads remain',async()=>{
+   for(const role of ['anon','authenticated'])await as(role,{sub:'better-auth-A'},async c=>{
+    assert.equal((await c.query('SELECT id,auth_id FROM users')).rowCount,3);
+    for(const set of ["auth_id='stolen'","id=99","first_name='forged'","role='admin'"])await denied(c,`UPDATE users SET ${set} WHERE id=2`);
+    await denied(c,"INSERT INTO users(id,auth_id) VALUES(99,'forged-login')");
+    await denied(c,'DELETE FROM users WHERE id=3');
+   });
+  });
+  await t.test('verified service profile updates and signup remain permitted after prerequisite',async()=>{
+   await as('service_role',{},async c=>{
+    assert.equal((await c.query("UPDATE users SET first_name='Updated' WHERE id=1 RETURNING id")).rowCount,1);
+    assert.equal((await c.query("INSERT INTO users(id,auth_id,first_name) VALUES(4,'new-login','New') RETURNING id")).rowCount,1);
+   });
+  });
+  await t.test('notification preflight also rejects column-only id update or auth_id insertion',async()=>{
+   for(const grant of ['UPDATE(id)','INSERT(auth_id)']) {
+    await pool.query(`GRANT ${grant} ON users TO authenticated`);
+    const c=await pool.connect();try{await assert.rejects(c.query(draft),/canonical user identity writes/);}finally{await c.query('ROLLBACK');c.release();}
+    await pool.query(`REVOKE ${grant} ON users FROM authenticated`);
+   }
   });
   await pool.query(draft);await pool.query(draft);
   await t.test('anonymous access and direct notification creation/deletion are denied',async()=>{
@@ -67,9 +107,54 @@ test('metadata-matched permissive baseline then least-privilege notification dra
   await t.test('missing, unmapped and user_metadata-spoofed identities cannot read or update',async()=>{
    for(const claims of [{},{sub:'missing'},{user_metadata:{sub:'better-auth-A'}},{sub:'better-auth-C',user_metadata:{recipient_id:1}}])await as('authenticated',claims,async c=>{assert.equal((await c.query('SELECT * FROM notifications')).rowCount,0);assert.equal((await c.query('UPDATE notifications SET read_at=now()')).rowCount,0);});
   });
+  await t.test('duplicate and blank canonical mappings fail closed even if a UNIQUE constraint is damaged',async()=>{
+   await pool.query('ALTER TABLE users DROP CONSTRAINT users_auth_id_key');
+   try {
+    await pool.query("INSERT INTO users(id,auth_id) VALUES(5,'better-auth-A'),(6,'')");
+    for(const sub of ['better-auth-A',''])await as('authenticated',{sub},async c=>{
+     assert.equal((await c.query('SELECT * FROM notifications')).rowCount,0);
+     assert.equal((await c.query('UPDATE notifications SET read_at=now()')).rowCount,0);
+    });
+   } finally {
+    await pool.query('DELETE FROM users WHERE id IN (5,6);ALTER TABLE users ADD CONSTRAINT users_auth_id_key UNIQUE(auth_id)');
+   }
+  });
   await t.test('switching identities changes visibility; service emitters still insert nullable actors',async()=>{
    await as('authenticated',{sub:'better-auth-B'},async c=>{const r=await c.query('SELECT recipient_id FROM notifications');assert.deepEqual(r.rows,[{recipient_id:2}]);});
    await as('service_role',{},async c=>{assert.equal((await c.query("INSERT INTO notifications(recipient_id,actor_id,type,entity_type,entity_id) VALUES(1,NULL,'ticket_comped','event','80') RETURNING id")).rowCount,1);assert.equal((await c.query('SELECT * FROM notifications')).rowCount,3);});
+  });
+  await t.test('service null-only identity CAS has one concurrent winner and never rebinds established links',async()=>{
+   // Real PostgreSQL predicate/concurrency evidence, not complete auth service E2E.
+   await as('service_role',{},async c=>{
+    await c.query("INSERT INTO users(id,auth_id) VALUES(10,NULL),(11,'established-account')");
+   });
+   const claimants=Array.from({length:8},(_,i)=>`synthetic-claimant-${i}`);
+   let arrived=0,release;
+   const barrier=new Promise(resolve=>{release=resolve;});
+   const results=await Promise.all(claimants.map(authId=>as('service_role',{},async c=>{
+    // All connections first observe the same unlinked row, as in the handler.
+    const before=await c.query('SELECT auth_id FROM users WHERE id=10');
+    assert.equal(before.rows[0].auth_id,null);
+    if(++arrived===claimants.length)release();
+    await barrier;
+    const result=await c.query('UPDATE users SET auth_id=$1 WHERE id=10 AND auth_id IS NULL RETURNING id',[authId]);
+    return {authId,count:result.rowCount};
+   })));
+   assert.equal(results.filter(result=>result.count===1).length,1);
+   assert.equal(results.filter(result=>result.count===0).length,7);
+   const winner=results.find(result=>result.count===1).authId;
+   await as('service_role',{},async c=>{
+    // Same-account retry loses the CAS but can confirm its own winning link.
+    assert.equal((await c.query('UPDATE users SET auth_id=$1 WHERE id=10 AND auth_id IS NULL RETURNING id',[winner])).rowCount,0);
+    assert.deepEqual((await c.query('SELECT id,auth_id FROM users WHERE id=10')).rows,[{id:10,auth_id:winner}]);
+    for(const authId of claimants.filter(id=>id!==winner)) {
+     assert.equal((await c.query('UPDATE users SET auth_id=$1 WHERE id=10 AND auth_id IS NULL RETURNING id',[authId])).rowCount,0);
+     assert.notEqual((await c.query('SELECT auth_id FROM users WHERE id=10')).rows[0].auth_id,authId);
+    }
+    assert.equal((await c.query("UPDATE users SET auth_id='foreign-account' WHERE id=11 AND auth_id IS NULL RETURNING id")).rowCount,0);
+    assert.deepEqual((await c.query('SELECT auth_id FROM users WHERE id=11')).rows,[{auth_id:'established-account'}]);
+    assert.equal((await c.query('SELECT auth_id FROM users WHERE id=10')).rows[0].auth_id,winner);
+   });
   });
  }finally{if(pool)await pool.end();try{run('pg_ctl',['-D',data,'-m','immediate','stop']);}catch{}fs.rmSync(data,{recursive:true,force:true});fs.rmSync(socket,{recursive:true,force:true});}
 });

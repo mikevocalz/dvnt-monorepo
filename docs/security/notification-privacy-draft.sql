@@ -9,7 +9,15 @@ BEGIN;
 -- until a separately approved identity-write lockdown is complete. Refuse to
 -- run rather than giving false assurance from notification-only hardening.
 DO $$ BEGIN
-  IF has_column_privilege('anon','public.users','auth_id','UPDATE')
+  IF has_column_privilege('anon','public.users','id','UPDATE')
+    OR has_column_privilege('authenticated','public.users','id','UPDATE')
+    OR has_column_privilege('anon','public.users','auth_id','INSERT')
+    OR has_column_privilege('authenticated','public.users','auth_id','INSERT')
+    OR has_column_privilege('anon','public.users','id','INSERT')
+    OR has_column_privilege('authenticated','public.users','id','INSERT')
+    OR has_table_privilege('anon','public.users','TRUNCATE')
+    OR has_table_privilege('authenticated','public.users','TRUNCATE')
+    OR has_column_privilege('anon','public.users','auth_id','UPDATE')
     OR has_column_privilege('authenticated','public.users','auth_id','UPDATE')
     OR has_table_privilege('anon','public.users','INSERT')
     OR has_table_privilege('authenticated','public.users','INSERT')
@@ -39,16 +47,19 @@ GRANT SELECT ON public.notifications TO authenticated;
 GRANT UPDATE (read_at) ON public.notifications TO authenticated;
 CREATE POLICY notifications_recipient_read ON public.notifications
   FOR SELECT TO authenticated USING (
-    recipient_id IN (SELECT u.id FROM public.users u
-      WHERE u.auth_id = (SELECT auth.jwt()->>'sub'))
+    recipient_id = (SELECT min(u.id) FROM public.users u
+      WHERE u.auth_id = nullif((SELECT auth.jwt()->>'sub'), '')
+      HAVING count(*) = 1)
   );
 CREATE POLICY notifications_recipient_read_state ON public.notifications
   FOR UPDATE TO authenticated USING (
-    recipient_id IN (SELECT u.id FROM public.users u
-      WHERE u.auth_id = (SELECT auth.jwt()->>'sub'))
+    recipient_id = (SELECT min(u.id) FROM public.users u
+      WHERE u.auth_id = nullif((SELECT auth.jwt()->>'sub'), '')
+      HAVING count(*) = 1)
   ) WITH CHECK (
-    recipient_id IN (SELECT u.id FROM public.users u
-      WHERE u.auth_id = (SELECT auth.jwt()->>'sub'))
+    recipient_id = (SELECT min(u.id) FROM public.users u
+      WHERE u.auth_id = nullif((SELECT auth.jwt()->>'sub'), '')
+      HAVING count(*) = 1)
   );
 -- Service-role emitters retain their existing explicit privileges and bypass RLS.
 -- Never grant client INSERT/DELETE; never allow client UPDATE of recipient,

@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'docs/security/notification-privacy-*'
+      - 'docs/security/users-identity-write-prerequisite.sql'
+      - 'apps/mobile/supabase/functions/auth-sync/**'
       - 'scripts/test-notification-privacy-sql.cjs'
       - '.github/workflows/notification-privacy-draft.yml'
       - 'packages/supabase/src/**'
@@ -33,4 +35,4 @@ jobs:
       - name: Private notification client and bootstrap contracts
         env:
           NODE_PATH: ${{ runner.temp }}/notification-privacy/node_modules
-        run: node --test packages/supabase/src/bridge-transport.test.ts packages/supabase/src/realtime-auth.test.ts packages/app/lib/api/notification-access.test.cjs packages/app/lib/stores/activity-realtime-privacy.test.cjs apps/mobile/supabase/functions/bootstrap-notifications/privacy.test.cjs
+        run: node --test packages/supabase/src/bridge-transport.test.ts packages/supabase/src/realtime-auth.test.ts packages/app/lib/api/notification-access.test.cjs packages/app/lib/stores/activity-realtime-privacy.test.cjs apps/mobile/supabase/functions/bootstrap-notifications/privacy.test.cjs apps/mobile/supabase/functions/auth-sync/identity-link.test.cjs
