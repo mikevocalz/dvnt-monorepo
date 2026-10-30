@@ -14,7 +14,7 @@ function harness({ racedStatus, racedOwner, racedScan, error } = {}) {
     const filters = [];
     const record = { table, eq: {}, is: {} };
     const q = {
-      select() { return q; }, eq(k,v) { filters.push(row => row[k] === v); record.eq[k] = v; return q; },
+      select() { return q; }, ilike(k,v) { return q.eq(k,v); }, eq(k,v) { filters.push(row => row[k] === v); record.eq[k] = v; return q; },
       is(k,v) { filters.push(row => row[k] === v); record.is[k] = v; return q; },
       in() { return q; }, limit() { return q; },
       update(p) { patch=p; return q; }, insert(p) { insert=p; return q; },
@@ -30,6 +30,8 @@ function harness({ racedStatus, racedOwner, racedScan, error } = {}) {
         return { data: null, error: null };
       },
       async maybeSingle() {
+        if (table === "users" && record.eq.username) return { data: { auth_id: "recipient" }, error: null };
+        if (table === "user") return q.single();
         if (table === "tickets" && patch) {
           claims.push(record);
           if (error) return { data: null, error: { message: "write failed" } };

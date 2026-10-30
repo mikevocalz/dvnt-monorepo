@@ -25,9 +25,9 @@ function fixture(options = {}) {
       ticket_type_id: 'tier', purchase_amount_cents: 0, status: 'active', checked_in_at: null,
       qr_token: `original-token-${i}`, qr_payload: null, guest_lookup_token: `00000000-0000-4000-8000-00000000000${i}`,
       attendee_name: 'Old holder', guest_email: 'old@example.test', guest_phone: '+12125550000', ...options.ticket })),
-    ticket_transfers: [],
+    ticket_transfers: [], notifications: [], push_tokens: [],
     user: ['sender', 'one', 'two', 'three', 'other'].map(id => ({ id, username: id })),
-    users: [], order_addons: [],
+    users: ['sender', 'one', 'two', 'three', 'other'].map((id, i) => ({ id: i + 1, username: id, auth_id: id })), order_addons: [],
     events: [{ id: 7, host_id: 'staff', start_date: new Date(Date.now() + 7 * 864e5).toISOString(), ...options.event }],
     ticket_types: [{ id: 'tier', name: 'GA' }],
   };
@@ -40,6 +40,7 @@ function fixture(options = {}) {
       const q = {
         select() { return q; }, limit(n) { limit = n; return q; },
         eq(k, v) { filters.push(row => row[k] === v); return q; },
+        ilike(k, v) { filters.push(row => String(row[k]).toLowerCase() === v.replace(/\\_/g, '_').toLowerCase()); return q; },
         is(k, v) { filters.push(row => row[k] === v); return q; },
         in(k, vs) { filters.push(row => vs.includes(row[k])); return q; },
         update(p) { operation = 'update'; payload = p; return q; },
@@ -49,6 +50,7 @@ function fixture(options = {}) {
             beforeWrite?.({ table, operation, payload, tables });
             writes.push({ table, operation, payload });
           }
+          if (table === options.lookupErrorTable && operation === 'select') return { data: null, error: { message: 'lookup unavailable' } };
           if (operation === 'insert' && options.insertError) {
             if (options.insertCommitted) tables[table].push({ id: `transfer-${++sequence}`, ...payload });
             return { data: null, error: { message: 'insert failed' } };
@@ -272,4 +274,39 @@ test('an acceptance response lost after commit never restores a moved comp to pe
   assert.equal(f.tables.tickets[0].status, 'active');
   assert.equal(f.tables.tickets[0].user_id, 'one');
   assert.equal((await f.invoke('one', { action: 'accept', transfer_id: id })).status, 400);
+});
+
+test('current profile handle resolves linked auth ID even when auth username is stale', async () => {
+  const f = fixture();
+  f.tables.user.find(u => u.id === 'one').username = 'old-handle';
+  const id = await initiate(f, 1, ' @ONE ');
+  assert.equal(f.tables.ticket_transfers.find(t => t.id === id).to_user_id, 'one');
+});
+
+test('reused profile handle never falls back to a different stale auth username', async () => {
+  const f = fixture();
+  f.tables.user.find(u => u.id === 'other').username = 'one';
+  const id = await initiate(f, 1, 'one');
+  assert.equal(f.tables.ticket_transfers.find(t => t.id === id).to_user_id, 'one');
+});
+
+for (const scenario of ['missing-profile', 'unlinked-profile', 'deleted-auth', 'malformed', 'lookup-error']) {
+  test(`recipient ${scenario} fails closed before ticket writes`, async () => {
+    const f = fixture(scenario === 'lookup-error' ? { lookupErrorTable: 'users' } : {});
+    if (scenario === 'missing-profile') f.tables.users = f.tables.users.filter(u => u.username !== 'one');
+    if (scenario === 'unlinked-profile') f.tables.users.find(u => u.username === 'one').auth_id = null;
+    if (scenario === 'deleted-auth') f.tables.user = f.tables.user.filter(u => u.id !== 'one');
+    const response = await f.invoke('sender', { action: 'initiate', ticket_id: 'comp-1', to_username: scenario === 'malformed' ? {} : 'one' });
+    assert.equal(response.status, scenario === 'lookup-error' ? 503 : scenario === 'malformed' ? 400 : 404);
+    assert.equal(f.tables.tickets[0].status, 'active');
+    assert.equal(f.writes.length, 0); assert.equal(f.wallets.length, 0);
+  });
+}
+
+ test('mixed-case canonical handles and literal underscores resolve exactly', async () => {
+  const f = fixture();
+  f.tables.users.find(u => u.auth_id === 'one').username = 'Mixed_Handle';
+  f.tables.users.find(u => u.auth_id === 'other').username = 'mixedXhandle';
+  const id = await initiate(f, 1, '@MIXED_HANDLE');
+  assert.equal(f.tables.ticket_transfers.find(t => t.id === id).to_user_id, 'one');
 });

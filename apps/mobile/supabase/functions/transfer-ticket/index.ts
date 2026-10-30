@@ -261,12 +261,34 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Resolve recipient by username
-      const { data: recipient } = await supabase
+      // Visible handles belong to app profiles, not Better Auth's stale
+      // username field. Never fall back to that field: a renamed handle may
+      // now belong to someone else. Persist only the linked auth identity.
+      const username = typeof to_username === "string"
+        ? to_username.trim().replace(/^@/, "").toLowerCase()
+        : "";
+      if (!/^[a-z0-9._-]{2,40}$/.test(username)) {
+        return json({ error: "Enter a valid DVNT username." }, 400);
+      }
+      const { data: profile, error: recipientError } = await supabase
+        .from("users")
+        .select("auth_id")
+        .ilike("username", username.replace(/_/g, "\\_"))
+        .maybeSingle();
+      if (recipientError) {
+        return json({ error: "Could not verify the recipient. Please try again." }, 503);
+      }
+      if (!profile?.auth_id) {
+        return json({ error: "No DVNT account found with that username. Check the recipient's current username." }, 404);
+      }
+      const { data: recipient, error: accountError } = await supabase
         .from("user")
         .select("id")
-        .eq("username", to_username.toLowerCase())
-        .single();
+        .eq("id", profile.auth_id)
+        .maybeSingle();
+      if (accountError) {
+        return json({ error: "Could not verify the recipient. Please try again." }, 503);
+      }
 
       if (!recipient) {
         return json({ error: "User not found" }, 404);
