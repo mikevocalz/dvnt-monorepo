@@ -186,6 +186,8 @@ async function bundle(key, native = false, expoKey = '') {
   await page.getByRole('button',{name:'Night Owl — approximate area',exact:true}).waitFor();
   await page.getByRole('button',{name:'You — approximate area',exact:true}).waitFor();
   assert.equal(await page.getByRole('button',{name:clusterName(2),exact:true}).count(),0,'zoom splits nearby but distinct coarse coordinates');
+  await page.getByRole('button',{name:'Close people in this area',exact:true}).click();
+  await chooser.waitFor({state:'detached'});
   await page.evaluate(()=>window.setFixtureZoom(12));
   await page.getByRole('button',{name:clusterName(2),exact:true}).click();
   await page.getByRole('button',{name:'Synthetic sharing toggle'}).click();
