@@ -206,11 +206,21 @@ await check('legacy financial trigger delta refuses and rolls back the whole can
  assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);
  assert.deepEqual(await sql(`SELECT * FROM orders ORDER BY id`),ordersBefore);
  // This runner talks only to the Unix-socket disposable Postgres, never Stripe.
- // Changing only the isolated fixture's fee counter models compatible zero-fee
- // accounting. No production financial migration is performed or authorized.
- await sql(recompute.replace("count(*) FILTER (WHERE status NOT IN ('refunded','void'))","count(*) FILTER (WHERE status NOT IN ('refunded','void') AND purchase_amount_cents > 0)"));
- await sql(`SELECT recompute_event_financials(1)`);
+ // Integration prerequisite: PR #213 supplies the real accounting migration.
+ // Never substitute a synthetic function or copy its migration into this PR.
+ // Missing merged accounting source fails closed before compatibility can pass.
+ await sql(readFileSync(join(MIGRATIONS,'20261030050000_free_units_never_have_fees.sql'),'utf8'));
+ // The mixed fixture retains the paid admission and adds two zero-price add-on
+ // units: neither the cancelled free admission nor free add-ons may bear fees.
+ await sql(`INSERT INTO order_addons(event_id,unit_price_cents,quantity,refunded_amount_cents,status) VALUES(1,0,2,0,'unfulfilled'); SELECT recompute_event_financials(1)`);
+ const compatibleBefore=(await sql(`SELECT gross_cents,refunds_cents,dvnt_fee_cents,stripe_fee_cents,net_cents FROM event_financials WHERE event_id=1`))[0];
+ assert.deepEqual(compatibleBefore,{gross_cents:1000,refunds_cents:0,dvnt_fee_cents:125,stripe_fee_cents:0,net_cents:875});
+ const addonsBefore=await sql(`SELECT * FROM order_addons`);
  assert.equal((await cancel(f)).ok,true);
+ assert.deepEqual((await sql(`SELECT gross_cents,refunds_cents,dvnt_fee_cents,stripe_fee_cents,net_cents FROM event_financials WHERE event_id=1`))[0],compatibleBefore);
+ assert.deepEqual(await sql(`SELECT * FROM order_addons`),addonsBefore);
+ assert.deepEqual(await sql(`SELECT * FROM orders ORDER BY id`),ordersBefore);
+ assert.equal((await sql(`SELECT status FROM tickets WHERE qr_token='paid-qr'`))[0].status,'active');
  assert.deepEqual((await sql(`SELECT gross_cents,dvnt_fee_cents,net_cents FROM event_financials WHERE event_id=1`))[0],{gross_cents:1000,dvnt_fee_cents:125,net_cents:875});
  assert.equal((await cancel(f)).changed,false);
  console.log('Legacy financial drift safely refused; compatible accounting succeeds without changing monetary values.');

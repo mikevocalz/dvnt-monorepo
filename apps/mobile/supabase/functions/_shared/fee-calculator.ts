@@ -60,11 +60,11 @@ export function computeFees(subtotal: number, qty: number): FeeBreakdown {
 
   // Compute each percentage component SEPARATELY — never combine percentages before rounding
   const buyer_pct_fee = Math.round(subtotal * 0.025);
-  const buyer_per_ticket_fee = qty * 100;
+  const buyer_per_ticket_fee = subtotal === 0 ? 0 : qty * 100;
   const buyer_fee = buyer_pct_fee + buyer_per_ticket_fee;
 
   const org_pct_fee = Math.round(subtotal * 0.025);
-  const org_per_ticket_fee = qty * 100;
+  const org_per_ticket_fee = subtotal === 0 ? 0 : qty * 100;
   const organizer_fee = org_pct_fee + org_per_ticket_fee;
 
   const dvnt_total_fee = buyer_fee + organizer_fee;

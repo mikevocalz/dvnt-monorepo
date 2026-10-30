@@ -104,3 +104,36 @@ test('cart-checkout charges a ticket + coat-check cart', async () => {
   assert.equal(order.subtotal_cents, 6000);
   assert.equal(Number(pi.body.get('amount')), order.total_cents);
 });
+
+test('zero-price units never count toward a flat fee in mixed carts', () => {
+  const r = priceCartLines([ticketLine({ticket_types:{...tier,price_cents:0},quantity:3}),addonLine({quantity:2}),addonLine({id:'free-addon',ticket_addons:{...coatCheck,price_cents:0}})],cart);
+  assert.equal(r.quantity,6);
+  assert.equal(r.feeQuantity,2);
+  assert.equal(r.subtotalCents,2000);
+});
+test('free admission beside paid coat check charges only the paid add-on fee', async () => {
+  const h=harness({cart:[
+    {id:'free',category:'admission',tier_id:'tier',addon_id:null,quantity:2,ticket_types:{price_cents:0,currency:'usd',event_id:1}},
+    {id:'coat',category:'addon',tier_id:null,addon_id:'coat',quantity:1,ticket_addons:{price_cents:1000,currency:'usd',event_id:1}},
+  ]});
+  const r=await h.invoke('cart-checkout',{cartId:'00000000-0000-4000-8000-000000000001'});
+  assert.equal(r.status,200,await r.text());
+  const order=h.writes.find(w=>w.table==='orders').payload;
+  assert.equal(order.quantity,3,'inventory quantity remains all units');
+  assert.equal(order.buyer_fee_cents,125);
+  assert.equal(order.organizer_fee_cents,125);
+  assert.equal(order.total_cents,1125);
+});
+test('all-free cart never creates a Stripe payment', async () => {
+  const h=harness({cart:[{id:'free',category:'admission',tier_id:'tier',addon_id:null,quantity:2,ticket_types:{price_cents:0,currency:'usd',event_id:1}}]});
+  const r=await h.invoke('cart-checkout',{cartId:'00000000-0000-4000-8000-000000000001'});
+  assert.equal(r.status,400,'existing cart rail has no zero-charge fulfillment; refuse rather than charge');
+  assert.equal(h.requests.some(q=>q.url.endsWith('/payment_intents')),false);
+});
+test('edge fee calculator returns zero for free orders in every fee mode', () => {
+  const {computeFeesWithMode}=harness().load(path.resolve(__dirname,'fee-calculator.ts'));
+  for(const mode of ['pass','absorb']) for(const qty of [1,3,100]) {
+    const f=computeFeesWithMode(0,qty,mode);
+    for(const key of ['buyer_fee','organizer_fee','application_fee_amount','customer_charge_amount','organizer_transfer_amount']) assert.equal(f[key],0,key);
+  }
+});

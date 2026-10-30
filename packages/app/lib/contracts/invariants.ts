@@ -27,6 +27,11 @@ export function calculateCartSubtotalCents(lineItems: CartLineItem[]): number {
   }, 0);
 }
 
+/** Zero-price ticket/add-on units never add a flat checkout fee. */
+export function calculateCartFeeQuantity(lineItems: Pick<CartLineItem, "unitPriceCents" | "quantity">[]): number {
+  return lineItems.reduce((sum, line) => sum + (line.unitPriceCents > 0 ? line.quantity : 0), 0);
+}
+
 export function assertPositiveCartQuantities(lineItems: CartLineItem[]): void {
   for (const lineItem of lineItems) {
     if (!Number.isInteger(lineItem.quantity) || lineItem.quantity <= 0) {

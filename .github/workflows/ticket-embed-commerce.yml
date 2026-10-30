@@ -6,6 +6,7 @@ on:
       - "apps/web/**"
       - "packages/app/**"
       - "scripts/*ticket-embed*"
+      - "scripts/verify-organizer-cancel-free.mjs"
       - "scripts/ticket_embed_sandbox*.py"
       - "packages/ui/**"
       - "packages/config/**"
