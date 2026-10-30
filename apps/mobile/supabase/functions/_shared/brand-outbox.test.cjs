@@ -379,7 +379,7 @@ test("the welcome email renders the team's copy verbatim and in order", async ()
   assert.deepEqual(t.WELCOME_COPY.map((b) => b.text), WELCOME_LINES);
   for (const { html } of [t.welcome("sam"), t.welcome("sam", { checkoutProfile: true })]) {
     // Text nodes of the body, before the footer, in document order.
-    const texts = [...html.matchAll(/<(h1|h2|p)\b[^>]*>([\s\S]*?)<\/\1>/g)].map((m) => unescapeHtml(m[2]));
+    const texts = [...html.matchAll(/<(h1|h2|p)\b[^>]*>([\s\S]*?)<\/\1>/g)].map((m) => unescapeHtml(m[2].replace(/<\/?span\b[^>]*>/g, "")));
     let from = 0;
     for (const line of WELCOME_LINES) {
       const at = texts.indexOf(line, from);

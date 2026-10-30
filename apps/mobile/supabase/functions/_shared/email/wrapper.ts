@@ -5,13 +5,15 @@
  * table on near-black, a rounded "card" (the flattened glass slab), the DVNT
  * gradient wordmark image in the header with a thin gradient rule under it, and a
  * real branded footer. All structure is tables; all CSS inline. `color-scheme`
- * is pinned so dark-mode mail clients don't auto-invert the brand into mush.
+ * hints are supplemented by Gmail-specific surface/text protection; clients
+ * can still override sender styling.
  *
  * Custom display fonts are progressive enhancement only (the wordmark is an
  * image, so it renders everywhere); the @font-face below is best-effort for the
  * handful of clients that honor it (Apple Mail / some iOS).
  */
 
+import { darkSurface, GMAIL_DARK_CSS, protectText } from "./dark-mode.ts";
 import { BRAND, COLORS, FONTS, GRADIENTS, LOGO, SPACE, esc } from "./tokens.ts";
 
 export interface WrapperOpts {
@@ -34,13 +36,15 @@ function header(): string {
 function footer(opts: WrapperOpts): string {
   const links = opts.minimalFooter
     ? ""
-    : `<tr><td align="center" style="padding:4px 0 14px"><a href="${BRAND.privacyUrl}" style="color:${COLORS.textMuted};font-family:${FONTS.body};font-size:12px;text-decoration:none;padding:0 8px">Privacy</a><span style="color:${COLORS.hairline}">·</span><a href="${BRAND.faqUrl}" style="color:${COLORS.textMuted};font-family:${FONTS.body};font-size:12px;text-decoration:none;padding:0 8px">FAQ</a><span style="color:${COLORS.hairline}">·</span><a href="${BRAND.site}" style="color:${COLORS.textMuted};font-family:${FONTS.body};font-size:12px;text-decoration:none;padding:0 8px">dvntapp.live</a></td></tr>`;
+    : `<tr><td align="center" style="padding:4px 0 14px">${protectText(`<a href="${BRAND.privacyUrl}" style="color:${COLORS.textMuted};font-family:${FONTS.body};font-size:12px;text-decoration:none;padding:0 8px">Privacy</a><span style="color:${COLORS.hairline}">·</span><a href="${BRAND.faqUrl}" style="color:${COLORS.textMuted};font-family:${FONTS.body};font-size:12px;text-decoration:none;padding:0 8px">FAQ</a><span style="color:${COLORS.hairline}">·</span><a href="${BRAND.site}" style="color:${COLORS.textMuted};font-family:${FONTS.body};font-size:12px;text-decoration:none;padding:0 8px">dvntapp.live</a>`)}</td></tr>`;
   return [
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">`,
     `<tr><td align="center" style="padding:24px 32px 8px">`,
     `<img src="${LOGO.glyphUrl}" width="${LOGO.glyphWidth}" height="${LOGO.glyphHeight}" alt="${BRAND.name}" style="display:block;border:0;outline:none;height:${LOGO.glyphHeight}px;width:${LOGO.glyphWidth}px;border-radius:7px;margin:0 auto 10px"/>`,
     `</td></tr>`,
-    `<tr><td align="center" style="padding:0 0 4px"><p style="margin:0;font-family:${FONTS.body};font-size:12px;color:${COLORS.textFaint};text-align:center">&copy; ${BRAND.legalName} &middot; ${BRAND.society}</p></td></tr>`,
+    `<tr><td align="center" style="padding:0 0 4px"><p style="margin:0;font-family:${FONTS.body};font-size:12px;color:${COLORS.textFaint};text-align:center">${protectText(`&copy; ${BRAND.legalName} &middot; ${BRAND.society}`)}</p></td></tr>`,
     links,
+    `</table>`,
   ].join("");
 }
 
@@ -49,12 +53,13 @@ export function brandEmailWrapper(
   opts: WrapperOpts = {},
 ): string {
   const preheader = opts.preheader
-    ? `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:${COLORS.canvas};opacity:0">${esc(opts.preheader)}</div>`
+    ? `<div lang="en" dir="ltr" style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:${COLORS.canvas};opacity:0">${esc(opts.preheader)}</div>`
     : "";
   return [
     `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">`,
-    `<html xmlns="https://www.w3.org/1999/xhtml" lang="en">`,
+    `<html xmlns="https://www.w3.org/1999/xhtml" lang="en" dir="ltr">`,
     `<head>`,
+    `<title>${esc(opts.preheader || "Email from DVNT")}</title>`,
     `<meta charset="utf-8"/>`,
     `<meta name="viewport" content="width=device-width,initial-scale=1"/>`,
     `<meta http-equiv="X-UA-Compatible" content="IE=edge"/>`,
@@ -66,15 +71,16 @@ export function brandEmailWrapper(
     // Progressive-enhancement display face (best-effort; logo is the real wordmark).
     `@font-face{font-family:'Space Grotesk';font-style:normal;font-weight:700;src:local('Space Grotesk Bold'),local('SpaceGrotesk-Bold');}`,
     `a{text-decoration:none;}`,
-    `body{margin:0;padding:0;width:100%!important;background:${COLORS.canvas};}`,
+    GMAIL_DARK_CSS,
+    `body{margin:0;padding:0;width:100%!important;${darkSurface(COLORS.canvas)}}`,
     `@media only screen and (max-width:600px){.dvnt-card{width:100%!important;border-radius:0!important;}.dvnt-pad{padding-left:20px!important;padding-right:20px!important;}}`,
     `</style>`,
     `</head>`,
-    `<body style="margin:0;padding:0;background:${COLORS.canvas};font-family:${FONTS.body};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">`,
+    `<body class="dvnt-body" bgcolor="${COLORS.canvas}" style="margin:0;padding:0;${darkSurface(COLORS.canvas)}color:${COLORS.text};font-family:${FONTS.body};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">`,
     preheader,
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${COLORS.canvas}"><tr><td align="center" style="padding:24px 12px">`,
+    `<table role="presentation" lang="en" dir="ltr" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${COLORS.canvas}" style="${darkSurface(COLORS.canvas)}"><tr><td align="center" style="padding:24px 12px">`,
     // The card.
-    `<table role="presentation" class="dvnt-card" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:${COLORS.panel};border:1px solid ${COLORS.hairline};border-radius:${SPACE.cardRadius}px;overflow:hidden">`,
+    `<table role="presentation" class="dvnt-card" bgcolor="${COLORS.panel}" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;${darkSurface(COLORS.panel)}border:1px solid ${COLORS.hairline};border-radius:${SPACE.cardRadius}px;overflow:hidden">`,
     header(),
     // Body content.
     `<tr><td class="dvnt-pad" style="padding:28px ${SPACE.cardPadding}px 8px">${content}</td></tr>`,

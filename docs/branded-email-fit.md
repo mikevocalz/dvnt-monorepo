@@ -73,11 +73,16 @@ Email can't blur/animate, so:
   so it degrades to "DVNT" text when images are blocked) on near-black, with a
   thin gradient rule under it.
 - **CTA** — bulletproof button: VML fill for Outlook + `background-image`
-  gradient with a solid `#379ed8` fallback for clients that drop gradients.
+  gradient with a solid `#24749f` fallback for clients that drop gradients;
+  white labels meet 4.5:1 contrast across both ends of the gradient.
 - **Type** — Inter/web-safe stack for body (≥16px, `#a1a1aa` on dark), white
   headings; display face is a `@font-face` progressive enhancement only.
-- **Dark mode** — `color-scheme` + `supported-color-schemes: dark` meta so mail
-  clients don't auto-invert the brand.
+- **Dark mode** — dark `color-scheme` metadata plus explicit `bgcolor`, inline
+  dark fills and flat gradients protect canvas/cards. Gmail-only paired
+  screen/difference wrappers preserve white text when Gmail iOS inverts colors.
+  Metadata alone does **not** prevent client inversion. Images stay outside the
+  text wrappers; QR images retain their white scanning quiet zone. Clients that
+  remove CSS or force their own transformations cannot be controlled completely.
 - **Footer** — wordmark glyph + "© Deviant LLC · Counter Culture Society" +
   Privacy/FAQ links (dvntapp.live), replacing the one-line text footer.
 
@@ -225,3 +230,74 @@ Remaining for a real-client pass (needs deployed assets + accounts):
 - [ ] Litmus / Email-on-Acid pass across Apple Mail, Gmail web + app, Outlook
       (the VML button is specifically for Outlook).
 - [ ] Confirm dark-mode clients don't invert the brand on real devices.
+
+
+## Dark-template regression checks (2026-10)
+
+Run locally with Node 24, without provider keys, customer data or email sends:
+
+```sh
+node --test apps/mobile/supabase/functions/_shared/email/dark-theme.test.mjs
+node scripts/render-email-fixtures.mjs /tmp/dvnt-email-previews
+```
+
+The synthetic fixtures cover all exported shared templates, the accepted-transfer
+branch shown in the Gmail iOS report, complimentary tickets, multiple tiers,
+guest QR delivery, authentication, broadcasts, payouts and event follow-ups.
+Content-only snapshots captured from `91045fb0` pin shared-template subjects,
+visible copy, destinations and image/QR payloads. They deliberately do not pin
+HTML formatting. Other checks cover table nesting, dark fallback attributes,
+Gmail-scoped styles, WCAG AA text/button/badge contrast and image exclusion from
+text blending. Rendered HTML stays below Gmail's clipping threshold for these
+fixtures; arbitrarily long host-authored messages are not size-guaranteed.
+
+Browser previews establish ordinary HTML layout, not native email-client
+compatibility. Before a release is described as Gmail/Outlook/Apple Mail verified,
+review real inbox renders in those clients (light and dark), including disabled
+images and Gmail with non-Google accounts. Do not send real or test email without
+authorization. Client CSS stripping and forced inversion remain compatibility
+limits; never promise that a sender can override every mail application's theme.
+
+### Dark-theme change scope (2026-10-30)
+
+The user examples show the accepted-transfer branch of `ticketConfirmation`:
+“You're in”, a sender greeting, a tier badge and “View in app”, without a QR.
+The Gmail iOS chrome is dark while the email is inverted pale. The source was
+already dark; metadata alone did not prevent that client transformation.
+
+The follow-up and commercial brand-outbox paths previously bypassed the shell.
+They now use it too, retaining existing copy, URLs, unsubscribe headers,
+suppression, recipients and send triggers. Text in Gmail's targeted blend
+wrappers intentionally becomes white for readability; ordinary clients retain
+the secondary/accent text palette. Brand gradients retain their hue with darker
+stops so small white labels meet 4.5:1 contrast. QR images stay outside text
+blending and retain a white, flat-gradient-backed scan margin: this small white
+area is functional, not a light email theme.
+
+Source dependency closure (not authorization to deploy, and not a claim that
+live bundles equal source): `auth`, `brand-outbox-worker`, `bulk-comp-tickets`,
+`door-sell`, `event-cancel`, `event-followup-settings`,
+`event-followup-unsubscribe`, `event-invite-guests`, `event-postpone`,
+`event-reminders`, `guest-checkout`, `guest-ticket-lookup`, `manage-promoters`,
+`payouts-release`, `process-event-followups`, `reconcile-orders`,
+`rsvp-issue-guest`, `rsvp-verify`, `send-email`, `stripe-webhook`,
+`ticket-checkout`, and `transfer-ticket`.
+
+Any separately approved release must inspect the current deployed closure for
+each consumer and preserve unrelated drift. In particular, the prior ticket
+release preserved deployed promo/event-access helper differences; replacing a
+whole bundle from source is not a safe assumption. This change sends no real
+emails and does not validate delivery in a native customer's inbox.
+
+`Dark email rendering` CI additionally runs system Google Chrome with its sandbox
+explicitly enabled. Playwright and PNG decoding dependencies are installed in an
+isolated runner-temporary prefix. It renders transfer, comp, follow-up and guest
+fixtures at 390px and 1024px in light/dark browser preferences and a separately
+labeled Gmail inversion model. It asserts dark protected surfaces, no horizontal
+overflow and light heading pixels over dark backgrounds, then publishes 24 PNGs
+and a JSON report. All requests are intercepted: the brand images come from the
+repository and the QR is a deterministic **non-scannable** preview image. No
+provider credentials or sends are involved. The Gmail model activates the
+`u + .dvnt-body` selectors and inverts computed black/white colors while leaving
+gradients/image bytes intact; it is regression evidence for the blend mechanism,
+not proof of current Gmail app rendering.

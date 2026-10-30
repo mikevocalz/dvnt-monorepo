@@ -1,0 +1,50 @@
+name: Dark email rendering
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/_shared/email/**'
+      - 'apps/mobile/supabase/functions/_shared/event-followup.ts'
+      - 'apps/mobile/supabase/functions/brand-outbox-worker/index.ts'
+      - 'apps/web/public/dvnt-email-*.png'
+      - 'scripts/*email*.mjs'
+      - '.github/workflows/email-dark-rendering.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dark-email-rendering:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Actual template, contrast and content regression tests
+        run: node --test apps/mobile/supabase/functions/_shared/email/dark-theme.test.mjs
+      - name: Install isolated browser test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/email-render" --ignore-scripts --no-audit --no-fund --no-save playwright@1.58.2 pngjs@7.0.0 typescript@5.9.2
+      - name: Existing brand content contracts and shared email type check
+        env:
+          NODE_PATH: ${{ runner.temp }}/email-render/node_modules
+        run: |
+          node --test apps/mobile/supabase/functions/_shared/brand-outbox.test.cjs
+          printf 'declare const Deno: {env: {get(name: string): string | undefined}};\n' > "$RUNNER_TEMP/email-deno-env.d.ts"
+          node "$RUNNER_TEMP/email-render/node_modules/typescript/bin/tsc" --noEmit --allowImportingTsExtensions --module esnext --moduleResolution bundler --target es2022 --lib esnext,dom --skipLibCheck "$RUNNER_TEMP/email-deno-env.d.ts" apps/mobile/supabase/functions/_shared/email/{dark-mode,tokens,components,wrapper,templates}.ts apps/mobile/supabase/functions/_shared/event-followup.ts
+      - name: Render offline with sandboxed system Chrome
+        env:
+          EMAIL_RENDER_NODE_MODULES: ${{ runner.temp }}/email-render/node_modules
+          EMAIL_RENDER_OUTPUT: ${{ runner.temp }}/email-render-artifacts
+        run: |
+          google-chrome --version
+          node scripts/verify-email-rendering.mjs
+      - name: Upload synthetic email screenshots and model report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-dark-rendering
+          path: ${{ runner.temp }}/email-render-artifacts
+          if-no-files-found: warn
+          retention-days: 14
