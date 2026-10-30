@@ -144,14 +144,13 @@ function EventRow({
         </Text>
         <View style={styles.eventStats}>
           <Text style={styles.eventStat}>
-            {sold}
-            {cap ? `/${cap}` : ""} sold
+            {sold} valid tickets{cap ? ` · Capacity ${cap}` : ""}
           </Text>
           {event.gross_cents > 0 && (
             <>
               <Text style={styles.dotSep}>·</Text>
               <Text style={styles.eventStat}>
-                {formatMoney(event.gross_cents)}
+                {formatMoney(event.gross_cents)} ticket + add-on value
               </Text>
             </>
           )}
@@ -165,7 +164,7 @@ function EventRow({
                   pct >= 75 && pct < 95 && { color: "#F59E0B" },
                 ]}
               >
-                {pct}%
+                {pct}% capacity
               </Text>
             </>
           )}
@@ -398,7 +397,7 @@ export default function HostDashboardScreen() {
       >
         <View style={styles.statsRow}>
           <StatCard
-            label="This month"
+            label="Issued this month"
             value={String(data.stats.monthSold)}
             Icon={Ticket}
             accent={tierAccent("ga")}

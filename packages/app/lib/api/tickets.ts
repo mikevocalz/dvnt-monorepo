@@ -195,20 +195,31 @@ export const ticketsApi = {
   },
 
   /**
-   * Get all tickets for an event via the get-event-tickets edge fn.
-   * Backwards-compat wrapper around the paginated variant — returns
-   * the first 200 rows in one shot.
-   *
-   * For rosters > 200 attendees, callers should switch to
-   * `getEventTicketsPaginated` which supports server-side pagination,
-   * status filter, and qr_token prefix search.
+   * Complete event roster for management totals. Each request remains bounded
+   * to 200 rows; follow the server's stable cursor, never an offset that moves
+   * under new sales. Do not publish a partial roster if any page fails.
    */
   async getEventTickets(eventId: string): Promise<TicketRecord[]> {
-    const page = await ticketsApi.getEventTicketsPaginated(eventId, {
-      page: 1,
-      pageSize: 200,
-    });
-    return page.tickets;
+    const rows = new Map<string, TicketRecord>();
+    const seenCursors = new Set<string>();
+    let cursor: RosterCursor | null = null;
+    for (;;) {
+      const page = await ticketsApi.getEventTicketsPaginated(eventId, {
+        pageSize: 200,
+        sort: "purchased_at",
+        cursor,
+      });
+      const previousSize = rows.size;
+      for (const ticket of page.tickets) rows.set(ticket.id, ticket);
+      if (!page.hasMore) return [...rows.values()];
+      const next = page.nextCursor;
+      const key = next ? JSON.stringify([next.value, next.id]) : "";
+      if (rows.size === previousSize || !next?.id || seenCursors.has(key)) {
+        throw new Error("Could not load the complete ticket roster. Please refresh.");
+      }
+      seenCursors.add(key);
+      cursor = next;
+    }
   },
 
   /**
@@ -310,7 +321,10 @@ export const ticketsApi = {
       console.error("[Tickets] getEventTicketsPaginated HTTP", status);
       throw Object.assign(new Error(`Could not load the guest list (HTTP ${status}).`), { status });
     }
-    const tickets = data?.ok ? (data.tickets ?? []) : [];
+    if (!data?.ok || !Array.isArray(data.tickets)) {
+      throw new Error("Could not load the guest list. Please refresh.");
+    }
+    const tickets = data.tickets;
     return {
       tickets,
       page: data?.page ?? opts.page ?? 1,

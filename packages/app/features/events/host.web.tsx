@@ -156,14 +156,13 @@ function EventRow({
         </span>
         <span className="mt-1.5 flex flex-wrap items-center gap-1">
           <span className="text-xs font-medium text-white/65">
-            {sold}
-            {cap ? `/${cap}` : ""} sold
+            {sold} valid tickets{cap ? ` · Capacity ${cap}` : ""}
           </span>
           {event.gross_cents > 0 ? (
             <>
               <span className="text-xs text-white/30">·</span>
               <span className="text-xs font-medium text-white/65">
-                {formatMoney(event.gross_cents)}
+                {formatMoney(event.gross_cents)} ticket + add-on value
               </span>
             </>
           ) : null}
@@ -174,7 +173,7 @@ function EventRow({
                 className="text-xs font-medium"
                 style={{ color: pctColor }}
               >
-                {pct}%
+                {pct}% capacity
               </span>
             </>
           ) : null}
@@ -428,7 +427,7 @@ export function HostScreen() {
           {/* Stats row */}
           <div className="flex gap-2 px-2 py-3">
             <StatCard
-              label="This month"
+              label="Issued this month"
               value={String(data.stats.monthSold)}
               icon={<Ticket size={16} color={tierAccent("ga")} />}
               accent={tierAccent("ga")}

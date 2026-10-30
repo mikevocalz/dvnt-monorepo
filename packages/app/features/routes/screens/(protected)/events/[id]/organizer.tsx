@@ -37,6 +37,7 @@ import {
   Undo2,
   Nfc,
 } from "lucide-react-native";
+import { organizerRosterMetrics } from "@dvnt/app/lib/tickets/organizer-roster-metrics";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
 import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
@@ -53,7 +54,8 @@ interface Ticket {
     name?: string;
     avatar?: string;
   };
-  status: "valid" | "checked_in" | "revoked";
+  status: "active" | "scanned" | "refunded" | "void" | "transfer_pending" | "valid" | "checked_in" | "revoked";
+  checked_in_at?: string | null;
   checkedInAt?: string;
   createdAt: string;
 }
@@ -66,11 +68,15 @@ function EventOrganizerScreenContent() {
   const duplicateLock = useRef(false);
   const [eventTickets, setEventTickets] = useState<Ticket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [loadedEventId, setLoadedEventId] = useState("");
+  const requestSequence = useRef(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   // Dashboard now defers to the dedicated full-screen scanner route
   // so we don't ship two different scanner UIs for the same job.
 
   const eventId = id || "";
+  const countsKnown = !isLoading && !loadError && loadedEventId === eventId;
 
   const handleDuplicateEvent = useCallback(async () => {
     const numericId = Number(eventId);
@@ -157,21 +163,31 @@ function EventOrganizerScreenContent() {
   }, [pendingScans, eventId, offlineStore, showToast]);
 
   const loadTickets = async () => {
+    const request = ++requestSequence.current;
+    setIsLoading(true);
+    setLoadError(false);
     try {
       const result = await tickets.getEventTickets(eventId);
+      if (request !== requestSequence.current) return;
       setEventTickets((result as any) || []);
+      setLoadedEventId(eventId);
     } catch (error: any) {
+      if (request !== requestSequence.current) return;
+      setLoadError(true);
       console.error("[Organizer] Load tickets error:", error);
       const errorMessage = error?.error || "Failed to load tickets";
       showToast("error", "Error", errorMessage);
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (request === requestSequence.current) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
   };
 
   useEffect(() => {
     loadTickets();
+    return () => { requestSequence.current++; };
   }, [eventId]);
 
   // Refresh tickets every time the dashboard regains focus — covers the
@@ -245,10 +261,7 @@ function EventOrganizerScreenContent() {
     });
   };
 
-  const checkedInCount = eventTickets.filter(
-    (t) => t.status === "checked_in",
-  ).length;
-  const totalCount = eventTickets.length;
+  const { issued: totalCount, checkedIn: checkedInCount, awaitingCheckIn: remainingCount } = organizerRosterMetrics(eventTickets);
 
   return (
     <SafeAreaView
@@ -307,7 +320,7 @@ function EventOrganizerScreenContent() {
               color: colors.foreground,
             }}
           >
-            {totalCount}
+            {countsKnown ? totalCount : "—"}
           </Text>
           <Text
             style={{
@@ -316,13 +329,13 @@ function EventOrganizerScreenContent() {
               marginTop: 4,
             }}
           >
-            Total Tickets
+            Issued tickets
           </Text>
         </View>
         <View style={{ width: 1, backgroundColor: colors.border }} />
         <View style={{ flex: 1, alignItems: "center" }}>
           <Text style={{ fontSize: 24, fontWeight: "bold", color: "#22c55e" }}>
-            {checkedInCount}
+            {countsKnown ? checkedInCount : "—"}
           </Text>
           <Text
             style={{
@@ -339,7 +352,7 @@ function EventOrganizerScreenContent() {
           <Text
             style={{ fontSize: 24, fontWeight: "bold", color: colors.primary }}
           >
-            {totalCount - checkedInCount}
+            {countsKnown ? remainingCount : "—"}
           </Text>
           <Text
             style={{
@@ -348,7 +361,7 @@ function EventOrganizerScreenContent() {
               marginTop: 4,
             }}
           >
-            Remaining
+            Awaiting check-in
           </Text>
         </View>
       </View>
@@ -600,7 +613,15 @@ function EventOrganizerScreenContent() {
       </View>
 
       {/* Tickets List */}
-      {isLoading ? (
+      {loadError ? (
+        <View accessibilityRole="alert" style={{ padding: 24, alignItems: "center", gap: 12 }}>
+          <Text style={{ color: colors.foreground, fontWeight: "600" }}>Ticket counts unavailable</Text>
+          <Text style={{ color: colors.mutedForeground }}>We couldn't load the complete roster. Please try again.</Text>
+          <Pressable accessibilityRole="button" onPress={handleRefresh} style={{ padding: 12 }}>
+            <Text style={{ color: colors.primary, fontWeight: "600" }}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : isLoading || loadedEventId !== eventId ? (
         <View
           style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
         >

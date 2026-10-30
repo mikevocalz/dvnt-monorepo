@@ -368,10 +368,10 @@ export function EventAnalyticsScreen() {
           <StatCard
             icon={<Ticket size={16} color="#3b82f6" />}
             iconColor="#3b82f6"
-            label="Tickets sold"
+            label="Tickets issued"
             value={String(ticketStats.total)}
             sublabel={
-              totalCapacity > 0 ? `${remainingTickets} remaining` : undefined
+              totalCapacity > 0 ? `${remainingTickets} tier inventory remaining` : undefined
             }
           />
         </div>
@@ -399,20 +399,20 @@ export function EventAnalyticsScreen() {
           </p>
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <p className="text-xs text-white/45">RSVP</p>
+              <p className="text-xs text-white/45">RSVP people</p>
               <p className="mt-1 text-xl font-bold text-white">{attendanceBreakdown.rsvp}</p>
             </div>
             <div>
-              <p className="text-xs text-white/45">Paid</p>
+              <p className="text-xs text-white/45">Paid tickets</p>
               <p className="mt-1 text-xl font-bold text-white">{attendanceBreakdown.paid}</p>
             </div>
             <div>
-              <p className="text-xs text-white/45">Total</p>
+              <p className="text-xs text-white/45">Going</p>
               <p className="mt-1 text-xl font-bold text-white">{attendanceBreakdown.total}</p>
             </div>
           </div>
           <p className="mt-3 text-xs leading-5 text-white/40">
-            Total includes paid, free/comp tickets, and RSVP-only guests without double-counting.
+            Going counts valid ticket units (including free/comp) plus RSVP-only guests. Refunded and cancelled tickets are excluded; issued tickets above include their history.
           </p>
         </section>
 

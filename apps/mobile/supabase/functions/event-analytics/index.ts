@@ -31,6 +31,8 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 
+import { readAllRows } from "../_shared/read-all-rows.ts";
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
@@ -89,14 +91,29 @@ Deno.serve(async (req: Request) => {
       if (!coOrg) return errorResponse("Not your event", 403);
     }
 
+    // Summary and exports must see the whole event, not PostgREST's first
+    // response page. Cursor on the unique row id; never return a partial read.
+    const readEventRows = async (table: string, columns: string, goingOnly = false) => {
+      try {
+        const data = await readAllRows(() => {
+          let query = supabase.from(table).select(columns).eq("event_id", eventIdNum);
+          if (goingOnly) query = query.eq("status", "going");
+          return query;
+        });
+        return { data, error: null };
+      } catch (error) {
+        return { data: null, error };
+      }
+    };
+
+    const issueOrder = (a: any, b: any) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || String(a.id).localeCompare(String(b.id));
+
     // ── action: attendees ────────────────────────────────────
     // Returns the flat attendee list for CSV export. Joined with the
     // user + ticket_type tables so the host gets human-readable rows
     // without an N+1 client-side merge.
     if (action === "attendees") {
-      const { data: attendeeRows, error: attendeeErr } = await supabase
-        .from("tickets")
-        .select(
+      const { data: attendeeRows, error: attendeeErr } = await readEventRows("tickets",
           `
           id,
           status,
@@ -107,9 +124,7 @@ Deno.serve(async (req: Request) => {
           ticket_type:ticket_types(name, price_cents),
           buyer:users!tickets_user_id_fkey(username, email, first_name, last_name)
         `,
-        )
-        .eq("event_id", eventIdNum)
-        .order("created_at", { ascending: true });
+        );
 
       if (attendeeErr) {
         // Fall back to a narrower select if the join shape is missing
@@ -118,13 +133,8 @@ Deno.serve(async (req: Request) => {
           "[event-analytics] attendees join failed, retrying narrow select:",
           attendeeErr,
         );
-        const { data: narrow, error: narrowErr } = await supabase
-          .from("tickets")
-          .select(
-            "id, user_id, status, purchase_amount_cents, checked_in_at, created_at, ticket_type_id, guest_email",
-          )
-          .eq("event_id", eventIdNum)
-          .order("created_at", { ascending: true });
+        const { data: narrow, error: narrowErr } = await readEventRows("tickets",
+          "id, user_id, status, purchase_amount_cents, checked_in_at, created_at, ticket_type_id, guest_email");
         if (narrowErr) {
           console.error("[event-analytics] attendees narrow select:", narrowErr);
           return errorResponse("Could not fetch attendees", 500);
@@ -133,7 +143,7 @@ Deno.serve(async (req: Request) => {
           ok: true,
           eventId: String(eventIdNum),
           title: event.title || "",
-          attendees: (narrow || []).map((t: any) => ({
+          attendees: (narrow || []).sort(issueOrder).map((t: any) => ({
             ticketId: String(t.id),
             buyerUsername: null,
             buyerEmail: t.guest_email ?? null,
@@ -148,7 +158,7 @@ Deno.serve(async (req: Request) => {
         });
       }
 
-      const attendees = (attendeeRows || []).map((t: any) => {
+      const attendees = (attendeeRows || []).sort(issueOrder).map((t: any) => {
         const buyer = Array.isArray(t.buyer) ? t.buyer[0] : t.buyer;
         const tier = Array.isArray(t.ticket_type)
           ? t.ticket_type[0]
@@ -196,22 +206,9 @@ Deno.serve(async (req: Request) => {
         )
         .eq("event_id", eventIdNum)
         .maybeSingle(),
-      supabase
-        .from("tickets")
-        .select("id, user_id, ticket_type_id, status, checked_in_at, purchase_amount_cents")
-        .eq("event_id", eventIdNum),
-      supabase
-        .from("event_rsvps")
-        .select("user_id,status")
-        .eq("event_id", eventIdNum)
-        .eq("status", "going"),
-      supabase
-        .from("ticket_types")
-        .select(
-          "id, name, price_cents, quantity_total, quantity_sold, is_active",
-        )
-        .eq("event_id", eventIdNum)
-        .order("price_cents", { ascending: true }),
+      readEventRows("tickets", "id, user_id, ticket_type_id, status, checked_in_at, purchase_amount_cents"),
+      readEventRows("event_rsvps", "id,user_id,status", true),
+      readEventRows("ticket_types", "id, name, price_cents, quantity_total, quantity_sold, is_active"),
       supabase
         .from("promo_codes")
         .select("id, code, discount_type, discount_value, uses_count, max_uses")
@@ -235,6 +232,10 @@ Deno.serve(async (req: Request) => {
       calculatedAt: financials?.calculated_at ?? null,
     };
 
+    if (financialsRes.error || tierRes.error || promoRes.error) {
+      console.error("[event-analytics] summary lookup failed");
+      return errorResponse("Event analytics unavailable", 500);
+    }
     if (ticketsErr || rsvpErr) {
       console.error("[event-analytics] attendance stats error:", ticketsErr || rsvpErr);
       return errorResponse("Attendance stats failed", 500);
@@ -252,10 +253,10 @@ Deno.serve(async (req: Request) => {
     for (const t of tickets) {
       const isCheckedIn = t.checked_in_at != null || t.status === "scanned";
       if (isCheckedIn) checkedIn++;
-      else if (t.status === "active") active++;
-      else if (t.status === "refunded") refunded++;
-      else if (t.status === "void") voidCount++;
-      else if (t.status === "transfer_pending") transferPending++;
+      if (t.status === "active" && !isCheckedIn) active++;
+      if (t.status === "refunded") refunded++;
+      if (t.status === "void") voidCount++;
+      if (t.status === "transfer_pending" && !isCheckedIn) transferPending++;
     }
     const ticketStats = {
       total: tickets.length,
@@ -299,7 +300,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const tiers = (tierRows || []).map((t: any) => {
+    const tiers = (tierRows || []).sort((a: any, b: any) => Number(a.price_cents || 0) - Number(b.price_cents || 0)).map((t: any) => {
       const quantityTotal = Number(t.quantity_total || 0);
       const quantitySold = Number(t.quantity_sold || 0);
       const remaining = Math.max(0, quantityTotal - quantitySold);

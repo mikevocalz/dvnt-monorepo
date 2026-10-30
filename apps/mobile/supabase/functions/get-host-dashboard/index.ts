@@ -22,6 +22,7 @@ import {
   corsHeaders,
   optionsResponse,
 } from "../_shared/verify-session.ts";
+import { readAllRows } from "../_shared/read-all-rows.ts";
 import { ADDON_REVENUE_SELECT, addonKeptCents } from "../_shared/addon-revenue.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -63,27 +64,29 @@ Deno.serve(async (req: Request) => {
     if (!authId) return json({ error: "Unauthorized" }, 401, req);
 
     // All events this user owns
-    const { data: events } = await supabase
+    const events = await readAllRows(() => supabase
       .from("events")
       .select(
         "id, title, start_date, end_date, cover_image_url, status, total_attendees, max_attendees",
       )
-      .eq("host_id", authId)
-      .order("start_date", { ascending: false });
+      .eq("host_id", authId));
 
-    const eventIds = (events || []).map((e: any) => e.id);
+    // Cursor order is by id; retain the dashboard's previous date ordering
+    // for draft rows before the section-specific sorts below.
+    events.sort((a: any, b: any) => String(b.start_date || "").localeCompare(String(a.start_date || "")));
+    const eventIds = events.map((e: any) => e.id);
 
-    // Aggregate ticket data across all events in one query
+    // Aggregate complete ticket data across all owned events, page by page
     let ticketAggregates: Record<
       number,
       { sold: number; scanned: number; gross_cents: number }
     > = {};
     if (eventIds.length > 0) {
-      const { data: tickets } = await supabase
+      const tickets = await readAllRows(() => supabase
         .from("tickets")
-        .select("event_id, status, purchase_amount_cents")
+        .select("id, event_id, status, checked_in_at, purchase_amount_cents")
         .in("event_id", eventIds)
-        .in("status", ["active", "scanned", "transfer_pending"]);
+        .in("status", ["active", "scanned", "transfer_pending"]));
       for (const t of tickets || []) {
         const agg =
           ticketAggregates[t.event_id] ||
@@ -93,7 +96,7 @@ Deno.serve(async (req: Request) => {
             gross_cents: 0,
           });
         agg.sold += 1;
-        if (t.status === "scanned") agg.scanned += 1;
+        if (t.status === "scanned" || t.checked_in_at != null) agg.scanned += 1;
         agg.gross_cents += Number(t.purchase_amount_cents || 0);
       }
     }
@@ -103,11 +106,10 @@ Deno.serve(async (req: Request) => {
     // counts stay tickets-only.
     let addonRows: any[] = [];
     if (eventIds.length > 0) {
-      const { data: addons, error: addonsError } = await supabase
+      const addons = await readAllRows(() => supabase
         .from("order_addons")
-        .select(ADDON_REVENUE_SELECT)
-        .in("event_id", eventIds);
-      if (addonsError) throw addonsError;
+        .select(`id, ${ADDON_REVENUE_SELECT}`)
+        .in("event_id", eventIds));
       addonRows = addons || [];
       for (const a of addonRows) {
         const agg =
@@ -183,12 +185,12 @@ Deno.serve(async (req: Request) => {
     let allTimeSold = 0;
     let allTimeScanned = 0;
     if (eventIds.length > 0) {
-      const { data: monthTickets } = await supabase
+      const monthTickets = await readAllRows(() => supabase
         .from("tickets")
-        .select("status, purchase_amount_cents, created_at")
+        .select("id, status, purchase_amount_cents, created_at")
         .in("event_id", eventIds)
         .gte("created_at", monthStart.toISOString())
-        .neq("status", "abandoned");
+        .neq("status", "abandoned"));
       for (const t of monthTickets || []) {
         monthSold += 1;
         if (t.status !== "refunded" && t.status !== "void") {
@@ -203,14 +205,14 @@ Deno.serve(async (req: Request) => {
       // All-time scan rate across past events
       const pastEventIds = past.map((p) => p.id);
       if (pastEventIds.length > 0) {
-        const { data: pastTickets } = await supabase
+        const pastTickets = await readAllRows(() => supabase
           .from("tickets")
-          .select("status")
+          .select("id, status, checked_in_at")
           .in("event_id", pastEventIds)
-          .in("status", ["scanned", "active", "transfer_pending"]);
+          .in("status", ["scanned", "active", "transfer_pending"]));
         for (const t of pastTickets || []) {
           allTimeSold += 1;
-          if (t.status === "scanned") allTimeScanned += 1;
+          if (t.status === "scanned" || t.checked_in_at != null) allTimeScanned += 1;
         }
       }
     }
