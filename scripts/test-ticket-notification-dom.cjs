@@ -19,13 +19,26 @@ const db = { from(table) {
   const q = {};
   q.select = fields => { selections.push([table, fields]); return q; };
   for (const method of ['eq', 'in', 'order', 'limit']) q[method] = () => q;
+  q.setHeader = () => q;
   q.then = (ok, fail) => Promise.resolve({ data: table === 'notifications' ? [row] : table === 'events' ? [{ id: 90, title: 'MIAMI Moonlight' }] : [], count: 1 }).then(ok, fail);
   return q;
 } };
+// Execute the verified-access helper when the privacy follow-up is present,
+// while retaining coverage on the notification fix's standalone base.
+const exportsAccess = {};
+const accessPath = path.join(ROOT, 'packages/app/lib/api/notification-access.ts');
+if (fs.existsSync(accessPath)) vm.runInNewContext(ts.transpileModule(fs.readFileSync(accessPath, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
+  exports: exportsAccess,
+  require: name => name.includes('auth/identity') ? { getCurrentUserIdSync: () => 23, getCurrentUserRow: async () => ({ id: 23, authId: 'fixture-viewer' }) }
+    : name.includes('supabase-jwt') ? { ensureSupabaseJwt: async subject => subject === 'fixture-viewer' }
+    : name.includes('session-lifecycle') ? { getSessionLifecycle: () => ({ epoch: 4, ready: true }) }
+    : name.includes('supabase/client') ? { getBridgeRequestEpoch: () => '4' } : {},
+});
 const exportsApi = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/app/lib/api/notifications.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
   exports: exportsApi, console, Date, Map, Set,
   require: name => name.includes('supabase/client') ? { supabase: db }
+    : name.includes('notification-access') ? exportsAccess
     : name.includes('auth-helper') ? { getCurrentUserIdSync: () => 23 }
     : {},
 });
