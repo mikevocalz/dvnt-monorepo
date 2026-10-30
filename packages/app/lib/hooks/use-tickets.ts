@@ -330,6 +330,9 @@ export function usePendingTransfers() {
     enabled: isAuthenticated,
     staleTime: 0,
     gcTime: GC_TIMES.standard,
+    retry: 2,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
   });
 }
 

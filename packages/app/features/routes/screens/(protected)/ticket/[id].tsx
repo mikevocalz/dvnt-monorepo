@@ -188,7 +188,7 @@ function ViewTicketScreenContent() {
 
   // ── Pending-outgoing-transfer lookup for Cancel CTA ──
   const queryClient = useQueryClient();
-  const { data: pendingTransfers } = useQuery({
+  const { data: pendingTransfers, isError: transferStatusError, refetch: retryTransferStatus } = useQuery({
     queryKey: ["ticket-transfers", "outgoing", dbTicket?.id ?? ""],
     queryFn: () => ticketsApi.getPendingTransfers(),
     enabled: !!dbTicket?.id && dbTicket?.status === "transfer_pending",
@@ -563,9 +563,13 @@ function ViewTicketScreenContent() {
               <Text
                 style={[styles.statusBannerText, { color: "#8A40CF", flex: 1 }]}
               >
-                Transfer pending — waiting for recipient to accept
+                {transferStatusError ? "Could not refresh transfer status" : "Transfer pending — waiting for recipient to accept"}
               </Text>
-              {outgoingTransfer ? (
+              {transferStatusError ? (
+                <Pressable onPress={() => retryTransferStatus()} accessibilityRole="button" hitSlop={10}>
+                  <Text style={{ color: "#C084FC", fontSize: 12, fontWeight: "700" }}>Retry transfer status</Text>
+                </Pressable>
+              ) : outgoingTransfer ? (
                 <Pressable
                   onPress={handleCancelTransfer}
                   disabled={cancelingTransfer}

@@ -78,6 +78,7 @@ import type {
 } from "@dvnt/app/lib/stores/ticket-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useSearchUsers } from "@dvnt/app/lib/hooks/use-search";
+import { confirmPendingTransfer } from "@dvnt/app/lib/tickets/transfer-cache";
 import { qk } from "@dvnt/app/lib/query/keys";
 import { useEventRealtime } from "@dvnt/app/lib/hooks/use-event-realtime";
 import { useSetAttendeeName, useTransferSender } from "@dvnt/app/lib/hooks/use-tickets";
@@ -239,7 +240,7 @@ export function TicketDetailScreen() {
   useEffect(() => {
     resetUI();
     return () => resetUI();
-  }, [routeId, resetUI]);
+  }, [routeId, viewerId, resetUI]);
 
   // ── Generate QR data url from the token (async → Zustand field) ──
   const qrToken = ticket?.qrToken || "";
@@ -305,7 +306,7 @@ export function TicketDetailScreen() {
   });
 
   // ── Pending outgoing transfer (for Cancel CTA) ──
-  const { data: pendingTransfers } = useQuery({
+  const { data: pendingTransfers, isError: transferStatusError, refetch: retryTransferStatus } = useQuery({
     queryKey: ["ticket-transfers", "outgoing", dbTicket?.id ?? ""],
     queryFn: () => ticketsApi.getPendingTransfers(),
     enabled: !!dbTicket?.id && dbTicket?.status === "transfer_pending",
@@ -470,30 +471,72 @@ export function TicketDetailScreen() {
     useSearchUsers(transferQuery);
   const transferResults: any[] = transferSearchData?.docs ?? [];
 
+  const transferInFlight = useRef(false);
+  const transferScope = useRef<object | null>(null);
+  useEffect(() => {
+    transferScope.current = {};
+    return () => {
+      transferScope.current = null;
+    };
+  }, [ticket?.id, viewerId]);
+
   const handleTransferToUser = useCallback(
     async (recipientUsername: string) => {
-      if (!recipientUsername || !ticket) return;
-      setShowTransferModal(false);
-      setTransferState("loading");
-      const result = await ticketsApi.initiateTransfer(
-        ticket.id,
-        recipientUsername,
-      );
-      if (result.error) {
-        setTransferState("error");
-        showToast("error", "Transfer Failed", result.error);
-        setTimeout(() => setTransferState("idle"), 3000);
-      } else {
-        setTransferState("success");
-        showToast(
-          "success",
-          "Transfer Initiated",
-          `Waiting for @${recipientUsername} to accept (expires in 24h)`,
+      if (!recipientUsername || !ticket || transferInFlight.current) return;
+      transferInFlight.current = true;
+      // Supersede any previous attempt's delayed UI reset.
+      const scope = {};
+      transferScope.current = scope;
+      const isCurrent = () => scope !== null && transferScope.current === scope;
+      try {
+        setShowTransferModal(false);
+        setTransferState("loading");
+        const result = await ticketsApi.initiateTransfer(
+          ticket.id,
+          recipientUsername,
         );
-        await queryClient.invalidateQueries({
-          queryKey: qk.tickets.forEvent(viewerId, eventId),
-        });
-        setTimeout(() => setTransferState("idle"), 3000);
+        if (result.transfer_id && !result.error) {
+          await confirmPendingTransfer(
+            queryClient,
+            viewerId,
+            ticket.id,
+            eventId,
+          );
+        }
+        if (!isCurrent()) return;
+        if (result.error || !result.transfer_id) {
+          setTransferState("error");
+          showToast(
+            "error",
+            "Transfer Failed",
+            result.error ??
+              "Transfer could not be confirmed. Refresh your tickets before trying again.",
+          );
+          setTimeout(() => {
+            if (isCurrent()) setTransferState("idle");
+          }, 3000);
+        } else {
+          setTransferState("success");
+          showToast(
+            "success",
+            "Transfer Initiated",
+            `Waiting for @${recipientUsername} to accept (expires in 24h)`,
+          );
+          setTimeout(() => {
+            if (isCurrent()) setTransferState("idle");
+          }, 3000);
+        }
+      } catch {
+        if (isCurrent()) {
+          setTransferState("error");
+          showToast(
+            "error",
+            "Transfer Failed",
+            "Transfer could not be confirmed. Refresh your tickets before trying again.",
+          );
+        }
+      } finally {
+        transferInFlight.current = false;
       }
     },
     [
@@ -503,6 +546,7 @@ export function TicketDetailScreen() {
       showToast,
       queryClient,
       eventId,
+      viewerId,
     ],
   );
 
@@ -763,9 +807,11 @@ export function TicketDetailScreen() {
           >
             <Shield size={16} color="#8A40CF" />
             <span className="flex-1 text-[13px] font-semibold text-[#C084FC]">
-              Transfer pending — waiting for recipient to accept
+              {transferStatusError ? "Could not refresh transfer status" : "Transfer pending — waiting for recipient to accept"}
             </span>
-            {outgoingTransfer ? (
+            {transferStatusError ? (
+              <button onClick={() => retryTransferStatus()} className="text-xs font-semibold text-[#C084FC]">Retry transfer status</button>
+            ) : outgoingTransfer ? (
               <button
                 onClick={handleCancelTransfer}
                 disabled={cancelingTransfer}

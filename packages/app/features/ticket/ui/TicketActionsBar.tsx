@@ -4,12 +4,7 @@
  * Loading, success, error states for each action.
  */
 
-import React, {
-  memo,
-  useCallback,
-  useRef,
-  useState,
-} from "react";
+import React, { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -23,6 +18,9 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTicketViewerId } from "@dvnt/app/lib/hooks/use-tickets";
+import { confirmPendingTransfer } from "@dvnt/app/lib/tickets/transfer-cache";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CalendarPlus, Share2, Check, Send } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
@@ -55,6 +53,17 @@ export const TicketActionsBar = memo(function TicketActionsBar({
   style,
 }: TicketActionsBarProps) {
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
+  const viewerId = useTicketViewerId();
+  const transferInFlight = useRef(false);
+  const transferScope = useRef<object | null>(null);
+  useEffect(() => {
+    transferScope.current = {};
+    return () => {
+      transferScope.current = null;
+    };
+  }, [ticket?.id, viewerId]);
+
   const showToast = useUIStore((s) => s.showToast);
   const tier = ticket.tier || "ga";
   const accent = TIER_ACCENT[tier];
@@ -119,43 +128,82 @@ export const TicketActionsBar = memo(function TicketActionsBar({
   const transferInputRef = useRef<TextInput>(null);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferQuery, setTransferQuery] = useState("");
+  useEffect(() => {
+    setShowTransferModal(false);
+    setTransferQuery("");
+    setTransferState("idle");
+  }, [ticket.id, viewerId]);
   const { data: transferSearchData, isFetching: isSearchingUsers } =
     useSearchUsers(transferQuery);
   const transferResults = transferSearchData?.docs ?? [];
 
   const handleTransfer = useCallback(() => {
     if (transferState === "loading") return;
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
-      () => {},
-    );
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setTransferQuery("");
     setShowTransferModal(true);
   }, [transferState, ticket.id]);
 
   const handleTransferToUser = useCallback(
     async (recipientUsername: string) => {
-      if (!recipientUsername) return;
-      setShowTransferModal(false);
-      setTransferState("loading");
-      const result = await ticketsApi.initiateTransfer(
-        ticket.id,
-        recipientUsername,
-      );
-      if (result.error) {
-        setTransferState("error");
-        showToast("error", "Transfer Failed", result.error);
-        setTimeout(() => setTransferState("idle"), 3000);
-      } else {
-        setTransferState("success");
-        showToast(
-          "success",
-          "Transfer Initiated",
-          `Waiting for @${recipientUsername} to accept (expires in 24h)`,
+      if (!recipientUsername || transferInFlight.current) return;
+      transferInFlight.current = true;
+      // Supersede any previous attempt's delayed UI reset.
+      const scope = {};
+      transferScope.current = scope;
+      const isCurrent = () => scope !== null && transferScope.current === scope;
+      try {
+        setShowTransferModal(false);
+        setTransferState("loading");
+        const result = await ticketsApi.initiateTransfer(
+          ticket.id,
+          recipientUsername,
         );
-        setTimeout(() => setTransferState("idle"), 3000);
+        if (result.transfer_id && !result.error) {
+          await confirmPendingTransfer(
+            queryClient,
+            viewerId,
+            ticket.id,
+            String(ticket.eventId),
+          );
+        }
+        if (!isCurrent()) return;
+        if (result.error || !result.transfer_id) {
+          setTransferState("error");
+          showToast(
+            "error",
+            "Transfer Failed",
+            result.error ??
+              "Transfer could not be confirmed. Refresh your tickets before trying again.",
+          );
+          setTimeout(() => {
+            if (isCurrent()) setTransferState("idle");
+          }, 3000);
+        } else {
+          setTransferState("success");
+          showToast(
+            "success",
+            "Transfer Initiated",
+            `Waiting for @${recipientUsername} to accept (expires in 24h)`,
+          );
+          setTimeout(() => {
+            if (isCurrent()) setTransferState("idle");
+          }, 3000);
+        }
+      } catch {
+        if (isCurrent()) {
+          setTransferState("error");
+          showToast(
+            "error",
+            "Transfer Failed",
+            "Transfer could not be confirmed. Refresh your tickets before trying again.",
+          );
+        }
+      } finally {
+        transferInFlight.current = false;
       }
     },
-    [ticket, showToast],
+    [ticket, showToast, queryClient, viewerId],
   );
 
   if (!isActive) return null;
