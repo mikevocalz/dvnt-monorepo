@@ -36,6 +36,8 @@
 
 import { useMemo, useRef, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { CompCancelModal } from "./ui/comp-cancel-modal";
+import { useCompCancelStore } from "@dvnt/app/lib/stores/comp-cancel-store";
 import { CompTicketsModal } from "./ui/comp-tickets-modal";
 import { canCompTickets } from "@dvnt/app/lib/tickets/comp-recipients";
 import { CardLink } from "@dvnt/app/components/ui/card-link.web";
@@ -145,7 +147,8 @@ function AttendeeRow({ item }: { item: TicketRecord }) {
     .toUpperCase();
   const planKey = item.membership_tier?.planKey ?? null;
   // `free` carries no badge — only a paid tier is worth a chip.
-  const planLabel = planKey && planKey !== "free" ? planLabelFor(planKey) : null;
+  const planLabel =
+    planKey && planKey !== "free" ? planLabelFor(planKey) : null;
   const planColor = planAccent(planKey);
 
   return (
@@ -226,7 +229,12 @@ export function AttendeesScreen() {
   const [searchDebounced] = useDebouncedValue(searchInput, { wait: 200 });
 
   const query = useInfiniteQuery({
-    queryKey: ["event-attendees", eventId, statusFilter, searchDebounced.trim()],
+    queryKey: [
+      "event-attendees",
+      eventId,
+      statusFilter,
+      searchDebounced.trim(),
+    ],
     queryFn: ({ pageParam = 1 }) =>
       ticketsApi.getEventTicketsPaginated(String(eventId), {
         page: pageParam as number,
@@ -397,6 +405,17 @@ export function AttendeesScreen() {
                     }}
                   >
                     <AttendeeRow item={item} />
+                    {role === "owner" && item.organizer_free_cancel ? (
+                      <button
+                        type="button"
+                        onClick={() => useCompCancelStore.getState().open(item)}
+                        className="mt-1 rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-white/5"
+                      >
+                        {item.organizer_free_cancel.eligible
+                          ? "Cancel free ticket"
+                          : "Review cancellation eligibility"}
+                      </button>
+                    ) : null}
                   </div>
                 );
               })}
@@ -411,6 +430,7 @@ export function AttendeesScreen() {
         )}
       </main>
 
+      {role === "owner" ? <CompCancelModal eventId={eventId} /> : null}
       {/* Mounted only for a host who may actually comp, so nobody else's
           browser even asks for the tier list. */}
       {canComp ? (
