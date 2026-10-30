@@ -16,7 +16,8 @@ permissions:
   contents: read
 jobs:
   notification-contract:
-    runs-on: ubuntu-latest
+    # Pinned Playwright 1.56.1 cannot install Chromium on ubuntu26.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

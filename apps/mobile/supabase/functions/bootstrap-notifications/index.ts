@@ -16,7 +16,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verifySession } from "../_shared/verify-session.ts";
+import { verifySession, corsHeaders } from "../_shared/verify-session.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -39,9 +39,12 @@ Deno.serve(async (req: Request) => {
   }
 
   const t0 = Date.now();
+  const responseHeaders = { ...corsHeaders(req), "Content-Type": "application/json", "Cache-Control": "no-store" };
 
   try {
-    const { limit = 50 } = await req.json();
+    const body = await req.json();
+    const limit = typeof body.limit === "number" && Number.isInteger(body.limit)
+      ? Math.max(1, Math.min(100, body.limit)) : 50;
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -55,7 +58,7 @@ Deno.serve(async (req: Request) => {
     if (!sessionUserId) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
-        headers: { "Content-Type": "application/json" },
+        headers: responseHeaders,
       });
     }
 
@@ -71,7 +74,7 @@ Deno.serve(async (req: Request) => {
     if (!intUserId) {
       return new Response(JSON.stringify({ error: "User not found" }), {
         status: 404,
-        headers: { "Content-Type": "application/json" },
+        headers: responseHeaders,
       });
     }
 
@@ -83,7 +86,7 @@ Deno.serve(async (req: Request) => {
         .from("notifications")
         .select(
           `
-          id, type, created_at, read_at, content,
+          id, type, created_at, read_at, entity_payload,
           entity_type, entity_id, actor_id,
           sender:users!notifications_actor_id_fk(
             id, username, avatar:avatar_id(url)
@@ -102,6 +105,13 @@ Deno.serve(async (req: Request) => {
         .is("read_at", null),
     ]);
 
+    if (notificationsResult.error || unreadCountResult.error) {
+      // Never cache a permission/schema/network failure as an empty private feed.
+      console.warn("[bootstrap-notifications] private feed unavailable");
+      return new Response(JSON.stringify({ error: "Could not load private activity. Please retry." }), {
+        status: 503, headers: responseHeaders,
+      });
+    }
     const notifications = notificationsResult.data || [];
     const isCommentActivity = (notification: any) =>
       notification.type === "comment" || notification.type === "mention";
@@ -338,7 +348,8 @@ Deno.serve(async (req: Request) => {
           n.entity_type === "comment" && n.entity_id
             ? String(n.entity_id)
             : commentContext?.commentId,
-        commentText: commentContext?.content || n.content || undefined,
+        commentText: commentContext?.content || undefined,
+        payload: n.entity_payload ?? null,
         event:
           (n.type === "event_invite" || n.type === "event_update") && n.entity_id
             ? {
@@ -367,16 +378,13 @@ Deno.serve(async (req: Request) => {
 
     return new Response(JSON.stringify(response), {
       status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "private, max-age=15",
-      },
+      headers: responseHeaders,
     });
   } catch (err: any) {
-    console.error("[bootstrap-notifications] Error:", err);
+    console.error("[bootstrap-notifications] request unavailable");
     return new Response(
-      JSON.stringify({ error: err.message || "Internal error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
+      JSON.stringify({ error: "Could not load private activity. Please retry." }),
+      { status: 500, headers: responseHeaders },
     );
   }
 });

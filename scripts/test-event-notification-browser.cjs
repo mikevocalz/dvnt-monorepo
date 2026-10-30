@@ -11,6 +11,9 @@ let chromium;
 try { ({ chromium } = require('playwright')); } catch { ({ chromium } = require('@playwright/test')); }
 const ROOT = path.resolve(__dirname, '..');
 const selections = [];
+const notificationFilters = [];
+const bridgeSubjects = [];
+const notificationHeaders = [];
 const row = {
   id: 1, type: 'event_broadcast', entity_type: 'event', entity_id: '90', actor_id: 613,
   actor: { id: 613, username: 'deviantevents', first_name: 'Deviant Events', last_name: null },
@@ -20,14 +23,25 @@ const row = {
 const db = { from(table) {
   const q = {};
   q.select = fields => { selections.push([table, fields]); return q; };
-  for (const method of ['eq', 'in', 'order', 'limit']) q[method] = () => q;
+  for (const method of ['in', 'order', 'limit']) q[method] = () => q;
+  q.eq = (key, value) => { if (table === 'notifications') notificationFilters.push([key, value]); return q; };
+  q.setHeader = (key, value) => { notificationHeaders.push([key, value]); return q; };
   q.then = (ok, fail) => Promise.resolve({ data: table === 'notifications' ? [row] : table === 'events' ? [{ id: 90, title: 'MIAMI Moonlight' }] : [], count: 1 }).then(ok, fail);
   return q;
 } };
+const exportsAccess = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/app/lib/api/notification-access.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
+  exports: exportsAccess,
+  require: name => name.includes('auth/identity') ? { getCurrentUserIdSync: () => 23, getCurrentUserRow: async () => ({ id: 23, authId: 'fixture-notification-viewer' }) }
+    : name.includes('supabase-jwt') ? { ensureSupabaseJwt: async subject => { bridgeSubjects.push(subject); return subject === 'fixture-notification-viewer'; } }
+    : name.includes('session-lifecycle') ? { getSessionLifecycle: () => ({ epoch: 4, ready: true }) }
+    : name.includes('supabase/client') ? { getBridgeRequestEpoch: () => '4' } : {},
+});
 const exportsApi = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/app/lib/api/notifications.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
   exports: exportsApi, console, Date, Map, Set,
   require: name => name.includes('supabase/client') ? { supabase: db }
+    : name.includes('notification-access') ? exportsAccess
     : name.includes('auth-helper') ? { getCurrentUserIdSync: () => 23 }
     : {},
 });
@@ -72,6 +86,9 @@ const boundaries = {
 (async () => {
   assert.ok(fs.existsSync(path.join(ROOT, 'apps/web/src/app/(frontend)/feed/events/[id]/page.tsx')));
   const dto = (await exportsApi.notificationsApiClient.getNotifications()).docs[0];
+  assert.deepEqual(bridgeSubjects, ['fixture-notification-viewer']);
+  assert.deepEqual(notificationFilters, [['recipient_id', 23]]);
+  assert.deepEqual(notificationHeaders, [['x-dvnt-bridge-epoch', '4']]);
   assert.equal(dto.sender.displayName, 'Deviant Events');
   assert.equal(dto.sender.username, 'deviantevents');
   assert.ok(selections.find(([table, fields]) => table === 'notifications' && fields.includes('first_name') && fields.includes('last_name')));

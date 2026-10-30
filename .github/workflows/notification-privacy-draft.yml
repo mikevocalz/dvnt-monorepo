@@ -1,0 +1,38 @@
+name: Notification privacy draft (isolated SQL only)
+on:
+  pull_request:
+    paths:
+      - 'docs/security/notification-privacy-*'
+      - 'docs/security/users-identity-write-prerequisite.sql'
+      - 'apps/mobile/supabase/functions/auth-sync/**'
+      - 'scripts/test-notification-privacy-sql.cjs'
+      - '.github/workflows/notification-privacy-draft.yml'
+      - 'packages/supabase/src/**'
+      - 'packages/app/lib/api/notification*'
+      - 'packages/app/lib/api/bootstrap.ts'
+      - 'packages/app/lib/stores/activity-store*'
+      - 'packages/app/lib/hooks/use-bootstrap-notifications.ts'
+      - 'apps/mobile/supabase/functions/bootstrap-notifications/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-policy-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --prefix "$RUNNER_TEMP/notification-privacy" --ignore-scripts --no-audit --no-fund --no-save pg@8.21.0 typescript@5.9.2
+      - name: Baseline and proposed policy on disposable socket-only PostgreSQL
+        env:
+          NODE_PATH: ${{ runner.temp }}/notification-privacy/node_modules
+        run: node --test scripts/test-notification-privacy-sql.cjs
+      - name: Private notification client and bootstrap contracts
+        env:
+          NODE_PATH: ${{ runner.temp }}/notification-privacy/node_modules
+        run: node --test packages/supabase/src/bridge-transport.test.ts packages/supabase/src/realtime-auth.test.ts packages/app/lib/api/notification-access.test.cjs packages/app/lib/stores/activity-realtime-privacy.test.cjs apps/mobile/supabase/functions/bootstrap-notifications/privacy.test.cjs apps/mobile/supabase/functions/auth-sync/identity-link.test.cjs

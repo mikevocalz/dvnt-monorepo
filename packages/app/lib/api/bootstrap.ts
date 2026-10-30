@@ -110,6 +110,7 @@ export interface BootstrapNotificationsResponse {
     entityId?: string;
     post?: { id: string; thumbnailUrl: string };
     event?: { id: string; title: string };
+    payload?: { title?: string; body?: string; summary?: string; changes?: string[]; ticket_id?: string } | null;
     commentText?: string;
     postId?: string;
     commentId?: string;

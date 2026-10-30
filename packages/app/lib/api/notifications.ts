@@ -2,6 +2,7 @@ import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import { getCurrentUserIdSync } from "./auth-helper";
 import { requireBetterAuthToken } from "../auth/identity";
+import { requireNotificationAccess } from "./notification-access";
 
 // Type exports for activity-store compatibility
 export type NotificationType =
@@ -435,13 +436,9 @@ export const notificationsApi = {
    */
   async getNotifications(limit: number = 50) {
     try {
-      const userId = getCurrentUserIdSync();
-      // Throw, never return an empty page. The activity query is keyed on the
-      // auth store's id while this reads the identity module's, so on a cold
-      // start one can be ready a tick before the other. Returning `[]` there
-      // let TanStack cache "no notifications" into MMKV and the list rendered
-      // its empty state over rows that exist.
-      if (!userId) throw new Error("notifications: no authenticated user yet");
+      const access = await requireNotificationAccess();
+      const { userId } = access;
+      access.assertCurrent();
 
       const { data, error, count } = await supabase
         .from("notifications")
@@ -467,7 +464,10 @@ export const notificationsApi = {
         )
         .eq("recipient_id", userId)
         .order("created_at", { ascending: false })
-        .limit(limit);
+        .limit(limit)
+        .setHeader("x-dvnt-bridge-epoch", access.requestEpoch);
+
+      access.assertCurrent();
 
       if (error) {
         console.error(
@@ -761,6 +761,7 @@ export const notificationsApi = {
         };
       });
 
+      access.assertCurrent();
       return { docs, totalDocs: count || 0 };
     } catch (error) {
       console.error("[Notifications] getNotifications error:", error);
@@ -819,12 +820,22 @@ export const notificationsApi = {
    */
   async markAsRead(notificationId: string) {
     try {
-      const { error } = await supabase
+      if (!/^[1-9]\d*$/.test(notificationId) || !Number.isSafeInteger(Number(notificationId))) {
+        throw new Error("Invalid notification.");
+      }
+      const access = await requireNotificationAccess();
+      access.assertCurrent();
+      const { data, error } = await supabase
         .from("notifications")
         .update({ read_at: new Date().toISOString() })
-        .eq("id", parseInt(notificationId));
+        .eq("id", Number(notificationId))
+        .eq("recipient_id", access.userId)
+        .select("id")
+        .setHeader("x-dvnt-bridge-epoch", access.requestEpoch);
 
+      access.assertCurrent();
       if (error) throw error;
+      if (!data?.length) throw new Error("This notification is unavailable for your account.");
       return { success: true };
     } catch (error) {
       console.error("[Notifications] markAsRead error:", error);
@@ -837,14 +848,18 @@ export const notificationsApi = {
    */
   async markAllAsRead() {
     try {
-      const userId = getCurrentUserIdSync();
-      if (!userId) throw new Error("Not authenticated");
+      const access = await requireNotificationAccess();
+      const { userId } = access;
+      access.assertCurrent();
 
       const { error } = await supabase
         .from("notifications")
         .update({ read_at: new Date().toISOString() })
         .eq("recipient_id", userId)
-        .is("read_at", null);
+        .is("read_at", null)
+        .setHeader("x-dvnt-bridge-epoch", access.requestEpoch);
+
+      access.assertCurrent();
 
       if (error) throw error;
       return { success: true };
@@ -866,19 +881,22 @@ export const notificationsApi = {
    */
   async getBadges() {
     try {
-      const userId = getCurrentUserIdSync();
-      if (!userId) return { unread: 0, total: 0 };
-
-      const { count: unread } = await supabase
+      const access = await requireNotificationAccess();
+      access.assertCurrent();
+      const { count: unread, error } = await supabase
         .from("notifications")
         .select("*", { count: "exact", head: true })
-        .eq("recipient_id", userId)
-        .is("read_at", null);
+        .eq("recipient_id", access.userId)
+        .is("read_at", null)
+        .setHeader("x-dvnt-bridge-epoch", access.requestEpoch);
 
-      return { unread: unread || 0, total: 0 };
+      access.assertCurrent();
+      if (error) throw error;
+      if (unread == null) throw new Error("Could not load your notification count. Please try again.");
+      return { unread, total: 0 };
     } catch (error) {
       console.error("[Notifications] getBadges error:", error);
-      return { unread: 0, total: 0 };
+      throw error;
     }
   },
 };
