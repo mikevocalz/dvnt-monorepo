@@ -56,12 +56,16 @@ import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-sto
 interface OrganizerUIState {
   roster: TicketRecord[];
   isLoading: boolean;
+  loadError: boolean;
+  loadedEventId: string;
   isRefreshing: boolean;
   isDownloading: boolean;
   isSyncing: boolean;
   refundingTicketId: string | null;
   setRoster: (roster: TicketRecord[]) => void;
   setLoading: (v: boolean) => void;
+  setLoadError: (v: boolean) => void;
+  setLoadedEventId: (v: string) => void;
   setRefreshing: (v: boolean) => void;
   setDownloading: (v: boolean) => void;
   setSyncing: (v: boolean) => void;
@@ -72,12 +76,16 @@ interface OrganizerUIState {
 const useOrganizerUIStore = create<OrganizerUIState>((set) => ({
   roster: [],
   isLoading: true,
+  loadError: false,
+  loadedEventId: "",
   isRefreshing: false,
   isDownloading: false,
   isSyncing: false,
   refundingTicketId: null,
   setRoster: (roster) => set({ roster }),
   setLoading: (isLoading) => set({ isLoading }),
+  setLoadError: (loadError) => set({ loadError }),
+  setLoadedEventId: (loadedEventId) => set({ loadedEventId }),
   setRefreshing: (isRefreshing) => set({ isRefreshing }),
   setDownloading: (isDownloading) => set({ isDownloading }),
   setSyncing: (isSyncing) => set({ isSyncing }),
@@ -86,6 +94,8 @@ const useOrganizerUIStore = create<OrganizerUIState>((set) => ({
     set({
       roster: [],
       isLoading: true,
+      loadError: false,
+      loadedEventId: "",
       isRefreshing: false,
       isDownloading: false,
       isSyncing: false,
@@ -131,7 +141,7 @@ function StatCard({
   label,
   color,
 }: {
-  value: number;
+  value: number | string;
   label: string;
   color: string;
 }) {
@@ -274,6 +284,12 @@ export function EventOrganizerScreen() {
   // Local UI flags (Zustand)
   const roster = useOrganizerUIStore((s) => s.roster);
   const isLoading = useOrganizerUIStore((s) => s.isLoading);
+  const loadError = useOrganizerUIStore((s) => s.loadError);
+  const loadedEventId = useOrganizerUIStore((s) => s.loadedEventId);
+  const setLoadError = useOrganizerUIStore((s) => s.setLoadError);
+  const setLoadedEventId = useOrganizerUIStore((s) => s.setLoadedEventId);
+  const requestSequence = useRef(0);
+  const countsKnown = requestSequence.current > 0 && !isLoading && !loadError && loadedEventId === eventId;
   const isRefreshing = useOrganizerUIStore((s) => s.isRefreshing);
   const isDownloading = useOrganizerUIStore((s) => s.isDownloading);
   const isSyncing = useOrganizerUIStore((s) => s.isSyncing);
@@ -286,20 +302,30 @@ export function EventOrganizerScreen() {
   const setRefundingTicketId = useOrganizerUIStore((s) => s.setRefundingTicketId);
 
   const loadTickets = useCallback(async () => {
+    const request = ++requestSequence.current;
+    setLoading(true);
+    setLoadError(false);
     try {
       const result = await tickets.getEventTickets(eventId);
+      if (request !== requestSequence.current) return;
       setRoster(result || []);
+      setLoadedEventId(eventId);
     } catch (error: any) {
+      if (request !== requestSequence.current) return;
+      setLoadError(true);
       console.error("[Organizer] Load tickets error:", error);
       showToast("error", "Error", error?.error || "Failed to load tickets");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (request === requestSequence.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [eventId, setRoster, setLoading, setRefreshing, showToast]);
+  }, [eventId, setRoster, setLoading, setLoadError, setLoadedEventId, setRefreshing, showToast]);
 
   useEffect(() => {
     if (eventId) loadTickets();
+    return () => { requestSequence.current++; };
   }, [eventId, loadTickets]);
 
   const handleRefresh = useCallback(async () => {
@@ -437,11 +463,11 @@ export function EventOrganizerScreen() {
       <main className="mx-auto w-full max-w-2xl px-4">
         {/* Stats bar */}
         <div className="flex items-center gap-3 border-b border-white/8 py-4">
-          <StatCard value={totalCount} label="Issued tickets" color="#fff" />
+          <StatCard value={countsKnown ? totalCount : "—"} label="Issued tickets" color="#fff" />
           <span className="h-10 w-px bg-white/10" />
-          <StatCard value={checkedInCount} label="Checked In" color="#22c55e" />
+          <StatCard value={countsKnown ? checkedInCount : "—"} label="Checked In" color="#22c55e" />
           <span className="h-10 w-px bg-white/10" />
-          <StatCard value={remainingCount} label="Awaiting check-in" color="#3FDCFF" />
+          <StatCard value={countsKnown ? remainingCount : "—"} label="Awaiting check-in" color="#3FDCFF" />
         </div>
 
         {/* Actions */}
@@ -572,7 +598,13 @@ export function EventOrganizerScreen() {
         </div>
 
         {/* Roster */}
-        {isLoading ? (
+        {loadError ? (
+          <div role="alert" className="py-12 text-center">
+            <p className="font-semibold">Ticket counts unavailable</p>
+            <p className="mt-2 text-sm text-white/60">We couldn't load the complete roster. Please try again.</p>
+            <button onClick={handleRefresh} className="mt-4 rounded-full bg-cyan-400 px-6 py-2 font-semibold text-black">Retry</button>
+          </div>
+        ) : !countsKnown ? (
           <div className="flex flex-col gap-3 pb-12">
             {Array.from({ length: 4 }).map((_, i) => (
               <div

@@ -17,6 +17,7 @@ on:
       - 'packages/app/lib/stores/activity-store.ts'
       - 'scripts/test-ticket-notification-*.cjs'
       - 'scripts/test-ticket-self-service-dom.cjs'
+      - 'scripts/test-organizer-counts-dom.cjs'
       - 'scripts/test-ticket-transfer-cache.cjs'
       - 'packages/app/features/ticket/ui/TicketActionsBar.tsx'
       - 'scripts/test-order-refund-dom.cjs'
