@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('typescript');
-function harness({ actor='host', emailFails=false, issuanceFailure=false, notificationError=false, notificationThrows=false, tokenLookupThrows=false }={}) {
- let handler;const calls=[],emails=[],stamps=[],notifications=[],warnings=[];
+function harness({ actor='host', emailFails=false, issuanceFailure=false, notificationError=false, notificationThrows=false, tokenLookupThrows=false, guestRpcError=false, phoneRpcError=false, receiptThrows=false }={}) {
+ let handler;const calls=[],emails=[],stamps=[],notifications=[],warnings=[],receipts=[];
  const db={from(table){
    const filters={};let patch;
    const q={select:()=>q,eq:(k,v)=>{filters[k]=v;return q;},in:(k,v)=>{filters[k]=v;return q;},
@@ -22,8 +22,10 @@ function harness({ actor='host', emailFails=false, issuanceFailure=false, notifi
    calls.push({name,args});
    if(issuanceFailure)return {data:{ok:false,error:'Tier capacity would be exceeded',would_exceed:true,remaining:2}};
    const quantity=args.p_quantity;
-   if(name==='issue_comp_tickets_atomic')return {data:{ok:true,tickets:Array.from({length:quantity},(_,i)=>({id:`member-${i}`,user_id:'member'}))}};
-   if(name==='issue_guest_comp_tickets_atomic')return {data:{ok:true,tickets:Array.from({length:quantity},(_,i)=>({id:`email-${i}`,guest_email:'guest@example.test',guest_lookup_token:`lookup-${i}`}))}};
+   if(name==='issue_comp_tickets_with_receipts')return {data:{ok:true,receipt_ids:['member-receipt'],tickets:Array.from({length:quantity},(_,i)=>({id:`member-${i}`,user_id:'member'}))}};
+   if(name==='issue_guest_comp_tickets_with_receipts'&&guestRpcError)return {error:{code:'offline'}};
+   if(name==='issue_guest_comp_tickets_with_receipts')return {data:{ok:true,receipt_ids:['guest-receipt'],tickets:Array.from({length:quantity},(_,i)=>({id:`email-${i}`,guest_email:'guest@example.test',guest_lookup_token:`lookup-${i}`}))}};
+   if(name==='issue_guest_phone_comp_tickets_atomic'&&phoneRpcError)return {error:{code:'offline'}};
    if(name==='issue_guest_phone_comp_tickets_atomic')return {data:{ok:true,links:Array.from({length:quantity},(_,i)=>({ticket_id:`phone-${i}`,phone:'+14155550123',token:String(i).repeat(43),expires_at:'2027-01-01T00:00:00Z',reissued:false}))}};
    throw Error(name);
   }};
@@ -35,22 +37,23 @@ function harness({ actor='host', emailFails=false, issuanceFailure=false, notifi
   const requireStub=name=>name.includes('supabase-js')?{createClient:()=>db}
    :name.includes('verify-session')?{verifySession:async()=>actor,corsHeaders:()=>({}),optionsResponse:()=>new Response(null,{status:204})}
    :name.includes('rate-limit')?{checkRateLimit:()=>({allowed:true})}
+   :name.includes('ticket-receipt-delivery')?{deliverTicketReceipts:async (_db,ids)=>{receipts.push([...ids]);if(receiptThrows)throw Error('offline');return ids.map(id=>({receipt_id:id,recipient:id==='member-receipt'?'member':'guest@example.test',status:emailFails?'failed':'delivered',...(emailFails?{error:'Email attempt failed; receipt remains queued.'}:{})}));}}
    :name.includes('send-resend-email')?{ticketConfirmation:p=>({payload:p}),sendResendEmail:async p=>{emails.push(p);if(emailFails)throw Error('mail failed');return 'message';}}
    :load(path.resolve(path.dirname(file),name));
   new Function('require','exports','module','Deno','console','Response','fetch',source)(requireStub,mod.exports,mod,{env:{get:()=>''},serve:fn=>{handler=fn;}},{error(){},warn:(...args)=>warnings.push(args)},Response,()=>{throw Error('Unexpected live fetch');});
   return mod.exports;
  }
  load(path.join(__dirname,'index.ts'));
- return {calls,emails,stamps,notifications,warnings,async invoke(body={}){const res=await handler(new Request('https://offline.test',{method:'POST',body:JSON.stringify({event_id:7,tier_id:'tier',recipients:['@member'],...body})}));return {status:res.status,body:await res.json()};}};
+ return {calls,emails,stamps,notifications,warnings,receipts,async invoke(body={}){const res=await handler(new Request('https://offline.test',{method:'POST',body:JSON.stringify({event_id:7,tier_id:'tier',recipients:['@member'],...body})}));return {status:res.status,body:await res.json()};}};
 }
 for(const quantity of [1,2,3])test(`quantity ${quantity} reaches each atomic RPC and sends one email containing every separate guest ticket`,async()=>{
  const h=harness();const r=await h.invoke({quantity,recipients:['@member','guest@example.test','+14155550123']});
  assert.equal(r.status,200);assert.equal(r.body.data.issued,quantity);assert.equal(r.body.data.guest_issued,quantity);assert.equal(r.body.data.phone_guest_issued,quantity);
  assert.equal(h.calls.length,3);assert.ok(h.calls.every(c=>c.args.p_quantity===quantity));
- assert.equal(h.emails.length,1);assert.equal(h.emails[0].payload.tickets.length,quantity);
- assert.equal(new Set(h.emails[0].payload.tickets.map(t=>t.lookupUrl)).size,quantity);
- assert.equal(h.stamps.length,1);assert.deepEqual(h.stamps[0].filters.id,Array.from({length:quantity},(_,i)=>`email-${i}`));
- assert.equal(r.body.data.delivery.length,1);assert.equal(r.body.data.claim_links.length,quantity);
+ assert.equal(h.emails.length,0, 'legacy direct mail path removed');
+ assert.deepEqual(h.receipts,[['member-receipt','guest-receipt']]);
+ assert.equal(r.body.data.delivery.length,2);assert.equal(r.body.data.claim_links.length,quantity);
+ assert.deepEqual(r.body.data.delivery.map(d=>d.recipient),['@member','guest@example.test']);
 });
 test('legacy request omitting quantity still targets one',async()=>{const h=harness();assert.equal((await h.invoke()).status,200);assert.equal(h.calls[0].args.p_quantity,1);});
 for(const quantity of [0,4,-1,1.5,'3',null,true,{},[]])test(`malformed/out-of-range quantity ${JSON.stringify(quantity)} is refused before issuance`,async()=>{const h=harness();assert.equal((await h.invoke({quantity})).status,400);assert.equal(h.calls.length,0);});
@@ -61,4 +64,8 @@ test('email failure reports three issued tickets but no delivery stamp',async()=
 test('member comp notification uses canonical recipient and schema-valid event route',async()=>{const h=harness();assert.equal((await h.invoke()).status,200);assert.equal(h.notifications.length,1);assert.deepEqual(h.notifications[0],{recipient_id:2,actor_id:1,type:'ticket_comped',entity_type:'event',entity_id:'7',entity_payload:{title:'Event',body:'Event — comped',tier:'GA'}});});
 test('notification insert errors are observable without failing already issued tickets or logging recipient data',async()=>{const h=harness({notificationError:true});const r=await h.invoke();assert.equal(r.status,200);assert.equal(r.body.data.issued,1);assert.equal(h.warnings.length,1);assert.ok(JSON.stringify(h.warnings).includes('test_insert_failure'));assert.ok(!JSON.stringify(h.warnings).includes('private recipient'));});
 
-for(const opt of [{notificationThrows:true},{tokenLookupThrows:true}])test(`notification transport failure preserves committed comp and guest delivery ${JSON.stringify(opt)}`,async()=>{const h=harness(opt);const r=await h.invoke({recipients:['@member','guest@example.test']});assert.equal(r.status,200);assert.equal(r.body.data.issued,1);assert.equal(r.body.data.guest_issued,1);assert.equal(h.emails.length,1);assert.equal(h.stamps.length,1);assert.equal(h.warnings.length,1);assert.ok(!JSON.stringify(h.warnings).includes('private recipient'));});
+for(const opt of [{notificationThrows:true},{tokenLookupThrows:true}])test(`notification transport failure preserves committed comp and guest delivery ${JSON.stringify(opt)}`,async()=>{const h=harness(opt);const r=await h.invoke({recipients:['@member','guest@example.test']});assert.equal(r.status,200);assert.equal(r.body.data.issued,1);assert.equal(r.body.data.guest_issued,1);assert.equal(h.emails.length,0);assert.deepEqual(h.receipts,[["member-receipt","guest-receipt"]]);assert.equal(h.warnings.length,1);assert.ok(!JSON.stringify(h.warnings).includes('private recipient'));});
+
+test('member-only comps now attempt one receipt without disclosing auth ids',async()=>{const h=harness();const r=await h.invoke({quantity:3});assert.equal(r.body.data.issued,3);assert.deepEqual(r.body.data.delivery,[{recipient:'@member',status:'delivered'}]);assert.deepEqual(h.receipts,[['member-receipt']]);});
+test('receipt transport outage never turns committed tickets into failed issuance',async()=>{const h=harness({receiptThrows:true});const r=await h.invoke();assert.equal(r.status,200);assert.equal(r.body.data.issued,1);assert.equal(r.body.data.delivery[0].status,'queued');});
+for(const option of ['guestRpcError','phoneRpcError'])test(`later issuance error preserves earlier member receipt: ${option}`,async()=>{const h=harness({[option]:true});const r=await h.invoke({recipients:['@member',option==='guestRpcError'?'guest@example.test':'+14155550123']});assert.equal(r.status,200);assert.equal(r.body.data.issued,1);assert.equal(r.body.data.skipped.length,1);assert.deepEqual(h.receipts,[['member-receipt']]);});

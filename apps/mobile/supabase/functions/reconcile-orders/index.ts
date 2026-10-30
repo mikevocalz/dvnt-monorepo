@@ -20,6 +20,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import { handleCartPaymentIntentSucceeded } from "../_shared/cart-issuance.ts";
 import { issueTicketsForCheckoutSession } from "../_shared/session-issuance.ts";
+import { deliverTicketReceipts } from "../_shared/ticket-receipt-delivery.ts";
+import { excludeReceiptManagedOrders } from "../_shared/receipt-managed-orders.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
 import { syncOrderStripeProcessingFeeSafely } from "../_shared/stripe-processing-fee.ts";
 
@@ -803,7 +805,7 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
       console.error("[reconcile] email-retry fetch error:", emailRetryError);
     }
 
-    for (const order of emailRetryOrders || []) {
+    for (const order of await excludeReceiptManagedOrders(supabase, emailRetryOrders || [])) {
       const last = order.ticket_email_last_attempt_at
         ? new Date(order.ticket_email_last_attempt_at).getTime()
         : 0;
@@ -824,6 +826,13 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
       }
     }
 
+    // Same existing authenticated cron, separate future-only receipt queue.
+    // No enqueue/backfill here and never any ticket/payment mutation from retries.
+    try {
+      await deliverTicketReceipts(supabase, undefined, 25);
+    } catch {
+      console.warn("[reconcile] receipt queue unavailable; retry on next sweep");
+    }
     console.log("[reconcile] Complete:", stats);
     return json({ success: true, stats });
   } catch (err: any) {
