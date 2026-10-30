@@ -84,6 +84,7 @@ CREATE TABLE ticket_transfers(id uuid PRIMARY KEY,ticket_id uuid,status text,fro
 CREATE TABLE checkins(ticket_id uuid NOT NULL,event_id integer,scanned_by text,device_id text,result text,offline boolean);
 ALTER TABLE tickets ADD COLUMN qr_payload text,ADD COLUMN attendee_name text,ADD COLUMN guest_name text,ADD COLUMN wallet_serial_number text,ADD COLUMN wallet_auth_token text,ADD COLUMN wallet_pass_type_id text;
 CREATE TABLE event_rsvps(event_id integer,user_id text,status text);
+CREATE TABLE event_financials(event_id integer PRIMARY KEY,gross_cents integer,refunds_cents integer,dvnt_fee_cents integer,stripe_fee_cents integer,net_cents integer,calculated_at timestamptz);
 `);
 await sql(readFileSync(join(MIGRATIONS,'20261030043000_organizer_cancel_free_ticket.sql'),'utf8'));
 // Execute repository migrations, not reconstructed scanner/attendance logic.
@@ -94,8 +95,8 @@ let passed=0;
 async function check(name,fn){await fn(); passed++; console.log(`PASS ${name}`);}
 async function fixture(){
  const id=randomUUID(), tier=randomUUID(),order=randomUUID();
- await sql(`TRUNCATE organizer_free_ticket_cancellations,checkins,ticket_transfers,event_rsvps,tickets,orders,ticket_types,events CASCADE`);
- await sql(`INSERT INTO events(id,host_id) VALUES(1,'host'),(2,'other'); INSERT INTO event_rsvps VALUES(1,'holder','going')`);
+ await sql(`TRUNCATE organizer_free_ticket_cancellations,event_financials,checkins,ticket_transfers,event_rsvps,tickets,orders,ticket_types,events CASCADE`);
+ await sql(`INSERT INTO events(id,host_id) VALUES(1,'host'),(2,'other'); INSERT INTO event_rsvps VALUES(1,'holder','going'); INSERT INTO event_financials VALUES(1,0,0,0,0,0,now())`);
  await sql(`INSERT INTO ticket_types VALUES($1,1,1)`,[tier]);
  await sql(`INSERT INTO orders(id,user_id,event_id,type,status,total_cents,subtotal_cents) VALUES($1,'holder',1,'event_ticket','paid',0,0)`,[order]);
  await sql(`INSERT INTO tickets(id,event_id,ticket_type_id,user_id,status,category,purchase_amount_cents,order_id,qr_token) VALUES($1,1,$2,'holder','active','admission',0,$3,'old-qr')`,[id,tier,order]);
@@ -139,5 +140,60 @@ await check('real acceptance RPC cannot change cancelled credential; accepted tr
 });
 await check('remaining valid ticket preserves RSVP',async()=>{const f=await fixture();await sql(`INSERT INTO tickets(id,event_id,user_id,status) VALUES(gen_random_uuid(),1,'holder','active')`);await cancel(f);assert.equal((await sql(`SELECT status FROM event_rsvps`))[0].status,'going');});
 await check('public API roles cannot execute RPC or rewrite audit',async()=>{for(const role of ['anon','authenticated']){const [r]=await sql(`SELECT has_function_privilege($1,'public.organizer_cancel_free_ticket(uuid,integer,text,text,text)','EXECUTE') AS execute,has_table_privilege($1,'public.organizer_free_ticket_cancellations','INSERT,UPDATE,DELETE') AS write`,[role]);assert.equal(r.execute,false);assert.equal(r.write,false);}const [r]=await sql(`SELECT has_table_privilege('service_role','public.organizer_free_ticket_cancellations','INSERT,UPDATE,DELETE') AS write`);assert.equal(r.write,false);});
+await check('missing financial snapshot refuses without any mutation',async()=>{
+ const f=await fixture();await sql(`DELETE FROM event_financials`);assert.equal((await cancel(f)).error,'financial_review_required');assert.equal((await sql(`SELECT status FROM tickets`))[0].status,'active');assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);
+});
+for(const field of ['gross_cents','refunds_cents','dvnt_fee_cents','stripe_fee_cents','net_cents']){
+ await check(`unknown financial snapshot ${field} refuses without mutation`,async()=>{
+  const f=await fixture();await sql(`UPDATE event_financials SET ${field}=NULL`);const before=await sql(`SELECT * FROM event_financials`);
+  assert.equal((await cancel(f)).error,'financial_review_required');assert.equal((await sql(`SELECT status FROM tickets`))[0].status,'active');assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);assert.deepEqual(await sql(`SELECT * FROM event_financials`),before);
+ });
+}
+// Compatibility regression for the exact production financial function read
+// 2026-10-30. It matches this older repository migration, NOT the later source
+// free-ticket accounting fix. This test exposes a release blocker; it does not
+// authorize changing accounting or deploying that unrelated fix.
+await check('exact live financial trigger delta refuses and rolls back the whole cancellation',async()=>{
+ const f=await fixture();
+ await sql(`ALTER TABLE orders ADD COLUMN stripe_fee_cents integer,ADD COLUMN paid_at timestamptz;
+ CREATE TABLE order_addons(event_id integer,unit_price_cents integer,quantity integer,refunded_amount_cents integer,status text);
+`);
+ const financialSource=readFileSync(join(MIGRATIONS,'20261009020000_event_financials_addon_revenue.sql'),'utf8');
+ const recompute=financialSource.match(/CREATE OR REPLACE FUNCTION public\.recompute_event_financials[\s\S]*?\$function\$;/)?.[0];
+ assert.ok(recompute,'reviewed live-compatible financial function must exist');await sql(recompute);
+ const triggerSource=readFileSync(join(MIGRATIONS,'20260922100000_free_ticket_orders_and_event_financials.sql'),'utf8');
+ const fn=triggerSource.match(/CREATE OR REPLACE FUNCTION public\.tickets_financials_refresh_upd[\s\S]*?\$function\$;/)?.[0];
+ const trigger=triggerSource.match(/CREATE TRIGGER tickets_financials_refresh_upd[\s\S]*?EXECUTE FUNCTION public\.tickets_financials_refresh_upd\(\);/)?.[0];
+ assert.ok(fn);assert.ok(trigger);await sql(fn);await sql(trigger);
+ await sql(`INSERT INTO tickets(id,event_id,ticket_type_id,user_id,status,category,purchase_amount_cents,qr_token) VALUES(gen_random_uuid(),1,$1,'paying-holder','active','admission',1000,'paid-qr')`,[f.tier]);
+ await sql(`UPDATE ticket_types SET quantity_sold=2; SELECT recompute_event_financials(1)`);
+ const before=(await sql(`SELECT gross_cents,dvnt_fee_cents,net_cents FROM event_financials WHERE event_id=1`))[0];
+ assert.deepEqual(before,{gross_cents:1000,dvnt_fee_cents:225,net_cents:775});
+ const ordersBefore=await sql(`SELECT * FROM orders ORDER BY id`);
+ const ticketsBefore=await sql(`SELECT * FROM tickets ORDER BY id`);
+ const financesBefore=await sql(`SELECT * FROM event_financials`);
+ const eventsBefore=await sql(`SELECT * FROM events ORDER BY id`);
+ const rsvpsBefore=await sql(`SELECT * FROM event_rsvps`);
+ assert.equal((await cancel(f)).error,'financial_review_required');
+ const after=(await sql(`SELECT gross_cents,dvnt_fee_cents,net_cents FROM event_financials WHERE event_id=1`))[0];
+ assert.deepEqual(after,before);
+ assert.deepEqual(await sql(`SELECT * FROM event_financials`),financesBefore);
+ assert.deepEqual(await sql(`SELECT * FROM events ORDER BY id`),eventsBefore);
+ assert.deepEqual(await sql(`SELECT * FROM tickets ORDER BY id`),ticketsBefore);
+ assert.deepEqual(await sql(`SELECT * FROM event_rsvps`),rsvpsBefore);
+ assert.equal((await sql(`SELECT quantity_sold FROM ticket_types`))[0].quantity_sold,2);
+ assert.equal((await sql(`SELECT count(*)::int n FROM organizer_free_ticket_cancellations`))[0].n,0);
+ assert.deepEqual(await sql(`SELECT * FROM orders ORDER BY id`),ordersBefore);
+ assert.equal((await sql(`SELECT status FROM tickets WHERE qr_token='paid-qr'`))[0].status,'active');
+ // This runner talks only to the Unix-socket disposable Postgres, never Stripe.
+ // Changing only the isolated fixture's fee counter models compatible zero-fee
+ // accounting. No production financial migration is performed or authorized.
+ await sql(recompute.replace("count(*) FILTER (WHERE status NOT IN ('refunded','void'))","count(*) FILTER (WHERE status NOT IN ('refunded','void') AND purchase_amount_cents > 0)"));
+ await sql(`SELECT recompute_event_financials(1)`);
+ assert.equal((await cancel(f)).ok,true);
+ assert.deepEqual((await sql(`SELECT gross_cents,dvnt_fee_cents,net_cents FROM event_financials WHERE event_id=1`))[0],{gross_cents:1000,dvnt_fee_cents:125,net_cents:875});
+ assert.equal((await cancel(f)).changed,false);
+ console.log('Exact live financial drift safely refused; compatible accounting succeeds without changing monetary values.');
+});
 console.log(`${passed} organizer cancellation PostgreSQL checks passed`);
 await pool.end();

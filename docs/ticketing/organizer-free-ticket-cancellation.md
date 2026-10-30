@@ -13,6 +13,9 @@ promo evidence, the same registered original owner and an unused active ticket.
 Paid, discounted, scanned, transferred/pending-transfer, guest/claimed and older
 unverifiable no-order tickets require manual review; they cannot use this action.
 Existing Refund endpoints refuse free/unknown amounts rather than bypassing it.
+A financial-snapshot guard rolls the entire cancellation back if existing
+accounting triggers change gross, refunds, fees or net. Such tickets require
+manual accounting review; this feature never repairs payout calculations.
 
 ## Scanner limitation
 The old QR fails **online** validation after cancellation commits. A scanner

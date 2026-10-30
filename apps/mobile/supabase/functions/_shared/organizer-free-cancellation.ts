@@ -34,5 +34,6 @@ export const cancellationErrors: Record<string, string> = {
   not_cancellable: 'This ticket is not eligible for free cancellation. Paid, used, transferred and unverified tickets require manual review.',
   invalid_request: 'Select a ticket and provide a reason between 5 and 500 characters.',
   inventory_inconsistent: 'Ticket inventory needs review. No cancellation was made.',
+  financial_review_required: 'This cancellation could change event accounting. No ticket was changed. Contact support for manual review.',
   cancellation_conflict: 'This ticket was already changed by another action. Refresh the roster.',
 };

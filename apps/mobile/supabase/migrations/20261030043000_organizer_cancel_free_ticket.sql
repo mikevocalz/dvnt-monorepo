@@ -29,6 +29,8 @@ DECLARE
   v_tier uuid;
   v_sold integer;
   v_now timestamptz;
+  v_financial_before jsonb;
+  v_financial_after jsonb;
   v_reason text := btrim(p_reason);
 BEGIN
   IF p_actor_id IS NULL OR btrim(p_actor_id) = '' OR p_expected_owner_id IS NULL
@@ -95,22 +97,41 @@ BEGIN
   IF v_sold IS NULL OR v_sold < 1 THEN
     RETURN jsonb_build_object('ok', false, 'error', 'inventory_inconsistent');
   END IF;
-  v_now := clock_timestamp();
-  INSERT INTO public.organizer_free_ticket_cancellations
-    (ticket_id, event_id, actor_id, owner_id, reason, previous_status, previous_quantity_sold, cancelled_at)
-    VALUES (p_ticket_id, p_event_id, p_actor_id, p_expected_owner_id, v_reason, 'active', v_sold, v_now);
-  UPDATE public.tickets SET status = 'void', wallet_voided_at = v_now,
-    wallet_last_pushed_at = v_now, updated_at = v_now WHERE id = p_ticket_id;
-  UPDATE public.ticket_types SET quantity_sold = quantity_sold - 1 WHERE id = v_tier;
-  IF NOT EXISTS (SELECT 1 FROM public.tickets WHERE event_id = p_event_id
-      AND user_id = p_expected_owner_id AND status IN ('active','scanned','transfer_pending')) THEN
-    UPDATE public.event_rsvps SET status = 'not_going'
-      WHERE event_id = p_event_id AND user_id = p_expected_owner_id AND status = 'going';
+  -- Financial summaries feed payouts. Do not let an existing accounting
+  -- trigger silently change money while correcting a zero-price credential.
+  SELECT jsonb_build_array(gross_cents, refunds_cents, dvnt_fee_cents, stripe_fee_cents, net_cents)
+    INTO v_financial_before FROM public.event_financials
+    WHERE event_id = p_event_id FOR UPDATE NOWAIT;
+  IF NOT FOUND OR v_financial_before @> '[null]'::jsonb THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'financial_review_required');
   END IF;
-  -- Existing attendance triggers own event counters. No refund, order rewrite,
-  -- reissue, push, email or waitlist promotion is performed here.
-  RETURN jsonb_build_object('ok', true, 'changed', true, 'ticket_id', p_ticket_id,
-    'event_id', p_event_id, 'ticket_type_id', v_tier);
+  BEGIN
+    v_now := clock_timestamp();
+    INSERT INTO public.organizer_free_ticket_cancellations
+      (ticket_id, event_id, actor_id, owner_id, reason, previous_status, previous_quantity_sold, cancelled_at)
+      VALUES (p_ticket_id, p_event_id, p_actor_id, p_expected_owner_id, v_reason, 'active', v_sold, v_now);
+    UPDATE public.tickets SET status = 'void', wallet_voided_at = v_now,
+      wallet_last_pushed_at = v_now, updated_at = v_now WHERE id = p_ticket_id;
+    UPDATE public.ticket_types SET quantity_sold = quantity_sold - 1 WHERE id = v_tier;
+    IF NOT EXISTS (SELECT 1 FROM public.tickets WHERE event_id = p_event_id
+        AND user_id = p_expected_owner_id AND status IN ('active','scanned','transfer_pending')) THEN
+      UPDATE public.event_rsvps SET status = 'not_going'
+        WHERE event_id = p_event_id AND user_id = p_expected_owner_id AND status = 'going';
+    END IF;
+    -- Existing attendance triggers own event counters. No refund, order rewrite,
+    -- reissue, push, email or waitlist promotion is performed here.
+    SELECT jsonb_build_array(gross_cents, refunds_cents, dvnt_fee_cents, stripe_fee_cents, net_cents)
+      INTO v_financial_after FROM public.event_financials WHERE event_id = p_event_id;
+    IF NOT FOUND OR v_financial_after IS DISTINCT FROM v_financial_before THEN
+      -- Raising inside this block rolls back EVERY write above, including audit,
+      -- inventory, RSVP and trigger-produced accounting, before returning false.
+      RAISE EXCEPTION USING ERRCODE = 'P0C01', MESSAGE = 'financial_review_required';
+    END IF;
+    RETURN jsonb_build_object('ok', true, 'changed', true, 'ticket_id', p_ticket_id,
+      'event_id', p_event_id, 'ticket_type_id', v_tier);
+  EXCEPTION WHEN SQLSTATE 'P0C01' THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'financial_review_required');
+  END;
 END;
 $$;
 REVOKE ALL ON FUNCTION public.organizer_cancel_free_ticket(uuid, integer, text, text, text)

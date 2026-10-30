@@ -25,7 +25,7 @@ export function canSubmitCompCancellation(
   );
 }
 export const COMP_CANCEL_WARNING =
-  "This permanently cancels only this ticket. Its QR will no longer work when checked online. Offline scanners must reconnect and refresh. No refund, replacement ticket, or recipient message is sent.";
+  "This permanently cancels only this ticket. Its QR will no longer work when checked online. Offline scanners must reconnect and refresh. No refund, replacement ticket, or recipient message is sent. If accounting checks require manual review, nothing is changed.";
 export function compCancelHolder(ticket: CompCancelTicket) {
   return ticket.username
     ? `@${ticket.username}`
