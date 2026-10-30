@@ -41,6 +41,13 @@ test('metadata-matched permissive baseline then least-privilege notification dra
   // Also prove explicit column grants cannot survive table-level cleanup.
   await pool.query('GRANT UPDATE(recipient_id,entity_payload), SELECT(entity_payload) ON notifications TO anon,authenticated');
   const draft=fs.readFileSync(path.resolve(__dirname,'../docs/security/notification-privacy-draft.sql'),'utf8');
+  await t.test('policy refuses to trust a client-writable identity mapping',async()=>{
+   await pool.query('GRANT UPDATE(auth_id) ON users TO authenticated');
+   await assert.rejects(pool.query(draft),/canonical user identity writes/);
+   // Draft begins a transaction, so failed preflight requires explicit rollback.
+   await pool.query('ROLLBACK');
+   await pool.query('REVOKE UPDATE(auth_id) ON users FROM authenticated');
+  });
   await pool.query(draft);await pool.query(draft);
   await t.test('anonymous access and direct notification creation/deletion are denied',async()=>{
    await as('anon',{},async c=>{await denied(c,'SELECT * FROM notifications');await denied(c,"SELECT nextval('notifications_id_seq')");await denied(c,'UPDATE notifications SET read_at=now()');await denied(c,"INSERT INTO notifications(recipient_id,type) VALUES(1,'ticket_comped')");});

@@ -120,3 +120,24 @@ production notification policy enforcement **with an update/re-auth requirement
 for unsupported old native clients**, or defer enforcement while accepting the
 known overbroad access. There is no safe exception that lets anonymous clients
 choose a recipient. This draft does not make that decision or execute it.
+
+## STOP: identity-table prerequisite discovered during final review
+
+Additional read-only production metadata shows `users` has public/true UPDATE
+and anon/authenticated INSERT policies; both clients have UPDATE on `auth_id`,
+and there are no non-internal users triggers. Therefore the notification draft's
+`users.auth_id` lookup is **not independently trustworthy in the present live
+configuration**. No identity mutation or cross-account read was attempted.
+The SQL now includes a hard preflight refusal if clients can mutate canonical
+identity links/create/delete users. Its isolated tests verify refusal; the
+positive policy tests use a protected synthetic users table, not the current
+production users write rules. Do not claim notification privacy is solved by
+this draft alone.
+
+A separately scoped identity-write lockdown must first be assessed and approved:
+prefer verified service-only profile writes if supported clients already use
+update-profile; otherwise allow only approved nonidentity columns under genuine
+own-profile policies with immutable auth_id. Check signup/auth-sync/native
+compatibility and all privileged functions before choosing. Do not silently
+expand this notification migration to lock down users. This prerequisite makes
+live notification RLS approval premature even if all client CI passes.

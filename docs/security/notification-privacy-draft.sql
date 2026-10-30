@@ -4,6 +4,20 @@
 -- Identity is the server-signed Better Auth JWT sub, never user_metadata or a
 -- caller-supplied recipient id. auth.uid() is unsuitable for non-UUID auth IDs.
 BEGIN;
+-- HARD BLOCK: current production users.auth_id is client-writable (metadata
+-- inspection 2026-10-30). This recipient mapping is not a trustworthy boundary
+-- until a separately approved identity-write lockdown is complete. Refuse to
+-- run rather than giving false assurance from notification-only hardening.
+DO $$ BEGIN
+  IF has_column_privilege('anon','public.users','auth_id','UPDATE')
+    OR has_column_privilege('authenticated','public.users','auth_id','UPDATE')
+    OR has_table_privilege('anon','public.users','INSERT')
+    OR has_table_privilege('authenticated','public.users','INSERT')
+    OR has_table_privilege('anon','public.users','DELETE')
+    OR has_table_privilege('authenticated','public.users','DELETE') THEN
+    RAISE EXCEPTION 'Blocked: canonical user identity writes must be locked down and verified before notification RLS';
+  END IF;
+END $$;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 -- Permissive policies are ORed. Leaving any historical USING(true) would defeat
 -- the recipient predicate, so replace every policy for this table atomically.
