@@ -22,3 +22,10 @@ const body={ticket_id:ticket.id,event_id:80,expected_owner_id:'holder',reason:' 
 test('strict request contract trims reason and carries reviewed holder/event',()=>assert.deepEqual(parseOrganizerCancellation(body),{p_ticket_id:ticket.id,p_event_id:80,p_expected_owner_id:'holder',p_reason:'Wrong event'}));
 for(const patch of [{ticket_id:'invalid'},{event_id:'80'},{event_id:NaN},{event_id:-1},{expected_owner_id:''},{reason:'    '},{reason:'x'.repeat(501)}])
   test(`invalid request ${JSON.stringify(patch)}`,()=>assert.equal(parseOrganizerCancellation({...body,...patch}),null));
+
+test('verified untiered General admission is eligible without inventing inventory', () => {
+  assert.deepEqual(organizerFreeCancellation({ ...ticket, ticket_type_id: null }, order, false), { eligible: true, reason: null });
+  assert.equal(organizerFreeCancellation({ ...ticket, ticket_type_id: null }, null, false).eligible, false);
+  assert.equal(organizerFreeCancellation({ ...ticket, ticket_type_id: null }, order, true).eligible, false);
+  assert.equal(organizerFreeCancellation({ ...ticket, ticket_type_id: null, purchase_amount_cents: 1 }, order, false).eligible, false);
+});
