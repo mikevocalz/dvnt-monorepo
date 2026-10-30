@@ -14,8 +14,12 @@ private, with a reminder to check My Tickets before retrying an uncertain result
 
 ## Release
 
-Deploy the reviewed `transfer-ticket` edge bundle to the existing shared backend
-and release the shared client. No new database migration, ticket ownership repair,
+Deploy reviewed edge bundles for `transfer-ticket`, `door-sell`, `ticket-checkout`,
+`guest-checkout`, `stripe-webhook` and `reconcile-orders` to the existing shared
+backend, then release the shared client. The five email consumers must carry
+the updated shared `ticket-email-delivery` helper: order retries/resends must
+never return a transferred recipient’s new QR to the original buyer. Pending
+transfers are also withheld; untransferred claimed/guest tickets remain deliverable. No new database migration, ticket ownership repair,
 refund, email or entitlement change is required. Existing atomic acceptance,
 credential rotation, event/ownership/status checks and recipient ownership
 restriction remain in force. Release verification must distinguish passing
