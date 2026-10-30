@@ -31,7 +31,7 @@ function fixture(options = {}) {
     events: [{ id: 7, host_id: 'staff', start_date: new Date(Date.now() + 7 * 864e5).toISOString(), ...options.event }],
     ticket_types: [{ id: 'tier', name: 'GA' }],
   };
-  const writes = [], wallets = [], rpcCalls = [];
+  const writes = [], wallets = [], rpcCalls = [], warnings = [];
   let sequence = 0, beforeWrite = options.beforeWrite;
   const db = {
     from(table) {
@@ -46,9 +46,15 @@ function fixture(options = {}) {
         update(p) { operation = 'update'; payload = p; return q; },
         insert(p) { operation = 'insert'; payload = p; return q; },
         result(single = false) {
+          if (options.throwOn?.({table, operation, tables})) throw Error('private-recipient-sentinel');
           if (operation !== 'select') {
             beforeWrite?.({ table, operation, payload, tables });
             writes.push({ table, operation, payload });
+          }
+          if (table === 'notifications' && operation === 'insert') {
+            if ('sender_id' in payload) return { data: null, error: { code: 'PGRST204' } };
+            if (payload.entity_type != null && !['post','comment','story','user','message','event','lynk_room'].includes(payload.entity_type)) return { data: null, error: { code: '22P02' } };
+            if (options.notificationError) return { data: null, error: { code: 'XX001' } };
           }
           if (table === options.lookupErrorTable && operation === 'select') return { data: null, error: { message: 'lookup unavailable' } };
           if (operation === 'insert' && options.insertError) {
@@ -106,13 +112,13 @@ function fixture(options = {}) {
     'send-resend-email.ts': { sendResendEmail: async () => 'email', ticketConfirmation: () => ({}) },
   };
   vm.runInNewContext(moduleCode(path.resolve(__dirname, 'index.ts')), {
-    exports: {}, Response, Request, crypto, console: { log() {}, error() {}, warn() {} },
+    exports: {}, Response, Request, crypto, console: { log() {}, error() {}, warn(...args) { warnings.push(args); } },
     Deno: { env: { get: () => 'test' }, serve: fn => { handler = fn; } },
     fetch: async () => { throw Error('No external side effects permitted'); },
     require: name => name.includes('supabase-js') ? { createClient: () => db } : stubs[path.basename(name)],
   });
   return {
-    tables, writes, wallets, rpcCalls,
+    tables, writes, wallets, rpcCalls, warnings,
     setBeforeWrite(fn) { beforeWrite = fn; },
     async invoke(user, body) {
       return handler(new Request('http://offline.test', { method: 'POST', headers: user ? { 'test-user': user } : {}, body: JSON.stringify(body) }));
@@ -310,3 +316,58 @@ for (const scenario of ['missing-profile', 'unlinked-profile', 'deleted-auth', '
   const id = await initiate(f, 1, '@MIXED_HANDLE');
   assert.equal(f.tables.ticket_transfers.find(t => t.id === id).to_user_id, 'one');
 });
+
+for (const action of ['accept', 'decline', 'cancel']) {
+  test(`transfer notification survives actual schema and routes ${action} to the correct account once`, async () => {
+    const f = fixture();
+    const id = await initiate(f, 1, 'one');
+    assert.equal(f.tables.notifications.length, 1);
+    const invitation = f.tables.notifications[0];
+    assert.equal(invitation.recipient_id, 2);
+    assert.equal(invitation.actor_id, 1);
+    assert.equal(invitation.entity_type, 'event');
+    assert.equal(invitation.entity_id, '7');
+    assert.equal(invitation.entity_payload.transfer_id, id);
+    assert.equal(invitation.type, 'ticket_transfer_initiated');
+    const user = action === 'cancel' ? 'sender' : 'one';
+    assert.equal((await f.invoke(user, { action, transfer_id: id })).status, 200);
+    assert.equal(f.tables.notifications.length, 2);
+    const resolution = f.tables.notifications[1];
+    assert.equal(resolution.recipient_id, action === 'cancel' ? 2 : 1);
+    assert.equal(resolution.actor_id, action === 'cancel' ? 1 : 2);
+    assert.equal(resolution.type, `ticket_transfer_${{accept:'accepted',decline:'declined',cancel:'cancelled'}[action]}`);
+    assert.equal(resolution.entity_type, 'event');
+    assert.equal(resolution.entity_id, '7');
+    assert.equal(resolution.entity_payload.transfer_id, id);
+    assert.notEqual((await f.invoke(user, { action, transfer_id: id })).status, 200);
+    assert.equal(f.tables.notifications.length, 2, 'replay must not send a second resolution');
+    assert.equal(f.tables.notifications.some(n => n.recipient_id === 5), false);
+  });
+}
+test('a rejected feed insert is logged without falsely failing or replaying committed transfer', async () => {
+  const f = fixture({notificationError:true});
+  await initiate(f, 1, 'one');
+  assert.equal(f.tables.tickets[0].status, 'transfer_pending');
+  assert.equal(f.tables.notifications.length, 0);
+  assert.ok(f.warnings.some(args => args[0].includes('notification insert failed') && args[1] === 'XX001'));
+});
+
+for (const action of ['accept','decline','cancel']) {
+ for (const failure of ['notifications','users','events']) {
+  test(`post-commit ${failure} transport failure never fails ${action} or leaks details`, async () => {
+   let armed=false;
+   const f=fixture({throwOn:({table})=>armed&&table===failure});
+   const id=await initiate(f,1,'one');armed=true;
+   const response=await f.invoke(action==='cancel'?'sender':'one',{action,transfer_id:id});
+   assert.equal(response.status,200);
+   assert.ok(!JSON.stringify(f.warnings).includes('private-recipient-sentinel'));
+  });
+ }
+}
+for(const failure of ['notifications','users','events']) {
+ test(`post-commit ${failure} transport failure never fails initiation`,async()=>{
+  const f=fixture({throwOn:({table,tables})=>tables.ticket_transfers.length>0&&table===failure});
+  await initiate(f,1,'one');assert.equal(f.tables.tickets[0].status,'transfer_pending');
+  assert.ok(!JSON.stringify(f.warnings).includes('private-recipient-sentinel'));
+ });
+}

@@ -448,59 +448,70 @@ Deno.serve(async (req: Request) => {
       .map((r) => r.intId)
       .filter((id): id is number => typeof id === "number");
     if (intIds.length > 0) {
-      const note = (body.note || "").toString().trim().slice(0, 240) || null;
-      await supabase.from("notifications").insert(
-        intIds.map((uid) => ({
-          recipient_id: uid,
-          actor_id: hostIntId,
-          type: "ticket_comped",
-          entity_type: "event",
-          entity_id: String(eventId),
-          entity_payload: {
-            title: event.title || "You're on the list",
-            body: note || `${event.title || "An event"} — comped`,
-            tier: tier.name,
-          },
-        })),
-      );
-
-      // Push
-      const { data: tokens } = await supabase
-        .from("push_tokens")
-        .select("token")
-        .in("user_id", intIds);
-      if (tokens && tokens.length > 0) {
-        const pushTitle = `${event.title || "Event"}: You're comped`;
-        const pushBody =
-          (body.note || "").toString().trim().slice(0, 180) ||
-          `${tier.name} ticket added to your wallet.`;
-        const messages = tokens.map((t: any) => ({
-          to: t.token,
-          title: pushTitle,
-          body: pushBody,
-          data: {
+      try {
+        const note = (body.note || "").toString().trim().slice(0, 240) || null;
+        const { error: notificationError } = await supabase.from("notifications").insert(
+          intIds.map((uid) => ({
+            recipient_id: uid,
+            actor_id: hostIntId,
             type: "ticket_comped",
-            entityType: "event",
-            entityId: String(eventId),
-            // The pass, not the event page (T04). /ticket/<event id> resolves
-            // to the recipient's own pass for this event.
-            url: `https://dvntapp.live/ticket/${eventId}`,
-          },
-          sound: "default",
-          channelId: "default",
-        }));
-        try {
-          await fetch("https://exp.host/--/api/v2/push/send", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
+            entity_type: "event",
+            entity_id: String(eventId),
+            entity_payload: {
+              title: event.title || "You're on the list",
+              body: note || `${event.title || "An event"} — comped`,
+              tier: tier.name,
             },
-            body: JSON.stringify(messages),
-          });
-        } catch (pushErr) {
-          console.warn("[bulk-comp-tickets] push failed:", pushErr);
+          })),
+        );
+        if (notificationError) {
+          // Issuance already committed. Report the feed failure without asking
+          // the host to issue the same tickets again or logging recipient data.
+          console.warn("[bulk-comp-tickets] notification insert failed:", notificationError.code || "insert_failed");
         }
+
+        // Push
+        const { data: tokens } = await supabase
+          .from("push_tokens")
+          .select("token")
+          .in("user_id", intIds);
+        if (tokens && tokens.length > 0) {
+          const pushTitle = `${event.title || "Event"}: You're comped`;
+          const pushBody =
+            (body.note || "").toString().trim().slice(0, 180) ||
+            `${tier.name} ticket added to your wallet.`;
+          const messages = tokens.map((t: any) => ({
+            to: t.token,
+            title: pushTitle,
+            body: pushBody,
+            data: {
+              type: "ticket_comped",
+              entityType: "event",
+              entityId: String(eventId),
+              // The pass, not the event page (T04). /ticket/<event id> resolves
+              // to the recipient's own pass for this event.
+              url: `https://dvntapp.live/ticket/${eventId}`,
+            },
+            sound: "default",
+            channelId: "default",
+          }));
+          try {
+            await fetch("https://exp.host/--/api/v2/push/send", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+              },
+              body: JSON.stringify(messages),
+            });
+          } catch (pushErr) {
+            console.warn("[bulk-comp-tickets] push unavailable");
+          }
+        }
+      } catch {
+        // Ticket issuance is already committed; feed/push transport failure
+        // must not invite a second issuance or prevent guest email delivery.
+        console.warn("[bulk-comp-tickets] notifications unavailable");
       }
     }
 

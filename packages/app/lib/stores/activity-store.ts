@@ -1,3 +1,4 @@
+import { ticketActivityRoute } from "@dvnt/app/lib/activity/ticket-activity";
 import { eventActivityRoute } from "@dvnt/app/lib/activity/event-activity";
 import { create } from "zustand";
 import { getPostDetailRoute } from "@dvnt/app/lib/routes/post-routes";
@@ -76,6 +77,7 @@ export interface Activity {
     body?: string;
     summary?: string;
     changes?: string[];
+    ticket_id?: string;
   } | null;
 }
 
@@ -275,9 +277,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       const activities = allActivities.filter((a) => {
         if (seenIds.has(a.id)) return false;
         seenIds.add(a.id);
-        // Broadcasts are separate messages, even from the same sender/event.
+        // Ticket actions and broadcasts are distinct occurrences, even from the same sender/event.
         // Their notification ID is the only safe deduplication key.
-        if (a.type === "event_broadcast") return true;
+        if (a.type === "event_broadcast" || a.type.startsWith("ticket_")) return true;
         // Composite key: same actor doing the same action on the same entity
         const compositeKey = `${a.type}:${a.user?.id || ""}:${a.entityId || a.post?.id || ""}`;
         if (seenKeys.has(compositeKey)) return false;
@@ -312,6 +314,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   // Get the correct route for an activity item
   getRouteForActivity: (activity) => {
     const { type, entityType, entityId, post, event, user } = activity;
+
+    const ticketRoute = ticketActivityRoute(activity, "native");
+    if (ticketRoute) return ticketRoute;
 
     const eventRoute = eventActivityRoute(activity, "native");
     if (eventRoute) return eventRoute;
