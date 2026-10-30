@@ -125,6 +125,42 @@ async function main() {
     await rejects('unexpected refunds change', 'UPDATE event_financials SET refunds_cents=refunds_cents+1 WHERE event_id=1;', /non-platform monetary/);
     await rejects('unexpected Stripe fee change', 'UPDATE event_financials SET stripe_fee_cents=stripe_fee_cents+1 WHERE event_id=1;', /non-platform monetary/);
     if (connect) {
+      const sourceWrites = {
+        tickets: 'INSERT INTO tickets(event_id,purchase_amount_cents) VALUES(8,0)',
+        order_addons: 'INSERT INTO order_addons(event_id,unit_price_cents) VALUES(8,0)',
+        orders: "INSERT INTO orders(event_id,paid_at) VALUES(8,now())",
+      };
+      const barrier = artifact.match(/LOCK TABLE public\.tickets, public\.order_addons, public\.orders IN SHARE MODE NOWAIT;/)?.[0];
+      assert.ok(barrier, 'release must acquire source-table barrier before formula replacement');
+      assert.ok(artifact.indexOf(barrier) < artifact.indexOf('CREATE OR REPLACE FUNCTION'));
+      for (const [table, write] of Object.entries(sourceWrites)) {
+        await setup(); await query('INSERT INTO events(id) VALUES(8)');
+        const before = await snapshot(); const functionsBefore = await functionSnapshot();
+        const other = await connect();
+        try {
+          await other.query('BEGIN');
+          await other.query(write); // Previously non-target event, uncommitted RowExclusive writer.
+          await assert.rejects(() => query(artifact), /could not obtain lock|lock timeout/, `${table} active source writer`);
+          await query('ROLLBACK');
+          assert.deepEqual(await snapshot(),before);
+          assert.deepEqual(await functionSnapshot(),functionsBefore);
+          console.log(`PASS: ${table} active non-target writer refuses release atomically`); count++;
+        } finally { await other.query('ROLLBACK'); other.release(); }
+        // Exercise the exact release barrier independently, keeping its transaction
+        // open so another session attempts to start writing while it is held.
+        const writer = await connect();
+        try {
+          await query(`BEGIN; ${barrier}`);
+          await writer.query("BEGIN; SET LOCAL lock_timeout='100ms'");
+          await assert.rejects(() => writer.query(write), /lock timeout/, `${table} writer must not enter while release holds SHARE`);
+          await writer.query('ROLLBACK');
+          await query('ROLLBACK');
+          await writer.query('BEGIN');
+          await writer.query(write); // Barrier released: same write can now complete.
+          await writer.query('ROLLBACK');
+          console.log(`PASS: ${table} new writer blocked during release and permitted after rollback`); count++;
+        } finally { await query('ROLLBACK'); await writer.query('ROLLBACK'); writer.release(); }
+      }
       for (const table of ['events','event_financials']) {
         await setup(); const before = await snapshot(); const functionsBefore = await functionSnapshot(); const other = await connect();
         try {

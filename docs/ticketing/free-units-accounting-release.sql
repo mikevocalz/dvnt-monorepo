@@ -3,6 +3,9 @@
 -- No private production measurements belong in this repository.
 BEGIN;
 SET LOCAL lock_timeout = '2s';
+-- Freeze all financial source rows, including first free units on new events.
+-- NOWAIT refuses active writers; subsequent writers wait only until this transaction ends.
+LOCK TABLE public.tickets, public.order_addons, public.orders IN SHARE MODE NOWAIT;
 -- SOURCE ONLY until explicit accounting approval. Free tickets stay $0 always.
 -- Replace the old all-unit count and the later mixed-cart fee fallback with
 -- strictly positive-price fee units. Zero/unknown-price units never create fees.

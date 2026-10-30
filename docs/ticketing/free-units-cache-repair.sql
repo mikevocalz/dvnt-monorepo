@@ -2,6 +2,9 @@
 -- Replace every __EXPECTED_*__ token using separately reviewed private bounds.
 -- Missing substitutions fail closed. Coordinate against payout execution.
 BEGIN;
+-- Freeze all financial source rows, including first free units on new events.
+-- NOWAIT refuses active writers; subsequent writers wait only until this transaction ends.
+LOCK TABLE public.tickets, public.order_addons, public.orders IN SHARE MODE NOWAIT;
 CREATE TEMP TABLE free_unit_repair_targets ON COMMIT DROP AS
 SELECT DISTINCT event_id FROM (
  SELECT event_id FROM public.tickets WHERE purchase_amount_cents = 0
