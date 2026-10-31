@@ -47,7 +47,7 @@ try {
         unexpected.push(route.request().url());
         return route.abort();
       });
-      for (const name of ['transfer', 'comp', 'followup', 'followupMember', 'followupGuest', 'guest']) {
+      for (const name of ['verification', 'reminderAddons', 'transfer', 'comp', 'followup', 'followupMember', 'followupGuest', 'guest']) {
         const page = await context.newPage();
         const id = `${name}-${width}-${mode}`;
         await page.setContent(mode === 'gmail-inversion-model' ? gmailModel(fixtures[name].html) : fixtures[name].html, { waitUntil: 'load' });
