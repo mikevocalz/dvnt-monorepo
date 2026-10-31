@@ -67,7 +67,7 @@ test("enable conflict and known refusals never compensate or claim a write", asy
 test("conditional compensation cannot revoke a newer competing revision", async () => {
   const f = fixture(); let newerGrantActive = true;
   f.deps.publish = async () => { throw Error("stale revision"); };
-  f.deps.revoke = async owned => { assert.equal(owned.revision, 5); if (owned.revision !== 6) throw Object.assign(Error("conflict"), {status:409}); newerGrantActive = false; };
+  f.deps.revoke = async owned => { if (owned.revision !== 6) { assert.equal(owned.revision, 5); throw Object.assign(Error("conflict"), {status:409}); } newerGrantActive = false; };
   await assert.rejects(commitMapConsent(f.deps), /Could not confirm that sharing stopped/);
   assert.equal(newerGrantActive, true); assert.equal(f.state.failedWithdrawal, true);
 });
