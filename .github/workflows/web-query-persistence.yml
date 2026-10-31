@@ -1,0 +1,21 @@
+name: Web query persistence
+on:
+  pull_request:
+    paths:
+      - 'packages/api/src/**'
+      - 'scripts/test-web-query-persistence.cjs'
+      - '.github/workflows/web-query-persistence.yml'
+permissions:
+  contents: read
+jobs:
+  optional-storage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated provider fixtures
+        run: npm install --prefix "$RUNNER_TEMP/storage-fixtures" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 react@19.2.3 react-dom@19.2.3 jsdom@26.1.0 @tanstack/react-query@5.101.0 @tanstack/react-query-persist-client@5.101.0 @tanstack/query-sync-storage-persister@5.101.0
+      - name: Optional storage does not block rendering or network queries
+        run: NODE_PATH="$RUNNER_TEMP/storage-fixtures/node_modules" node scripts/test-web-query-persistence.cjs

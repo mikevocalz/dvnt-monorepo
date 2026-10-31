@@ -31,16 +31,38 @@ const PERSISTED_KEY_PREFIXES = [
 ];
 
 export function createPlatformPersister() {
-  if (typeof window === 'undefined' || !('localStorage' in window)) {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+
+  // The property can exist while its getter throws (restricted Safari/WebViews).
+  // Persistence is optional: keep the provider's in-memory fallback available.
+  let storage: Storage;
+  try {
+    storage = window.localStorage;
+    if (!storage) return undefined;
+  } catch {
     return undefined;
   }
 
   return createSyncStoragePersister({
     key: DVNT_QUERY_CACHE_KEY,
-    storage: window.localStorage,
+    storage: {
+      // Permission can also change after initialization. A failed read is a
+      // cache miss, and failure to remove an optional snapshot is non-fatal.
+      getItem: (key) => {
+        try { return storage.getItem(key); } catch { return null; }
+      },
+      setItem: (key, value) => storage.setItem(key, value),
+      removeItem: (key) => {
+        try { storage.removeItem(key); } catch { /* optional cache */ }
+      },
+    },
     // Without this, a QuotaExceededError is swallowed and the snapshot freezes
     // permanently — every later load restores that same stale cache.
-    retry: removeOldestQuery,
+    retry: (props) => props.error.name === 'SecurityError'
+      ? undefined
+      : removeOldestQuery(props),
   });
 }
 
