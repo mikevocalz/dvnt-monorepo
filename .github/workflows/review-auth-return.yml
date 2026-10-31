@@ -5,6 +5,7 @@ on:
       - 'packages/app/features/events/**'
       - 'packages/app/features/routes/screens/(protected)/events/**'
       - 'scripts/test-review-section-dom.cjs'
+      - 'scripts/test-review-section-layout-browser.cjs'
       - 'scripts/test-event-review-detail-dom.cjs'
       - 'packages/app/lib/auth/**'
       - 'packages/app/lib/deep-linking/**'
@@ -45,3 +46,9 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-review-section-dom.cjs
           REVIEW_SECTION_TARGET=1 NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-review-auth-return-dom.cjs
           NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-event-review-detail-dom.cjs
+      - name: Install Chromium layout fixtures
+        run: |
+          npm install --prefix "$RUNNER_TEMP/review-fixtures" --ignore-scripts --no-audit --no-fund --no-save playwright@1.58.2 typescript@5.9.3 react@19.2.3 react-dom@19.2.3 jsdom@26.1.0 esbuild@0.25.11 happy-dom@20.10.3 zustand@5.0.14 lucide-react@1.30.0 zod@4.6.5
+          "$RUNNER_TEMP/review-fixtures/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Fixed header and late layout visibility in desktop and mobile Chromium
+        run: NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-review-section-layout-browser.cjs
