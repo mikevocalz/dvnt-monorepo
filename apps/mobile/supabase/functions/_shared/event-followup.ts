@@ -226,16 +226,17 @@ export function buildFollowupEmail(args: {
   reviewUrl: string;
   unsubscribeUrl: string;
   preview?: boolean;
-  profileUrl?: string;
+  /** Guests without an account receive only this signup CTA. */
+  joinUrl?: string;
 }): { subject: string; html: string; headers: Record<string, string> } {
   const title = args.eventTitle || "your event";
   const message = escapeHtml(args.message || `Thanks for coming to ${title}.`);
+  const ctaUrl = args.joinUrl || args.reviewUrl;
   const html = brandEmailWrapper([
     heading(escapeHtml(args.eventTitle || "Thanks for coming")),
     paragraph(`<span style="white-space:pre-wrap">${message}</span>`),
-    button(args.reviewUrl, escapeHtml(args.ctaLabel || "Leave a review")),
-    args.profileUrl ? button(args.profileUrl, "Join the community") : "",
-    paragraph(`If the app opens instead, copy this link into your browser’s address bar:<br/><a href="${escapeHtml(args.reviewUrl)}" style="color:${COLORS.textMuted};word-break:break-all">${escapeHtml(args.reviewUrl)}</a>`, { size: 12, color: COLORS.textMuted }),
+    button(ctaUrl, args.joinUrl ? "Join the platform" : escapeHtml(args.ctaLabel || "Rate the party")),
+    paragraph(`If the app opens instead, copy this link into your browser’s address bar:<br/><a href="${escapeHtml(ctaUrl)}" style="color:${COLORS.textMuted};word-break:break-all">${escapeHtml(ctaUrl)}</a>`, { size: 12, color: COLORS.textMuted }),
     paragraph(
       (args.preview ? `This is your requested preview for ${escapeHtml(title)}. ` : `You got this because you had a ticket to ${escapeHtml(title)}. `) +
       `<a href="${escapeHtml(args.unsubscribeUrl)}" style="color:${COLORS.textMuted};text-decoration:underline">Unsubscribe from event follow-up emails</a>.`,

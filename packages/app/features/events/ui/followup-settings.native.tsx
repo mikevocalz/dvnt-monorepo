@@ -9,7 +9,7 @@ function Settings({ eventId }: { eventId: number }) {
   const s = useFollowupSettings(eventId);
   return <View className="mb-4 rounded-2xl border border-border bg-card p-4 gap-3">
     <Text className="text-base font-semibold text-foreground">Post-party email</Text>
-    <Text className="text-sm text-muted-foreground">Optional for this event only. Invite eligible admission ticket holders to rate the event. Unsubscribes are respected.</Text>
+    <Text className="text-sm text-muted-foreground">Optional for this event only, for eligible admission ticket holders. Members get a link to this event’s review section; guests without an account get an invitation to join DVNT. Unsubscribes are respected.</Text>
     {s.loading ? <Text accessibilityLiveRegion="polite" className="text-foreground">Loading email settings…</Text> : null}
     {s.error ? <View><Text accessibilityRole="alert" className="text-foreground">{s.error}</Text><Pressable accessibilityRole="button" onPress={() => void s.reload()}><Text className="text-primary">Reload email settings</Text></Pressable></View> : null}
     {s.settings ? <>

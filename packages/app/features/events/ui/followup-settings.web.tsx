@@ -9,7 +9,7 @@ function Settings({ eventId }: { eventId: number }) {
   const s = useFollowupSettings(eventId);
   return <section className="rounded-2xl border border-white/10 bg-white/4 p-4 space-y-3" aria-label="Post-party email settings">
     <h2 className="text-base font-semibold">Post-party email</h2>
-    <p className="text-sm text-white/60">Optional for this event only. Invite eligible admission ticket holders to rate the event. Unsubscribes are respected.</p>
+    <p className="text-sm text-white/60">Optional for this event only, for eligible admission ticket holders. Members get a link to this event’s review section; guests without an account get an invitation to join DVNT. Unsubscribes are respected.</p>
     {s.loading ? <p role="status">Loading email settings…</p> : null}
     {s.error ? <div role="alert"><p>{s.error}</p><button type="button" onClick={() => void s.reload()} className="text-cyan-300 underline">Reload email settings</button></div> : null}
     {s.settings ? <>
