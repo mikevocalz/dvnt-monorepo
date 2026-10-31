@@ -338,6 +338,12 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       );
     }
 
+    if (ticketType.max_per_order > 0 && quantity > ticketType.max_per_order) {
+      return new Response(JSON.stringify({ error: `Limit ${ticketType.max_per_order} per order for this ticket.`, code: "order_limit" }), {
+        status: 400, headers: { "Content-Type": "application/json" },
+      });
+    }
+
     // Apply the same sale policy before paid checkout AND free/promo issuance.
     // Visibility runs first so hidden tiers do not disclose their sale state.
     const saleError = tierSaleAvailabilityError(ticketType);
@@ -349,7 +355,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
 
     // Check availability (including active holds from other checkouts)
     const remaining =
-      (ticketType.quantity_total || Infinity) - (ticketType.quantity_sold || 0);
+      (ticketType.quantity_total ?? Infinity) - (ticketType.quantity_sold || 0);
 
     const { count: activeHolds } = await supabase
       .from("ticket_holds")
@@ -378,7 +384,8 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
     ownedQuery = isGuest
       ? ownedQuery.eq("guest_email", trimmedGuestEmail)
       : ownedQuery.eq("user_id", user_id as string);
-    const { count: ownedCount } = await ownedQuery;
+    const { count: ownedCount, error: ownedError } = await ownedQuery;
+    if (ownedError) throw ownedError;
 
     if ((ownedCount || 0) + quantity > maxPerUser) {
       const ticketsRemaining = maxPerUser - (ownedCount || 0);
@@ -443,12 +450,9 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
 
     // Free tickets (or fully discounted): issue directly without Stripe
     if (effectiveSubtotal === 0) {
-      // ── Order row FIRST — it carries the idempotency key, so a losing
-      // racer fails here before any tickets exist, and the winner's rows
-      // are returned below. Tickets then stamp order_id directly.
-      const { data: freeOrder, error: freeOrderErr } = await supabase
-        .from("orders")
-        .insert({
+      // Order, credentials, inventory and cap enforcement commit together.
+      // A fresh purchase uses a fresh key; retries return only that order.
+      const freeOrderInput = {
           user_id: isGuest ? null : user_id,
           guest_email: isGuest ? trimmedGuestEmail : null,
           type: "event_ticket",
@@ -477,20 +481,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
               }
             : {}),
           ...(idemKey ? { idempotency_key: idemKey } : {}),
-        })
-        .select("id")
-        .single();
-
-      // Lost the same-key race: apply the SAME identity/completion check.
-      // No tickets were minted on this attempt; guest recovery stays in email.
-      if (freeOrderErr?.code === "23505" && idemKey) {
-        const replay = await readCheckoutReplay(supabase, replayRequest);
-        return new Response(JSON.stringify(replay?.body ?? CHECKOUT_REPLAY_UNAVAILABLE), {
-          status: replay?.status ?? 409, headers: { "Content-Type": "application/json" },
-        });
-      }
-      if (freeOrderErr) throw freeOrderErr;
-
+        };
       const tickets = [];
       const eventIdInt = parseInt(event_id);
       for (let i = 0; i < quantity; i++) {
@@ -511,29 +502,39 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
           qr_token: qrToken,
           qr_payload: qrPayload,
           purchase_amount_cents: 0,
-          order_id: freeOrder?.id ?? null,
         });
       }
 
-      const { data: issued, error: issueError } = await supabase
-        .from("tickets")
-        .insert(tickets)
-        .select("id, qr_token");
-
-      if (issueError) {
-        // Order exists but no tickets — drop it so a retry starts clean
-        // rather than replaying an empty order off the idempotency key.
-        await supabase.from("orders").delete().eq("id", freeOrder?.id);
-        throw issueError;
+      const { data: freeResult, error: freeError } = await supabase.rpc("free_ticket_checkout_atomic", {
+        p_ticket_type_id: ticket_type_id,
+        p_ticket_rows: tickets,
+        p_order: {
+          ...freeOrderInput,
+          expected_unit_price_cents: ticketType.price_cents,
+          discount_cents: discountCents,
+        },
+      });
+      if (freeError) throw freeError;
+      if (!freeResult?.ok) {
+        const message = freeResult?.error === "limit" || freeResult?.error === "buyer_limit"
+          ? "You have reached the per-person limit for this ticket."
+          : freeResult?.error === "order_limit"
+            ? `Limit ${freeResult.limit} per order for this ticket.`
+          : freeResult?.error === "idempotency_conflict"
+            ? "This checkout attempt belongs to another selection. Start a new purchase."
+            : "That selection is no longer available. Please refresh and try again.";
+        return new Response(JSON.stringify({ error: message, code: freeResult?.error || "checkout_unavailable" }), {
+          status: 409, headers: { "Content-Type": "application/json" },
+        });
       }
-
-      // Increment sold count
-      await supabase
-        .from("ticket_types")
-        .update({
-          quantity_sold: (ticketType.quantity_sold || 0) + quantity,
-        })
-        .eq("id", ticket_type_id);
+      const freeOrder = freeResult.order;
+      const issued = freeResult.tickets;
+      if (freeResult.idempotent) {
+        const replay = await readCheckoutReplay(supabase, replayRequest);
+        return new Response(JSON.stringify(replay?.body ?? CHECKOUT_REPLAY_UNAVAILABLE), {
+          status: replay?.status ?? 409, headers: { "Content-Type": "application/json" },
+        });
+      }
 
       // Capacity milestone alerts (75 / 90 / 100 %) — idempotent
       await maybeFireCapacityAlerts(supabase, {
@@ -566,16 +567,6 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       }
 
       if (freeOrder?.id) {
-        await supabase.from("order_timeline").insert([
-          { order_id: freeOrder.id, type: "created", label: "Order created" },
-          {
-            order_id: freeOrder.id,
-            type: "payment_captured",
-            label: promoResult
-              ? "Free ticket issued (100% promo discount)"
-              : "Free ticket issued",
-          },
-        ]);
         // Guests have no account/My Tickets — the bundle email IS their
         // delivery. Authed free orders have no guest_email; the delivery
         // helper returns no_recipient and skips cleanly.
@@ -742,7 +733,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
     const holdExpiresAt = asyncSettlement
       ? asyncSettlementHoldExpiresAt()
       : new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    const { data: hold, error: holdError } = await supabase.rpc("ticket_hold_create_atomic", {
+    const { data: hold, error: holdError } = await supabase.rpc("ticket_purchase_hold_atomic", {
       p_user_id: isGuest ? null : user_id,
       p_guest_email: isGuest ? trimmedGuestEmail : null,
       p_ticket_type_id: ticket_type_id,
@@ -757,7 +748,9 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       } catch (expireError) {
         console.error("[ticket-checkout] failed to expire unallocated session", expireError);
       }
-      return new Response(JSON.stringify({ error: "Not enough tickets available", code: "sold_out" }), {
+      return new Response(JSON.stringify(hold?.error === "buyer_limit"
+        ? { error: `Limit ${hold.limit} per person for this ticket, including pending checkouts.`, code: "buyer_limit" }
+        : { error: "Not enough tickets available", code: "sold_out" }), {
         status: 409, headers: { "Content-Type": "application/json" },
       });
     }

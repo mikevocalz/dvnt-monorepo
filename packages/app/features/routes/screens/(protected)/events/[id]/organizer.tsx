@@ -1,3 +1,4 @@
+import { hasAdmissionPurpose, ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 /**
  * Event Organizer Screen
  *
@@ -48,6 +49,7 @@ import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-sto
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 interface Ticket {
+  category?: string | null;
   id: string;
   user?: {
     username?: string;
@@ -712,7 +714,7 @@ function EventOrganizerScreenContent() {
                       </View>
                     </View>
 
-                    {ticket.status === "checked_in" ? (
+                    {ticket.status === "checked_in" || ticket.status === "scanned" || ticket.checked_in_at ? (
                       <View
                         style={{
                           flexDirection: "row",
@@ -732,7 +734,7 @@ function EventOrganizerScreenContent() {
                             color: "#22c55e",
                           }}
                         >
-                          Checked In
+                          {hasAdmissionPurpose(ticket.category) ? "Checked In" : "Redeemed"}
                         </Text>
                       </View>
                     ) : ticket.status === "revoked" ? (
@@ -778,23 +780,23 @@ function EventOrganizerScreenContent() {
                             color: colors.mutedForeground,
                           }}
                         >
-                          Valid
+                          {hasAdmissionPurpose(ticket.category) ? "Valid" : `${ticketCategoryLabel(ticket.category)} · No admission`}
                         </Text>
                       </View>
                     )}
                   </View>
 
-                  {ticket.checkedInAt && (
+                  {(ticket.checkedInAt || ticket.checked_in_at) && (
                     <Text
                       style={{ fontSize: 12, color: colors.mutedForeground }}
                     >
-                      Checked in: {formatDate(ticket.checkedInAt)}
+                      {hasAdmissionPurpose(ticket.category) ? "Checked in" : "Redeemed"}: {formatDate((ticket.checkedInAt || ticket.checked_in_at)!)}
                     </Text>
                   )}
 
                   {/* Refund button — only on tickets that CAN be refunded */}
                   {ticket.status !== "revoked" &&
-                  ticket.status !== "checked_in" ? (
+                  ticket.status !== "checked_in" && ticket.status !== "scanned" && !ticket.checked_in_at ? (
                     <Pressable
                       onPress={() =>
                         handleRefundTicket(

@@ -26,7 +26,7 @@
 
 import type { TicketRecord } from "@dvnt/app/lib/api/tickets";
 
-const KEY = "dvnt.door.roster.v1";
+const KEY = "dvnt.door.roster.v2";
 
 /** Only the fields the list renders. A full roster row is mostly dead weight. */
 export interface CachedGuest {
@@ -35,6 +35,7 @@ export interface CachedGuest {
   holder_name: string | null;
   ticket_type_name: string | null;
   status: string;
+  category: TicketRecord["category"] | null;
   checked_in_at: string | null;
 }
 
@@ -66,6 +67,7 @@ export function snapshotRoster(eventId: string, tickets: TicketRecord[]): void {
     holder_name: t.holder_name ?? null,
     ticket_type_name: t.ticket_type_name ?? null,
     status: t.status,
+    category: t.category ?? null,
     checked_in_at: t.checked_in_at ?? null,
   }));
   try {

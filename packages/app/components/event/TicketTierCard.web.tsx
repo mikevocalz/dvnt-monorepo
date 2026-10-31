@@ -1,4 +1,5 @@
 "use client";
+import { isAdmissionCategory, ticketCategoryLabel, ticketTierBadge } from "@dvnt/app/lib/tickets/ticket-category";
 
 import { Check } from "lucide-react";
 import { color } from "@dvnt/app/lib/theme";
@@ -26,11 +27,9 @@ export interface TierCardData {
   glowColor: string;
 }
 
-const TIER_CATEGORY: Record<string, string> = { admission: "Admission", product: "Product", service: "Service" };
-
 export function TicketTierCard({ tier, isSelected, onSelect }: { tier: TierCardData; isSelected: boolean; onSelect: (t: TierCardData) => void }) {
-  const isVip = tier.tier === "vip" || tier.tier === "table_service" || tier.tier === "table";
-  const categoryLabel = TIER_CATEGORY[tier.category ?? "admission"] ?? "Admission";
+  const isVip = isAdmissionCategory(tier.category) && (tier.tier === "vip" || tier.tier === "table_service" || tier.tier === "table");
+  const categoryLabel = ticketCategoryLabel(tier.category);
   const g = tier.glowColor;
 
   return (
@@ -65,7 +64,7 @@ export function TicketTierCard({ tier, isSelected, onSelect }: { tier: TierCardD
 
       <span style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
         <span style={{ borderRadius: 8, padding: "3px 8px", background: `${g}25` }}>
-          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", color: g }}>{tier.tier.toUpperCase()}</span>
+          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", color: g }}>{ticketTierBadge(tier.category, tier.tier)}</span>
         </span>
         <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 10, fontWeight: 500, letterSpacing: "0.03em" }}>{categoryLabel}</span>
       </span>

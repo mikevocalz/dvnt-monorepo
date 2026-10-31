@@ -25,3 +25,9 @@ test('outsider and anonymous cannot invoke search RPC',async()=>{for(const actor
 test('RPC failure is closed, no broad fallback or schema detail leak',async()=>{const h=harness({rpcError:true});const r=await h.call({search:'Attendee'});assert.equal(r.status,500);assert.ok(!JSON.stringify(r.body).includes('private_schema'));assert.ok(!h.calls.some(c=>c.table==='tickets'&&c.method==='from'))});
 test('blank search keeps legacy direct roster path',async()=>{const h=harness();const r=await h.call({search:'   '});assert.equal(r.status,200);assert.equal(r.body.total,1207);assert.ok(!h.calls.some(c=>c.method==='rpc'))});
 test('oversized and structured search fail without returning broad roster',async()=>{for(const search of ['x'.repeat(201),{name:'Attendee'},['Attendee']]){const h=harness();const r=await h.call({search});assert.equal(r.status,400);assert.ok(!h.calls.some(c=>c.table==='tickets'||c.method==='rpc'))}});
+
+for(const role of ['owner','scanner'])test(`${role} roster exposes authoritative service category without admission perks`,async()=>{
+ const h=harness({actor:role==='owner'?'host':'door',role,rows:[ticket(1,{category:'admission',ticket_types:{name:'Coat Check',category:'service'}})]});
+ const r=await h.call();assert.equal(r.status,200);const item=r.body.tickets[0];assert.equal(item.category,'service');assert.equal(item.ticket_type_name,'Coat Check');assert.equal(item.membership_tier,null);assert.deepEqual(item.perks,[]);
+ if(role==='scanner')assert.equal(item.guest_email,undefined);
+});

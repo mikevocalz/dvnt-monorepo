@@ -15,8 +15,8 @@ function load(file, modules = {}) {
   });
   return exports;
 }
-function storeFixture(api = {}) {
-  const storage = { getItem: () => null, setItem() {}, removeItem() {} };
+function storeFixture(api = {}, persisted = null) {
+  const storage = { getItem: () => persisted, setItem() {}, removeItem() {} };
   return load('packages/app/lib/stores/offline-checkin-store.ts', {
     zustand: require('zustand'), 'zustand/middleware': require('zustand/middleware'),
     '@dvnt/app/lib/mmkv-zustand': { mmkvStorage: storage },
@@ -139,6 +139,14 @@ test('mounted web verdict distinguishes provisional from confirmed; unresolved s
     await React.act(async()=>host.querySelector('button').click());assert.equal(dismissed,1);
     await React.act(async()=>mounted.render(React.createElement(exports.Overlay,{result:{type:'success'},onDismiss:()=>{}})));
     assert.match(host.textContent,/Admitted — let them in/);
+    for (const [kind,label] of [['service','Service'],['product','Product'],['addon','Add-on'],['unknown','Credential']]) {
+      await React.act(async()=>mounted.render(React.createElement(exports.Overlay,{result:{type:'success',kind,tierName:'Coat Check'},onDismiss:()=>dismissed++})));
+      assert.match(host.textContent,new RegExp(`${label} redeemed`));
+      assert.doesNotMatch(host.textContent,/Admitted — let them in/);
+      assert.match(host.textContent,kind==='unknown'?/verify entry separately/:/not event entry/);
+      await React.act(async()=>host.querySelector('button').click());
+    }
+    assert.equal(dismissed,5);
     await React.act(async()=>mounted.render(React.createElement(exports.Sync,{phase:'online',queued:2,listUpdatedAt:Date.now()})));
     assert.match(host.textContent,/2 scans need sync or staff review — not confirmed/);assert.doesNotMatch(host.textContent,/list updated just now/);
     await React.act(async()=>mounted.render(React.createElement(exports.Sync,{phase:'synced',queued:1,listUpdatedAt:Date.now()})));
@@ -300,4 +308,47 @@ for(const status of [403,404,409])test(`terminal HTTP${status} reconciliation re
   const{api,useOfflineCheckinStore:store,calls}=apiFixture({error:{context:{status}}});store.getState().markScannedOffline('7','ticket','staff');
   const scans=store.getState().pendingScans;await api.syncOfflineScans(scans);await api.syncOfflineScans(scans);
   assert.equal(calls.length,1);assert.ok(store.getState().pendingScans[0].conflict);assert.equal(store.getState().pendingScans.length,1);
+});
+
+test('persisted old mixed allowlist is revoked without losing pending scans or duplicate history', () => {
+ const now=new Date().toISOString();
+ const pending=[{qrToken:'synthetic-service',eventId:'7',scannedAt:now,scannedBy:'staff'}];
+ const {useOfflineCheckinStore:store}=storeFixture({}, {version:0,state:{tokensByEvent:{'7':['synthetic-service']},lastDownloaded:{'7':now},addonTokensByEvent:{'7':['addon']},addonLastDownloaded:{'7':now},scannedTokens:{'7':['prior']},pendingScans:pending}});
+ assert.equal(store.getState().isTokenValid('7','synthetic-service'),false);
+ assert.equal(store.getState().isAddonTokenValid('7','addon'),true);
+ assert.equal(store.getState().isAlreadyScanned('7','prior'),true);
+ assert.equal(store.getState().pendingScans.length,1);
+ assert.equal(store.getState().pendingScans[0].qrToken,'synthetic-service');
+});
+
+
+test('mounted native result panel distinguishes service redemption from admission and dismisses cleanly', async () => {
+  const React=require('react');const {Window}=await import(require.resolve('happy-dom'));const window=new Window();
+  const old={window:global.window,document:global.document,navigator:Object.getOwnPropertyDescriptor(global,'navigator')};
+  global.window=window;global.document=window.document;Object.defineProperty(global,'navigator',{value:window.navigator,configurable:true});global.IS_REACT_ACT_ENVIRONMENT=true;
+  const {createRoot}=require('react-dom/client');
+  const source=fs.readFileSync(path.join(root,'packages/app/features/routes/screens/(protected)/events/[id]/scanner.tsx'),'utf8');
+  const selected=source.slice(source.indexOf('function ScanResultOverlay('),source.indexOf('// ── LiveCamera'));
+  const exports={};const Div=({children})=>React.createElement('div',null,children);const Button=({children,onPress})=>React.createElement('button',{onClick:onPress},children);
+  vm.runInNewContext(ts.transpileModule(selected+'\nexports.Overlay=ScanResultOverlay;', {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{
+    exports,require,Animated:{View:Div},Text:Div,Pressable:Button,CheckCircle2:()=>null,XCircle:()=>null,
+    useSharedValue:value=>({value}),useAnimatedStyle:()=>({}),useEffect:React.useEffect,withSequence:(...v)=>v.at(-1),withTiming:v=>v,FadeIn:{duration:()=>({})},FadeOut:{duration:()=>({})},
+    scanVerdictTitle:load('packages/app/lib/tickets/scan-verdict.ts').scanVerdictTitle,
+  });
+  const host=document.createElement('div');document.body.appendChild(host);const mounted=createRoot(host);let dismissed=0;
+  try{
+    for(const [kind,label] of [['ticket','Admitted — let them in'],['service','Service redeemed — not event entry'],['product','Product redeemed — not event entry'],['unknown','Credential redeemed — verify entry separately']]){
+      await React.act(async()=>mounted.render(React.createElement(exports.Overlay,{result:{type:'success',kind},onDismiss:()=>dismissed++})));
+      assert.ok(host.textContent.includes(label));if(kind!=='ticket')assert.doesNotMatch(host.textContent,/Admitted — let them in/);
+      await React.act(async()=>host.querySelector('button').click());
+    }
+    assert.equal(dismissed,4);
+  }finally{await React.act(async()=>mounted.unmount());window.happyDOM.abort();global.window=old.window;global.document=old.document;if(old.navigator)Object.defineProperty(global,'navigator',old.navigator);else delete global.navigator;delete global.IS_REACT_ACT_ENVIRONMENT;}
+});
+
+test('online and offline replay requests advertise purpose-aware scanner rendering',async()=>{
+ const {api,calls}=apiFixture({data:{valid:true,kind:'ticket',admits_entry:true}});
+ await api.scanTicket('synthetic','staff','7');
+ await api.syncOfflineScans([{qrToken:'synthetic-replay',eventId:'7',scannedBy:'staff',scannedAt:'2026-01-01T00:00:00Z'}]);
+ assert.equal(calls.length,2);assert.ok(calls.every(request=>request.body.supports_credential_purposes===true));
 });

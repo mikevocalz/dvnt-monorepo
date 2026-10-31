@@ -1,4 +1,5 @@
 -- Activation requires separate approval AFTER refresh-platform-fees is deployed.
+-- User-approved cadence: 00:07, 04:07, 08:07, 12:07, 16:07 and 20:07 UTC.
 -- Reporting only: no recovery schedule/function changes, no credentials created,
 -- no provider reads or cache enrollment occur while this migration is applied.
 BEGIN;
@@ -20,7 +21,7 @@ BEGIN
    url := 'https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/refresh-platform-fees',
    headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',v_secret),
    body := '{}'::jsonb,
-   timeout_milliseconds := 30000
+   timeout_milliseconds := 120000
  );
 END;
 $$;
@@ -34,7 +35,7 @@ BEGIN
  IF EXISTS(SELECT 1 FROM cron.job WHERE jobname='refresh-platform-fees-reporting-only') THEN
    RAISE EXCEPTION 'Reporting job already exists; inspect before activation';
  END IF;
- PERFORM cron.schedule('refresh-platform-fees-reporting-only','7,22,37,52 * * * *','select public.cron_refresh_platform_fees();');
+ PERFORM cron.schedule('refresh-platform-fees-reporting-only','7 */4 * * *','select public.cron_refresh_platform_fees();');
 END;
 $schedule$;
 COMMIT;

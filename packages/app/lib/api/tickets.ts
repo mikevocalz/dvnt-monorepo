@@ -1,3 +1,4 @@
+import type { ScanCredentialKind } from "@dvnt/app/lib/tickets/scan-verdict";
 import { supabase } from "../supabase/client";
 import { getCurrentUserAuthId } from "./auth-helper";
 import { useAuthStore } from "../stores/auth-store";
@@ -121,8 +122,9 @@ export interface ScanAddonSummary {
 export interface ScanTicketResponse {
   valid: boolean;
   reason?: string;
-  /** "addon" when the scanned QR belonged to an order_addons row. */
-  kind?: "ticket" | "addon";
+  /** Purpose is distinct from the ticket/add-on storage rail. */
+  kind?: ScanCredentialKind;
+  admits_entry?: boolean;
   status?: string;
   checked_in_at?: string | null;
   checked_in_by?: string | null;
@@ -576,6 +578,7 @@ export const ticketsApi = {
     const { data, error } = await supabase.functions.invoke("ticket-scan", {
       body: {
         qr_token: qrToken,
+        supports_credential_purposes: true,
         scanned_by: scannedBy,
         ...(eventId ? { event_id: eventId } : {}),
       },
@@ -752,6 +755,7 @@ export const ticketsApi = {
           const { data, error } = await supabase.functions.invoke("ticket-scan", {
             body: {
               qr_token: scan.qrToken,
+              supports_credential_purposes: true,
               scanned_by: owner.authId,
               offline_scanned_at: scan.scannedAt,
               ...(scan.eventId ? { event_id: scan.eventId } : {}),
@@ -1074,8 +1078,9 @@ export const ticketsApi = {
     try {
       const result = await ticketsApi.scanTicket(data.qrToken);
       return {
-        success: result.valid,
-        alreadyCheckedIn: result.reason === "already_scanned",
+        // This legacy API promises admission, not successful item redemption.
+        success: result.valid === true && result.admits_entry === true && result.kind === "ticket",
+        alreadyCheckedIn: result.reason === "already_scanned" && result.admits_entry === true && result.kind === "ticket",
       };
     } catch {
       return { success: false };

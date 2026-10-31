@@ -26,6 +26,9 @@ test('durable platform fee snapshots have scoped enrollment and provider CAS',{t
  const args=['-D',data,'-U','harness','--auth=trust','--no-sync'];if(process.env.POSTGRES_SHARE)args.push('-L',process.env.POSTGRES_SHARE);run('initdb',args);
  try { run('pg_ctl',['-D',data,'-o',`-k ${socket} -c listen_addresses='' -c fsync=off`,'-w','-l',path.join(data,'log'),'start']); } catch (error) { if (existsSync(path.join(data,'log'))) console.error(readFileSync(path.join(data,'log'),'utf8')); throw error; }pool=new Pool({host:socket,user:'harness',database:'postgres',max:5});await pool.query(schema);
  await pool.query(readFileSync(path.join(migrations,'20261031131615_scoped_platform_fee_report.sql'),'utf8'));
+ const policyDefinitions=await pool.query("SELECT oid::regprocedure::text name,pg_get_functiondef(oid) definition FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN ('publish_platform_fee_report','enroll_platform_fee_snapshots') ORDER BY proname");
+ await pool.query(readFileSync(path.join(migrations,'20261031153724_platform_fee_fair_claims.sql'),'utf8'));
+ assert.deepEqual((await pool.query("SELECT oid::regprocedure::text name,pg_get_functiondef(oid) definition FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN ('publish_platform_fee_report','enroll_platform_fee_snapshots') ORDER BY proname")).rows,policyDefinitions.rows,'fair claim migration must not change freshness/publication/enrollment');
  const bounds=(await pool.query("SELECT date_trunc('month',clock_timestamp() AT TIME ZONE 'America/New_York') AT TIME ZONE 'America/New_York' start,(date_trunc('month',clock_timestamp() AT TIME ZONE 'America/New_York')+interval '1 month') AT TIME ZONE 'America/New_York' finish")).rows[0];
  const reset=()=>pool.query('TRUNCATE platform_fee_reports,platform_fee_snapshots,orders,events RESTART IDENTITY CASCADE');
  const ev=async(owner='host')=>(await pool.query('INSERT INTO events(host_id) VALUES($1) RETURNING id',[owner])).rows[0].id;
@@ -48,6 +51,17 @@ test('durable platform fee snapshots have scoped enrollment and provider CAS',{t
  await t.test('concurrent enrollment and claims cannot double lease one payment',async()=>{
  await reset();const event=await ev();await mint(event,'pi_Concurrent');await Promise.all([enroll(),enroll()]);const lists=await Promise.all([claim(),claim()]);assert.equal(lists.flat().length,1);const r=lists.flat()[0];assert.equal(await finish(r,200,37),true);const saved=(await pool.query("SELECT * FROM platform_fee_snapshots WHERE payment_intent_id=$1",[r.payment_intent_id])).rows[0];assert.equal(saved.status,'verified');assert.equal(Number(saved.refunded_cents),37);assert.equal(await finish(r,200,37),false);
  });
+ await t.test('fair cohorts progress across overlapping claimers without duplicate leases',async()=>{
+ await reset();const older=await ev('older-owner'),later=await ev('later-owner');
+ await pool.query("INSERT INTO orders(event_id,stripe_payment_intent_id) SELECT $1,'pi_OlderFair'||n FROM generate_series(1,101)n",[older]);
+ await pool.query("INSERT INTO orders(event_id,stripe_payment_intent_id) SELECT $1,'pi_LaterFair'||n FROM generate_series(1,5)n",[later]);
+ await enroll('older-owner');await enroll('later-owner');
+ const lists=await Promise.all([claim(4),claim(4)]);const rows=lists.flat();
+ assert.ok(rows.length>=4&&rows.length<=8);assert.equal(new Set(rows.map(r=>r.payment_intent_id)).size,rows.length);
+ assert.ok(rows.some(r=>r.auth_id==='older-owner'));assert.ok(rows.some(r=>r.auth_id==='later-owner'),'newer cohort is not starved behind old101row backlog');
+ const next=await claim(4);assert.ok(next.every(r=>!rows.some(old=>old.payment_intent_id===r.payment_intent_id)),'live leases are not reused');
+ assert.ok((await pool.query('SELECT last_claimed_at FROM platform_fee_reports')).rows.every(r=>r.last_claimed_at));
+ });
  await t.test('scope changes after enrollment prevent provider GET; after claim prevent verified write',async()=>{
  await reset();const event=await ev();await mint(event,'pi_Ownership');await enroll();await pool.query("UPDATE events SET host_id='other' WHERE id=$1",[event]);assert.equal((await claim()).length,0);assert.equal((await pool.query('SELECT status FROM platform_fee_snapshots')).rows[0].status,'failed');await reset();const e=await ev();await mint(e,'pi_AfterClaim');await enroll();const r=(await claim())[0];await pool.query("UPDATE events SET host_id='other' WHERE id=$1",[e]);assert.equal(await finish(r),true);assert.equal((await pool.query('SELECT status FROM platform_fee_snapshots')).rows[0].status,'failed');
  });
@@ -56,6 +70,13 @@ test('durable platform fee snapshots have scoped enrollment and provider CAS',{t
  });
  await t.test('expired invalid rows cannot hide valid work behind a limited claim page',async()=>{
  await reset();const stale=await ev(),valid=await ev();for(let n=0;n<105;n++)await mint(stale,'pi_Invalid'+n);await mint(valid,'pi_Valid');await enroll();await pool.query("UPDATE events SET host_id='other' WHERE id=$1",[stale]);const rows=await claim(4);assert.equal(rows.length,1);assert.equal(rows[0].payment_intent_id,'pi_Valid');
+ });
+ await t.test('fair claim handles empty/null limits and resumes expired leases without accepting stale completion',async()=>{
+ await reset();assert.deepEqual(await claim(null),[]);const event=await ev();await mint(event,'pi_ResumeFair');await enroll();
+ const first=(await claim(null))[0];assert.ok(first);assert.deepEqual(await claim(),[],'no eligible rows while current lease is live');
+ await pool.query("UPDATE platform_fee_snapshots SET leased_until=clock_timestamp()-interval '1 second' WHERE payment_intent_id=$1",[first.payment_intent_id]);
+ const resumed=(await claim())[0];assert.equal(resumed.payment_intent_id,first.payment_intent_id);assert.notEqual(resumed.lease_token,first.lease_token);assert.equal(resumed.attempts,2);
+ assert.equal(await finish(first),false);assert.equal(await finish(resumed),true);assert.deepEqual(await claim(null),[],'completed cohort cannot be reclaimed');
  });
  await t.test('repeated lease expiry reaches bounded terminal failure',async()=>{
  await reset();const event=await ev();await mint(event,'pi_Expired');await enroll();await claim();await pool.query("UPDATE platform_fee_snapshots SET attempts=5,leased_until=clock_timestamp()-interval '1 second'");assert.equal((await claim()).length,0);assert.equal((await pool.query('SELECT status FROM platform_fee_snapshots')).rows[0].status,'failed');

@@ -1,4 +1,5 @@
 "use client";
+import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
 import { eventTypeOptions } from "@dvnt/app/lib/events/event-type";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 /**
@@ -454,7 +455,7 @@ export function EventEditScreen() {
           await withTimeout(
             ticketTypesApi.create({
               eventId: id,
-              name: tier.name || "General Admission",
+              name: tier.name || defaultTicketTypeName(tier.category),
               category: tier.category || "admission",
               description: tier.description || undefined,
               priceCents,
@@ -1169,8 +1170,8 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
       className="rounded-2xl bg-white/[0.04] p-4 border"
       style={{ borderColor }}
     >
-      {/* Tier level selector */}
-      <div className="flex flex-wrap gap-1.5 mb-3">
+      {/* Admission styles do not classify separately sold services/products. */}
+      {isAdmissionCategory(tier.category) ? <div className="flex flex-wrap gap-1.5 mb-3">
         {TIER_LEVELS.map((lvl) => {
           const selected = tier.tier === lvl;
           return (
@@ -1188,7 +1189,7 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
             </button>
           );
         })}
-      </div>
+      </div> : null}
 
       {/* Category selector */}
       <div className="flex flex-wrap gap-1.5 mb-2">
@@ -1198,6 +1199,7 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
             <button
               key={option.value}
               onClick={() => updateTier(idx, { category: option.value })}
+              aria-pressed={selected}
               className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold border ${
                 selected
                   ? "bg-[#3FDCFF] text-black border-transparent"
@@ -1231,7 +1233,7 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
             className="w-full bg-white/[0.05] rounded-lg px-2.5 py-1.5 text-[15px] font-semibold text-white outline-none disabled:text-white/40"
             inputMode="decimal"
             placeholder="0"
-            disabled={tier.tier === "free"}
+            disabled={isAdmissionCategory(tier.category) && tier.tier === "free"}
             value={tier.priceDollars}
             onChange={(e) => updateTier(idx, { priceDollars: e.target.value })}
           />
@@ -1309,7 +1311,8 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
       </div>
 
       {/* Tier type — v2 enum (GA / VIP / Early Bird / Table / Group). */}
-      <span className="block text-[11px] text-white/50 mb-1">Tier type</span>
+      {isAdmissionCategory(tier.category) ? <>
+      <span className="block text-[11px] text-white/50 mb-1">Admission tier type</span>
       <div className="flex flex-wrap gap-1.5 mb-2.5">
         {TIER_TYPE_OPTIONS.map((o) => {
           const selected = (tier.tierType || "ga") === o.value;
@@ -1328,6 +1331,7 @@ function TierCard({ tier, idx }: { tier: LocalTicketTier; idx: number }) {
           );
         })}
       </div>
+      </> : null}
 
       {/* Visibility — public / hidden / locked (+ unlock code). */}
       <span className="block text-[11px] text-white/50 mb-1">Visibility</span>

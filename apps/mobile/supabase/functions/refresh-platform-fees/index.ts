@@ -29,9 +29,9 @@ Deno.serve(async (req: Request) => {
     const client=createClient(url,serviceKey,{auth:{persistSession:false,autoRefreshToken:false}});
     // Capability-limited adapter: this worker has no table mutation API and the
     // provider helper can only invoke these two service-only reporting RPCs.
-    const reportingDb={rpc(name:string,args:Record<string,unknown>){
+    const reportingDb={rpc(name:string,args:Record<string,unknown>,signal:AbortSignal){
       if(!allowedRpcs.has(name))throw new Error("Unsupported reporting operation");
-      return client.rpc(name,args);
+      return client.rpc(name,args).abortSignal(signal);
     }};
     const result=await reconcilePlatformFeeSnapshots(reportingDb,stripeSecret);
     return reply({ok:true,verified:result.verified,unavailable:result.unavailable});

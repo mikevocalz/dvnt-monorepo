@@ -217,6 +217,7 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       event_id,
       offline,
       offline_scanned_at,
+      supports_credential_purposes,
     } = await req.json();
 
     if (!qr_token && !qr_payload) {
@@ -274,6 +275,17 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
     let scanKind: "ticket" | "addon" = "ticket";
     let resolvedToken: string | null = null;
     let resolvedEventId: number | null = null;
+    // Category is authorization-relevant display data: resolve it BEFORE the
+    // CAS, so a failed enrichment can never turn a service QR into admission.
+    let resolvedTicketType: { name?: string; category?: string | null } | null = null;
+    const rememberTicketType = (ticket: { ticket_types?: unknown; ticket_type_id?: string | null; category?: string }) => {
+      const row = Array.isArray(ticket.ticket_types) ? ticket.ticket_types[0] : ticket.ticket_types;
+      resolvedTicketType = row && typeof row === "object" ? row
+        // Untiered free RSVPs are real admission credentials; they have no
+        // related tier by design. A missing referenced tier is not the same.
+        : ticket.ticket_type_id == null && ticket.category
+          ? { category: ticket.category } : null;
+    };
 
     if (qr_payload) {
       // Fast path: HMAC-signed QR payload (tickets and add-ons).
@@ -283,7 +295,7 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       }
       const byId = await lookupRow(() => supabase
         .from("tickets")
-        .select("qr_token, event_id")
+        .select("qr_token, event_id, ticket_type_id, category, ticket_types(name, category)")
         .eq("id", verification.ticketId!)
         // A valid signature proves issuance, not current ownership. Transfers
         // rotate the payload; the sender's old signed screenshot must not
@@ -292,6 +304,7 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
         .eq("event_id", verification.eventId!)
         .maybeSingle());
       if (byId?.qr_token) {
+        rememberTicketType(byId);
         resolvedToken = byId.qr_token;
         resolvedEventId = byId.event_id ?? verification.eventId!;
       } else {
@@ -315,10 +328,11 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
     } else {
       const byToken = await lookupRow(() => supabase
         .from("tickets")
-        .select("event_id")
+        .select("event_id, ticket_type_id, category, ticket_types(name, category)")
         .eq("qr_token", qr_token)
         .maybeSingle());
       if (byToken) {
+        rememberTicketType(byToken);
         resolvedToken = qr_token;
         resolvedEventId = byToken.event_id;
       } else {
@@ -453,6 +467,25 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       }
     }
 
+    // Service/product credentials use the same one-time redemption CAS, not
+    // admission. Missing/unknown category evidence must never announce entry.
+    const ticketCategory = (resolvedTicketType as { category?: string | null } | null)?.category;
+    const credentialKind = !resolvedTicketType ? "unknown"
+      : ticketCategory === "service" || ticketCategory === "coat_check" ? "service"
+      : ticketCategory === "product" ? "product"
+      : ticketCategory == null || ticketCategory === "admission" ? "ticket"
+      : "unknown";
+    const admitsEntry = credentialKind === "ticket";
+    // Older native builds treat every valid ticket-row response as admission.
+    // Refuse their non-admission scans BEFORE redemption, until they update or
+    // use the current web scanner. This flag does not grant staff authority.
+    if (resolvedToken && !admitsEntry && supports_credential_purposes !== true) {
+      return json({
+        error: "This credential is not event admission. Update the app or use the current web scanner to redeem it.",
+        code: "scanner_update_required",
+      }, 426);
+    }
+
     // ── TICKET RAIL: atomic check-in via redeem_ticket CAS ────
     // Single RPC replaces the old read-then-update path: the CAS flips
     // active → scanned AND writes the audit row in one transaction.
@@ -492,26 +525,22 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
           .eq("auth_id", ticket?.user_id)
           .maybeSingle());
 
-        const ticketType = await displayRow(() => supabase
-          .from("ticket_types")
-          .select("name")
-          .eq("id", ticket?.ticket_type_id)
-          .maybeSingle());
-
         const addons = ticket
           ? await fetchTicketAddons(supabase, ticket)
           : [];
 
         // WS-4: tier + perk on the result card. Resolved AFTER the CAS redeem
         // above, so a slow or failing lookup can never affect admission.
-        const door = await resolveDoorTier(
+        const door = admitsEntry ? await resolveDoorTier(
           supabase,
           (ticket as any)?.user_id ?? null,
           (ticket as any)?.event_id ?? rpcResult.eventId ?? null,
-        );
+        ) : { membership_tier: null, perks: [] };
 
         return json({
           valid: true,
+          kind: credentialKind,
+          admits_entry: admitsEntry,
           membership_tier: door.membership_tier,
           perks: door.perks,
           ticket: {
@@ -534,7 +563,9 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
               user?.username ||
               (ticket as any)?.guest_name?.trim() ||
               "Guest",
-            tier_name: ticketType?.name || "General",
+            category: ticketCategory ?? null,
+            tier_name: (resolvedTicketType as { name?: string } | null)?.name ||
+              (credentialKind === "service" ? "Service" : credentialKind === "product" ? "Product" : "Ticket"),
           },
           addons,
         });
@@ -563,6 +594,8 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
         }
         return json({
           valid: false,
+          kind: credentialKind,
+          admits_entry: admitsEntry,
           reason: "already_scanned",
           status: "scanned",
           checked_in_at: rpcResult.checkedInAt ?? null,

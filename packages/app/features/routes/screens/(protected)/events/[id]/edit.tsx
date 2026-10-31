@@ -1,3 +1,4 @@
+import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
 import { eventTypeOptions } from "@dvnt/app/lib/events/event-type";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
@@ -723,7 +724,7 @@ function EditEventScreenContent() {
         if (!tier.id) {
           await ticketTypesApi.create({
             eventId: id,
-            name: tier.name || "General Admission",
+            name: tier.name || defaultTicketTypeName(tier.category),
             category: tier.category || "admission",
             description: tier.description || undefined,
             priceCents,
@@ -1564,8 +1565,8 @@ function EditEventScreenContent() {
                           : "rgba(52,162,223,0.3)",
                 }}
               >
-                {/* Tier level selector */}
-                <View
+                {/* Admission styles do not classify services/products. */}
+                {isAdmissionCategory(tier.category) ? <View
                   style={{ flexDirection: "row", gap: 6, marginBottom: 12 }}
                 >
                   {TIER_LEVELS.map((lvl) => (
@@ -1611,7 +1612,7 @@ function EditEventScreenContent() {
                       </Text>
                     </Pressable>
                   ))}
-                </View>
+                </View> : null}
 
                 <View
                   style={{ flexDirection: "row", gap: 6, marginBottom: 12 }}
@@ -1622,6 +1623,8 @@ function EditEventScreenContent() {
                     return (
                       <Pressable
                         key={option.value}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
                         onPress={() => {
                           const updated = [...ticketTiers];
                           updated[idx] = {
@@ -1729,10 +1732,10 @@ function EditEventScreenContent() {
                       placeholder="0"
                       placeholderTextColor={colors.mutedForeground}
                       keyboardType="decimal-pad"
-                      editable={tier.tier !== "free"}
+                      editable={!isAdmissionCategory(tier.category) || tier.tier !== "free"}
                       style={{
                         color:
-                          tier.tier === "free"
+                          isAdmissionCategory(tier.category) && tier.tier === "free"
                             ? colors.mutedForeground
                             : colors.foreground,
                         fontSize: 15,

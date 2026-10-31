@@ -64,3 +64,12 @@ for (const [label, over] of [['hidden', { is_hidden: true }], ['not yet publishe
 test('an unparseable publish_at fails closed', async () => {
   assert.equal(await can(event({ publish_at: 'soon' }), 'stranger'), false);
 });
+
+for (const category of ['service','coat_check','product']) test(`${category}-only ownership is not admission for private/hidden events`, async()=>{
+  for(const over of [{visibility:'private'},{is_hidden:true},{publish_at:FUTURE}]){
+    const tables={events:[event(over)],tickets:[{event_id:7,user_id:'service-buyer',status:'active',category}]};
+    assert.equal(await canAccessEvent(db(tables),7,'service-buyer'),false);
+    tables.tickets.push({event_id:7,user_id:'service-buyer',status:'active',category:'admission'});
+    assert.equal(await canAccessEvent(db(tables),7,'service-buyer'),true,'separate admission still grants access');
+  }
+});

@@ -13,7 +13,7 @@ permissions:
   contents: read
 jobs:
   isolated-postgres:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -30,4 +30,4 @@ jobs:
       - name: Disposable synthetic database contracts (no external connection)
         env:
           NODE_PATH: ${{ runner.temp }}/fee-tests/node_modules
-        run: node --test apps/mobile/supabase/functions/_shared/platform-fee-snapshot-sql.cjs apps/mobile/supabase/functions/_shared/reporting-only-fee-schedule-sql.cjs
+        run: node --test apps/mobile/supabase/functions/_shared/platform-fee-snapshot-sql.cjs apps/mobile/supabase/functions/_shared/reporting-only-fee-schedule-sql.cjs apps/mobile/supabase/functions/_shared/platform-fee-four-hour-sql.cjs

@@ -31,6 +31,7 @@ const OUT = process.env.EVENT_PURCHASE_OUTPUT_DIR || fs.mkdtempSync(path.join(os
 const PAID = '22222222-2222-4222-8222-222222222222';
 const FREE = '11111111-1111-4111-8111-111111111111';
 const VIP = '33333333-3333-4333-8333-333333333333';
+const SERVICE = '55555555-5555-4555-8555-555555555555';
 
 const fixture = `
   import {create} from 'zustand';
@@ -38,7 +39,7 @@ const fixture = `
   export const noop=()=>{};
   export const query=(data,patch={})=>({data,isPending:false,isFetching:false,isError:false,refetch:noop,...patch});
   export const mutation={isPending:false,isError:false,mutate:noop,mutateAsync:async()=>({})};
-  const tier={event_id:42,quantity_total:100,quantity_sold:0,is_active:true,status:'on_sale',perks:[]};
+  const tier={event_id:42,category:'admission',max_per_user:10,quantity_total:100,quantity_sold:0,is_active:true,status:'on_sale',perks:[]};
   export const tiers=[
     {...tier,id:'${FREE}',name:'Free RSVP',price_cents:0,description:'Free admission ticket.'},
     {...tier,id:'${PAID}',name:'General admission',price_cents:3000,description:'Admission for one person.'},
@@ -46,14 +47,15 @@ const fixture = `
   ];
   if(new URLSearchParams(location.search).has('long'))tiers.forEach((t,i)=>{t.name=['Free community admission with advance registration','General admission for the late-night community celebration','VIP admission for the complete evening'][i];t.description='Organizer-provided details may take several lines on a smaller screen.'});
   if(new URLSearchParams(location.search).has('configured'))tiers[2].perks=['Organizer-listed coat check'];
-  export const ownedTicket={id:'fixture-ticket',event_id:42,ticket_type_id:'${PAID}',purchase_amount_cents:3000,status:'active',event_title:'NYC Black Out · Layout fixture'};
+  export const serviceTier={...tier,id:'${SERVICE}',category:'service',name:'Coat Check',price_cents:1000,description:'Coat check sold separately from event admission.'};
+  export const ownedTicket={id:'fixture-ticket',user_id:'fixture-auth',category:'admission',event_id:42,ticket_type_id:'${PAID}',purchase_amount_cents:3000,status:'active',event_title:'NYC Black Out · Layout fixture'};
   export const event={id:42,title:'NYC Black Out · Layout fixture',description:'Music, community, and a night out. Select a ticket above to continue.',
     image:'./fixture-flyer.svg',price:30,ticketingEnabled:true,ticketTiers:tiers,visibility:'public',status:'active',
     host:{id:'fixture-host',username:'community',avatar:'./fixture-avatar.svg'},location:'Brooklyn, NY',
     fullDate:'2099-06-20T23:00:00Z',event_tz:'America/New_York',lineup:['Local selectors'],perks:[],attendees:[]};
-  export const useFixture=create(()=>({event,tiers,authenticated:false}));
-  export const f=window.fixture={baseEvent:event,checkouts:[],rsvps:[],routes:[],storyShares:[],attendancePrivacy:[],ui:useEventDetailUiStore,
-    configure:patch=>useFixture.setState(patch),configureTickets:tiers=>useFixture.setState(s=>({tiers,event:{...s.event,ticketTiers:tiers}})),reset:()=>{useEventDetailUiStore.getState().reset();f.checkouts=[];f.rsvps=[];f.routes=[];f.storyShares=[];f.attendancePrivacy=[];useFixture.setState({event,tiers,authenticated:false})}};
+  export const useFixture=create(()=>({event,tiers,authenticated:false,ownedTicket:null}));
+  export const f=window.fixture={baseEvent:event,ownedTicket,serviceTier,checkouts:[],rsvps:[],routes:[],storyShares:[],attendancePrivacy:[],ui:useEventDetailUiStore,
+    configure:patch=>useFixture.setState(patch),configureTickets:tiers=>useFixture.setState(s=>({tiers,event:{...s.event,ticketTiers:tiers}})),reset:()=>{useEventDetailUiStore.getState().reset();f.checkouts=[];f.rsvps=[];f.routes=[];f.storyShares=[];f.attendancePrivacy=[];useFixture.setState({event,tiers,authenticated:false,ownedTicket:null})}};
   export const store=state=>Object.assign((select=s=>s)=>select(state),{getState:()=>state});
   export const guestCheckout=store({open:false,email:'',eventId:'42',tierId:'',requestKey:'fixture',quantity:1,
     discountCode:'',trackedPromoterCode:'',codeDraft:'',quoteRevision:0,patch:noop,
@@ -65,7 +67,7 @@ const boundaries = new Map([
   ['solito/navigation', `import {f} from 'fixture';const router={push:url=>f.routes.push(url),back:()=>{}};export const useParams=()=>({id:'42'});export const usePathname=()=>'/public/events/42';export const useRouter=()=>router;`],
   ['@tanstack/react-query', `import {query,mutation} from 'fixture';export const useQuery=({queryKey})=>query(queryKey[1]==='share-token'?null:[]);export const useMutation=()=>mutation;export const useQueryClient=()=>({invalidateQueries:()=>{}});`],
   ['@dvnt/app/lib/hooks/use-events', `import {useFixture,query,mutation,f} from 'fixture';export const useEvents=()=>query([]);export const useEvent=()=>query(useFixture(s=>s.event));export const useDeleteEvent=()=>mutation;export const useToggleEventLike=()=>mutation;export const useRsvpEvent=()=>({...mutation,mutate:v=>f.rsvps.push(v)});export const eventKeys={all:['events']};`],
-  ['@dvnt/app/lib/hooks/use-tickets', `import {useFixture,query,ownedTicket,noop} from 'fixture';export const useTicketRoute=()=>({isLoading:false,refetch:noop,resolution:{kind:'ticket',ticket:ownedTicket}});export const useTicketTypes=()=>query(useFixture(s=>s.tiers));export const useMyTicketStatusForEvent=()=>({primary:null,isPending:false,isError:false});export const useTicketViewerId=()=>useFixture(s=>s.authenticated)?'fixture-member':'anon';export const useTicketViewerAuthId=()=>null;export const useTicketViewerIdentityPending=()=>false;`],
+  ['@dvnt/app/lib/hooks/use-tickets', `import {useFixture,query,ownedTicket,noop} from 'fixture';export const useTicketRoute=()=>({isLoading:false,refetch:noop,resolution:{kind:'ticket',ticket:ownedTicket}});export const useTicketTypes=()=>query(useFixture(s=>s.tiers));export const useMyTicketStatusForEvent=()=>{const primary=useFixture(s=>s.ownedTicket);return{primary,tickets:primary?[primary]:[],isPending:false,isError:false}};export const useTicketViewerId=()=>useFixture(s=>s.authenticated)?'fixture-member':'anon';export const useTicketViewerAuthId=()=>useFixture(s=>s.authenticated)?'fixture-auth':null;export const useTicketViewerIdentityPending=()=>false;`],
   ['@dvnt/app/lib/hooks/use-ticket-checkout', `export const useTicketCheckout=()=>({checkout:()=>{},isLoading:false});`],
   ['@dvnt/app/lib/hooks/use-ticket-upgrade', `import {mutation} from 'fixture';export const useTicketUpgradeOptions=()=>[];export const useInitiateUpgrade=()=>mutation;`],
   ['@dvnt/app/lib/hooks/use-event-waitlist', `import {query,mutation} from 'fixture';export const useEventWaitlistStatus=()=>query(null);export const useJoinWaitlist=()=>mutation;export const useLeaveWaitlist=()=>mutation;`],
@@ -83,7 +85,7 @@ const boundaries = new Map([
   ['@dvnt/app/lib/hooks/use-share-post-to-story', `import {f} from 'fixture';export const useSharePostToStory=()=>({isPending:false,shareEvent:(event,onShared)=>{f.storyShares.push({type:'event',id:String(event.id)});onShared?.()}});`],
   ['@dvnt/app/lib/hooks/use-weather', `import {query} from 'fixture';export const useWeatherForecast=()=>query([]);`],
   ['@dvnt/app/lib/color/useEventDominantColor', `export const useEventDominantColor=()=>({color:'#26173d'});`],
-  ['@dvnt/app/lib/stores/auth-store', `import {useFixture} from 'fixture';export const useAuthStore=select=>{const authenticated=useFixture(s=>s.authenticated);return select({isAuthenticated:authenticated,user:authenticated?{id:'fixture-member',username:'member'}:null})};`],
+  ['@dvnt/app/lib/stores/auth-store', `import {useFixture} from 'fixture';export const useAuthStore=select=>{const authenticated=useFixture(s=>s.authenticated);return select({isAuthenticated:authenticated,user:authenticated?{id:'fixture-member',authId:'fixture-auth',username:'member'}:null})};`],
   ['@dvnt/app/lib/stores/guest-checkout-store', `export {guestCheckout as useGuestCheckoutStore} from 'fixture';`],
   ['@dvnt/app/lib/stores/guest-rsvp-store', `export {guestRsvp as useGuestRsvpStore} from 'fixture';`],
   ['@dvnt/app/lib/stores/ui-store', `import {store,noop} from 'fixture';export const useUIStore=store({showToast:noop});`],
@@ -112,7 +114,7 @@ const boundaries = new Map([
   ['@dvnt/app/features/sneaky-lynk', `export const sneakyLynkApi={};`],
   ['@dvnt/observability/flows', `export const onboardingCheckpoint=()=>{};`],
   ['@dvnt/ui', `export {Dialog} from '${source('packages/ui/src/form/Dialog.web.tsx')}';`],
-  [source('packages/app/features/events/use-checkout-code.web'), `export const useCheckoutCode=()=>({});`],
+  [source('packages/app/features/events/use-checkout-code.web'), `export const useCheckoutCode=()=>()=>{};`],
 ]);
 
 async function buildFixture() {
@@ -283,6 +285,58 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       }
       evidence.screens.push({...size,geometry,screenshots:[full,focused]});
       evidence.checks.push(size.name+': grouped-before-About, one CTA, selected default, no overflow/overlap, keyboard, selection-only clicks, free/paid CTA dispatch');
+      // Repeat buyers keep their credential and a separate purchase action.
+      // The actual source screen, actual authorization helper, real CSS and
+      // real BottomSheet are mounted; only ownership reads remain synthetic.
+      await page.evaluate(()=>{
+        const f=window.fixture;f.reset();
+        f.configureTickets([...f.baseEvent.ticketTiers,f.serviceTier]);
+        f.configure({authenticated:true,ownedTicket:f.ownedTicket});
+      });
+      await tick(page);
+      const viewTicket=purchase.getByRole('button',{name:'View ticket',exact:true});
+      await viewTicket.waitFor();
+      const additional=purchase.getByTestId('event-purchase-action');
+      assert.match(await additional.innerText(),/Buy additional/i,'holder has distinct buy-more action');
+      assert.equal(await additional.isEnabled(),true,'holder may buy while below cumulative cap');
+      await viewTicket.click();await tick(page);
+      assert.deepEqual(await page.evaluate(()=>window.fixture.routes),['/feed/ticket/fixture-ticket'],'View opens original ticket id, not new checkout');
+      await page.evaluate(()=>{window.fixture.routes=[]});
+      const service=page.getByTestId('ticket-tier-'+SERVICE);
+      await service.click();await tick(page);
+      assert.equal(await service.getAttribute('aria-pressed'),'true');
+      assert.match(await service.innerText(),/Service.*Does not include event admission/s,'service label is not GA');
+      assert.equal(await page.evaluate(()=>window.fixture.ui.getState().checkoutOpen),false,'service choice does not start payment');
+      const holderGeometry=await page.evaluate(()=>{
+        const box=el=>{const r=el.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
+        const p=document.querySelector('[data-testid="event-purchase"]');
+        const view=[...p.querySelectorAll('button')].find(b=>b.textContent.trim()==='View ticket');
+        const buy=p.querySelector('[data-testid="event-purchase-action"]');
+        const rows=[...p.querySelectorAll('[data-testid^="ticket-tier-"]')];
+        return{view:box(view),buy:box(buy),tiers:rows.map(box),scrollWidth:document.documentElement.scrollWidth,bodyWidth:document.body.scrollWidth};
+      });
+      assert.ok(holderGeometry.view.bottom<=holderGeometry.buy.y+1,'existing-ticket and additional-purchase actions never overlap');
+      assert.ok(holderGeometry.scrollWidth<=size.width&&holderGeometry.bodyWidth<=size.width,'holder/service layout has no horizontal overflow');
+      for(const rect of [holderGeometry.view,holderGeometry.buy,...holderGeometry.tiers]){
+        assert.ok(rect.x>=0&&rect.right<=size.width,'holder controls fit the viewport');
+        assert.ok(rect.height>=44,'holder controls meet the touch target');
+      }
+      await additional.scrollIntoViewIfNeeded();await tick(page);
+      const holderScreenshot=path.join(OUT,size.name+'-holder-service.png');
+      await page.screenshot({path:holderScreenshot});
+      evidence.screens.at(-1).screenshots.push(holderScreenshot);
+      evidence.screens.at(-1).holderGeometry=holderGeometry;
+      await additional.click();await tick(page);
+      const checkoutSheet=page.getByRole('dialog',{name:'Checkout',exact:true});
+      await checkoutSheet.waitFor();
+      assert.match(await checkoutSheet.innerText(),/Coat Check/,'selected service opens the real checkout sheet');
+      assert.equal(await page.evaluate(()=>window.fixture.ui.getState().selectedTierId),SERVICE);
+      assert.deepEqual(await page.evaluate(()=>window.fixture.routes),[],'opening extra checkout never navigates over original ticket');
+      await page.keyboard.press('Escape');await tick(page);
+      assert.equal(await page.evaluate(()=>window.fixture.ui.getState().checkoutOpen),false,'Escape dismisses checkout without purchasing');
+      assert.equal(await viewTicket.count(),1,'original ticket action remains after dismissal');
+      evidence.checks.push(size.name+': authenticated holder View ticket + Buy additional remain distinct, service selection and checkout dismissal, no overlap/overflow, minimum touch targets');
+      await page.evaluate(()=>window.fixture.reset());await tick(page);
       // Stress realistic long names/descriptions without changing production markup.
       await page.evaluate(()=>{
         const state=window.fixture;

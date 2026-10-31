@@ -561,7 +561,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
               const planKey = data.membership_tier?.planKey ?? null;
               setScanResult({
                 type: "success",
-                kind: data.kind ?? "ticket",
+                kind: data.kind ?? "unknown",
                 name,
                 tierName,
                 addons: data.addons,
@@ -571,7 +571,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
                 planColor: planAccent(planKey),
                 perkLabels: (data.perks ?? []).map((p) => PERK_LABELS[p]),
               });
-              recordSuccess({ kind: data.kind ?? "ticket", name, tierName });
+              recordSuccess({ kind: data.kind ?? "unknown", name, tierName });
               // Seed local knowledge so a re-scan flips instantly.
               offlineStore.markScannedLocal(eventId, qrToken);
             } else {
@@ -587,7 +587,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
                   : ("not_found" as const);
               setScanResult({
                 type: resultType,
-                kind: data.kind ?? "ticket",
+                kind: data.kind ?? "unknown",
                 name:
                   data.kind === "addon" && data.addon
                     ? [data.addon.name, data.addon.variant_name]
@@ -872,7 +872,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
           disabled={!manualToken.trim() || scanMutation.isPending}
           className="shrink-0 rounded-lg bg-[#3FDCFF] px-3 py-1.5 text-[13px] font-semibold text-black disabled:opacity-40"
         >
-          Check in
+          Check / redeem
         </button>
       </div>
 

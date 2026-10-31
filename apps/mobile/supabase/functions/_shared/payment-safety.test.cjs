@@ -43,7 +43,7 @@ function harness(config = {}) {
     if (name === 'door_free_sale_atomic') return config.rpcError
       ? { error: { message: 'RPC unavailable' } }
       : { data: config.soldOut ? { ok: false } : { ok: true, order_id: 'order', tickets: args.p_ticket_rows } };
-    if (name === 'ticket_hold_create_atomic' && config.soldOut) return { data: { ok: false, available: 0 } };
+    if (['ticket_hold_create_atomic', 'ticket_purchase_hold_atomic'].includes(name) && config.soldOut) return { data: { ok: false, available: 0 } };
     if (name === 'complete_paid_cart_atomic') return config.rpcError
       ? { error: { message: 'issuance failed' } } : { data: { ok: false, error: 'hold_expired' } };
     return { data: { ok: true } };
@@ -69,7 +69,7 @@ function harness(config = {}) {
     const source = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText;
-    vm.runInNewContext(source, { exports, Response, Request, URLSearchParams, crypto, TextEncoder, AbortSignal,
+    vm.runInNewContext(source, { exports, Response, Request, URLSearchParams, crypto, TextEncoder, AbortSignal, AbortController, setTimeout, clearTimeout,
       console: { log() {}, error() {}, warn() {} },
       Deno: { env: { get: name => config.env && Object.hasOwn(config.env,name) ? config.env[name] : 'test' }, serve: fn => { handler = fn; } },
       fetch: async (url, init) => { requests.push({ url, body: new URLSearchParams(init.body) });
@@ -186,7 +186,7 @@ test('hosted checkout reserves against the same atomic inventory as door sales',
   const h = harness();
   const r = await h.invoke('ticket-checkout', { event_id: 1, ticket_type_id: 'tier', quantity: 2 });
   assert.equal(r.status, 200);
-  const hold = h.calls.find(c => c.name === 'ticket_hold_create_atomic');
+  const hold = h.calls.find(c => c.name === 'ticket_purchase_hold_atomic');
   assert.equal(hold.args.p_quantity, 2);
   assert.equal(hold.args.p_payment_intent_id, 'cs_test');
   assert.ok(!h.writes.some(w => w.table === 'ticket_holds' && w.operation === 'insert'));

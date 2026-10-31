@@ -235,6 +235,14 @@ export const useOfflineCheckinStore = create<OfflineCheckinState>()(
     {
       name: "offline-checkin-store",
       storage: mmkvStorage,
+      version: 1,
+      // Old snapshots mixed services/products into the admission rail. Drop
+      // that evidence once, preserving pending syncs and duplicate history.
+      migrate: (persisted) => ({
+        ...(persisted as Partial<OfflineCheckinState>),
+        tokensByEvent: {},
+        lastDownloaded: {},
+      } as OfflineCheckinState),
     },
   ),
 );

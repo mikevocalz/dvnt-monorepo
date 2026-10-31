@@ -196,7 +196,7 @@ Deno.serve(async (req: Request) => {
         // the requested size, so scan stable IDs until an empty terminal page.
         const [tickets, addons] = await Promise.all([
           readAllRows(() => supabase.from("tickets")
-            .select("id, qr_token")
+            .select("id, qr_token, ticket_type_id, category, ticket_types(category)")
             .eq("event_id", eventIdNum)
             .eq("status", "active")
             .not("qr_token", "is", null)),
@@ -219,7 +219,15 @@ Deno.serve(async (req: Request) => {
           .filter((token): token is string => typeof token === "string" && token.length > 0);
         return jsonResponse({
           ok: true,
-          qr_tokens: tokens(tickets),
+          // Service/product ticket rows are redeemable online only. The
+          // legacy offline "ticket" rail means event admission, so do not put
+          // non-admission (or unresolved) credentials on that allowlist.
+          qr_tokens: tokens(tickets.filter((ticket: any) => {
+            const tier = Array.isArray(ticket.ticket_types)
+              ? ticket.ticket_types[0] : ticket.ticket_types;
+            return tier ? tier.category == null || tier.category === "admission"
+              : ticket.ticket_type_id == null && ticket.category === "admission";
+          })),
           addon_qr_tokens: tokens(addons),
         });
       } catch {
@@ -251,8 +259,8 @@ Deno.serve(async (req: Request) => {
     let query = search
       ? supabase.rpc("search_event_tickets", {
           p_event_id: eventIdNum, p_auth_id: authId, p_search: search,
-        }, { count: "exact" }).select("*, ticket_types(name)")
-      : supabase.from("tickets").select("*, ticket_types(name)", { count: "exact" }).eq("event_id", eventIdNum);
+        }, { count: "exact" }).select("*, ticket_types(name, category)")
+      : supabase.from("tickets").select("*, ticket_types(name, category)", { count: "exact" }).eq("event_id", eventIdNum);
 
     if (
       status &&
@@ -368,13 +376,20 @@ Deno.serve(async (req: Request) => {
 
     const isScanner = effectiveRole === "scanner";
     const tickets = (data || []).map((t: any) => {
+      const ticketType = Array.isArray(t.ticket_types) ? t.ticket_types[0] : t.ticket_types;
+      // Legacy single-tier issuance omitted tickets.category. The authoritative
+      // tier is the display/entry purpose; this does not rewrite stored rows.
+      const category = ticketType?.category ?? t.category ?? "admission";
+      const isAdmission = category === "admission";
+      const ticketTypeName = ticketType?.name || (isAdmission ? "General" : category === "product" ? "Product" : "Service");
       const base = {
         id: t.id,
         event_id: t.event_id,
         ticket_type_id: t.ticket_type_id,
         status: t.status,
         qr_token: t.qr_token,
-        ticket_type_name: t.ticket_types?.name || "General",
+        category,
+        ticket_type_name: ticketTypeName,
         checked_in_at: t.checked_in_at,
         checked_in_by: t.checked_in_by,
       };
@@ -396,13 +411,13 @@ Deno.serve(async (req: Request) => {
           : null) ??
         (t.user_id ? nameByUser.get(t.user_id) || null : t.guest_name || null);
       const tier = t.user_id ? tierByUser.get(t.user_id) || null : null;
-      const membership_tier = tier
+      const membership_tier = isAdmission && tier
         ? { planKey: tier.planKey, rank: tier.rank }
         : null;
       // Resolved server-side per WS-3 so the scanner card and the priority lane
       // read a decision rather than making one. A lapsed member reaches here
       // with tier === null and therefore gets [].
-      const perks = resolvePerks(tier?.rank ?? null, perkConfig);
+      const perks = isAdmission ? resolvePerks(tier?.rank ?? null, perkConfig) : [];
 
       if (isScanner) {
         // Scanner role (Phase-0 decision, option 3): holder name + membership
@@ -420,10 +435,11 @@ Deno.serve(async (req: Request) => {
           event_title: event.title,
           event_location: event.location,
           organizer_free_cancel: cancellationVerified
-            ? organizerFreeCancellation(t, cancellationOrders.get(t.order_id), cancellationTransfers.has(t.id))
+            ? organizerFreeCancellation({ ...t, category }, cancellationOrders.get(t.order_id), cancellationTransfers.has(t.id))
             : { eligible: false, reason: "Cancellation eligibility is unavailable. Refresh the roster." },
         } : {}),
-        ticket_type_name: t.ticket_types?.name || "General",
+        category,
+        ticket_type_name: ticketTypeName,
         holder_name: holderName,
         membership_tier,
         perks,

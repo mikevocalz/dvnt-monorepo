@@ -27,6 +27,10 @@
  * titled "Upgrade Ticket", content `max-w-xl`, bg #06070d, accent cyan #3FDCFF.
  */
 
+import {
+  isAdmissionUpgradeCategory,
+  isAdmissionUpgradeSource,
+} from "@dvnt/app/lib/tickets/upgrade-purpose";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -267,11 +271,12 @@ export function TicketUpgradeScreen() {
   }, [dbTicket, allTiers]);
 
   const upgradeOptions: EnrichedTier[] = useMemo(() => {
-    if (!dbTicket || !allTiers) return [];
+    if (!dbTicket || !allTiers || !isAdmissionUpgradeSource(dbTicket, allTiers)) return [];
     const paidCents = dbTicket.purchase_amount_cents ?? 0;
     return allTiers
       .filter(
         (t) =>
+          isAdmissionUpgradeCategory(t.category) &&
           t.is_active !== false &&
           (t.price_cents ?? 0) > paidCents &&
           String(t.id) !== String(dbTicket.ticket_type_id),
@@ -522,10 +527,12 @@ export function TicketUpgradeScreen() {
         <div className="flex flex-col items-center justify-center px-8 py-16 text-center">
           <Crown size={48} color="rgba(255,255,255,0.25)" />
           <p className="mt-4 text-xl font-semibold text-white">
-            You&apos;re at the top
+            {isAdmissionUpgradeSource(dbTicket, allTiers) ? "You're at the top" : "No admission upgrades"}
           </p>
           <p className="mt-1 text-sm leading-5 text-white/40">
-            Your ticket is already the highest available tier for this event.
+            {isAdmissionUpgradeSource(dbTicket, allTiers)
+              ? "Your ticket is already the highest available tier for this event."
+              : "Services and add-ons are purchased separately and cannot replace an admission ticket."}
           </p>
         </div>
         {/* Top tier still gets the add-on upsell (WS-3). */}
