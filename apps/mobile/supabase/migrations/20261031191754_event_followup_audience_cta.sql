@@ -3,6 +3,8 @@ BEGIN;
 ALTER TABLE public.event_followup_campaigns ADD COLUMN IF NOT EXISTS member_message text, ADD COLUMN IF NOT EXISTS guest_message text;
 ALTER TABLE public.event_followup_outbox ADD COLUMN IF NOT EXISTS preview_revision integer NOT NULL DEFAULT 1
  CHECK (preview_revision BETWEEN 1 AND 100 AND (purpose='preview' OR preview_revision=1));
+ALTER TABLE public.event_followup_outbox ADD COLUMN IF NOT EXISTS preview_audience text
+ CHECK (preview_audience IS NULL OR (purpose='preview' AND preview_audience IN ('member','guest')));
 -- Legacy rows and frozen payloads remain revision 1, byte-for-byte unchanged.
 -- Superseded campaign-version constraint would collide across preview revisions.
 ALTER TABLE public.event_followup_outbox DROP CONSTRAINT event_followup_outbox_event_id_campaign_version_recipient_e_key;
@@ -64,18 +66,20 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
  AND lower(trim(a.email))=lower(trim(p_email)));
 $$;
 
-CREATE OR REPLACE FUNCTION public.enqueue_event_followup_preview(p_event_id integer,p_email text,p_content jsonb DEFAULT NULL,p_revision integer DEFAULT 1)
+CREATE OR REPLACE FUNCTION public.enqueue_event_followup_preview(p_event_id integer,p_email text,p_content jsonb DEFAULT NULL,p_revision integer DEFAULT 1,p_audience text DEFAULT NULL)
 RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE result bigint; email text:=lower(trim(p_email));
 BEGIN
+ IF p_audience IS NOT NULL AND p_audience NOT IN ('member','guest') THEN RAISE EXCEPTION 'Invalid preview audience'; END IF;
  IF p_revision IS NULL OR p_revision NOT BETWEEN 1 AND 100 THEN RAISE EXCEPTION 'Invalid preview revision'; END IF;
  p_content:=public.validate_event_followup_content(p_content);
  IF email IS NULL OR email !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' THEN RAISE EXCEPTION 'Valid preview address required'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.events WHERE id=p_event_id AND coalesce(end_date,start_date+interval '3 hours')<=now()
  AND coalesce(status,'') NOT IN ('cancelled','canceled','deleted','postponed')) THEN RAISE EXCEPTION 'Completed event required'; END IF;
- INSERT INTO public.event_followup_outbox(event_id,campaign_version,recipient_email,purpose,content_override,preview_revision)
- VALUES(p_event_id,0,email,'preview',p_content,p_revision) ON CONFLICT(event_id,recipient_email,purpose,preview_revision) DO NOTHING;
+ INSERT INTO public.event_followup_outbox(event_id,campaign_version,recipient_email,purpose,content_override,preview_revision,preview_audience)
+ VALUES(p_event_id,0,email,'preview',p_content,p_revision,p_audience) ON CONFLICT(event_id,recipient_email,purpose,preview_revision) DO NOTHING;
  SELECT id INTO result FROM public.event_followup_outbox WHERE event_id=p_event_id AND recipient_email=email AND purpose='preview' AND preview_revision=p_revision;
+ IF EXISTS(SELECT 1 FROM public.event_followup_outbox WHERE id=result AND preview_audience IS DISTINCT FROM p_audience) THEN RAISE EXCEPTION 'Preview revision audience conflict'; END IF;
  RETURN result;
 END $$;
 
@@ -100,10 +104,11 @@ BEGIN
  GET DIAGNOSTICS n=ROW_COUNT; RETURN n;
 END $$;
 
-CREATE OR REPLACE FUNCTION public.dispatch_event_followups(p_event_ids integer[],p_preview_email text DEFAULT NULL,p_content jsonb DEFAULT NULL,p_preview_revision integer DEFAULT 1)
+CREATE OR REPLACE FUNCTION public.dispatch_event_followups(p_event_ids integer[],p_preview_email text DEFAULT NULL,p_content jsonb DEFAULT NULL,p_preview_revision integer DEFAULT 1,p_preview_audience text DEFAULT NULL)
 RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE secret text; body jsonb;
 BEGIN
+ IF p_preview_audience IS NOT NULL AND (p_preview_email IS NULL OR p_preview_audience NOT IN ('member','guest')) THEN RAISE EXCEPTION 'Invalid preview audience'; END IF;
  IF p_preview_revision IS NULL OR p_preview_revision NOT BETWEEN 1 AND 100 OR (p_preview_email IS NULL AND p_preview_revision<>1) THEN RAISE EXCEPTION 'Invalid preview revision'; END IF;
  p_content:=public.validate_event_followup_content(p_content);
  IF p_content IS NOT NULL AND p_preview_email IS NULL THEN RAISE EXCEPTION 'Content is only accepted for explicit preview'; END IF;
@@ -112,11 +117,11 @@ BEGIN
  SELECT decrypted_secret INTO secret FROM vault.decrypted_secrets WHERE name='CRON_SECRET' LIMIT 1;
  IF nullif(secret,'') IS NULL THEN RAISE EXCEPTION 'Worker authorization unavailable'; END IF;
  body:=jsonb_build_object('event_ids',p_event_ids);
- IF p_preview_email IS NOT NULL THEN body:=body||jsonb_build_object('preview_email',p_preview_email,'preview_revision',p_preview_revision); END IF;
+ IF p_preview_email IS NOT NULL THEN body:=body||jsonb_build_object('preview_email',p_preview_email,'preview_revision',p_preview_revision,'preview_audience',p_preview_audience); END IF;
  IF p_content IS NOT NULL THEN body:=body||jsonb_build_object('preview_content',p_content); END IF;
  RETURN net.http_post(url:='https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/process-event-followups',
  headers:=jsonb_build_object('Content-Type','application/json','x-cron-secret',secret),body:=body,timeout_milliseconds:=120000);
 END $$;
-REVOKE ALL ON FUNCTION public.event_followup_recipient_is_member(integer,text),public.enqueue_event_followup_preview(integer,text,jsonb,integer),public.dispatch_event_followups(integer[],text,jsonb,integer) FROM PUBLIC,anon,authenticated;
-GRANT EXECUTE ON FUNCTION public.event_followup_recipient_is_member(integer,text),public.enqueue_event_followup_preview(integer,text,jsonb,integer),public.dispatch_event_followups(integer[],text,jsonb,integer) TO service_role;
+REVOKE ALL ON FUNCTION public.event_followup_recipient_is_member(integer,text),public.enqueue_event_followup_preview(integer,text,jsonb,integer,text),public.dispatch_event_followups(integer[],text,jsonb,integer,text) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.event_followup_recipient_is_member(integer,text),public.enqueue_event_followup_preview(integer,text,jsonb,integer,text),public.dispatch_event_followups(integer[],text,jsonb,integer,text) TO service_role;
 COMMIT;

@@ -9,3 +9,5 @@ test('preview only queues and claims requested record; never enrolls or processe
 test('scoped normal run claims same event boundary and refreshes aggregate status',async()=>{const h=setup();assert.equal((await h.run({event_ids:[7]})).status,200);assert.ok(h.calls.some(x=>x.name==='enqueue_event_followup'));for(const c of h.calls.filter(x=>x.name==='claim_event_followups'))assert.deepEqual(c.args.p_event_ids,[7]);assert.ok(h.calls.some(x=>x.name==='refresh_event_followup_status'));});
 
 test('explicit corrected preview revision reaches durable queue without resetting prior preview',async()=>{const h=setup();assert.equal((await h.run({event_ids:[7],preview_email:'sample@example.test',preview_revision:2})).status,200);assert.equal(h.calls.find(x=>x.name==='enqueue_event_followup_preview').args.p_revision,2);});
+
+test('explicit guest preview audience is passed only to scoped preview RPC',async()=>{const h=setup();assert.equal((await h.run({event_ids:[7],preview_email:'sample@example.test',preview_revision:3,preview_audience:'guest'})).status,200);assert.equal(h.calls.find(x=>x.name==='enqueue_event_followup_preview').args.p_audience,'guest');});

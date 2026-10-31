@@ -33,8 +33,13 @@ A later authorized corrected sample must explicitly request `preview_revision: 2
 (or `p_preview_revision => 2` through the service-only dispatcher). Retrying that
 revision reuses the same row/provider key; it never resets or edits revision 1.
 Attendee uniqueness remains one event/address. Do not use preview revisions as a
-bulk resend mechanism. Render the no-account variant with synthetic fixtures;
-do not falsify a member's account classification just to send a guest sample.
+bulk resend mechanism. For explicitly requested two-variant samples, the service-only preview scope can
+persist `preview_audience: "member"` or `"guest"` (RPC `p_preview_audience`). Use
+revision 2/member and revision 3/guest for the corrected pair. A conflicting
+revision/audience request fails; retries preserve the same row/payload/key.
+This override is forbidden for attendee delivery and never edits account/profile
+membership. Without an override, previews classify actual account membership.
+Offline no-account visual coverage continues using synthetic fixtures.
 
 ## Release gate
 

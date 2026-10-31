@@ -21,7 +21,7 @@ test('isolated embedded PostgreSQL follow-up lifecycle (never production)',async
  await q("update event_followup_outbox set provider_payload=$2,status='sent',provider_message_id='legacy-synthetic-receipt' where id=$1",[id,{to:'legacy@example.test',html:'unchanged'}]);
  const before=(await q('select * from event_followup_outbox where id=$1',[id]))[0];
  await db.exec(fs.readFileSync(path.join(__dirname,'../../migrations/20261031191754_event_followup_audience_cta.sql'),'utf8'));
- const after=(await q('select * from event_followup_outbox where id=$1',[id]))[0];assert.equal(after.preview_revision,1);delete after.preview_revision;assert.deepEqual(after,before);
+ const after=(await q('select * from event_followup_outbox where id=$1',[id]))[0];assert.equal(after.preview_revision,1);delete after.preview_revision;assert.equal(after.preview_audience,null);delete after.preview_audience;assert.deepEqual(after,before);
  assert.equal((await q("select enqueue_event_followup_preview(2,'legacy@example.test') id"))[0].id,id);
  await q('delete from event_followup_outbox where id=$1',[id]); // disposable fixture only
  });
@@ -82,6 +82,18 @@ test('isolated embedded PostgreSQL follow-up lifecycle (never production)',async
  assert.equal((await q("select count(*)::int n from pg_proc where proname='enqueue_event_followup_preview'"))[0].n,1);
  assert.equal((await q("select count(*)::int n from pg_proc where proname='dispatch_event_followups'"))[0].n,1);
  await assert.rejects(q("select dispatch_event_followups(ARRAY[1],NULL,NULL,2)"),/revision/);
+ });
+ await t.test('preview audience is explicit, immutable per revision and impossible for attendees',async()=>{
+ const member=(await q("select enqueue_event_followup_preview(1,'variants@example.test',NULL,2,'member') id"))[0].id;
+ const guest=(await q("select enqueue_event_followup_preview(1,'variants@example.test',NULL,3,'guest') id"))[0].id;
+ assert.notEqual(member,guest);assert.equal((await q("select enqueue_event_followup_preview(1,'variants@example.test',NULL,3,'guest') id"))[0].id,guest);
+ await assert.rejects(q("select enqueue_event_followup_preview(1,'variants@example.test',NULL,3,'member')"),/audience conflict/);
+ await assert.rejects(q("select enqueue_event_followup_preview(1,'variants@example.test',NULL,3)"),/audience conflict/);
+ await assert.rejects(q("select enqueue_event_followup_preview(1,'variants@example.test',NULL,4,'all')"),/audience/);
+ await assert.rejects(q("select dispatch_event_followups(ARRAY[1],NULL,NULL,1,'guest')"),/audience/);
+ await assert.rejects(q("update event_followup_outbox set preview_audience='guest' where purpose='attendee'"),/check constraint/);
+ assert.equal((await q('select preview_audience from event_followup_outbox where id=$1',[member]))[0].preview_audience,'member');
+ assert.equal((await q('select preview_audience from event_followup_outbox where id=$1',[guest]))[0].preview_audience,'guest');
  });
  await t.test('all new RPCs service-only',async()=>{
  const funcs=await q("select oid::regprocedure::text sig from pg_proc where pronamespace='public'::regnamespace and proname like '%event_followup%'");for(const f of funcs){for(const role of ['anon','authenticated'])assert.equal((await q("select has_function_privilege($1,$2,'EXECUTE') v",[role,f.sig]))[0].v,false);assert.equal((await q("select has_function_privilege('service_role',$1,'EXECUTE') v",[f.sig]))[0].v,true);}});

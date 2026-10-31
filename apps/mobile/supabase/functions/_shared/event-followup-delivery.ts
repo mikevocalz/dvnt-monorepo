@@ -6,18 +6,20 @@ export function completedFollowupEvent(event: any, now = Date.now()): boolean {
   const end = event?.end_date ? Date.parse(event.end_date) : Date.parse(event?.start_date || "") + 3 * 3600000;
   return !!event && Number.isFinite(end) && end <= now && !["cancelled", "canceled", "deleted", "postponed"].includes(event.status);
 }
-export function parseFollowupScope(body: any): { eventIds: number[] | null; previewEmail: string | null; previewContent: any; previewRevision: number } {
+export function parseFollowupScope(body: any): { eventIds: number[] | null; previewEmail: string | null; previewContent: any; previewRevision: number; previewAudience: "member" | "guest" | null } {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw Error("Invalid request");
   const keys = Object.keys(body);
-  if (keys.some(k => !["event_ids", "preview_email", "preview_content", "preview_revision"].includes(k))) throw Error("Unknown request field");
+  if (keys.some(k => !["event_ids", "preview_email", "preview_content", "preview_revision", "preview_audience"].includes(k))) throw Error("Unknown request field");
   const ids = body.event_ids;
   if (ids !== undefined && (!Array.isArray(ids) || !ids.length || ids.length > 10 || ids.some((id: any) => !Number.isSafeInteger(id) || id <= 0) || new Set(ids).size !== ids.length)) throw Error("Explicit scope must contain 1-10 distinct events");
   const email = body.preview_email;
   if (email !== undefined && (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || ids?.length !== 1)) throw Error("Preview requires one event and one email");
   if (body.preview_content !== undefined && (email === undefined || !body.preview_content || typeof body.preview_content !== "object" || Array.isArray(body.preview_content))) throw Error("Preview content requires a preview");
+  const audience = body.preview_audience ?? null;
+  if ((body.preview_audience !== undefined && email === undefined) || (audience !== null && !["member", "guest"].includes(audience))) throw Error("Preview audience requires a preview");
   const revision = body.preview_revision ?? 1;
   if (!Number.isSafeInteger(revision) || revision < 1 || revision > 100 || (body.preview_revision !== undefined && email === undefined)) throw Error("Preview revision requires a preview");
-  return { previewRevision: revision, eventIds: ids ?? null, previewEmail: email?.trim().toLowerCase() ?? null, previewContent: body.preview_content ?? null };
+  return { previewAudience: audience, previewRevision: revision, eventIds: ids ?? null, previewEmail: email?.trim().toLowerCase() ?? null, previewContent: body.preview_content ?? null };
 }
 async function checked(query: any): Promise<any> {
   const r = await query;
@@ -49,11 +51,14 @@ export async function deliverFollowup(db: any, row: any, config: { site: string;
     if (suppression.error || typeof suppression.data !== "boolean") throw Error("Suppression lookup unavailable");
     if (suppression.data) { await finish("suppressed", "unsubscribed"); return result("suppressed"); }
     if (!config.from || !config.unsubscribeSecret) throw Error("Email configuration unavailable");
+    if (row.preview_audience != null && (row.purpose !== "preview" || !["member", "guest"].includes(row.preview_audience))) throw Error("Invalid persisted preview audience");
     let payload = row.provider_payload;
     if (!payload) {
       // Resolve current account membership, including public checkout addresses
       // that now belong to an account. Never infer membership from checkout origin.
-      const membership = await db.rpc("event_followup_recipient_is_member", { p_event_id: row.event_id, p_email: row.recipient_email });
+      const membership = row.purpose === "preview" && row.preview_audience != null
+        ? { data: row.preview_audience === "member", error: null }
+        : await db.rpc("event_followup_recipient_is_member", { p_event_id: row.event_id, p_email: row.recipient_email });
       if (membership.error || typeof membership.data !== "boolean") throw Error("Membership lookup unavailable");
       const member = membership.data;
       const token = await signUnsubscribeToken(config.unsubscribeSecret, row.recipient_email);
