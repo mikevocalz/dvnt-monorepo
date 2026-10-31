@@ -73,7 +73,7 @@
     "test:attendee-search": "node --test apps/mobile/supabase/functions/get-event-tickets/index.test.cjs apps/mobile/supabase/functions/get-event-tickets/offline.test.cjs && node scripts/test-attendee-search-dom.cjs",
     "test:attendee-search:sql": "node --test apps/mobile/supabase/functions/get-event-tickets/search-sql.test.cjs",
     "test:platform-fees": "node --test apps/mobile/supabase/functions/_shared/organizer-platform-fees.test.cjs apps/mobile/supabase/functions/_shared/organizer-platform-fee-cache.test.cjs apps/mobile/supabase/functions/_shared/platform-fee-refund.test.cjs packages/app/lib/organizer/platform-fees.test.ts && node scripts/test-host-platform-fees-dom.cjs",
-    "test:platform-fees:sql": "node --test apps/mobile/supabase/functions/_shared/platform-fee-snapshot-sql.test.cjs"
+    "test:platform-fees:sql": "node --test apps/mobile/supabase/functions/_shared/platform-fee-snapshot-sql.cjs"
   },
   "keywords": [],
   "author": "",
