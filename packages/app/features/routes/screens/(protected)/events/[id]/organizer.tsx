@@ -116,7 +116,6 @@ function EventOrganizerScreenContent() {
     try {
       const tokens = await ticketsApi.downloadOfflineTokens(eventId);
       if (tokens.length > 0) {
-        offlineStore.setTokensForEvent(eventId, tokens);
         showToast(
           "success",
           "Downloaded",

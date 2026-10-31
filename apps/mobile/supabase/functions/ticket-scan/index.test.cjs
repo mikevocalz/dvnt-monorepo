@@ -11,30 +11,32 @@ const ADDON = { id: 'oa-1', event_id: EVENT_ID, qr_token: 'addon-token-hex', qr_
 const TICKET = { id: 'ticket-1', event_id: EVENT_ID, qr_token: 'ticket-token-hex', qr_payload: 'ticket-payload' };
 
 // Minimal PostgREST-shaped fake: filters rows by every .eq() applied.
-function fakeDb() {
+function fakeDb(options = {}) {
   const rpcCalls = [];
   const tables = {
     tickets: [TICKET],
     order_addons: [ADDON],
-    events: [{ id: EVENT_ID, host_id: 'staff', perk_config: null }],
+    events: [{ id: EVENT_ID, host_id: 'staff', status: options.eventStatus || 'published', perk_config: null }],
     event_co_organizers: [], users: [], ticket_types: [], effective_membership_tiers: [],
   };
   return {
     rpcCalls,
     from(table) {
+      if (rpcCalls.length && options.failAfterCommit === table) throw new Error("private transport detail");
       const filters = [];
       const rows = () => (tables[table] || []).filter(r => filters.every(([k, v]) => String(r[k]) === String(v)));
       const q = {
         select: () => q, in: () => q, or: () => q,
         eq: (k, v) => { filters.push([k, v]); return q; },
-        maybeSingle: async () => ({ data: rows()[0] ?? null, error: null }),
-        single: async () => ({ data: rows()[0] ?? null, error: rows()[0] ? null : { message: 'no rows' } }),
+        maybeSingle: async () => options.failLookup === table ? { data: null, error: { message: 'private database detail' } } : ({ data: rows()[0] ?? null, error: null }),
+        single: async () => options.failLookup === table ? { data: null, error: { message: 'private database detail' } } : ({ data: rows()[0] ?? null, error: rows()[0] ? null : { message: 'no rows' } }),
         then: (res, rej) => Promise.resolve({ data: rows(), error: null }).then(res, rej),
       };
       return q;
     },
     async rpc(name, args) {
       rpcCalls.push({ name, args });
+      if (options.rpcResult) return { data: options.rpcResult, error: null };
       if (name === 'redeem_addon') {
         const hit = args.p_qr_token === ADDON.qr_token && args.p_event_id === ADDON.event_id;
         return { data: hit
@@ -59,8 +61,8 @@ const verifySignedQrPayload = async payload => ({
   'orphan-payload': { valid: true, ticketId: 'random-uuid-unknown', eventId: EVENT_ID },
 }[payload] || { valid: false, reason: 'invalid_signature' });
 
-function scan(body) {
-  const db = fakeDb();
+function scan(body, options) {
+  const db = fakeDb(options);
   const h = harness({ database: db, dependencyOverrides: { 'hmac-qr.ts': { verifySignedQrPayload } } });
   return h.invoke('ticket-scan', body).then(async r => ({ status: r.status, body: await r.json(), db }));
 }
@@ -93,5 +95,79 @@ test('validly signed payload matching neither a ticket nor an add-on is not foun
 test('bad signature is rejected before any lookup', async () => {
   const { body, db } = await scan({ qr_payload: 'forged', event_id: EVENT_ID });
   assert.deepEqual(body, { valid: false, reason: 'invalid_signature' });
+  assert.equal(db.rpcCalls.length, 0);
+});
+
+for (const table of ['tickets', 'users', 'ticket_types']) {
+  test(`committed scan remains successful when ${table} display lookup throws`, async () => {
+    const { status, body, db } = await scan({ qr_payload: 'ticket-payload', event_id: EVENT_ID }, { failAfterCommit: table });
+    assert.equal(status, 200);
+    assert.equal(body.valid, true);
+    assert.equal(body.ticket.id, TICKET.id);
+    assert.equal(db.rpcCalls.length, 1);
+    assert.ok(!JSON.stringify(body).includes('private transport detail'));
+  });
+}
+
+for (const eventStatus of ['cancelled', 'deleted']) {
+  for (const qr_payload of ['ticket-payload', 'addon-payload']) {
+    test(`${eventStatus} event does not redeem ${qr_payload}`, async () => {
+      const { status, body, db } = await scan({ qr_payload, event_id: EVENT_ID }, { eventStatus });
+      assert.equal(status, 200);
+      assert.deepEqual(body, { valid: false, reason: 'event_cancelled' });
+      assert.equal(db.rpcCalls.length, 0);
+    });
+  }
+}
+
+for (const table of ['tickets', 'order_addons', 'events']) {
+  test(`failed ${table} lookup is not an invalid-ticket verdict`, async () => {
+    const { status, body, db } = await scan({ qr_payload: table === 'order_addons' ? 'addon-payload' : 'ticket-payload', event_id: EVENT_ID }, { failLookup: table });
+    assert.equal(status, 500);
+    assert.equal(body.valid, undefined);
+    assert.equal(db.rpcCalls.length, 0);
+    assert.ok(!JSON.stringify(body).includes('private database detail'));
+  });
+}
+for (const qr_payload of ['ticket-payload', 'addon-payload']) {
+  test(`event lifecycle race rejection remains non-admitting for ${qr_payload}`, async () => {
+    const { status, body } = await scan({ qr_payload, event_id: EVENT_ID }, { rpcResult: { result: 'event_cancelled' } });
+    assert.equal(status, 200);
+    assert.equal(body.valid, false);
+    assert.equal(body.reason, 'event_cancelled');
+  });
+  test(`event lock contention is retryable for ${qr_payload}`, async () => {
+    const { status, body } = await scan({ qr_payload, event_id: EVENT_ID }, { rpcResult: { result: 'retry_later' } });
+    assert.equal(status, 503);
+    assert.equal(body.valid, undefined);
+    assert.match(body.error, /retry/i);
+  });
+}
+
+test('malformed explicit event context never silently falls back to the QR event', async () => {
+  for (const event_id of ['7-other', 'invalid', 7.5, -7, true, {}, [], 2147483648]) {
+    const { status, db } = await scan({ qr_payload: 'ticket-payload', event_id });
+    assert.equal(status, 400, JSON.stringify(event_id));
+    assert.equal(db.rpcCalls.length, 0);
+  }
+});
+test('legacy event-less replay still resolves its authorized event', async () => {
+  const { status, body } = await scan({ qr_payload: 'ticket-payload' });
+  assert.equal(status, 200);
+  assert.equal(body.valid, true);
+});
+
+for (const qr_payload of ['ticket-payload', 'addon-payload']) {
+  test(`missing admission summary is retryable for ${qr_payload}`, async () => {
+    const { status, body } = await scan({ qr_payload, event_id: EVENT_ID }, { rpcResult: { result: 'financials_unavailable' } });
+    assert.equal(status, 503);
+    assert.equal(body.valid, undefined);
+  });
+}
+
+test('well-formed missing event is authoritative not-found, not database failure', async () => {
+  const { status, body, db } = await scan({ qr_payload: 'ticket-payload', event_id: 999 });
+  assert.equal(status, 404);
+  assert.deepEqual(body, { valid: false, reason: 'event_not_found' });
   assert.equal(db.rpcCalls.length, 0);
 });

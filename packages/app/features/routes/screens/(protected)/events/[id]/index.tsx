@@ -429,7 +429,6 @@ function EventDetailScreenContent() {
         );
         return;
       }
-      offlineCheckin.setTokensForEvent(eventId, tokens);
       showToast(
         "success",
         "Downloaded",
