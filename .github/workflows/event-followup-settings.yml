@@ -16,12 +16,14 @@ permissions:
 jobs:
   opt-in-ui:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-      - uses: pnpm/action-setup@v4
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: node scripts/test-event-followup-settings-dom.cjs
-      - run: node scripts/test-event-followup-api.cjs
+          node-version: '24'
+      - name: Isolated mounted UI dependencies
+        run: npm install --prefix "$RUNNER_TEMP/followup-ui" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.28.1 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 happy-dom@20.10.3
+      - run: node scripts/test-event-followup-settings-dom.cjs && node scripts/test-event-followup-api.cjs
+        env:
+          NODE_PATH: ${{ runner.temp }}/followup-ui/node_modules
