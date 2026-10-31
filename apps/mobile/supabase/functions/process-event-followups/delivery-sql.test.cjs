@@ -16,6 +16,15 @@ test('isolated embedded PostgreSQL follow-up lifecycle (never production)',async
  (1,'00000000-0000-0000-0000-000000000001','owner','stale@example.test','active'),(1,'00000000-0000-0000-0000-000000000001','owner',NULL,'scanned'),
  (1,'00000000-0000-0000-0000-000000000001',NULL,'guest@example.test','active'),(1,'00000000-0000-0000-0000-000000000001',NULL,'refund@example.test','refunded'),(1,'00000000-0000-0000-0000-000000000002',NULL,'service@example.test','active');`);
  for(const file of ['20261002203000_event_followup_campaigns.sql','20261031180000_event_followup_delivery_safety.sql'])await db.exec(fs.readFileSync(path.join(__dirname,'../../migrations',file),'utf8'));
+ await t.test('upgrade preserves pre-migration frozen preview and receipt',async()=>{
+ const id=(await q("select enqueue_event_followup_preview(2,'legacy@example.test') id"))[0].id;
+ await q("update event_followup_outbox set provider_payload=$2,status='sent',provider_message_id='legacy-synthetic-receipt' where id=$1",[id,{to:'legacy@example.test',html:'unchanged'}]);
+ const before=(await q('select * from event_followup_outbox where id=$1',[id]))[0];
+ await db.exec(fs.readFileSync(path.join(__dirname,'../../migrations/20261031191754_event_followup_audience_cta.sql'),'utf8'));
+ const after=(await q('select * from event_followup_outbox where id=$1',[id]))[0];assert.equal(after.preview_revision,1);delete after.preview_revision;assert.deepEqual(after,before);
+ assert.equal((await q("select enqueue_event_followup_preview(2,'legacy@example.test') id"))[0].id,id);
+ await q('delete from event_followup_outbox where id=$1',[id]); // disposable fixture only
+ });
  await t.test('no enrollment on migration, bounded catchup, disabled and future protected',async()=>{
  assert.equal((await q('select count(*)::int n from event_followup_campaigns'))[0].n,0);await assert.rejects(q('select enable_event_followup_catchup(ARRAY[3])'),/completed/);await assert.rejects(q('select enable_event_followup_catchup(NULL)'),/completed/);
  await q('insert into event_followup_campaigns(event_id,enabled) values(2,false)');await assert.rejects(q('select enable_event_followup_catchup(ARRAY[2])'),/disabled/);await q('select enable_event_followup_catchup(ARRAY[1])');});
@@ -41,7 +50,40 @@ test('isolated embedded PostgreSQL follow-up lifecycle (never production)',async
  const id=(await q("select enqueue_event_followup_preview(1,'copy@example.test',$1) id",[copy]))[0].id;assert.deepEqual((await q('select content_override from event_followup_outbox where id=$1',[id]))[0].content_override,copy);
  await assert.rejects(q('select validate_event_followup_content($1)',[{html:'<p>unsafe</p>'}]),/Invalid/);await assert.rejects(q('select validate_event_followup_content($1)',[{profile_cta_enabled:'yes'}]),/Invalid/);await assert.rejects(q('select validate_event_followup_content($1)',[{message:'x'.repeat(3001)}]),/Invalid/);
  });
+ await t.test('actual account classification ignores checkout origin and verification',async()=>{
+ assert.equal((await q("select event_followup_recipient_is_member(1,' OWNER@example.test ') v"))[0].v,true);
+ assert.equal((await q("select event_followup_recipient_is_member(1,'guest@example.test') v"))[0].v,false);
+ await q(`insert into "user" values('guest-account',' Guest@Example.test ',false)`);
+ assert.equal((await q("select event_followup_recipient_is_member(1,'guest@example.test') v"))[0].v,true);
+ assert.equal((await q("select event_followup_recipient_is_member(1,'stale@example.test') v"))[0].v,false);
+ assert.equal((await q("select event_followup_recipient_is_member(1,'new@example.test') v"))[0].v,true);
+ await q(`delete from "user" where id='guest-account'`);
+ assert.equal((await q("select event_followup_recipient_is_member(1,'guest@example.test') v"))[0].v,false);
+ });
+ await t.test('preview revision is explicit, deduped and never rewrites a frozen legacy payload',async()=>{
+ const old=(await q("select enqueue_event_followup_preview(1,'sample@example.test') id"))[0].id;
+ await q("update event_followup_outbox set provider_payload=$2,status='sent',provider_message_id='synthetic-receipt' where id=$1",[old,{to:'sample@example.test',html:'frozen legacy'}]);
+ const before=(await q('select * from event_followup_outbox where id=$1',[old]))[0];
+ const next=(await q("select enqueue_event_followup_preview(1,'sample@example.test',$1,2) id",[{member_message:'Member copy',guest_message:'Guest copy'}]))[0].id;
+ assert.notEqual(next,old);assert.equal((await q("select enqueue_event_followup_preview(1,'sample@example.test',NULL,2) id"))[0].id,next);
+ assert.equal((await q("select enqueue_event_followup_preview(1,'sample@example.test') id"))[0].id,old);
+ assert.deepEqual((await q('select * from event_followup_outbox where id=$1',[old]))[0],before);
+ for(const revision of [0,101,null]) await assert.rejects(q("select enqueue_event_followup_preview(1,'sample@example.test',NULL,$1)",[revision]),/revision/);
+ await assert.rejects(q("update event_followup_outbox set preview_revision=2 where purpose='attendee'"),/check constraint/);
+ assert.equal((await q('select enqueue_event_followup(1) n'))[0].n,1); // new owner, not a resend to old recipient
+ assert.equal((await q('select enqueue_event_followup(1) n'))[0].n,0);
+ });
+ await t.test('segmented copy validates and preserves legacy fallback when omitted',async()=>{
+ await q('select enable_event_followup_catchup(ARRAY[1],$1)',[{member_message:'Member invitation',guest_message:'Join invitation'}]);
+ await q('select enable_event_followup_catchup(ARRAY[1],$1)',[{subject:'Updated subject'}]);
+ const c=(await q('select * from event_followup_campaigns where event_id=1'))[0];
+ assert.equal(c.member_message,'Member invitation');assert.equal(c.guest_message,'Join invitation');assert.equal(c.message,'Synthetic invitation');
+ for(const value of [{member_message:123},{guest_message:null},{guest_message:'x'.repeat(3001)}])await assert.rejects(q('select validate_event_followup_content($1)',[value]),/Invalid/);
+ assert.equal((await q("select count(*)::int n from pg_proc where proname='enqueue_event_followup_preview'"))[0].n,1);
+ assert.equal((await q("select count(*)::int n from pg_proc where proname='dispatch_event_followups'"))[0].n,1);
+ await assert.rejects(q("select dispatch_event_followups(ARRAY[1],NULL,NULL,2)"),/revision/);
+ });
  await t.test('all new RPCs service-only',async()=>{
- const funcs=await q("select oid::regprocedure::text sig from pg_proc where pronamespace='public'::regnamespace and proname like '%event_followup%'");for(const f of funcs)for(const role of ['anon','authenticated'])assert.equal((await q("select has_function_privilege($1,$2,'EXECUTE') v",[role,f.sig]))[0].v,false);});
+ const funcs=await q("select oid::regprocedure::text sig from pg_proc where pronamespace='public'::regnamespace and proname like '%event_followup%'");for(const f of funcs){for(const role of ['anon','authenticated'])assert.equal((await q("select has_function_privilege($1,$2,'EXECUTE') v",[role,f.sig]))[0].v,false);assert.equal((await q("select has_function_privilege('service_role',$1,'EXECUTE') v",[f.sig]))[0].v,true);}});
  }finally{await db.close()}
 });

@@ -32,11 +32,17 @@ export const fixtures = {
   reset: templates.resetPassword(url),
   verifyLink: templates.verifyEmailLink(url, 'Preview'),
   verifyAlias: templates.verifyEmail(url, 'Preview'),
-  followupInvite: buildFollowupEmail({
+  followupMember: buildFollowupEmail({
     eventTitle: 'Synthetic Community Night', subject: 'How was your night?',
-    message: 'Thanks for celebrating with us. Tell us what worked and what could be better.\n\nJoin the community to share photos, meet people and find another event. This is synthetic preview copy, not a real campaign.',
-    ctaLabel: 'Rate the party', reviewUrl: 'https://example.test/public/events/7/reviews',
-    profileUrl: 'https://example.test/auth/login?returnTo=%2Ffeed%2Fevents%2F7%2Freviews',
+    message: 'Thanks for celebrating with us. Tell us what worked and what could be better.\n\nShare photos, meet people and find another event. This is synthetic preview copy, not a real campaign.',
+    ctaLabel: 'Rate the party', reviewUrl: 'https://example.test/public/events/7?section=reviews',
+    unsubscribeUrl: 'https://example.test/unsubscribe?token=synthetic-preview', preview: true,
+  }),
+  followupGuest: buildFollowupEmail({
+    eventTitle: 'Synthetic Community Night', subject: 'Stay connected',
+    message: 'Make a profile and connect with the community. Share your photos and discover future events. This is synthetic preview copy, not a real campaign.',
+    ctaLabel: 'Rate the party', reviewUrl: 'https://example.test/public/events/7?section=reviews',
+    joinUrl: 'https://example.test/auth/signup?returnTo=%2Ffeed%2Fevents%2F7%3Fsection%3Dreviews',
     unsubscribeUrl: 'https://example.test/unsubscribe?token=synthetic-preview', preview: true,
   }),
   followup: buildFollowupEmail({ eventTitle: 'Preview Event', subject: null, message: 'Thanks for coming.\nSee you next time.', ctaLabel: null, reviewUrl: url, unsubscribeUrl: 'https://example.test/unsubscribe?token=preview-only' }),

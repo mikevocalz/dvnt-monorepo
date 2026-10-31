@@ -19,7 +19,7 @@ Deno.serve(async(req)=>{
   let campaignIds:number[]=[];
   try {
     if(scope.previewEmail){
-      const r=await s.rpc("enqueue_event_followup_preview",{p_event_id:scope.eventIds![0],p_email:scope.previewEmail,p_content:scope.previewContent});
+      const r=await s.rpc("enqueue_event_followup_preview",{p_event_id:scope.eventIds![0],p_email:scope.previewEmail,p_content:scope.previewContent,p_revision:scope.previewRevision});
       if(r.error) throw Error("Preview unavailable");
       previewId=r.data;
     } else {
