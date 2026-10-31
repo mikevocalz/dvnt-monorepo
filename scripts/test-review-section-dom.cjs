@@ -20,6 +20,7 @@ function Detail({id, requested, ready}) {
 (async()=>{
   const root = createRoot(document.getElementById('root'));
   const render = async (id,requested,ready)=>React.act(async()=>root.render(React.createElement(Detail,{id,requested,ready})));
+  await render(null,true,true); assert.equal(scrolled,0, "unresolved event must not scroll");
   await render(82,true,false); assert.equal(scrolled,0);
   await render(82,true,true); assert.equal(scrolled,1); assert.equal(document.activeElement.id,'reviews');
   await render(82,true,true); assert.equal(scrolled,1, 'rerenders must not hijack reading');
