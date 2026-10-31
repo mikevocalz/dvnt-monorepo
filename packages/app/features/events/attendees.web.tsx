@@ -1,4 +1,5 @@
 "use client";
+import { hasAdmissionPurpose, ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 
 /**
  * Event Attendees Screen — WEB port of the native host roster
@@ -101,14 +102,14 @@ function RowShell({
   );
 }
 
-function statusBadge(status: string): {
+function statusBadge(status: string, category?: string | null): {
   Icon: typeof CheckCircle2;
   color: string;
   label: string;
 } {
   switch (status) {
     case "scanned":
-      return { Icon: CheckCircle2, color: "#22C55E", label: "Scanned" };
+      return { Icon: CheckCircle2, color: "#22C55E", label: hasAdmissionPurpose(category) ? "Scanned" : "Redeemed" };
     case "refunded":
       return { Icon: XCircle, color: "#FC253A", label: "Refunded" };
     case "transfer_pending":
@@ -120,7 +121,7 @@ function statusBadge(status: string): {
       return {
         Icon: Circle,
         color: "rgba(255,255,255,0.45)",
-        label: "Unscanned",
+        label: hasAdmissionPurpose(category) ? "Unscanned" : "Unredeemed",
       };
   }
 }
@@ -129,8 +130,8 @@ const ROW_HEIGHT = 84; // 72px row + 12px gap
 
 function AttendeeRow({ item }: { item: TicketRecord }) {
   const router = useRouter();
-  const { Icon, color, label } = statusBadge(item.status);
-  const tier = item.ticket_type_name || "General";
+  const { Icon, color, label } = statusBadge(item.status, item.category);
+  const tier = item.ticket_type_name || ticketCategoryLabel(item.category);
   const gaColor = tierAccent("ga");
   // Native long-presses to a selection refund flow; on web a row click that
   // resolves to a known username opens the profile (project nav convention).
@@ -168,7 +169,7 @@ function AttendeeRow({ item }: { item: TicketRecord }) {
             className="rounded-lg border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
             style={{ borderColor: gaColor, color: gaColor }}
           >
-            {tier}
+            {tier}{!hasAdmissionPurpose(item.category) ? " · No admission" : ""}
           </span>
           {/* SUBSCRIPTION tier — a different axis from the ticket tier beside
               it, so it gets its own palette (plan-colors, never tier-colors).

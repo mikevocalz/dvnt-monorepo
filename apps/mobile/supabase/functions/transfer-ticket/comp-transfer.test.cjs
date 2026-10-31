@@ -29,16 +29,16 @@ function fixture(options = {}) {
     user: ['sender', 'one', 'two', 'three', 'other'].map(id => ({ id, username: id })),
     users: ['sender', 'one', 'two', 'three', 'other'].map((id, i) => ({ id: i + 1, username: id, auth_id: id })), order_addons: [],
     events: [{ id: 7, host_id: 'staff', start_date: new Date(Date.now() + 7 * 864e5).toISOString(), ...options.event }],
-    ticket_types: [{ id: 'tier', name: 'GA' }],
+    ticket_types: [{ id: 'tier', name: 'GA', category: 'admission' }],
   };
   const writes = [], wallets = [], rpcCalls = [], warnings = [], receipts = [], directEmails = [];
   let sequence = 0, beforeWrite = options.beforeWrite;
   const db = {
     from(table) {
-      let payload, operation = 'select', limit = Infinity;
+      let payload, operation = 'select', limit = Infinity, selected = '';
       const filters = [];
       const q = {
-        select() { return q; }, limit(n) { limit = n; return q; },
+        select(columns = '') { selected = columns; return q; }, limit(n) { limit = n; return q; },
         eq(k, v) { filters.push(row => row[k] === v); return q; },
         ilike(k, v) { filters.push(row => String(row[k]).toLowerCase() === v.replace(/\\_/g, '_').toLowerCase()); return q; },
         is(k, v) { filters.push(row => row[k] === v); return q; },
@@ -68,7 +68,7 @@ function fixture(options = {}) {
           if (operation === 'update') rows.forEach(row => Object.assign(row, payload));
           const snapshots = rows.map(row => table === 'ticket_transfers'
             ? { ...row, tickets: { ...tables.tickets.find(t => t.id === row.ticket_id) } }
-            : { ...row });
+            : { ...row, ...(table === 'tickets' && selected.includes('ticket_types(') ? { ticket_types: tables.ticket_types.find(t => t.id === row.ticket_type_id) ?? null } : {}) });
           return { data: single ? snapshots[0] ?? null : snapshots, error: null };
         },
         single: async () => q.result(true), maybeSingle: async () => q.result(true),

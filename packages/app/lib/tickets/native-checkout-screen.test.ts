@@ -74,7 +74,8 @@ function harness(options: { read?: () => Promise<any[]>; result?: any } = {}) {
   const storage = new Map<string, any>();
   const { useNativeTicketCheckoutStore: store, nativeTicketCheckoutKey: key } =
     loadStore(storage);
-  const state = { isCheckingOut: false };
+  const state = { isCheckingOut: false, ticketQty: 1 };
+  const quantityWrites: number[] = [];
   const toasts: any[][] = [];
   let payments = 0;
   let writes = 0;
@@ -85,6 +86,11 @@ function harness(options: { read?: () => Promise<any[]>; result?: any } = {}) {
     nativeCheckoutKey: key("viewer-1", "42"),
     selectedTier: { id: "tier-ga" },
     ticketQty: 1,
+    setTicketQty: (quantity: number) => {
+      quantityWrites.push(quantity);
+      state.ticketQty = quantity;
+      context.ticketQty = quantity;
+    },
     promoCode: "",
     useNativeTicketCheckoutStore: store,
     useEventDetailScreenStore: { getState: () => state },
@@ -131,6 +137,7 @@ function harness(options: { read?: () => Promise<any[]>; result?: any } = {}) {
     key,
     toasts,
     state,
+    quantityWrites,
     run: context.handleNativeTicketCheckout,
     get payments() {
       return payments;
@@ -155,6 +162,7 @@ test("native screen displays processing after delayed webhook, not purchased, an
   assert.equal(h.toasts.at(-1)?.[0], "info");
   assert.match(h.toasts.at(-1)?.[2], /don't pay again/);
   assert.equal(h.writes, 0);
+  assert.deepEqual(h.quantityWrites, [], "pending checkout must keep its requested quantity");
   // Run the real entry callback after sales are cancelled: recovery still works.
   await vm.runInNewContext(getTicketsCallback, h.context)();
   assert.equal(h.payments, 1);
@@ -198,6 +206,8 @@ test("native screen celebrates matching issuance and free confirmed tickets only
     await h.run();
     assert.equal(h.toasts[0][0], "success");
     assert.equal(h.toasts[0][1], "Ticket Confirmed");
+    assert.deepEqual(h.quantityWrites, [1]);
+    assert.equal(h.state.ticketQty, 1);
     assert.equal(h.writes, 0);
   }
 });
@@ -231,6 +241,8 @@ test("pending purchase survives restart, remains account/event scoped, and reche
   await vm.runInNewContext(nativeCallback, h.context)();
   assert.equal(h.payments, 1);
   assert.equal(h.toasts.at(-1)?.[0], "success");
+  assert.deepEqual(h.quantityWrites, [1]);
+  assert.equal(h.context.ticketQty, 1, "completed recovery resets quantity for the next purchase");
   assert.equal(
     restarted.useNativeTicketCheckoutStore.getState().pending[key],
     undefined,
@@ -329,4 +341,17 @@ test("actual native CTA replaces buying with read-only recovery, including exist
       );
     }
   }
+});
+
+
+test("native confirmed service does not claim event entry and resets the next-purchase quantity", async () => {
+  const h = harness({ result: { success: true, free: true, tickets: [{ id: "synthetic-free-service", qr_token: "synthetic-service-qr" }] } });
+  h.context.selectedTier = { id: "synthetic-service", category: "service", name: "Coat Check" };
+  await h.run();
+  assert.equal(h.toasts[0][0], "success");
+  assert.match(h.toasts[0][2], /Coat Check.*confirmed/);
+  assert.match(h.toasts[0][2], /admission.*separately/);
+  assert.doesNotMatch(h.toasts[0][2], /You're going/);
+  assert.deepEqual(h.quantityWrites, [1]);
+  assert.equal(h.writes, 0);
 });

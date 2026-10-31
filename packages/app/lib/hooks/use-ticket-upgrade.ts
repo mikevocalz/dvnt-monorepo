@@ -6,6 +6,10 @@
  */
 
 import { useMemo } from "react";
+import {
+  isAdmissionUpgradeCategory,
+  isAdmissionUpgradeSource,
+} from "@dvnt/app/lib/tickets/upgrade-purpose";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Linking } from "react-native";
 import { supabase } from "@dvnt/app/lib/supabase/client";
@@ -30,7 +34,8 @@ export function useTicketUpgradeOptions(
   myTicket: TicketRecord | null | undefined,
 ): UpgradeTierOption[] {
   return useMemo(() => {
-    if (!myTicket || myTicket.status !== "active" || myTicket.checked_in_at) {
+    if (!myTicket || myTicket.status !== "active" || myTicket.checked_in_at ||
+      !isAdmissionUpgradeSource(myTicket, allTiers)) {
       return [];
     }
     const paidCents = myTicket.purchase_amount_cents || 0;
@@ -38,6 +43,7 @@ export function useTicketUpgradeOptions(
     return allTiers
       .filter(
         (t) =>
+          isAdmissionUpgradeCategory(t.category) &&
           t.is_active &&
           t.price_cents > paidCents &&
           String(t.id) !== String(myTicket.ticket_type_id),

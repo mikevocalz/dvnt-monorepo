@@ -68,7 +68,7 @@ function fixture() {
     async scan(token, opts = {}) {
       const qrToken = opts.qrToken ?? `ticket-${++sequence}`;
       if (!tables.tickets.some(t => t.qr_token === qrToken)) tables.tickets.push({
-        id: qrToken, qr_token: qrToken, event_id: 7, status: 'active', user_id: 'guest',
+        id: qrToken, qr_token: qrToken, event_id: 7, status: 'active', user_id: 'guest', category: 'admission',
       });
       const headers = { ...(opts.ip === null ? {} : { 'x-forwarded-for': opts.ip || '192.0.2.40' }),
         ...(token ? { [opts.legacy ? 'Authorization' : 'x-auth-token']: opts.legacy ? `Bearer ${token}` : token } : {}) };

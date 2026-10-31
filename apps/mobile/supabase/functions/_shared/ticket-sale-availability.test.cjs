@@ -48,7 +48,7 @@ function checkout(rail, patch = {}, options = {}) {
         }, error: null };
         if (table === "organizer_accounts") return { data: { stripe_account_id: "acct_fixture", charges_enabled: true }, error: null };
         if (table === "stripe_customers") return { data: { stripe_customer_id: "cus_fixture" }, error: null };
-        if (table === "tickets" || table === "ticket_holds") return { data: [], count: 0, error: null };
+        if (table === "tickets" || table === "ticket_holds") return { data: [], count: table === "tickets" ? options.ownedCount || 0 : 0, error: table === "tickets" ? options.ownedError || null : null };
         if (table === "orders") return { data: null, error: null };
         throw new Error(`Unexpected table read: ${table}`);
       }
@@ -66,8 +66,14 @@ function checkout(rail, patch = {}, options = {}) {
     },
     rpc: async (name, args) => {
       ops.push({ action: "rpc", name, args });
-      assert.equal(name, "ticket_hold_create_atomic");
-      return { data: { ok: true, hold_id: "hold-1" }, error: null };
+      if (name === "free_ticket_checkout_atomic") {
+        if (options.freeError) return { data: null, error: options.freeError };
+        if (options.freeResult) return { data: options.freeResult, error: null };
+        issued.push(...args.p_ticket_rows);
+        return { data: { ok: true, idempotent: false, order: { id: "order-1", ...args.p_order }, tickets: args.p_ticket_rows }, error: null };
+      }
+      assert.equal(name, "ticket_purchase_hold_atomic");
+      return { data: options.holdResult || { ok: true, hold_id: "hold-1" }, error: null };
     },
   };
   const stubs = {
@@ -199,7 +205,7 @@ for (const [label, rail, options] of rails) {
         const result = await response.json();
         if (purchase === "paid") {
           assert.equal(fn.issued.length, 0, "Paid tickets wait for webhook fulfillment");
-          assert.equal(fn.ops.filter((op) => op.name === "ticket_hold_create_atomic").length, 1);
+          assert.equal(fn.ops.filter((op) => op.name === "ticket_purchase_hold_atomic").length, 1);
           assert.equal(fn.ops.find((op) => op.table === "orders" && op.action === "insert").payload.status, "payment_pending");
           assert.ok(rail === "create-payment-intent" ? result.paymentIntent : result.url);
         } else {
@@ -242,5 +248,50 @@ for (const [label, rail, options] of rails) {
     const fn = checkout(rail, {}, { ...options, event: { end_date: new Date(NOW + 30 * 60_000).toISOString() } });
     assert.equal((await fn.run()).status, 400);
     assert.equal(fn.stripe.length, 0);
+  });
+}
+
+// Repeat purchasing never disables server limits or turns a service into GA.
+for (const [label, rail, identity] of rails) {
+  test(`${label}: an existing holder can buy another standalone service below the cap`, async () => {
+    const f = checkout(rail, { name: "Coat Check", category: "service", price_cents: 0, max_per_user: 3 }, { ...identity, ownedCount: 1 });
+    const response = await f.run({ quantity: 1 });
+    assert.equal(response.status, 200, await response.clone().text());
+    const call = f.ops.find(op => op.name === "free_ticket_checkout_atomic");
+    assert.equal(call.args.p_ticket_type_id, "tier-1");
+    assert.equal(call.args.p_ticket_rows.length, 1);
+    assert.ok(call.args.p_ticket_rows.every(row => row.ticket_type_id === "tier-1"));
+    assert.ok(!f.ops.some(op => op.action === "insert"), "no split allocation or forced admission insert");
+    assert.equal(f.stripe.length, 0);
+  });
+  test(`${label}: a holder at the cumulative cap never reaches allocation or Stripe`, async () => {
+    const f = checkout(rail, { max_per_user: 2 }, { ...identity, ownedCount: 2 });
+    assert.equal((await f.run({ quantity: 1 })).status, 400);
+    assert.equal(f.stripe.length, 0); assert.equal(f.issued.length, 0);
+  });
+  test(`${label}: configured per-order cap is checked before payment or free allocation`, async () => {
+    for (const price_cents of [0, 1000]) {
+      const f = checkout(rail, { max_per_user: 10, max_per_order: 1, price_cents }, identity);
+      const response = await f.run({ quantity: 2 });
+      assert.equal(response.status, 400); assert.equal((await response.json()).code, "order_limit");
+      assert.equal(f.stripe.length, 0); assert.equal(f.issued.length, 0);
+    }
+  });
+  test(`${label}: pending-checkout cap race cancels the unallocated payment and reports a limit`, async () => {
+    const f = checkout(rail, {}, { ...identity, holdResult: { ok: false, error: "buyer_limit", limit: 2 } });
+    const response = await f.run({ quantity: 1 });
+    assert.equal(response.status, 409); assert.equal((await response.json()).code, "buyer_limit");
+    assert.equal(f.issued.length, 0);
+    assert.ok(f.stripe.some(call => /\/(cancel|expire)$/.test(call.url)), "unallocated Stripe attempt is cancelled/expired");
+    assert.ok(!f.ops.some(op => op.table === "orders" && op.action === "insert"));
+  });
+  test(`${label}: failed ownership read is not zero tickets owned`, async () => {
+    const f = checkout(rail, {}, { ...identity, ownedError: { message: "SYNTHETIC_READ_ERROR" } });
+    assert.equal((await f.run({ quantity: 1 })).status, 500); assert.equal(f.stripe.length, 0); assert.equal(f.issued.length, 0);
+  });
+  test(`${label}: atomic free failure has no direct-write fallback`, async () => {
+    const f = checkout(rail, { price_cents: 0 }, { ...identity, freeError: { code: "PGRST202", message: "SYNTHETIC_MISSING_RPC" } });
+    assert.equal((await f.run({ quantity: 1 })).status, 500); assert.equal(f.issued.length, 0);
+    assert.ok(!f.ops.some(op => op.action === "insert" || op.action === "update"));
   });
 }

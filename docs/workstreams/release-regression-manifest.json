@@ -122,6 +122,18 @@
       "owner": "tickets",
       "kind": "command",
       "automation": "test:ticket-cancellation-sql"
+    },
+    {
+      "id": "repeat-purchase-service-separation",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "scripts/test-repeat-ticket-purchase-dom.cjs"
+    },
+    {
+      "id": "repeat-purchase-atomic-capacity",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/_shared/repeat-purchase-sql.cjs"
     }
   ],
   "releaseCandidateManual": [

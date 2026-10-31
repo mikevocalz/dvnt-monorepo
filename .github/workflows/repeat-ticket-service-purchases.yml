@@ -1,0 +1,39 @@
+name: Repeat ticket and service purchases
+on:
+  pull_request:
+    paths:
+      - 'packages/app/features/events/**'
+      - 'packages/app/features/routes/screens/(protected)/events/**'
+      - 'packages/app/features/routes/screens/(protected)/ticket/**'
+      - 'packages/app/components/event/**'
+      - 'packages/app/lib/tickets/**'
+      - 'packages/app/lib/api/ticket*'
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
+      - 'scripts/test-repeat-ticket*'
+      - 'scripts/test-service-category-ui.cjs'
+      - '.github/workflows/repeat-ticket-service-purchases.yml'
+permissions:
+  contents: read
+jobs:
+  repeat-service:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Isolated mounted-UI test dependency
+        run: npm install --prefix "$RUNNER_TEMP/repeat-dom" --ignore-scripts --no-audit --no-fund --no-save happy-dom@20.10.3
+      - name: Actual web/native purchase, editor and category surfaces
+        run: NODE_PATH="$RUNNER_TEMP/repeat-dom/node_modules:$PWD/apps/web/node_modules:$PWD/node_modules" pnpm test:repeat-ticket-ui
+      - name: Ticket and scanner regressions
+        run: pnpm test:ticket-release && pnpm test:scanner-staff
+      - name: Category-aware handlers, admission compatibility and offline cache safety
+        run: NODE_PATH="$RUNNER_TEMP/repeat-dom/node_modules:$PWD/apps/web/node_modules:$PWD/node_modules" pnpm test:repeat-ticket-backend
+      - name: Actual PostgreSQL sequential and concurrent purchasing invariants
+        run: pnpm test:repeat-ticket-sql

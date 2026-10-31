@@ -1,3 +1,4 @@
+import { defaultTicketTypeName, ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 /**
  * View Ticket — Luxury Digital Pass
  * posh.vip-style VIP ticket with glassmorphism, tier accents, and animated QR
@@ -90,7 +91,7 @@ function dbToTicket(rec: TicketRecord): Ticket {
         : (rec.purchase_amount_cents ?? 0) === 0
           ? "free"
           : "ga") as TicketTierLevel,
-    tierName: rec.ticket_type_name || "General Admission",
+    tierName: rec.ticket_type_name || defaultTicketTypeName(rec.category),
     eventTitle: rec.event_title || "",
     eventDate: rec.event_date || "",
     eventTz: rec.event_tz ?? null,
@@ -381,7 +382,7 @@ function ViewTicketScreenContent() {
                 accessibilityLabel={`${
                   pass.category === "coat_check"
                     ? "Coat check"
-                    : pass.ticket_type_name || "Admission"
+                    : pass.ticket_type_name || ticketCategoryLabel(pass.category)
                 } pass`}
                 style={styles.groupRow}
               >
@@ -389,7 +390,7 @@ function ViewTicketScreenContent() {
                   <Text style={styles.groupRowTitle}>
                     {pass.category === "coat_check"
                       ? "Coat check"
-                      : pass.ticket_type_name || "Admission"}
+                      : pass.ticket_type_name || ticketCategoryLabel(pass.category)}
                   </Text>
                   <Text style={styles.groupRowMeta}>
                     {pass.status === "active"
@@ -495,7 +496,7 @@ function ViewTicketScreenContent() {
                     accessibilityLabel={`Ticket ${i + 1} of ${passGroup.length}, ${
                       pass.category === "coat_check"
                         ? "coat check"
-                        : pass.ticket_type_name || "admission"
+                        : pass.ticket_type_name || ticketCategoryLabel(pass.category)
                     }`}
                     style={[
                       styles.passChip,
@@ -508,7 +509,7 @@ function ViewTicketScreenContent() {
                     >
                       {pass.category === "coat_check"
                         ? "Coat check"
-                        : pass.ticket_type_name || "Admission"}
+                        : pass.ticket_type_name || ticketCategoryLabel(pass.category)}
                     </Text>
                   </Pressable>
                 );

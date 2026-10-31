@@ -1,4 +1,5 @@
 "use client";
+import { ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 
 /**
  * My Tickets — web (port of native `app/(protected)/events/my-tickets.tsx`).
@@ -154,7 +155,7 @@ function TicketCard({
     <CardLink
       href={`/feed/ticket/${ticket.id}`}
       ariaLabel={`${
-        isCoatCheck ? "Coat check" : ticket.ticket_type_name || "Admission"
+        isCoatCheck ? "Coat check" : ticket.ticket_type_name || ticketCategoryLabel(ticket.category)
       } for ${ticket.event_title || "event"}. ${status.label}.`}
       // A spent pass is dimmed so the eye skips it when scanning a list for
       // tonight's ticket. Not hidden and still tappable — the detail screen is

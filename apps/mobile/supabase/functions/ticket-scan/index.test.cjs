@@ -8,13 +8,13 @@ const { harness } = require('../_shared/payment-safety.test.cjs');
 
 const EVENT_ID = 7;
 const ADDON = { id: 'oa-1', event_id: EVENT_ID, qr_token: 'addon-token-hex', qr_payload: 'addon-payload' };
-const TICKET = { id: 'ticket-1', event_id: EVENT_ID, qr_token: 'ticket-token-hex', qr_payload: 'ticket-payload' };
+const TICKET = { id: 'ticket-1', event_id: EVENT_ID, ticket_type_id: 'tier-1', category: 'admission', qr_token: 'ticket-token-hex', qr_payload: 'ticket-payload' };
 
 // Minimal PostgREST-shaped fake: filters rows by every .eq() applied.
 function fakeDb(options = {}) {
   const rpcCalls = [];
   const tables = {
-    tickets: [TICKET],
+    tickets: [{ ...TICKET, ...(options.ticket || {}), ticket_types: options.missingCategory ? null : { name: options.category === "service" ? "Coat Check" : "Admission", category: options.category ?? "admission" } }],
     order_addons: [ADDON],
     events: [{ id: EVENT_ID, host_id: 'staff', status: options.eventStatus || 'published', perk_config: null }],
     event_co_organizers: [], users: [], ticket_types: [], effective_membership_tiers: [],
@@ -64,7 +64,7 @@ const verifySignedQrPayload = async payload => ({
 function scan(body, options) {
   const db = fakeDb(options);
   const h = harness({ database: db, dependencyOverrides: { 'hmac-qr.ts': { verifySignedQrPayload } } });
-  return h.invoke('ticket-scan', body).then(async r => ({ status: r.status, body: await r.json(), db }));
+  return h.invoke('ticket-scan', { supports_credential_purposes: true, ...body }).then(async r => ({ status: r.status, body: await r.json(), db }));
 }
 
 test('signed add-on qr_payload redeems the add-on through redeem_addon', async () => {
@@ -170,4 +170,51 @@ test('well-formed missing event is authoritative not-found, not database failure
   assert.equal(status, 404);
   assert.deepEqual(body, { valid: false, reason: 'event_not_found' });
   assert.equal(db.rpcCalls.length, 0);
+});
+
+for (const category of ['service', 'coat_check', 'product']) {
+  test(`${category} QR redeems its own credential without announcing admission or perks`, async () => {
+    for (const body of [{ qr_payload: 'ticket-payload', event_id: EVENT_ID }, { qr_token: TICKET.qr_token, event_id: EVENT_ID }]) {
+      const r = await scan(body, { category });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.valid, true);
+      assert.equal(r.body.kind, category === 'product' ? 'product' : 'service');
+      assert.equal(r.body.admits_entry, false);
+      assert.equal(r.body.ticket.category, category);
+      assert.deepEqual(r.body.perks, []);
+      assert.equal(r.body.membership_tier, null);
+      assert.deepEqual(r.db.rpcCalls.map(c => c.name), ['redeem_ticket']);
+      assert.equal(r.db.rpcCalls[0].args.p_qr_token, TICKET.qr_token);
+    }
+  });
+}
+test('known admission remains entry, missing category evidence never does', async () => {
+  const admitted = await scan({ qr_payload: 'ticket-payload', event_id: EVENT_ID });
+  assert.equal(admitted.body.kind, 'ticket');
+  assert.equal(admitted.body.admits_entry, true);
+  const unknown = await scan({ qr_payload: 'ticket-payload', event_id: EVENT_ID }, { missingCategory: true });
+  assert.equal(unknown.body.valid, true);
+  assert.equal(unknown.body.kind, 'unknown');
+  assert.equal(unknown.body.admits_entry, false);
+});
+test('service classification survives a failed post-redemption display read', async () => {
+  const r = await scan({ qr_payload: 'ticket-payload', event_id: EVENT_ID }, { category: 'service', failAfterCommit: 'tickets' });
+  assert.equal(r.body.valid, true);
+  assert.equal(r.body.kind, 'service');
+  assert.equal(r.body.admits_entry, false);
+  assert.equal(r.body.ticket.tier_name, 'Coat Check');
+});
+
+test('untiered free RSVP remains admission while a broken tier reference fails closed', async () => {
+ const r=await scan({qr_payload:'ticket-payload',event_id:EVENT_ID},{missingCategory:true,ticket:{ticket_type_id:null}});
+ assert.equal(r.body.kind,'ticket');assert.equal(r.body.admits_entry,true);
+});
+
+for(const category of ['service','coat_check','product'])test(`older scanner cannot redeem ${category} as admission`,async()=>{
+ const r=await scan({qr_payload:'ticket-payload',event_id:EVENT_ID,supports_credential_purposes:false},{category});
+ assert.equal(r.status,426);assert.equal(r.body.code,'scanner_update_required');assert.equal(r.body.valid,undefined);assert.equal(r.db.rpcCalls.length,0);
+});
+test('older scanner admission QR remains supported without purpose capability',async()=>{
+ const r=await scan({qr_payload:'ticket-payload',event_id:EVENT_ID,supports_credential_purposes:false});
+ assert.equal(r.status,200);assert.equal(r.body.valid,true);assert.equal(r.body.admits_entry,true);
 });

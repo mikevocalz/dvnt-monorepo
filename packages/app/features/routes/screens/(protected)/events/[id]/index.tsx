@@ -86,8 +86,10 @@ import {
 } from "@dvnt/app/lib/normalization/safe-entity";
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
-import { useTicketViewerId } from "@dvnt/app/lib/hooks/use-tickets";
-import { tierIsHiddenFromBuyers } from "@dvnt/app/lib/tickets/pricing";
+import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
+import { useTicketViewerId, useTicketViewerAuthId } from "@dvnt/app/lib/hooks/use-tickets";
+import { ticketPurchaseAllowance } from "@dvnt/app/lib/tickets/purchase-quantity";
+import { tierIsHiddenFromBuyers, tierIsPurchasable } from "@dvnt/app/lib/tickets/pricing";
 import { qk } from "@dvnt/app/lib/query/keys";
 import * as WebBrowser from "expo-web-browser";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
@@ -127,7 +129,7 @@ import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
 import { canHostEventLynk } from "@dvnt/app/lib/events/event-lynk";
 import { EventLynkHostPanel } from "@dvnt/app/features/events/ui/EventLynkHostPanel";
 import { canScanTickets } from "@dvnt/app/lib/events/event-role";
-import { eventEnded } from "@dvnt/app/lib/events/event-time";
+import { eventEnded, eventSalesClosed } from "@dvnt/app/lib/events/event-time";
 import type {
   TicketTier,
   EventAttendee,
@@ -403,6 +405,7 @@ function EventDetailScreenContent() {
   );
   const { hasValidTicket, clearTicket } = useTicketStore();
   const viewerId = useTicketViewerId();
+  const viewerAuthId = useTicketViewerAuthId();
   const showToast = useUIStore((s) => s.showToast);
   const isSubscribedToSale = useSaleNotifyStore((s) => s.isSubscribed);
   const toggleSaleSubscription = useSaleNotifyStore((s) => s.toggle);
@@ -473,7 +476,7 @@ function EventDetailScreenContent() {
   );
 
   // Display only — drives the CTA, never opens a pass.
-  const { primary: myTicketData } = useMyTicketStatusForEvent(eventId);
+  const { primary: myTicketData, tickets: myTickets = [] } = useMyTicketStatusForEvent(eventId);
   const { data: liveTicketTypes = [] } = useTicketTypes(eventId);
   // upgradeOptions computed after upgradeSourceTiers is defined below
   const { mutate: initiateUpgrade, isPending: isUpgradePending } =
@@ -582,6 +585,14 @@ function EventDetailScreenContent() {
   const hasTicket = myTicketData
     ? myTicketData.status === "active" || myTicketData.status === "scanned"
     : hasValidTicket(eventId) || isRsvped[eventId] || serverHasTicket;
+
+  const ownedTickets = myTickets.filter((ticket) =>
+    resolveTicketAccess({ ticket, viewerId, viewerAuthId }).isHolder,
+  );
+  const hasAdmissionTicket = ownedTickets.some((ticket) =>
+    (ticket.category ?? "admission") === "admission" &&
+    ["active", "scanned"].includes(ticket.status),
+  );
 
   // Fall back to eventData.ticketTiers when the standalone ticket_types query returns empty
   const upgradeSourceTiers =
@@ -723,6 +734,19 @@ function EventDetailScreenContent() {
     return buildTicketTiers(eventData);
   }, [safeEvent]);
 
+  const selectedDbTier = liveTicketTypes.find((tier) => tier.id === selectedTier?.id)
+    ?? eventData?.ticketTiers?.find((tier: any) => tier.id === selectedTier?.id);
+  const selectedAllowance = selectedDbTier
+    ? ticketPurchaseAllowance(selectedDbTier, ownedTickets)
+    : selectedTier?.maxPerOrder ?? 4;
+  const purchaseDisabledReason = eventSalesClosed(eventData)
+    ? "Ticket sales ended"
+    : selectedDbTier && (selectedDbTier.is_active === false || !tierIsPurchasable(selectedDbTier))
+      ? "Currently unavailable"
+      : selectedDbTier && selectedAllowance <= 0
+        ? "Maximum per person reached"
+        : undefined;
+
   // Use real attendee avatars from batch payload, fall back to mock
   const realAttendees = useMemo(() => {
     const avatars = safeEvent?.attendeeAvatars;
@@ -771,7 +795,8 @@ function EventDetailScreenContent() {
 
   const handleSelectTier = useCallback((tier: TicketTier) => {
     setSelectedTier(tier);
-  }, []);
+    setTicketQty(1);
+  }, [setSelectedTier, setTicketQty]);
 
   // ── Waitlist (visible only when the selected tier is sold out) ──
   const waitlistTierId = selectedTier?.id ? String(selectedTier.id) : null;
@@ -911,12 +936,15 @@ function EventDetailScreenContent() {
         pendingCopy();
         return;
       }
+      setTicketQty(1);
       showToast(
         "success",
         outcome.ticketCount > 1
           ? `${outcome.ticketCount} Tickets Confirmed`
           : "Ticket Confirmed",
-        `You're going to ${eventData.title}!`,
+        selectedTier?.category === "service" || selectedTier?.category === "product"
+          ? `${selectedTier.name} is confirmed. Event admission is sold separately.`
+          : `You're going to ${eventData.title}!`,
       );
     } catch (err: any) {
       console.error("[EventDetail] Checkout error:", err);
@@ -934,7 +962,10 @@ function EventDetailScreenContent() {
     nativeCheckoutKey,
     nativeCheckout,
     selectedTier?.id,
+    selectedTier?.name,
+    selectedTier?.category,
     ticketQty,
+    setTicketQty,
     promoCode,
     queryClient,
     viewerId,
@@ -965,8 +996,13 @@ function EventDetailScreenContent() {
     // a missing end_date means the event is assumed to run start+6h
     // (the get_events_home convention) — an 8pm event is still live at
     // 8:30pm, not "Ended" at doors or at viewer-local midnight.
-    if (eventEnded(eventData)) {
-      showToast("warning", "Event Ended", "This event has already ended.");
+    if (eventSalesClosed(eventData)) {
+      showToast("warning", "Ticket sales ended", "Ticket sales are closed for this event.");
+      return;
+    }
+
+    if (purchaseDisabledReason || (selectedDbTier && (ticketQty < 1 || ticketQty > selectedAllowance))) {
+      showToast("warning", "Tickets unavailable", purchaseDisabledReason || "Review the quantity for this tier.");
       return;
     }
 
@@ -1114,6 +1150,10 @@ function EventDetailScreenContent() {
     user?.id,
     nativeCheckoutKey,
     handleNativeTicketCheckout,
+    purchaseDisabledReason,
+    selectedDbTier,
+    selectedAllowance,
+    ticketQty,
     verificationStatus,
     setVerifyOpen,
     toggleRsvp,
@@ -1777,39 +1817,6 @@ function EventDetailScreenContent() {
     return "";
   }, [isPast, hasTicket, isHostUser]);
 
-  // Gallery cells follow the window, not the width the app launched with.
-  // MUST stay above the loading/error guards below: it used to sit after them,
-  // so the skeleton render called one fewer hook than the loaded render and
-  // React threw "Rendered more hooks than during the previous render" the
-  // moment the event data arrived.
-  const { width: liveScreenWidth } = useWindowDimensions();
-
-  // ── Loading state ───────────────────────────────────────────────────
-  // Show skeleton while: params not ready, query disabled/pending, or actively fetching
-  if (!eventId || isPending || isLoading) {
-    return <EventDetailSkeleton />;
-  }
-
-  // ── Error state ─────────────────────────────────────────────────────
-  if (hasError || !eventData) {
-    return (
-      <View style={s.errorContainer}>
-        <StatusBar barStyle="light-content" />
-        <Text style={s.errorEmoji}>🔒</Text>
-        <Text style={s.errorTitle}>Event Unavailable</Text>
-        <Text style={s.errorSubtitle}>
-          This event may be private, require an invite, or no longer exist.
-        </Text>
-        <Pressable onPress={() => fetchEvent()} style={s.retryButton}>
-          <Text style={s.retryText}>Try Again</Text>
-        </Pressable>
-        <Pressable onPress={() => router.back()} style={s.backLink}>
-          <Text style={s.backLinkText}>Go Back</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
   const event = safeEvent;
 
   /**
@@ -1854,6 +1861,39 @@ function EventDetailScreenContent() {
     }
     return { kind: "unknown" };
   }, [liveTicketTypes, ticketTiers, isLoading, event?.price]);
+
+  // Gallery cells follow the window, not the width the app launched with.
+  // MUST stay above the loading/error guards below: it used to sit after them,
+  // so the skeleton render called one fewer hook than the loaded render and
+  // React threw "Rendered more hooks than during the previous render" the
+  // moment the event data arrived.
+  const { width: liveScreenWidth } = useWindowDimensions();
+
+  // ── Loading state ───────────────────────────────────────────────────
+  // Show skeleton while: params not ready, query disabled/pending, or actively fetching
+  if (!eventId || isPending || isLoading) {
+    return <EventDetailSkeleton />;
+  }
+
+  // ── Error state ─────────────────────────────────────────────────────
+  if (hasError || !eventData) {
+    return (
+      <View style={s.errorContainer}>
+        <StatusBar barStyle="light-content" />
+        <Text style={s.errorEmoji}>🔒</Text>
+        <Text style={s.errorTitle}>Event Unavailable</Text>
+        <Text style={s.errorSubtitle}>
+          This event may be private, require an invite, or no longer exist.
+        </Text>
+        <Pressable onPress={() => fetchEvent()} style={s.retryButton}>
+          <Text style={s.retryText}>Try Again</Text>
+        </Pressable>
+        <Pressable onPress={() => router.back()} style={s.backLink}>
+          <Text style={s.backLinkText}>Go Back</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   // Two-up off the CONTENT column, not the window. `s.root` caps this screen at
   // CONTENT_MAX_WIDTH, so dividing the 1024pt window gave two 488pt cells that
@@ -2156,7 +2196,7 @@ function EventDetailScreenContent() {
               />
 
               {/* Promo code input */}
-              {selectedTier && selectedTier.price > 0 && !hasTicket && (
+              {selectedTier && selectedTier.price > 0 && (
                 <View style={{ marginTop: 12, gap: 8 }}>
                   <View
                     style={{
@@ -2252,14 +2292,14 @@ function EventDetailScreenContent() {
               )}
 
               {/* Signed-in buyer with no phone on file: shown after checkout asks. */}
-              {selectedTier && !hasTicket ? <CheckoutPhoneField /> : null}
+              {selectedTier ? <CheckoutPhoneField /> : null}
+              {purchaseDisabledReason ? <Text style={{ color: "#a1a1aa", marginTop: 8 }}>{purchaseDisabledReason}</Text> : null}
 
               {/* Quantity selector — shown for all real DB tiers (free and paid).
                   Excluded for the synthetic "free" id which uses the legacy RSVP path. */}
               {selectedTier &&
-                !hasTicket &&
                 selectedTier.id !== "free" &&
-                (selectedTier.maxPerOrder || 4) > 1 && (
+                selectedAllowance > 0 && (
                   <View
                     style={{
                       flexDirection: "row",
@@ -2318,14 +2358,14 @@ function EventDetailScreenContent() {
                         {ticketQty}
                       </Text>
                       <Pressable
-                        onPress={() => setTicketQty(ticketQty + 1)}
-                        disabled={ticketQty >= (selectedTier.maxPerOrder || 4)}
+                        onPress={() => setTicketQty(Math.min(selectedAllowance, ticketQty + 1))}
+                        disabled={ticketQty >= selectedAllowance}
                         style={{
                           width: 32,
                           height: 32,
                           borderRadius: 16,
                           backgroundColor:
-                            ticketQty >= (selectedTier.maxPerOrder || 4)
+                            ticketQty >= selectedAllowance
                               ? "rgba(255,255,255,0.06)"
                               : "rgba(255,255,255,0.12)",
                           alignItems: "center",
@@ -2335,7 +2375,7 @@ function EventDetailScreenContent() {
                         <Text
                           style={{
                             color:
-                              ticketQty >= (selectedTier.maxPerOrder || 4)
+                              ticketQty >= selectedAllowance
                                 ? "#555"
                                 : "#fff",
                             fontSize: 20,
@@ -2661,7 +2701,7 @@ function EventDetailScreenContent() {
           <View style={s.section}>
             <WhoAllOverThere
               eventId={eventId}
-              canUpload={isHost || hasTicket}
+              canUpload={isHost || hasAdmissionTicket}
             />
           </View>
 
@@ -2981,8 +3021,9 @@ function EventDetailScreenContent() {
         onGetTickets={handleGetTickets}
         onViewTicket={handleViewTicket}
         onBuyMore={
-          selectedTier && selectedTier.price > 0 ? handleGetTickets : undefined
+          selectedDbTier ? handleGetTickets : undefined
         }
+        purchaseDisabledReason={purchaseDisabledReason}
         waitlistJoined={waitlistJoined}
         onJoinWaitlist={handleJoinWaitlist}
         onLeaveWaitlist={handleLeaveWaitlist}

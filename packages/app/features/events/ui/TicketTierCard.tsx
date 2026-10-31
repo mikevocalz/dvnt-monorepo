@@ -1,3 +1,4 @@
+import { isAdmissionCategory, ticketCategoryLabel, ticketTierBadge } from "@dvnt/app/lib/tickets/ticket-category";
 import React, { memo, useCallback, useEffect, useRef } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import Animated, {
@@ -19,12 +20,6 @@ interface TicketTierCardProps {
   onSelect: (tier: TicketTier) => void;
 }
 
-const TIER_CATEGORY: Record<string, string> = {
-  admission: "Admission",
-  product: "Product",
-  service: "Service",
-};
-
 export const TicketTierCard = memo(function TicketTierCard({
   tier,
   isSelected,
@@ -36,8 +31,8 @@ export const TicketTierCard = memo(function TicketTierCard({
     onSelect(tier);
   }, [tier, onSelect]);
 
-  const isVip = tier.tier === "vip" || tier.tier === "table";
-  const categoryLabel = TIER_CATEGORY[tier.category] ?? "Admission";
+  const isVip = isAdmissionCategory(tier.category) && (tier.tier === "vip" || tier.tier === "table");
+  const categoryLabel = ticketCategoryLabel(tier.category);
 
   // Hex glow color + alpha pair to keep selected state visually
   // bold even on dark cards. `${color}40` ≈ 25% alpha, `${color}80`
@@ -115,7 +110,7 @@ export const TicketTierCard = memo(function TicketTierCard({
           style={[styles.tierBadge, { backgroundColor: `${tier.glowColor}25` }]}
         >
           <Text style={[styles.tierBadgeText, { color: tier.glowColor }]}>
-            {tier.tier.toUpperCase()}
+            {ticketTierBadge(tier.category, tier.tier)}
           </Text>
         </View>
         <Text style={styles.categoryLabel}>{categoryLabel}</Text>

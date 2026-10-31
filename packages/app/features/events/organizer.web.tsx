@@ -1,4 +1,5 @@
 "use client";
+import { hasAdmissionPurpose, ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 
 /**
  * Event Organizer Dashboard — web (port of native
@@ -160,7 +161,7 @@ function StatusChip({ ticket }: { ticket: TicketRecord }) {
     return (
       <span className="flex items-center gap-1.5 rounded-full bg-green-500/15 px-3 py-1.5 text-xs font-semibold text-green-400">
         <CheckCircle size={14} color="#22c55e" />
-        Checked In
+        {hasAdmissionPurpose(ticket.category) ? "Checked In" : "Redeemed"}
       </span>
     );
   }
@@ -175,7 +176,7 @@ function StatusChip({ ticket }: { ticket: TicketRecord }) {
   return (
     <span className="flex items-center gap-1.5 rounded-full bg-white/8 px-3 py-1.5 text-xs font-semibold text-white/60">
       <Clock size={14} color="rgba(255,255,255,0.6)" />
-      Valid
+      {hasAdmissionPurpose(ticket.category) ? "Valid" : `${ticketCategoryLabel(ticket.category)} · No admission`}
     </span>
   );
 }
@@ -214,7 +215,7 @@ function TicketRow({
 
       {ticket.checked_in_at ? (
         <p className="mt-2 text-xs text-white/60">
-          Checked in: {formatDate(ticket.checked_in_at)}
+          {hasAdmissionPurpose(ticket.category) ? "Checked in" : "Redeemed"}: {formatDate(ticket.checked_in_at)}
         </p>
       ) : null}
 

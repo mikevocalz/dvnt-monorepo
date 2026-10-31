@@ -217,7 +217,7 @@ Deno.serve(async (req) => {
     const { data: tier } = await supabase
       .from("ticket_types")
       .select(
-        "id, event_id, name, price_cents, is_active, is_sold_out, status, sale_start, sale_end, quantity_total, quantity_sold, quantity_held, max_per_user, tier_visibility, unlock_code, unlocks_after_tier_id",
+        "id, event_id, name, price_cents, is_active, is_sold_out, status, sale_start, sale_end, quantity_total, quantity_sold, quantity_held, max_per_user, max_per_order, tier_visibility, unlock_code, unlocks_after_tier_id",
       )
       .eq("id", ticketTypeId)
       .single();
@@ -245,13 +245,16 @@ Deno.serve(async (req) => {
         visibilityError === "tier_hidden" ? 404 : 403,
       );
     }
+    if (tier.max_per_order > 0 && quantity > tier.max_per_order) {
+      return err("order_limit", `Limit ${tier.max_per_order} per order for this ticket.`, 400);
+    }
     // The quote and both paid/free checkout use the same online sale policy.
     // Keep visibility first so unavailable tiers cannot disclose hidden state.
     const saleError = tierSaleAvailabilityError(tier);
     if (saleError) return err(saleError.code, saleError.error);
 
     // Advisory pre-check only — fails an obviously sold-out tier before we
-    // create a Stripe session. The binding check is ticket_hold_create_atomic
+    // create a Stripe session. The binding check is ticket_purchase_hold_atomic
     // below, which locks the tier and counts BOTH hold tables by seat. The
     // count-based arithmetic that used to live here counted hold ROWS (a hold
     // for 5 seats counted as 1) and never saw cart_holds at all.
@@ -263,13 +266,14 @@ Deno.serve(async (req) => {
 
     // Per-email cap (the posh.vip pattern — guests are NOT unlimited).
     if (guestEmail && tier.max_per_user && tier.max_per_user > 0) {
-      const { count } = await supabase
+      const { count, error: ownedError } = await supabase
         .from("tickets")
         .select("id", { count: "exact", head: true })
         .eq("event_id", eventId)
         .eq("ticket_type_id", ticketTypeId)
         .eq("guest_email", guestEmail)
-        .eq("status", "active");
+        .in("status", ["active", "scanned", "transfer_pending"]);
+      if (ownedError) throw ownedError;
       if ((count ?? 0) + quantity > tier.max_per_user)
         return err("limit", `Limit ${tier.max_per_user} per person for this ticket.`);
     }
@@ -338,7 +342,8 @@ Deno.serve(async (req) => {
         if (code === "insufficient_inventory")
           return err("sold_out", typeof issued.available === "number" && issued.available > 0
             ? `Only ${issued.available} left.` : "Those tickets just sold out.", 409);
-        if (code === "limit") return err("limit", `Limit ${issued.limit} per person for this ticket.`, 409);
+        if (code === "order_limit") return err("order_limit", `Limit ${issued.limit} per order for this ticket.`, 409);
+        if (code === "limit" || code === "buyer_limit") return err("limit", `Limit ${issued.limit} per person for this ticket.`, 409);
         if (code === "idempotency_conflict")
           return err(code, "This checkout attempt belongs to a different selection.", 409);
         if (code === "checkout_processing" || issueError?.code === "23505")
@@ -467,7 +472,7 @@ Deno.serve(async (req) => {
     // Atomic hold — see create-payment-intent for the full rationale. 31 min
     // covers the hosted-Checkout redirect window.
     const { data: guestHold, error: guestHoldErr } = await supabase.rpc(
-      "ticket_hold_create_atomic",
+      "ticket_purchase_hold_atomic",
       {
         p_ticket_type_id: ticketTypeId,
         p_quantity: quantity,
@@ -488,6 +493,9 @@ Deno.serve(async (req) => {
           session.id,
           e,
         );
+      }
+      if (guestHold?.error === "buyer_limit") {
+        return err("limit", `Limit ${guestHold.limit} per person for this ticket, including pending checkouts.`, 409);
       }
       const available = guestHold?.available;
       return err(

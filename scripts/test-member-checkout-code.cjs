@@ -31,7 +31,6 @@ const boundaries={
  '@dvnt/app/components/bottom-sheet.web':`export const BottomSheet=({open,title,children})=>open?<section role="dialog"><h1>{title}</h1>{children}</section>:null;`,
  './checkout-phone-field.web':`export const CheckoutPhoneField=()=>null;`,
  '@dvnt/app/lib/hooks/use-events':`export const useEvent=()=>({data:null});`,
- '@dvnt/app/lib/events/event-time':`export const formatEventWhen=()=>'';`,
  '@dvnt/app/lib/api/promoters':`export const promotersApi={getClaim:async()=>null};`,
  '@dvnt/app/lib/api/addons':`export const addonsApi={list:async()=>[]};`,
  '@tanstack/react-query':`export const useQuery=()=>({data:[]});`,
@@ -50,15 +49,19 @@ import {CheckoutReviewScreen} from './packages/app/features/events/checkout-revi
 import {useEventDetailUiStore} from '@dvnt/app/lib/stores/event-detail-ui-store';
 import {useCartStore} from '@dvnt/app/lib/stores/cart';import {useAddonUpsellStore} from '@dvnt/app/lib/stores/addon-upsell-store';
 import {usePromoterRefStore} from '@dvnt/app/lib/stores/promoter-ref-store';
+import {ticketPurchaseAllowance} from '@dvnt/app/lib/tickets/purchase-quantity';
+import {eventSalesClosed} from '@dvnt/app/lib/events/event-time';
 const route=create(()=>({path:'sheet'}));window.__nav=p=>{history.replaceState(null,'',p);route.setState({path:p});};
-const tier={id:'${TIER}',price_cents:3000,name:'General Admission',max_per_user:10};
+const tier={id:'${TIER}',price_cents:3000,name:'General Admission',category:'admission',quantity_total:100,quantity_sold:0,max_per_user:10};
 window.refs=usePromoterRefStore;window.cart=useCartStore;window.ui=useEventDetailUiStore;
 window.begin=()=>{useCartStore.getState().clearCart();usePromoterRefStore.setState({refs:{}});useEventDetailUiStore.getState().reset();useEventDetailUiStore.getState().setCheckoutOpen(true);useEventDetailUiStore.getState().setSelectedTierId(tier.id);window.__nav('/sheet');};
 function App(){const s=useEventDetailUiStore();const routePath=route(st=>st.path);const router=useRouter();
- const liveTicketTypes=[tier],eventId='1',selectedTierId=tier.id,e={title:'MIAMI Moonlight'},eventAddons=[];
+ const liveTicketTypes=[tier],eventId='1',selectedTierId=tier.id,e={title:'MIAMI Moonlight',start_date:'2099-01-01T20:00:00Z',end_date:'2099-01-02T02:00:00Z'},eventAddons=[];
+ const isCheckingOut=false,isCancelledEvent=false,selectedCheckoutTier=tier,ownedTickets=[];
+ const selectedAllowance=ticketPurchaseAllowance(tier,ownedTickets);
  const {ticketQty,promoCode,setCheckoutOpen,setPromoCode}=s;const resetAddonSelections=()=>{};const showToast=()=>{};
  const onCheckout=${handoff};
- return routePath.includes('/checkout/review')?<CheckoutReviewScreen/>:<CheckoutSheet open={s.checkoutOpen} onClose={()=>s.setCheckoutOpen(false)} eventId={eventId} eventTitle={e.title} tier={tier} addons={[]} qty={ticketQty} setQty={s.setTicketQty} promoCode={promoCode} setPromoCode={s.setPromoCode} isCheckingOut={false} onCheckout={onCheckout}/>;
+ return routePath.includes('/checkout/review')?<CheckoutReviewScreen/>:<CheckoutSheet open={s.checkoutOpen} onClose={()=>s.setCheckoutOpen(false)} eventId={eventId} eventTitle={e.title} tier={tier} addons={[]} maxQuantity={selectedAllowance} qty={ticketQty} setQty={s.setTicketQty} promoCode={promoCode} setPromoCode={s.setPromoCode} isCheckingOut={false} onCheckout={onCheckout}/>;
 }createRoot(document.getElementById('root')).render(<App/>);`;
  const result=await esbuild.build({stdin:{contents:entry,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,format:'iife',platform:'browser',jsx:'automatic',define:{'process.env.NODE_ENV':'"test"'},plugins:[{name:'boundaries',setup(build){
  build.onResolve({filter:/.*/},args=>{
@@ -69,6 +72,7 @@ function App(){const s=useEventDetailUiStore();const routePath=route(st=>st.path
  build.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:boundaries[args.path],loader:'tsx',resolveDir:ROOT}));
  build.onLoad({filter:/.*/,namespace:'extracted'},()=>({contents:extracted,loader:'tsx',resolveDir:ROOT}));
  }}]});
+ if(process.argv.includes('--build-only')){console.log('PASS: member sheet/handoff/review browser fixture bundles');return;}
  const server=http.createServer(async(req,res)=>{
  try{
  if(req.url==='/bundle.js'){res.writeHead(200,{'Content-Type':'application/javascript'});return res.end(result.outputFiles[0].contents)}
