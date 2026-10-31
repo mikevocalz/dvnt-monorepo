@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { getSession } from "@dvnt/app/lib/auth-client";
-import { readReturnToFromUrl } from "@dvnt/app/lib/auth/return-to";
+import { authPathWithReturn, readReturnToFromUrl } from "@dvnt/app/lib/auth/return-to";
 import { hasSignupContinuation, clearSignupContinuation } from "@dvnt/app/lib/auth/signup-continuation";
 
 /** Decide once at entry, before mounting signup. Becoming authenticated during
@@ -23,7 +23,18 @@ export function SignupEntry({ children }: { children: React.ReactNode }) {
       if (!active) return;
       if (error) { setState("error"); return; }
       if (data?.session && data?.user) {
-        if (!data.user.emailVerified && hasSignupContinuation(data.user.id)) { decided.current = true; setState("guest"); return; }
+        if (!data.user.emailVerified && hasSignupContinuation(data.user.id)) {
+          // ID approval removes this marker before the email step. On refresh,
+          // resume that step instead of remounting the initial signup form.
+          const pendingIdentity = window.sessionStorage.getItem("dvnt:signup:verification") === "pending";
+          decided.current = true;
+          if (pendingIdentity) setState("guest");
+          else {
+            setState("redirecting");
+            router.replace(authPathWithReturn("/auth/verify-email", readReturnToFromUrl("")));
+          }
+          return;
+        }
         decided.current = true;
         setState("redirecting");
         // Already-sent Join links are direct signup URLs. Only the explicit

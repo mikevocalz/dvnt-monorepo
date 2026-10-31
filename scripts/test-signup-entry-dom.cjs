@@ -53,11 +53,22 @@ async function resolve(index,value){await React.act(async()=>requests[index].res
  for(const kind of ['same-unverified','different-account','expired','future','verified']){
   await mount();
   continuation.rememberSignupContinuation(kind==='different-account'?'auth-other':'auth-a');
+  window.sessionStorage.setItem('dvnt:signup:verification','pending');
   if(kind==='expired'||kind==='future')window.sessionStorage.setItem('dvnt:signup:continuation',JSON.stringify({authId:'auth-a',savedAt:Date.now()+(kind==='future'?60000:-3600001)}));
   const result=member();result.data.user.emailVerified=kind==='verified';
   await resolve(0,result);
   assert.equal(hasForm(),kind==='same-unverified',kind+' continuation must be account-bound, fresh, and unfinished');
   assert.deepEqual(navigation,kind==='same-unverified'?[]:['/feed']);
+ }
+ for(const [query,expected] of [
+  ['?returnTo=%2Ffeed%2Fevents%2F42%3Fsection%3Dreviews','/auth/verify-email?returnTo=%2Ffeed%2Fevents%2F42%3Fsection%3Dreviews'],
+  ['','/auth/verify-email'],
+  ['?returnTo=https%3A%2F%2Fevil.invalid','/auth/verify-email'],
+ ]){
+  await mount('/auth/signup'+query);continuation.rememberSignupContinuation('auth-a');
+  const result=member();result.data.user.emailVerified=false;await resolve(0,result);
+  assert.equal(hasForm(),false,'completed identity continuation cannot flash initial signup');
+  assert.deepEqual(navigation,[expected],'same-account pending email resumes verification with validated destination');
  }
  continuation.clearSignupContinuation();assert.equal(continuation.hasSignupContinuation('auth-a'),false);
  await mount();await resolve(0,{data:null,error:{message:'fixture rejected session'}});assert.equal(hasForm(),false,'server error object stays closed');assert.match(document.body.textContent,/Unable to check/);
