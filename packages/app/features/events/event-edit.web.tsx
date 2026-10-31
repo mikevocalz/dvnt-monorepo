@@ -1,4 +1,5 @@
 "use client";
+import { EventFollowupSettings } from "./ui/followup-settings.web";
 import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
 import { eventTypeOptions } from "@dvnt/app/lib/events/event-type";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
@@ -1085,6 +1086,8 @@ export function EventEditScreen() {
               .map((tier) => ({ id: tier.id!, name: tier.name }))}
           />
         </Section>
+
+        <EventFollowupSettings eventId={Number(id)} />
 
         {/* More details */}
         <Section title="More Details">
