@@ -89,7 +89,7 @@ import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
 import { useTicketViewerId, useTicketViewerAuthId } from "@dvnt/app/lib/hooks/use-tickets";
 import { ticketPurchaseAllowance } from "@dvnt/app/lib/tickets/purchase-quantity";
-import { tierIsHiddenFromBuyers, tierIsPurchasable } from "@dvnt/app/lib/tickets/pricing";
+import { tierIsHiddenFromBuyers, tierIsLockedForBuyer, tierIsPurchasable } from "@dvnt/app/lib/tickets/pricing";
 import { qk } from "@dvnt/app/lib/query/keys";
 import * as WebBrowser from "expo-web-browser";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
@@ -332,7 +332,8 @@ function EventDetailScreenContent() {
   // DEV-only loop detection
   useRenderLoopDetector("EventDetail");
 
-  const rawParams = useLocalSearchParams<{ id: string; ref?: string }>();
+  const rawParams = useLocalSearchParams<{ id: string; ref?: string; serviceTier?: string }>();
+  const requestedServiceTierId = Array.isArray(rawParams.serviceTier) ? rawParams.serviceTier[0] : rawParams.serviceTier;
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -739,7 +740,12 @@ function EventDetailScreenContent() {
   const selectedAllowance = selectedDbTier
     ? ticketPurchaseAllowance(selectedDbTier, ownedTickets)
     : selectedTier?.maxPerOrder ?? 4;
-  const purchaseDisabledReason = eventSalesClosed(eventData)
+  const purchaseDisabledReason = requestedServiceTierId && (!selectedTier ||
+    (selectedTier.id === requestedServiceTierId && (!selectedDbTier ||
+      selectedDbTier.category !== "service" || tierIsHiddenFromBuyers(selectedDbTier) || tierIsLockedForBuyer(selectedDbTier) ||
+      (selectedDbTier.event_id != null && String(selectedDbTier.event_id) !== eventId))))
+    ? "Requested service is unavailable. Select an available tier."
+    : eventSalesClosed(eventData)
     ? "Ticket sales ended"
     : selectedDbTier && (selectedDbTier.is_active === false || !tierIsPurchasable(selectedDbTier))
       ? "Currently unavailable"
@@ -785,13 +791,26 @@ function EventDetailScreenContent() {
     [router, queryClient],
   );
 
+  // A new wallet selection (including Back/Forward on this mounted route)
+  // supersedes an older choice, but later manual selections remain untouched.
+  useEffect(() => {
+    setSelectedTier(null);
+    setTicketQty(1);
+  }, [eventId, requestedServiceTierId, setSelectedTier, setTicketQty]);
+
   // Auto-select first paid tier when paid tiers exist; fall back to first tier
   useEffect(() => {
     if (ticketTiers.length > 0 && !selectedTier) {
+      // Wallet service links never silently select an admission instead.
+      if (requestedServiceTierId) {
+        const service = ticketTiers.find((tier) => tier.id === requestedServiceTierId && tier.category === "service");
+        if (service) setSelectedTier(service);
+        return;
+      }
       const firstPaid = ticketTiers.find((t: any) => (t.price ?? 0) > 0);
       setSelectedTier(firstPaid || ticketTiers[0]);
     }
-  }, [ticketTiers, selectedTier]);
+  }, [ticketTiers, selectedTier, requestedServiceTierId, setSelectedTier]);
 
   const handleSelectTier = useCallback((tier: TicketTier) => {
     setSelectedTier(tier);

@@ -52,7 +52,7 @@ for (const statement of ast.statements) {
 const app = (suffix, values) => Object.assign(mocks['@dvnt/app/' + suffix], values);
 mocks.react = React;
 mocks['react/jsx-runtime'] = require('react/jsx-runtime');
-mocks['solito/navigation'] = { useParams: () => scenario.params, usePathname: () => '/public/events/42', useRouter: () => ({ push: (url) => scenario.navigation.push(url), back: noop }) };
+mocks['solito/navigation'] = { useParams: () => scenario.params, useSearchParams: () => new URLSearchParams(scenario.searchParams || ''), usePathname: () => '/public/events/42', useRouter: () => ({ push: (url) => scenario.navigation.push(url), back: noop }) };
 mocks['@tanstack/react-query'] = {
   useQuery: ({ queryKey, enabled }) => {
     if (queryKey[1] === 'share-token') return scenario.tokenQuery;
@@ -454,4 +454,164 @@ test('service-only holder can view and buy services without receiving attendee u
   scenario.tickets = [existingTicket, heldService];
   await render();
   assert.equal(document.querySelector('[data-testid="moments-upload-access"]').getAttribute('data-can-upload'), 'true');
+});
+
+// Comp issuance uses an ordinary active admission credential with amount 0,
+// not a separate "comp" status. Exercise that real wire shape, free admission,
+// paid admission, and older untiered comps against the actual mounted screen.
+const holderKinds = [
+  { name: 'comp', tier: paid, ticket: { ...existingTicket, purchase_amount_cents: 0, stripe_payment_intent_id: null } },
+  { name: 'free', tier: free, ticket: { ...existingTicket, ticket_type_id: free.id, purchase_amount_cents: 0, stripe_payment_intent_id: null } },
+  { name: 'paid', tier: paid, ticket: { ...existingTicket, purchase_amount_cents: 2500, stripe_payment_intent_id: 'pi_synthetic_prior' } },
+  { name: 'legacy untiered comp', tier: paid, ticket: { ...existingTicket, ticket_type_id: null, purchase_amount_cents: 0, stripe_payment_intent_id: null } },
+];
+function holderWithService(kind, admissionPatch = {}, servicePatch = {}, extraTickets = [], eventPatch = {}) {
+  member([kind.ticket, ...extraTickets]);
+  const tiers = [{ ...kind.tier, ...admissionPatch }, { ...service, ...servicePatch }];
+  scenario.tiersQuery = query(tiers);
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: tiers, ...eventPatch });
+}
+for (const kind of holderKinds) {
+  for (const [availability, admissionPatch] of [
+    ['available', {}],
+    ['per-person capped', { max_per_user: 1 }],
+    ['sold out', { quantity_sold: 20 }],
+  ]) {
+    test(`${kind.name} admission holder can select and buy only Coat Check when admission is ${availability}`, async () => {
+      const capTickets = availability === 'per-person capped' && !kind.ticket.ticket_type_id
+        ? [{ ...existingTicket, id: 'synthetic-extra-admission-at-cap', ticket_type_id: kind.tier.id }]
+        : [];
+      holderWithService(kind, admissionPatch, {}, capTickets);
+      const original = JSON.stringify(scenario.tickets);
+      await render();
+      assert.ok(viewButton(), 'existing credential remains viewable');
+      if (availability !== 'available') assert.equal(tierButton(kind.tier.id).disabled, true, 'admission really is unavailable in this fixture');
+      await click(tierButton(service.id));
+      assert.equal(ui.getState().selectedTierId, service.id);
+      assert.equal(purchaseButton().disabled, false, 'admission availability must not govern the selected service');
+      await click(purchaseButton());
+      await click(submitButton());
+      assert.equal(scenario.carts.length, 1);
+      assert.equal(scenario.carts[0].lines.length, 1, 'no admission line is added');
+      assert.equal(scenario.carts[0].lines[0].tierId, service.id);
+      assert.equal(scenario.carts[0].lines[0].category, 'service');
+      assert.equal(scenario.carts[0].lines[0].quantity, 1);
+      assert.equal(scenario.memberCheckouts.length, 0, 'paid service must not use free admission checkout');
+      assert.equal(scenario.memberRsvps.length, 0);
+      assert.equal(scenario.ticketWrites.length, 0);
+      assert.equal(JSON.stringify(scenario.tickets), original, 'prior admission is untouched');
+    });
+  }
+
+  test(`${kind.name} holder service quantity uses only remaining service allowance`, async () => {
+    const heldService = { ...existingTicket, id: 'synthetic-owned-service', category: 'service', ticket_type_id: service.id };
+    holderWithService(kind, { max_per_user: 1, quantity_sold: 20 }, { max_per_user: 3 }, [heldService]);
+    await render();
+    await click(tierButton(service.id));
+    await click(purchaseButton());
+    assert.equal(labelButton('Increase quantity').disabled, false);
+    await click(labelButton('Increase quantity'));
+    assert.equal(ui.getState().ticketQty, 2);
+    assert.equal(labelButton('Increase quantity').disabled, true);
+    await click(submitButton());
+    assert.equal(scenario.carts[0].lines.length, 1);
+    assert.equal(scenario.carts[0].lines[0].tierId, service.id);
+    assert.equal(scenario.carts[0].lines[0].quantity, 2);
+  });
+
+  for (const [reason, servicePatch, ownsService, eventPatch] of [
+    ['service limit reached', { max_per_user: 1 }, true, {}],
+    ['service inventory exhausted', { quantity_sold: 20 }, false, {}],
+    ['event sales closed', {}, false, { fullDate: '2000-01-01T00:00:00Z', endDate: '2000-01-01T03:00:00Z' }],
+  ]) {
+    test(`${kind.name} admission never bypasses ${reason}`, async () => {
+      const extra = ownsService ? [{ ...existingTicket, id: 'synthetic-owned-service', category: 'service', ticket_type_id: service.id }] : [];
+      holderWithService(kind, { quantity_sold: 20 }, servicePatch, extra, eventPatch);
+      await render();
+      assert.ok(viewButton(), 'the existing admission stays viewable');
+      const row = tierButton(service.id);
+      assert.equal(row?.disabled ?? true, true);
+      if (row) await click(row);
+      if (purchaseButton()) {
+        assert.equal(purchaseButton().disabled, true);
+        await click(purchaseButton());
+      }
+      assert.equal(ui.getState().checkoutOpen, false);
+      assert.equal(scenario.carts.length, 0);
+      assert.equal(scenario.memberCheckouts.length, 0);
+      assert.equal(scenario.memberRsvps.length, 0);
+      await click(viewButton());
+      assert.deepEqual(scenario.navigation, [`/feed/ticket/${kind.ticket.id}`]);
+    });
+  }
+}
+
+for (const kind of holderKinds) {
+  test(`ticket-detail service link selects Coat Check for ${kind.name} holder without opening checkout`, async () => {
+    holderWithService(kind, { max_per_user: 1, quantity_sold: 20 });
+    scenario.searchParams = `serviceTier=${service.id}`;
+    await render();
+    assert.equal(ui.getState().selectedTierId, service.id);
+    assert.equal(ui.getState().checkoutOpen, false);
+    assert.equal(scenario.carts.length, 0);
+    assert.equal(scenario.memberCheckouts.length, 0);
+    assert.equal(purchaseButton().disabled, false);
+    await click(purchaseButton());
+    await click(submitButton());
+    assert.equal(scenario.carts[0].lines.length, 1);
+    assert.equal(scenario.carts[0].lines[0].tierId, service.id);
+    assert.equal(scenario.carts[0].lines[0].category, 'service');
+  });
+}
+
+for (const [reason, requestedId, servicePatch, eventPatch] of [
+  ['missing', 'synthetic-missing-service', {}, {}],
+  ['admission passed as service', paid.id, {}, {}],
+  ['sold out', service.id, { quantity_sold: 20 }, {}],
+  ['hidden', service.id, { tier_visibility: 'hidden' }, {}],
+  ['locked', service.id, { tier_visibility: 'locked' }, {}],
+  ['foreign event', service.id, { event_id: 43 }, {}],
+  ['inactive', service.id, { is_active: false }, {}],
+  ['future sale', service.id, { sale_start: '2099-01-01T00:00:00Z' }, {}],
+  ['closed event', service.id, {}, { fullDate: '2000-01-01T00:00:00Z', endDate: '2000-01-01T03:00:00Z' }],
+]) {
+  test(`ticket-detail ${reason} service link never silently falls back to buying admission`, async () => {
+    holderWithService(holderKinds[0], {}, servicePatch, [], eventPatch);
+    scenario.searchParams = `serviceTier=${requestedId}`;
+    await render();
+    assert.equal(ui.getState().selectedTierId, requestedId);
+    assert.equal(ui.getState().checkoutOpen, false);
+    assert.equal(purchaseButton()?.disabled ?? true, true);
+    if (purchaseButton()) await click(purchaseButton());
+    assert.equal(scenario.carts.length, 0);
+    assert.equal(scenario.memberCheckouts.length, 0);
+    assert.deepEqual(scenario.navigation, []);
+  });
+}
+
+test('service link change on the same mounted event replaces prior selection but never auto-purchases', async () => {
+  const secondService = { ...service, id: '55555555-5555-4555-8555-555555555555', name: 'Synthetic Drink Service' };
+  holderWithService(holderKinds[0]);
+  scenario.tiersQuery = query([paid, service, secondService]);
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [paid, service, secondService] });
+  await render();
+  await click(tierButton(paid.id));
+  scenario.searchParams = `serviceTier=${service.id}`;
+  await render();
+  assert.equal(ui.getState().selectedTierId, service.id);
+  scenario.searchParams = `serviceTier=${secondService.id}`;
+  await render();
+  assert.equal(ui.getState().selectedTierId, secondService.id);
+  assert.equal(ui.getState().checkoutOpen, false);
+  assert.equal(scenario.carts.length, 0);
+  // A deliberate manual selection still works; the URL must not trap the user.
+  await click(tierButton(service.id));
+  assert.equal(ui.getState().selectedTierId, service.id);
+  scenario.searchParams = '';
+  await render();
+  assert.equal(ui.getState().selectedTierId, null, 'Back to the unqualified event clears the URL choice');
+  scenario.searchParams = `serviceTier=${secondService.id}`;
+  await render();
+  assert.equal(ui.getState().selectedTierId, secondService.id, 'Forward restores the service choice');
+  assert.equal(scenario.carts.length, 0);
 });

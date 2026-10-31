@@ -60,11 +60,13 @@ import { Dialog } from "@dvnt/ui";
 import {
   useTicketRoute,
   useTicketViewerId,
+  useTicketViewerAuthId,
+  useTicketTypes,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { getTicketSelfServiceAction, ticketSelfServiceCopy } from "@dvnt/app/lib/tickets/self-service-action";
 import { formatEventClock, formatEventDay } from "@dvnt/app/lib/events/event-time";
-import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
+import { resolveTicketDetailPurchases, ticketServicePurchaseHref } from "@dvnt/app/lib/tickets/ticket-detail-purchases";
 import { addonsApi, type OrderAddonRecord } from "@dvnt/app/lib/api/addons";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import {
@@ -172,6 +174,7 @@ export function TicketDetailScreen() {
   const routeId = Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? "");
 
   const viewerId = useTicketViewerId();
+  const viewerAuthId = useTicketViewerAuthId();
   /**
    * Same identity rule as native: a uuid names one credential, an integer is an
    * event id that resolves to the group. `useMyTicketForEvent` returned
@@ -273,26 +276,12 @@ export function TicketDetailScreen() {
     };
   }, [qrToken, setQrDataUrl]);
 
-  // ── Upgrade tiers (existence drives the upgrade card) ──
-  const { data: upgradeTiers = [] } = useQuery({
-    queryKey: [
-      "ticket-upgrade-tiers",
-      dbTicket?.event_id ?? "",
-      dbTicket?.purchase_amount_cents ?? 0,
-    ],
-    enabled: !!dbTicket?.event_id && dbTicket?.status === "active",
-    staleTime: 30 * 1000,
-    queryFn: async () => {
-      if (!dbTicket?.event_id) return [] as any[];
-      const tiers = await ticketTypesApi.getByEvent(String(dbTicket.event_id));
-      const paidCents = dbTicket.purchase_amount_cents ?? 0;
-      return tiers.filter(
-        (t: any) =>
-          t.is_active !== false &&
-          (t.price_cents ?? 0) > paidCents &&
-          t.id !== dbTicket.ticket_type_id,
-      );
-    },
+  // Services are separate purchases, never price-based admission upgrades.
+  const { data: purchaseTiers = [] } = useTicketTypes(eventId);
+  const { upgrades: upgradeTiers, services: serviceTiers, canBuyMore } = resolveTicketDetailPurchases({
+    ticket: dbTicket, tiers: purchaseTiers,
+    tickets: route.resolution.kind === "ticket" ? route.resolution.group : [],
+    viewerId, viewerAuthId,
   });
 
   // ── Owned add-ons (WS-3) — order_addons via RLS owner read. Holder-side
@@ -1086,8 +1075,23 @@ export function TicketDetailScreen() {
             })()
           : null}
 
+        {/* A service keeps the existing admission and uses the normal checkout. */}
+        {serviceTiers.map((tier) => (
+          <button
+            key={tier.id}
+            type="button"
+            data-testid={`ticket-service-${tier.id}`}
+            onClick={() => router.push(ticketServicePurchaseHref(eventId, tier.id, "web"))}
+            className="mb-3 flex w-full items-center justify-between gap-3 rounded-2xl border border-pink-400/30 bg-pink-400/10 px-4 py-3.5 text-left"
+          >
+            <span><span className="block text-sm font-bold">Buy {tier.name}</span>
+              <span className="mt-0.5 block text-xs text-white/55">Separate service · Your admission stays unchanged</span></span>
+            <ChevronRight size={18} color="rgb(255,109,193)" />
+          </button>
+        ))}
+
         {/* ── 2.7 ADD-ONS — link to event detail ── */}
-        {isActive && eventId ? (
+        {canBuyMore && eventId ? (
           <button
             onClick={() => router.push(`/feed/events/${eventId}`)}
             aria-label="Add more for this event"

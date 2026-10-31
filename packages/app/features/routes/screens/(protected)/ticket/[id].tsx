@@ -34,6 +34,8 @@ import type { Ticket, TicketTierLevel } from "@dvnt/app/lib/stores/ticket-store"
 import {
   useTicketRoute,
   useTicketViewerId,
+  useTicketViewerAuthId,
+  useTicketTypes,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { qk } from "@dvnt/app/lib/query/keys";
 import { ticketPath } from "@dvnt/app/lib/tickets/ticket-identity";
@@ -48,7 +50,7 @@ import {
 import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
 import { addToWallet } from "@dvnt/app/features/ticket/helpers";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
-import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
+import { resolveTicketDetailPurchases, ticketServicePurchaseHref } from "@dvnt/app/lib/tickets/ticket-detail-purchases";
 import { addonsApi, type OrderAddonRecord } from "@dvnt/app/lib/api/addons";
 import QRCodeSvg from "react-native-qrcode-svg";
 import { WeatherStrip } from "@dvnt/app/features/events";
@@ -115,6 +117,7 @@ function ViewTicketScreenContent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const viewerId = useTicketViewerId();
+  const viewerAuthId = useTicketViewerAuthId();
 
   /**
    * `:id` is a ticket uuid, or an event integer for the links already in the
@@ -157,26 +160,11 @@ function ViewTicketScreenContent() {
     "idle" | "loading" | "success"
   >("idle");
 
-  // ── Upgrade tiers state ──
-  // We only need to know whether upgrade tiers EXIST (to show the upgrade banner).
-  // The full upgrade flow lives in /ticket/upgrade/[id] — see route.
-  const [upgradeTiers, setUpgradeTiers] = React.useState<any[]>([]);
-
-  React.useEffect(() => {
-    if (!dbTicket?.event_id || dbTicket.status !== "active") return;
-    ticketTypesApi.getByEvent(String(dbTicket.event_id)).then((tiers) => {
-      const paidCents = dbTicket.purchase_amount_cents ?? 0;
-      const higher = tiers.filter(
-        (t: any) =>
-          t.is_active !== false &&
-          (t.price_cents ?? 0) > paidCents &&
-          t.id !== dbTicket.ticket_type_id,
-      );
-      setUpgradeTiers(higher);
-    });
-  }, [dbTicket?.event_id, dbTicket?.purchase_amount_cents, dbTicket?.status]);
-
-  // Upgrade flow lives in app/(protected)/ticket/upgrade/[id].tsx
+  // Services are separate purchases, never price-based admission upgrades.
+  const { data: purchaseTiers = [] } = useTicketTypes(eventId);
+  const { upgrades: upgradeTiers, services: serviceTiers, canBuyMore } = resolveTicketDetailPurchases({
+    ticket: dbTicket, tiers: purchaseTiers, tickets: passGroup, viewerId, viewerAuthId,
+  });
 
   // ── Owned add-ons (WS-3) — order_addons via RLS owner read. Holder-side
   //    display: fulfillment/redeemed state + door QR for redeemables.
@@ -743,8 +731,26 @@ function ViewTicketScreenContent() {
             );
           })()}
 
+          {/* A service keeps the existing admission and uses the normal checkout. */}
+          {serviceTiers.map((tier) => (
+            <Pressable
+              key={tier.id}
+              testID={`ticket-service-${tier.id}`}
+              accessibilityRole="button"
+              accessibilityLabel={`Buy ${tier.name}`}
+              onPress={() => router.push(ticketServicePurchaseHref(eventId, tier.id, "native") as any)}
+              style={styles.addonsCard}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.addonsTitle}>Buy {tier.name}</Text>
+                <Text style={styles.addonsSub}>Separate service · Your admission stays unchanged</Text>
+              </View>
+              <ChevronRight size={18} color="rgb(255, 109, 193)" />
+            </Pressable>
+          ))}
+
           {/* ── 2.7 ADD-ONS — link to event detail for buying more ── */}
-          {ticket.status === "valid" && eventId && (
+          {canBuyMore && eventId && (
             <Pressable
               onPress={() =>
                 router.push(`/(protected)/events/${eventId}` as any)

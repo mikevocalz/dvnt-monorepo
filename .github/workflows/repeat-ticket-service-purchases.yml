@@ -11,6 +11,8 @@ on:
       - 'apps/mobile/supabase/functions/**'
       - 'apps/mobile/supabase/migrations/**'
       - 'scripts/test-repeat-ticket*'
+      - 'scripts/test-ticket-detail-service-purchase-dom.cjs'
+      - 'scripts/test-ticket-self-service-dom.cjs'
       - 'scripts/test-service-category-ui.cjs'
       - '.github/workflows/repeat-ticket-service-purchases.yml'
 permissions:

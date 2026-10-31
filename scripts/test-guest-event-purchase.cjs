@@ -49,7 +49,7 @@ for (const statement of ast.statements) {
 const app = (suffix, values) => Object.assign(mocks['@dvnt/app/' + suffix], values);
 mocks.react = React;
 mocks['react/jsx-runtime'] = require('react/jsx-runtime');
-mocks['solito/navigation'] = { useParams: () => scenario.params, usePathname: () => '/public/events/42', useRouter: () => ({ push: (url) => scenario.navigation.push(url), back: noop }) };
+mocks['solito/navigation'] = { useSearchParams: () => null, useParams: () => scenario.params, usePathname: () => '/public/events/42', useRouter: () => ({ push: (url) => scenario.navigation.push(url), back: noop }) };
 mocks['@tanstack/react-query'] = {
   useQuery: ({ queryKey, enabled }) => {
     if (queryKey[1] === 'share-token') return scenario.tokenQuery;
