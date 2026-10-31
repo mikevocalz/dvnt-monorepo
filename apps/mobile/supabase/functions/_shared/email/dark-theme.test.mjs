@@ -159,7 +159,7 @@ test('QR scan margin is protected white without blending the credential image', 
 
 
 test('verification and reminder add-on emails remain dark-only, never opt into light templates', () => {
-  for (const name of ['verification', 'reminderAddons']) {
+  for (const name of ['verification', 'verifyLink', 'reminderAddons']) {
     const {html} = fixtures[name];
     assert.match(html, /<body[^>]*bgcolor="#0a0a0a"/);
     assert.match(html, /name="color-scheme" content="dark"/);
