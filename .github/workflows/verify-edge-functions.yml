@@ -112,7 +112,12 @@ jobs:
       # both unnecessary (pnpm already supplies @types/node, which is why this
       # passes locally without it) and harmful, because Deno would flatten
       # pnpm's symlink layout. Locally, drop the flag.
+      # These edge suites do not depend on the app's npm workspace. Prevent
+      # auto-install of unrelated frontend/optional-platform packages while
+      # retaining Deno's dependency-age policy and automatic @types/node support.
       - run: deno test --node-modules-dir=auto --no-lock --allow-net --allow-env --allow-read apps/mobile/supabase/functions/_shared/
+        env:
+          DENO_NO_PACKAGE_JSON: '1'
 
   call-admission-concurrency:
     # Boots a throwaway cluster from the runner's own Postgres and drives
