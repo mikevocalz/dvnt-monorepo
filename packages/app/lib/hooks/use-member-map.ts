@@ -25,6 +25,29 @@ function selectLocationOwner(owner: string | null) {
 }
 function currentOwner() { return useAuthStore.getState().user?.authId ?? null; }
 
+/** Stops immediately even if a location provider is still awaiting a fix. */
+function withdrawMapPermission(owner: string, client: ReturnType<typeof useQueryClient>) {
+  const state = useLocationAccessStore.getState();
+  if (currentOwner() !== owner || state.owner !== owner || state.pendingWithdrawal || !mapGrantActive(state.settings, Date.now())) return;
+  permissionProof = null;
+  state.stop("Location permission was revoked. Stopping avatar sharing…", true);
+  clearLocalLocation();
+  const generation = useLocationAccessStore.getState().generation;
+  client.removeQueries({ queryKey: memberMapKeys.nearby(owner) });
+  void serialize(async () => {
+    if (currentOwner() !== owner) return;
+    try {
+      const stopped = await memberMapApi.revoke(owner, "events");
+      if (currentOwner() === owner) {
+        useLocationAccessStore.getState().accept(owner, stopped, true, generation);
+        client.setQueryData(memberMapKeys.settings(owner), stopped);
+      }
+    } catch {
+      if (currentOwner() === owner) useLocationAccessStore.getState().stop("Location permission is off. Could not confirm server withdrawal; retry Stop sharing.", true);
+    }
+  });
+}
+
 export function useLocationSettings() {
   const owner = useAuthStore((s) => s.user?.authId ?? null);
   const state = useLocationAccessStore();
@@ -149,7 +172,7 @@ export function useMapSharingConsent(active: boolean) {
   }, [owner, active, invalidate]);
   const cancel = useCallback(() => { invalidate(); setBusy(false); setError(null); }, [invalidate]);
   const share = useCallback(async (): Promise<boolean> => {
-    if (pending.current || !activeRef.current || !owner || currentOwner() !== owner) return false;
+    if (pending.current || !isForeground() || !activeRef.current || !owner || currentOwner() !== owner) return false;
     const initial = useLocationAccessStore.getState();
     if (initial.owner !== owner || !initial.hydrationReady || !initial.settings || initial.pendingWithdrawal || locationDurabilityError() || (initial.blocked && initial.settings.locationEnabled)) {
       setError("Location privacy settings are not ready. Reload settings or retry stopping sharing first."); return false;
@@ -158,10 +181,15 @@ export function useMapSharingConsent(active: boolean) {
     const request = { owner, revision: initial.settings.revision, writing: false }; pending.current = request;
     const run = lifetime.current, generation = initial.generation;
     const sameOwner = () => currentOwner() === owner && useLocationAccessStore.getState().owner === owner;
-    const allowed = () => isForeground() && activeRef.current && pending.current === request && lifetime.current === run && sameOwner() && useLocationAccessStore.getState().generation === generation && !useLocationAccessStore.getState().pendingWithdrawal;
+    const current = () => activeRef.current && pending.current === request && lifetime.current === run && sameOwner() && useLocationAccessStore.getState().generation === generation && !useLocationAccessStore.getState().pendingWithdrawal;
+    const allowed = () => current() && isForeground();
     setBusy(true); setError(null);
     try {
-      const point = await consentTimeout(sampleLocation(allowed, true, false, () => {}, () => {}));
+      const point = await consentTimeout((async () => {
+        const point = await sampleLocation(current, true, false, () => {}, () => {});
+        if (point && !await waitForConsentForeground(current)) return null;
+        return point;
+      })());
       if (!allowed()) return false;
       if (!point) throw new Error("Location access is off. Allow location in your browser or device settings, then try sharing again. You are not sharing.");
       permissionProof = { owner, generation };
@@ -170,8 +198,8 @@ export function useMapSharingConsent(active: boolean) {
         settings: () => memberMapApi.settings(owner),
         enable: (revision) => { request.writing = true; return memberMapApi.updateSettings(owner, { expectedRevision: revision, locationEnabled: true, eventsMapEnabled: true, consentVersion: "events-map-v1", shareDurationHours: 4 }); },
         publish: (settings, coarse) => memberMapApi.publish(owner, { ...coarse, revision: settings.revision }),
-        revoke: async () => {
-          const stopped = await memberMapApi.revoke(owner, "events");
+        revoke: async (owned) => {
+          const stopped = await memberMapApi.updateSettings(owner, { expectedRevision: owned.revision, locationEnabled: owned.locationEnabled, eventsMapEnabled: false });
           if (sameOwner()) { useLocationAccessStore.getState().accept(owner, stopped, true, useLocationAccessStore.getState().generation); client.setQueryData(memberMapKeys.settings(owner), stopped); }
         },
         committed: (result) => {
@@ -198,6 +226,13 @@ export function useMapSharingConsent(active: boolean) {
 }
 
 function isForeground() { return Platform.OS === "web" ? (typeof document !== "undefined" && document.visibilityState === "visible") : AppState.currentState === "active"; }
+/** Permission sheets can temporarily background native apps. Wait for the
+ * same still-consenting lifetime to return before sampling or publishing. */
+async function waitForConsentForeground(current: () => boolean): Promise<boolean> {
+  const until = Date.now() + 15_000;
+  while (current() && !isForeground() && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 50));
+  return current() && isForeground();
+}
 async function sampleLocation(allowed: () => boolean, requestPermission: boolean, previouslyGranted: boolean, onGranted: () => void, onDenied: () => void) {
   if (!allowed()) return null;
   if (Platform.OS === "web") {
@@ -229,6 +264,7 @@ async function sampleLocation(allowed: () => boolean, requestPermission: boolean
   }
   if (permission.status !== "granted") { if (permission.status === "denied") onDenied(); return null; }
   onGranted();
+  if (requestPermission && !await waitForConsentForeground(allowed)) return null;
   if (!allowed()) return null;
   const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
   return { latitude: position.coords.latitude, longitude: position.coords.longitude, timestamp: position.timestamp };
@@ -274,7 +310,7 @@ export function useMemberMapPresence(active: boolean) {
     if (Platform.OS === "web" && typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
     let disposed = false;
     let permissionStatus: PermissionStatus | undefined;
-    const onPermissionChange = () => { if (!disposed && permissionStatus?.state === "denied") void refreshRef.current(); };
+    const onPermissionChange = () => { if (!disposed && owner && permissionStatus?.state === "denied") withdrawMapPermission(owner, client); };
     if (active && Platform.OS === "web" && typeof navigator !== "undefined") {
       void navigator.permissions?.query({ name: "geolocation" }).then(status => {
         if (disposed) return;
@@ -289,7 +325,7 @@ export function useMemberMapPresence(active: boolean) {
       subscription.remove();
       if (Platform.OS === "web" && typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [active, owner, generation]);
+  }, [active, owner, generation, client]);
   const refresh = useCallback(async () => {
     if (!active || !owner || !access.enabled || !locationAllowedFor(owner) || !isForeground()) return;
     const currentGeneration = useLocationAccessStore.getState().generation;
@@ -319,24 +355,7 @@ export function useMemberMapPresence(active: boolean) {
         if (!allowed()) return;
         permissionProof = null;
         locationSucceeded.current = false; setLocalArea(null); clearLocalLocation();
-        if (!mapGrantActive(useLocationAccessStore.getState().settings, Date.now())) return;
-        // A revoked OS grant is also a withdrawal, not a reason to keep the old
-        // public pin alive until its freshness timer. Failed withdrawal is sticky.
-        useLocationAccessStore.getState().stop("Location permission was revoked. Stopping avatar sharing…", true);
-        const stoppedGeneration = useLocationAccessStore.getState().generation;
-        client.removeQueries({ queryKey: memberMapKeys.nearby(owner) });
-        void serialize(async () => {
-          if (currentOwner() !== owner) return;
-          try {
-            const stopped = await memberMapApi.revoke(owner, "events");
-            if (currentOwner() === owner) {
-              useLocationAccessStore.getState().accept(owner, stopped, true, stoppedGeneration);
-              client.setQueryData(memberMapKeys.settings(owner), stopped);
-            }
-          } catch {
-            if (currentOwner() === owner) useLocationAccessStore.getState().stop("Location permission is off. Could not confirm server withdrawal; retry Stop sharing.", true);
-          }
-        });
+        withdrawMapPermission(owner, client);
       };
       const point = await sampleLocation(allowed, requestPermission, locationSucceeded.current, () => {
         // Permission sheets may background the app. Remember only the OS grant,

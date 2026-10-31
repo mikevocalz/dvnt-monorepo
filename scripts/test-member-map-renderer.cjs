@@ -10,6 +10,7 @@ const http = require('node:http');
 const root = path.resolve(__dirname, '..');
 const member = {id:'fixture-1',username:'night owl',displayName:'Night Owl',avatarUrl:null,latitude:40.71,longitude:-74.01,expiresAt:'2099-01-01T00:00:00Z'};
 const mocks = {
+ './map-sharing-consent': `import React from 'react';export const MapSharingConsent=({active})=>React.createElement('button',{'aria-label':'Synthetic sharing toggle',onClick:()=>{window.fixture.sharing=false;window.renderFixture()},disabled:!active},'Stop sharing');`,
   '@dvnt/app/lib/stores/events-location-store': `export const useEventsLocationStore=selector=>selector({activeCity:window.fixture.savedCity||null});`,
   '@vis.gl/react-google-maps': require('./fixtures/member-map/google-overlay-boundary.cjs'),
   '@tanstack/react-query': `export const useQuery=()=>({data:[],isPending:false,isError:false,refetch:async()=>{}});`,

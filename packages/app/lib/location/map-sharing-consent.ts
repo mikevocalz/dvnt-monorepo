@@ -26,7 +26,7 @@ export async function commitMapConsent(deps: {
   settings: () => Promise<LocationAccessSnapshot>;
   enable: (revision: number) => Promise<LocationAccessSnapshot>;
   publish: (settings: LocationAccessSnapshot, point: ReturnType<typeof freshConsentPoint>) => Promise<unknown>;
-  revoke: () => Promise<unknown>;
+  revoke: (owned: LocationAccessSnapshot) => Promise<unknown>;
   withdrawalFailed: () => void;
   committed?: (settings: LocationAccessSnapshot) => void;
 }) {
@@ -38,10 +38,12 @@ export async function commitMapConsent(deps: {
   if (mapGrantActive(fresh, Date.now())) throw new Error("You already have an active sharing session. Reload the map to see it.");
   freshConsentPoint(deps.point);
   let attempted = false;
+  let owned: LocationAccessSnapshot | null = null;
   try {
     assertCurrent();
     attempted = true;
     const settings = await deps.enable(fresh.revision);
+    owned = settings;
     assertCurrent();
     if (!mapGrantActive(settings, Date.now())) throw new Error("The server did not confirm map sharing. Please try again.");
     await deps.publish(settings, freshConsentPoint(deps.point));
@@ -49,14 +51,21 @@ export async function commitMapConsent(deps: {
     deps.committed?.(settings);
     return settings;
   } catch (error) {
-    if (attempted && deps.sameOwner()) {
-      try { await deps.revoke(); }
+    if (owned && deps.sameOwner()) {
+      // Only undo our confirmed revision. A newer grant belongs to another
+      // operation/device and must not be revoked by this stale compensation.
+      try { await deps.revoke(owned); }
       catch { deps.withdrawalFailed(); throw new Error("Could not confirm that sharing stopped. Your device has stopped updating. Use Stop sharing to retry."); }
-    } else if (attempted) {
-      // The old account's token is no longer available. Persist its negative
-      // intent so returning to that account cannot silently resume this grant.
+    } else if (owned || (attempted && !knownEnableRefusal(error))) {
       deps.withdrawalFailed();
+      throw new Error("The server did not confirm whether sharing started. Your device has stopped updating. Use Stop sharing to confirm withdrawal.");
     }
     throw error;
   }
+}
+
+/** A transport failure is not evidence that the server rejected the write. */
+export function knownEnableRefusal(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" && [400, 401, 403, 404, 409, 422, 429].includes(status);
 }

@@ -14,7 +14,7 @@ function fixture() {
     settings: async () => { calls.push("settings"); return off; },
     enable: async (revision: number) => { assert.equal(revision, 4); calls.push("enable"); return on; },
     publish: async (settings: LocationAccessSnapshot, point: ReturnType<typeof freshConsentPoint>) => { assert.equal(settings.revision, 5); assert.notEqual(point.latitude, 40.123456); assert.notEqual(point.longitude, -73.123456); calls.push("publish"); },
-    revoke: async () => { calls.push("revoke"); },
+    revoke: async (owned: LocationAccessSnapshot) => { assert.equal(owned.revision, 5); calls.push("revoke"); },
     withdrawalFailed: () => { state.failedWithdrawal = true; },
   };
   return { calls, state, off, on, deps };
@@ -43,16 +43,33 @@ test("cancel after enable compensates without publishing", async () => {
 });
 test("account switch never sends compensation as the new account", async () => {
   const f = fixture(); f.deps.enable = async () => { f.state.allowed = false; f.state.sameOwner = false; return f.on; };
-  await assert.rejects(commitMapConsent(f.deps), /cancelled/);
+  await assert.rejects(commitMapConsent(f.deps), /did not confirm whether sharing started/);
   assert.deepEqual(f.calls, ["settings"]);
   assert.equal(f.state.failedWithdrawal, true, "old owner retains a durable withdrawal intent");
 });
-test("publish failure and uncertain enable both attempt withdrawal", async () => {
-  for (const stage of ["enable", "publish"] as const) {
-    const f = fixture(); f.deps[stage] = async () => { throw Error("offline"); };
-    await assert.rejects(commitMapConsent(f.deps), /offline/);
-    assert.equal(f.calls.at(-1), "revoke");
+test("publish failure compensates only the confirmed revision", async () => {
+  const f = fixture(); f.deps.publish = async () => { throw Error("offline"); };
+  await assert.rejects(commitMapConsent(f.deps), /offline/);
+  assert.equal(f.calls.at(-1), "revoke");
+});
+test("unknown enable transport outcome records uncertainty without revoking another grant", async () => {
+  const f = fixture(); f.deps.enable = async () => { throw Error("offline"); };
+  await assert.rejects(commitMapConsent(f.deps), /did not confirm whether sharing started/);
+  assert.deepEqual(f.calls, ["settings"]); assert.equal(f.state.failedWithdrawal, true);
+});
+test("enable conflict and known refusals never compensate or claim a write", async () => {
+  for (const status of [400, 401, 403, 409, 429]) {
+    const f = fixture(); f.deps.enable = async () => { throw Object.assign(Error("refused"), { status, code: "settings_changed" }); };
+    await assert.rejects(commitMapConsent(f.deps), /refused/);
+    assert.deepEqual(f.calls, ["settings"]); assert.equal(f.state.failedWithdrawal, false);
   }
+});
+test("conditional compensation cannot revoke a newer competing revision", async () => {
+  const f = fixture(); let newerGrantActive = true;
+  f.deps.publish = async () => { throw Error("stale revision"); };
+  f.deps.revoke = async owned => { assert.equal(owned.revision, 5); if (owned.revision !== 6) throw Object.assign(Error("conflict"), {status:409}); newerGrantActive = false; };
+  await assert.rejects(commitMapConsent(f.deps), /Could not confirm that sharing stopped/);
+  assert.equal(newerGrantActive, true); assert.equal(f.state.failedWithdrawal, true);
 });
 test("failed compensation remains explicitly unconfirmed and stops device updates", async () => {
   const f = fixture(); f.deps.publish = async () => { throw Error("offline"); }; f.deps.revoke = async () => { throw Error("offline"); };
