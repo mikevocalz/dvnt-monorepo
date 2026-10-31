@@ -92,6 +92,47 @@ test(process.env.POSTGRES_SINGLE_USER ? 'repeat purchases: actual PostgreSQL seq
       while(Date.now()<until){if((await sql('SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1',[pid]))[0]?.wait_event_type==='Lock')return;await new Promise(r=>setTimeout(r,10));}
       throw Error('Expected a real row-lock wait');
     }
+    // A comp is an ordinary zero-paid admission credential, not a separate
+    // purchase prohibition. Its own sold-out/hidden tier and per-person cap
+    // must never consume inventory or allowance from a standalone service.
+    for (const admissionAmount of [0, 1000]) for (const status of ['active', 'scanned']) {
+      await t.test(`${admissionAmount === 0 ? 'comp' : 'paid'} ${status} admission holder buys standalone paid/free services despite admission tier cap and sellout`, async () => {
+        const buyer = `synthetic-holder-${admissionAmount}-${status}`;
+        const admissionId = await tier('admission', 1, 1000, 1);
+        const original = rows(1)[0];
+        await sql(`INSERT INTO tickets(id,event_id,ticket_type_id,user_id,status,qr_token,qr_payload,purchase_amount_cents,category)
+          VALUES($1,1,$2,$3,$4,$5,$6,$7,'admission')`,
+          [original.id, admissionId, buyer, status, original.qr_token, original.qr_payload, admissionAmount]);
+        await sql(`UPDATE ticket_types SET quantity_sold=1,status='sold_out',is_sold_out=true,tier_visibility=$2 WHERE id=$1`,
+          [admissionId, admissionAmount === 0 ? 'hidden' : 'public']);
+        const unchangedAdmission = await ticketSnapshot(original.id);
+
+        const paidServiceId = await tier('service', 1, 1000, 20);
+        assert.equal(Number((await sql('SELECT ticket_buyer_reserved_quantity($1,$2,NULL) AS n', [paidServiceId,buyer]))[0].n), 0);
+        const serviceCart = await cart(paidServiceId, buyer);
+        assert.equal((await holdCart(serviceCart)).ok, true);
+        const paidService = await payCart(serviceCart, buyer);
+        assert.equal((await paidService.complete()).ok, true);
+        assert.equal((await paidService.complete()).duplicate, true);
+        assert.equal((await ticketSnapshot(paidService.prepared[0].ticket_id)).category, 'service');
+        assert.equal((await hold(paidServiceId, buyer)).error, 'buyer_limit', 'service allowance still enforced');
+
+        const nativeServiceId = await tier('service', 1, 1000, 20);
+        assert.equal((await hold(nativeServiceId, buyer)).ok, true);
+        assert.equal((await hold(nativeServiceId, buyer)).error, 'buyer_limit', 'pending native hold consumes only its service allowance');
+
+        const freeServiceId = await tier('service', 1, 0, 20);
+        const freeService = free(freeServiceId, buyer);
+        assert.equal((await issueFree(freeService)).ok, true);
+        assert.equal((await issueFree(freeService)).idempotent, true);
+        assert.equal((await ticketSnapshot(freeService.rows[0].id)).category, 'service');
+        assert.equal((await issueFree(free(freeServiceId, buyer))).error, 'limit');
+
+        assert.deepEqual(await ticketSnapshot(original.id), unchangedAdmission, 'original admission and QR remain unchanged');
+        assert.equal((await sql("SELECT count(*)::int AS n FROM tickets WHERE user_id=$1 AND category='admission'", [buyer]))[0].n, 1);
+        assert.equal((await sql('SELECT quantity_sold FROM ticket_types WHERE id=$1', [admissionId]))[0].quantity_sold, 1);
+      });
+    }
     for(const guest of [false,true]) await t.test(`${guest?'guest':'member'} free service: two purchases, same-key replay, cumulative cap and unchanged original`,async()=>{
       const id=await tier('service',2,0), buyer=guest?'free-repeat@fixture.example':'free-repeat-member';
       const first=free(id,buyer), one=await issueFree(first);assert.equal(one.ok,true,JSON.stringify(one));

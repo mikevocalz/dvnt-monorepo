@@ -20,7 +20,7 @@ import { canScanTickets, canViewFullRoster } from "@dvnt/app/lib/events/event-ro
  */
 import { useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useParams, useRouter, usePathname } from "solito/navigation";
+import { useParams, useRouter, usePathname, useSearchParams } from "solito/navigation";
 import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
 import {
   formatEventTime,
@@ -287,6 +287,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 export function EventDetailScreen() {
   const params = useParams();
+  const requestedServiceTierId = useSearchParams()?.get("serviceTier") || undefined;
   const router = useRouter();
   const pathname = usePathname() ?? "";
   // This screen mounts at BOTH /events/[slug] and /feed/events/[id]. The [id]
@@ -433,6 +434,16 @@ export function EventDetailScreen() {
   useEffect(() => () => resetUi(), [resetUi]);
 
   const eventId = resolvedId ? String(resolvedId) : "";
+  // Tickets links select a service, not an upgrade and never an automatic payment.
+  // Keep a missing/sold-out request selected so it cannot silently become GA.
+  useEffect(() => {
+    if (!eventId) return;
+    // A different URL selection never inherits consent from an open sheet.
+    setCheckoutOpen(false);
+    setSelectedTierId(requestedServiceTierId ?? null);
+    setTicketQty(1);
+  }, [requestedServiceTierId, eventId, setSelectedTierId, setTicketQty, setCheckoutOpen]);
+
 
   // Sale-open reminder. Same store and same `toggle-sale-notify` edge function
   // as native, so a reminder set on the phone is the same subscription here.
@@ -882,9 +893,14 @@ export function EventDetailScreen() {
   const guestPurchase = resolveGuestPurchase(guestPurchaseInput);
   // The highlighted choice and the adjacent purchase action share one source
   // of truth. Never replace an explicit choice silently if its stock changes.
-  const selectedPurchase = selectedTierId
+  const requestedPurchase = selectedTierId
     ? resolveGuestPurchase({ ...guestPurchaseInput, selectedTierId })
     : guestPurchase;
+  const selectedPurchase = requestedServiceTierId && selectedTierId === requestedServiceTierId &&
+    requestedPurchase.kind === "checkout" && (requestedPurchase.tier.category !== "service" ||
+      String(requestedPurchase.tier.event_id) !== eventId)
+      ? { kind: "unavailable" as const }
+      : requestedPurchase;
   const selectedCheckoutTier =
     selectedPurchase.kind === "checkout" ? selectedPurchase.tier : undefined;
   const displayedSelectionId = selectedTierId ?? selectedCheckoutTier?.id;

@@ -64,7 +64,7 @@ const fixture = `
 `;
 const boundaries = new Map([
   ['fixture', fixture],
-  ['solito/navigation', `import {f} from 'fixture';const router={push:url=>f.routes.push(url),back:()=>{}};export const useParams=()=>({id:'42'});export const usePathname=()=>'/public/events/42';export const useRouter=()=>router;`],
+  ['solito/navigation', `import {f} from 'fixture';const router={push:url=>f.routes.push(url),back:()=>{}};export const useParams=()=>({id:'42'});export const useSearchParams=()=>new URLSearchParams(location.search);export const usePathname=()=>'/public/events/42';export const useRouter=()=>router;`],
   ['@tanstack/react-query', `import {query,mutation} from 'fixture';export const useQuery=({queryKey})=>query(queryKey[1]==='share-token'?null:[]);export const useMutation=()=>mutation;export const useQueryClient=()=>({invalidateQueries:()=>{}});`],
   ['@dvnt/app/lib/hooks/use-events', `import {useFixture,query,mutation,f} from 'fixture';export const useEvents=()=>query([]);export const useEvent=()=>query(useFixture(s=>s.event));export const useDeleteEvent=()=>mutation;export const useToggleEventLike=()=>mutation;export const useRsvpEvent=()=>({...mutation,mutate:v=>f.rsvps.push(v)});export const eventKeys={all:['events']};`],
   ['@dvnt/app/lib/hooks/use-tickets', `import {useFixture,query,ownedTicket,noop} from 'fixture';export const useTicketRoute=()=>({isLoading:false,refetch:noop,resolution:{kind:'ticket',ticket:ownedTicket}});export const useTicketTypes=()=>query(useFixture(s=>s.tiers));export const useMyTicketStatusForEvent=()=>{const primary=useFixture(s=>s.ownedTicket);return{primary,tickets:primary?[primary]:[],isPending:false,isError:false}};export const useTicketViewerId=()=>useFixture(s=>s.authenticated)?'fixture-member':'anon';export const useTicketViewerAuthId=()=>useFixture(s=>s.authenticated)?'fixture-auth':null;export const useTicketViewerIdentityPending=()=>false;`],
@@ -336,6 +336,29 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       assert.equal(await page.evaluate(()=>window.fixture.ui.getState().checkoutOpen),false,'Escape dismisses checkout without purchasing');
       assert.equal(await viewTicket.count(),1,'original ticket action remains after dismissal');
       evidence.checks.push(size.name+': authenticated holder View ticket + Buy additional remain distinct, service selection and checkout dismissal, no overlap/overflow, minimum touch targets');
+      // The wallet service link must select Coat Check for comp/scanned holders,
+      // without routing through upgrades or opening a payment automatically.
+      await page.getByTestId('ticket-tier-'+PAID).click();await tick(page);
+      for (const status of ['active','scanned']) {
+        await page.evaluate(({serviceId,status})=>{
+          history.replaceState(null,'','?serviceTier='+serviceId);
+          window.fixture.configure({ownedTicket:{...window.fixture.ownedTicket,purchase_amount_cents:0,status}});
+        },{serviceId:SERVICE,status});
+        await tick(page);
+        assert.equal(await service.getAttribute('aria-pressed'),'true','wallet target remains the separate service');
+        assert.equal(await additional.isEnabled(),true,'comp/scanned admission can buy Coat Check');
+        assert.equal(await page.evaluate(()=>window.fixture.ui.getState().checkoutOpen),false,'wallet URL is not an automatic checkout');
+        await additional.click();await tick(page);
+        assert.match(await checkoutSheet.innerText(),/Coat Check/);
+        await page.keyboard.press('Escape');await tick(page);
+      }
+      await additional.scrollIntoViewIfNeeded();
+      const compScreenshot=path.join(OUT,size.name+'-comp-service-link.png');
+      await page.screenshot({path:compScreenshot});
+      evidence.screens.at(-1).screenshots.push(compScreenshot);
+      evidence.checks.push(size.name+': wallet service URL selects Coat Check for active/scanned comp; explicit checkout and Escape preserve original admission');
+      await page.evaluate(()=>history.replaceState(null,'',location.pathname));
+
       await page.evaluate(()=>window.fixture.reset());await tick(page);
       // Stress realistic long names/descriptions without changing production markup.
       await page.evaluate(()=>{
