@@ -11,10 +11,32 @@ must not fall back to client-side JSON writes or broaden table policies.
 
 Before any release, run `scripts/verify-dm-reactions-readiness.sql` against the
 explicitly approved target. All four results must be true. If the migration is
-missing, obtain approval for **only that existing migration**, apply it through
-the migration workflow, and verify the signature, service-only execute grants,
+not recognized, inspect the recorded name, statements and RPC before concluding
+it is missing. If it is genuinely missing, obtain approval for **only that
+existing migration**, apply it through the migration workflow, and verify the
+signature, service-only execute grants,
 migration history and `messages` realtime publication. Do not apply unrelated
 pending migrations. No data backfill is needed.
+
+### Migration history identity
+
+The approved migration workflow recorded this SQL as
+`20261030131710_atomic_message_reactions`; it did not create the original
+`20260905123000` version row. The readiness query recognizes either version only
+when the name is exactly `atomic_message_reactions` and `statements` contains
+exactly one entry whose UTF-8 bytes have SHA-256:
+
+```text
+29f17beae2f230a3f2986a88a990589e03d856c90d3ed318d7bee91d3ab25aa2
+```
+
+This is the hash of the complete reviewed migration file, including comments
+and whitespace. A matching name or version alone is not sufficient. Missing,
+split, edited or otherwise unrecognized stored statements fail closed and need
+read-only review; a failed check is not an instruction to reapply the migration.
+Do not manually insert, rename or repair ledger rows to make the check pass.
+This check recognizes the reviewed history; the separate RPC, execute-grant and
+realtime checks remain required and do not prove live reaction delivery.
 
 ## Client changes
 
