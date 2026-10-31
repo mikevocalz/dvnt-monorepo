@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { createRequire } from "node:module";
+import { URL } from "node:url";
 import * as purpose from "./upgrade-purpose.ts";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
