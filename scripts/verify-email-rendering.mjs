@@ -47,7 +47,7 @@ try {
         unexpected.push(route.request().url());
         return route.abort();
       });
-      for (const name of ['transfer', 'comp', 'followup', 'guest']) {
+      for (const name of ['transfer', 'comp', 'followup', 'followupInvite', 'guest']) {
         const page = await context.newPage();
         const id = `${name}-${width}-${mode}`;
         await page.setContent(mode === 'gmail-inversion-model' ? gmailModel(fixtures[name].html) : fixtures[name].html, { waitUntil: 'load' });
@@ -97,6 +97,12 @@ try {
         const pixels = textPixels(await heading.screenshot());
         assert.ok(pixels.whiteFraction >= .01, `${id}: heading lacks readable light text (${JSON.stringify(pixels)})`);
         assert.ok(pixels.darkFraction >= .25, `${id}: heading background is not dark (${JSON.stringify(pixels)})`);
+        if (name === 'followupInvite') {
+          assert.ok(await page.getByRole('link', { name: 'Rate the party', exact: true }).isVisible(), `${id}: rating CTA missing`);
+          assert.ok(await page.getByRole('link', { name: 'Join the community', exact: true }).isVisible(), `${id}: community CTA missing`);
+          assert.ok(await page.getByText('If the app opens instead, copy this link into your browser’s address bar:', { exact: false }).isVisible(), `${id}: fallback missing`);
+          assert.ok(await page.getByRole('link', { name: 'Unsubscribe from event follow-up emails', exact: true }).isVisible(), `${id}: unsubscribe missing`);
+        }
         await page.screenshot({ path: join(out, `${id}.png`), fullPage: true });
         report.push({ id, ...metrics, ...pixels, nativeGmailVerified: false });
         await page.close();

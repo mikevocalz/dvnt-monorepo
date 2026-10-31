@@ -124,7 +124,7 @@ export function recipientsToEnqueue(
 ): Map<string, { ticketId: string; userId: string | null }> {
   const out = new Map<string, { ticketId: string; userId: string | null }>();
   for (const t of tickets) {
-    const email = String(t.guest_email || emailByAuth.get(String(t.user_id)) || "")
+    const email = String((t.user_id ? emailByAuth.get(String(t.user_id)) : t.guest_email) || "")
       .trim()
       .toLowerCase();
     if (!email || out.has(email) || alreadyMailed.has(email)) continue;
@@ -225,6 +225,8 @@ export function buildFollowupEmail(args: {
   ctaLabel: string | null;
   reviewUrl: string;
   unsubscribeUrl: string;
+  preview?: boolean;
+  profileUrl?: string;
 }): { subject: string; html: string; headers: Record<string, string> } {
   const title = args.eventTitle || "your event";
   const message = escapeHtml(args.message || `Thanks for coming to ${title}.`);
@@ -232,8 +234,10 @@ export function buildFollowupEmail(args: {
     heading(escapeHtml(args.eventTitle || "Thanks for coming")),
     paragraph(`<span style="white-space:pre-wrap">${message}</span>`),
     button(args.reviewUrl, escapeHtml(args.ctaLabel || "Leave a review")),
+    args.profileUrl ? button(args.profileUrl, "Join the community") : "",
+    paragraph(`If the app opens instead, copy this link into your browser’s address bar:<br/><a href="${escapeHtml(args.reviewUrl)}" style="color:${COLORS.textMuted};word-break:break-all">${escapeHtml(args.reviewUrl)}</a>`, { size: 12, color: COLORS.textMuted }),
     paragraph(
-      `You got this because you had a ticket to ${escapeHtml(title)}. ` +
+      (args.preview ? `This is your requested preview for ${escapeHtml(title)}. ` : `You got this because you had a ticket to ${escapeHtml(title)}. `) +
       `<a href="${escapeHtml(args.unsubscribeUrl)}" style="color:${COLORS.textMuted};text-decoration:underline">Unsubscribe from event follow-up emails</a>.`,
       { size: 12, color: COLORS.textMuted },
     ),

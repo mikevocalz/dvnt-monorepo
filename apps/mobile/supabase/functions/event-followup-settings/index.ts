@@ -34,7 +34,8 @@ Deno.serve(async(req)=>{
   if(!(await canManage(s,eventId,authId))) return json(req,{ok:false,error:"Forbidden"},403);
 
   if(req.method==="GET"){
-    const {data}=await s.from("event_followup_campaigns").select("*").eq("event_id",eventId).maybeSingle();
+    const {data,error}=await s.from("event_followup_campaigns").select("*").eq("event_id",eventId).maybeSingle();
+    if(error) return json(req,{ok:false,error:"Follow-up settings unavailable"},503);
     return json(req,{ok:true,data:data||{event_id:eventId,enabled:false,status:"disabled"}});
   }
   if(req.method!=="POST") return json(req,{ok:false,error:"Method not allowed"},405);
@@ -46,12 +47,14 @@ Deno.serve(async(req)=>{
   const input=normaliseFollowupInput(body);
   const scheduledAt=new Date(end.getTime()+input.delay_minutes*60_000).toISOString();
 
-  const {data:existing}=await s.from("event_followup_campaigns")
+  const {data:existing,error:existingError}=await s.from("event_followup_campaigns")
     .select("enabled,subject,message,cta_label,delay_minutes,campaign_version,status,scheduled_at")
     .eq("event_id",eventId).maybeSingle();
+  if(existingError) return json(req,{ok:false,error:"Follow-up settings unavailable"},503);
   const plan=planFollowupSave(existing||null,input,scheduledAt,authId,new Date().toISOString());
   if(!plan.write){
-    const {data}=await s.from("event_followup_campaigns").select("*").eq("event_id",eventId).maybeSingle();
+    const {data,error}=await s.from("event_followup_campaigns").select("*").eq("event_id",eventId).maybeSingle();
+    if(error) return json(req,{ok:false,error:"Follow-up settings unavailable"},503);
     return json(req,{ok:true,data,unchanged:true});
   }
   const {data,error}=existing
