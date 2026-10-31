@@ -7,7 +7,34 @@ function dateLine(iso: string, timezone: string | null | undefined): string {
   catch { return new Date(iso).toLocaleString("en-US", {...options, timeZone: "UTC"}); }
 }
 export type ReminderResult = { delivery_id: string; event_id: number; status: "delivered" | "failed" | "not_available" };
-type Payload = { to: string; from: string; subject: string; html: string; ticket_ids: string[]; guest_lookup_tokens?: string[] };
+type Payload = { to: string; from: string; subject: string; html: string; ticket_ids: string[]; guest_lookup_tokens?: string[]; addon_ids?: string[] };
+// Add-ons are a separate entitlement domain, not admission tickets. Never read
+// their QR credentials here; the authenticated ticket page checks current owner
+// access and renders its "Your add-ons" section (including unbound purchases).
+async function ownedAddons(db: any, eventId: number, authId: string): Promise<any[]> {
+  const addons: any[] = [];
+  const seen = new Set<string>();
+  for (let cursor: string | null = null; ; ) {
+    let query = db.from("order_addons")
+      .select("id,event_id,user_id,status,quantity,ticket_addon:ticket_addons(name),variant:ticket_addon_variants(name)")
+      .eq("event_id", eventId).eq("user_id", authId)
+      .in("status", ["unfulfilled", "fulfilled", "redeemed"])
+      .order("id", {ascending: true}).range(0, 199);
+    if (cursor !== null) query = query.gt("id", cursor);
+    const {data, error} = await query;
+    if (error) throw new Error("Reminder add-ons unavailable");
+    if (!data?.length) break;
+    for (const addon of data) {
+      if (seen.has(addon.id)) throw new Error("Add-on pagination made no progress");
+      seen.add(addon.id);
+      // Defence in depth at the service-role boundary.
+      if (addon.event_id === eventId && addon.user_id === authId &&
+          ["unfulfilled", "fulfilled", "redeemed"].includes(addon.status)) addons.push(addon);
+    }
+    cursor = data[data.length - 1].id;
+  }
+  return addons;
+}
 export async function deliverEventReminders(db: any): Promise<ReminderResult[]> {
   const claimed = await db.rpc("claim_event_reminders", {p_limit: 8, p_delivery_ids: null});
   if (claimed.error) throw new Error("Reminder queue unavailable");
@@ -72,6 +99,14 @@ async function deliverClaimed(db: any, row: any): Promise<ReminderResult> {
     if (payload && !row.recipient_auth_id && JSON.stringify(payload.guest_lookup_tokens) !== JSON.stringify(ids.map(id => eligible.find((t: any) => t.id === id)?.guest_lookup_token))) {
       await finish("suppressed", "guest_access_changed"); return result("not_available", "Guest ticket access changed before delivery");
     }
+    // Old frozen payloads remain byte-identical. New payloads record the addon
+    // IDs so a refund/ownership change suppresses a retry instead of emailing
+    // stale purchase details. Newly purchased addons never mutate frozen mail.
+    const addons = row.recipient_auth_id && (!payload || payload.addon_ids?.length)
+      ? await ownedAddons(db, row.event_id, row.recipient_auth_id) : [];
+    if (payload?.addon_ids?.some(id => !addons.some(addon => addon.id === id))) {
+      await finish("suppressed", "addons_no_longer_owned_or_valid"); return result("not_available");
+    }
     if (!payload) {
       const ordered = ids.map(id => eligible.find((t: any) => t.id === id));
       const content = ticketConfirmation({
@@ -83,10 +118,17 @@ async function deliverClaimed(db: any, row: any): Promise<ReminderResult> {
         preheader: `${event.title || "Your event"} starts soon — your ticket${ids.length > 1 ? "s are" : " is"} inside.`,
         greeting: `${event.title || "Your event"} starts in about 3 hours. Open your ticket${ids.length > 1 ? "s" : ""} below and have the QR ready at the door.`,
         calendar: {startIso: event.start_date}, summary: [{label: "Tickets", value: String(ids.length)}],
+        addons: addons.map(addon => {
+          const definition = Array.isArray(addon.ticket_addon) ? addon.ticket_addon[0] : addon.ticket_addon;
+          const variant = Array.isArray(addon.variant) ? addon.variant[0] : addon.variant;
+          return {name: definition?.name || "Add-on", variant: variant?.name,
+            quantity: addon.quantity, status: addon.status,
+            lookupUrl: `${SITE}/ticket/${encodeURIComponent(ordered[0].id)}`};
+        }),
         tickets: ordered.map((t: any) => ({tier: (Array.isArray(t.ticket_type) ? t.ticket_type[0] : t.ticket_type)?.category || "ga", tierLabel: (Array.isArray(t.ticket_type) ? t.ticket_type[0] : t.ticket_type)?.name || "Ticket",
           lookupUrl: row.recipient_auth_id ? `${SITE}/ticket/${encodeURIComponent(t.id)}` : `${SITE}/public/tickets/guest/${encodeURIComponent(t.guest_lookup_token)}`})),
       });
-      payload = {to, from: Deno.env.get("RESEND_FROM_EMAIL") || "DVNT <onboarding@resend.dev>", ...content, ticket_ids: ids, ...(!row.recipient_auth_id ? {guest_lookup_tokens: ordered.map((t: any) => t.guest_lookup_token)} : {})};
+      payload = {to, from: Deno.env.get("RESEND_FROM_EMAIL") || "DVNT <onboarding@resend.dev>", ...content, ticket_ids: ids, ...(row.recipient_auth_id ? {addon_ids: addons.map(addon => addon.id)} : {}), ...(!row.recipient_auth_id ? {guest_lookup_tokens: ordered.map((t: any) => t.guest_lookup_token)} : {})};
     }
     // Recheck the lease even on frozen retries; do not send after a slow lookup
     // has outlived its lease or the provider's idempotency retention window.
