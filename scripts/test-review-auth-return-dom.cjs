@@ -20,7 +20,7 @@ const auth = (selector = x => x) => selector({ ...state.auth, setUser: user => {
 auth.getState = () => ({ ...state.auth, setUser: user => { state.auth.user = user; state.auth.isAuthenticated = true; } });
 const box = ({children}) => React.createElement('div', null, children);
 const button = ({children, onPress, onClick, ...props}) => React.createElement('button', { onClick: onPress || onClick, disabled: props.disabled }, children);
-const real = ['lib/auth/return-to', 'lib/auth/review-return', 'lib/auth/guest-event-route'];
+const real = ['lib/auth/signup-continuation', 'lib/auth/return-to', 'lib/auth/review-return', 'lib/auth/guest-event-route'];
 const caches = new Map();
 function load(relative) {
   const file = path.resolve(ROOT, relative);
@@ -114,12 +114,17 @@ async function mount(file, exportName, pathname, options={}) {
     assert.equal(JSON.parse(window.sessionStorage.getItem('dvnt:review-return')).target,target, 'required setup retains intent without bypass');
   }
   const signupUrl='/auth/signup?returnTo='+encodeURIComponent(target);
+  await mount('packages/app/features/auth/screens/LoginScreen.web.tsx','LoginScreen',loginUrl);
+  const signupLink = [...document.querySelectorAll('button')].find(b=>b.textContent==='Sign up');
+  assert.ok(signupLink); await React.act(async()=>signupLink.click());
+  assert.deepEqual(state.navigation,[signupUrl+'&entry=login'], 'Rate signup handoff remains distinct from a direct Join invitation');
   await mount('packages/app/features/auth/screens/SignupScreen.web.tsx','SignupScreen',signupUrl);
   await React.act(async () => onSubmit({value:{dateOfBirth:'1990-01-01'}}));
   const terms = [...document.querySelectorAll('button')].find(b=>b.textContent.includes('I agree'));
   assert.ok(terms);
   await React.act(async () => terms.click());
   await React.act(async () => onSubmit({value:{email:'member@example.invalid',password:'fixture-only',username:'member',dateOfBirth:'1990-01-01'}}));
+  assert.equal(JSON.parse(window.sessionStorage.getItem('dvnt:signup:continuation')).authId, 'auth-a');
   assert.equal(state.signup.callbackURL,'https://fixture.invalid/auth/verify-email?returnTo='+encodeURIComponent(target));
   const start = [...document.querySelectorAll('button')].find(b=>b.textContent.includes('Start secure'));
   await React.act(async () => start.click());
@@ -128,6 +133,7 @@ async function mount(file, exportName, pathname, options={}) {
   await mount('packages/app/features/auth/screens/VerifyEmailScreen.web.tsx','VerifyEmailScreen',verifyUrl);
   await React.act(async () => new Promise(resolve=>setTimeout(resolve,2050)));
   assert.deepEqual(state.navigation,[target], 'new-tab verification preserves review URL');
+  assert.equal(window.sessionStorage.getItem('dvnt:signup:continuation'), null);
   await mount('packages/app/features/auth/screens/VerifyEmailScreen.web.tsx','VerifyEmailScreen',verifyUrl);
   await React.act(async () => root.unmount()); root=null;
   await new Promise(resolve=>setTimeout(resolve,2050));
