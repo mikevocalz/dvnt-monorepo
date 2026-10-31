@@ -52,12 +52,12 @@ export const TICKET_TYPE_CATEGORIES: Array<{
   {
     value: "product",
     label: "Add-on",
-    hint: "Physical items sold alongside entry — drink tokens, merch.",
+    hint: "Sold separately — drink tokens, merch. Does not include event admission.",
   },
   {
     value: "service",
     label: "Service",
-    hint: "Experiences sold alongside entry — coat check, bottle service.",
+    hint: "Sold separately — coat check, bottle service. Does not include event admission.",
   },
 ];
 

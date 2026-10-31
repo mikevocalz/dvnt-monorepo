@@ -75,6 +75,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { eventsApi } from "@dvnt/app/lib/api/events";
 import { useCreateEventStore } from "@dvnt/app/lib/stores/create-event-store";
+import { qk } from "@dvnt/app/lib/query/keys";
 import { eventKeys } from "@dvnt/app/lib/hooks/use-events";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
 import { useEvents, useEvent, useToggleEventLike, useRsvpEvent } from "@dvnt/app/lib/hooks/use-events";
@@ -97,6 +98,7 @@ import {
   useTicketViewerIdentityPending,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
+import { ticketPurchaseAllowance } from "@dvnt/app/lib/tickets/purchase-quantity";
 import { resolveGuestPurchase } from "@dvnt/app/lib/tickets/guest-purchase-state";
 import { eventDetailIsResolving } from "@dvnt/app/lib/events/event-detail-state";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
@@ -546,6 +548,7 @@ export function EventDetailScreen() {
   // Display only — drives the CTA, never opens a pass.
   const {
     primary: myTicketData,
+    tickets: myTickets = [],
     isPending: ticketsPending,
     isError: ticketsFailed,
   } = useMyTicketStatusForEvent(eventId);
@@ -573,6 +576,13 @@ export function EventDetailScreen() {
     viewerAuthId,
   });
   const hasTicket = ticketAccess.canShowCredential;
+  const ownedTickets = myTickets.filter((ticket) =>
+    resolveTicketAccess({ ticket, viewerId, viewerAuthId }).isHolder,
+  );
+  const hasAdmissionTicket = ownedTickets.some((ticket) =>
+    (ticket.category ?? "admission") === "admission" &&
+    ["active", "scanned"].includes(ticket.status),
+  );
   // "Do they hold a pass" has three answers, not two, and the third one used to
   // be rendered as "no". While the ticket read is in flight — or the viewer's
   // auth id is still being resolved for a session persisted without it — the
@@ -878,6 +888,7 @@ export function EventDetailScreen() {
   const selectedCheckoutTier =
     selectedPurchase.kind === "checkout" ? selectedPurchase.tier : undefined;
   const displayedSelectionId = selectedTierId ?? selectedCheckoutTier?.id;
+  const selectedAllowance = selectedCheckoutTier ? ticketPurchaseAllowance(selectedCheckoutTier, ownedTickets) : 0;
   const retryGuestTickets = () => {
     retryEvent();
     void ticketTypesQuery.refetch();
@@ -1498,13 +1509,14 @@ export function EventDetailScreen() {
                       selectedTierId: String(t.id),
                     });
                     const tierUnavailable = tierPurchase.kind !== "checkout";
+                    const atLimit = !!live && ticketPurchaseAllowance(live, ownedTickets) <= 0 && !soldOut;
                     return (
                       <button
                         key={t.id ?? i}
                         type="button"
                         data-testid={`ticket-tier-${tierId}`}
                         aria-pressed={isSelected}
-                        disabled={soldOut || hasTicket || ownershipUnknown || tierUnavailable || eventSalesClosed(e) || isCancelledEvent}
+                        disabled={soldOut || atLimit || ownershipUnknown || tierUnavailable || eventSalesClosed(e) || isCancelledEvent}
                         onClick={() => {
                           setSelectedTierId(tierId);
                           // A different tier may have a lower quantity cap.
@@ -1526,6 +1538,8 @@ export function EventDetailScreen() {
                                 : "Free"}
                           </span>
                         </div>
+                        {atLimit ? <p className="mt-1 text-xs text-white/50">Maximum per person reached</p> : null}
+                        {(live?.category ?? t.category) === "service" ? <p className="mt-1 text-xs text-white/60">Service · Does not include event admission</p> : null}
                         {tierUnavailable && !soldOut ? (
                           <p className="mt-1 text-xs text-white/50">
                             {tierPurchase.kind === "loading"
@@ -1609,6 +1623,16 @@ export function EventDetailScreen() {
               </Section>
             ) : null}
 
+            {hasTicket ? (
+              <button
+                type="button"
+                onClick={() => router.push(myTicketData?.id ? `/feed/ticket/${myTicketData.id}` : `/feed/ticket/${eventId}`)}
+                className="w-full mt-4 h-12 rounded-xl bg-white/10 text-white font-bold flex items-center justify-center gap-2"
+              >
+                <Ticket size={18} color="#379ED8" /> View ticket
+              </button>
+            ) : null}
+
             {/* CTA — drives the real checkout / view-ticket / waitlist flow. */}
             {(() => {
               // Buyer-visible only: hidden tiers never sell here, locked tiers
@@ -1659,40 +1683,15 @@ export function EventDetailScreen() {
                 );
               }
 
-              if (hasTicket) {
-                // Route by TICKET id, not event id.
-                //
-                // `/feed/ticket/:id` accepts either, but an integer is read as an
-                // event and `resolveTicketRoute` answers `{kind: "group"}` for
-                // anyone holding more than one pass. The web pass screen only
-                // unwraps `kind: "ticket"`, so a group resolved to undefined and
-                // rendered "Ticket Not Found · This ticket may have been
-                // removed" — to 24 of the 70 people coming on Friday, about
-                // their perfectly valid tickets. `myTicketData` is the group's
-                // display representative, so this opens a real pass; the picker
-                // native already has is the proper fix.
-                const ticketPath = myTicketData?.id
-                  ? `/feed/ticket/${myTicketData.id}`
-                  : `/feed/ticket/${eventId}`;
-                return (
-                  <button
-                    onClick={() => router.push(ticketPath)}
-                    className="w-full mt-4 h-12 rounded-xl bg-white/10 text-white font-bold flex items-center justify-center gap-2"
-                  >
-                    <Ticket size={18} color="#379ED8" /> View ticket
-                  </button>
-                );
-              }
-
               // Sales window closed — every checkout/RSVP rail enforces the
               // same cutoff server-side (end − 30 min), so a live button here
               // would only click through to a sales_closed error. Ticket
               // holders still get "View ticket" above; everyone else sees the
               // honest state instead of Buy/RSVP/Waitlist on a dead event.
-              if (eventSalesClosed(e)) {
+              if (isCancelledEvent || eventSalesClosed(e)) {
                 return (
                   <div className="w-full mt-4 h-12 rounded-xl bg-white/5 text-white/50 font-bold flex items-center justify-center">
-                    {eventEnded(e) ? "Event ended" : "Ticket sales ended"}
+                    {isCancelledEvent ? "Event cancelled" : eventEnded(e) ? "Event ended" : "Ticket sales ended"}
                   </div>
                 );
               }
@@ -1754,7 +1753,7 @@ export function EventDetailScreen() {
 
               // 1. TICKETS — open the checkout sheet (or RSVP for free events).
               const openCheckout = () => {
-                if (!selectedCheckoutTier) return;
+                if (!selectedCheckoutTier || selectedAllowance <= 0) return;
                 setSelectedTierId(String(selectedCheckoutTier.id));
                 setCheckoutOpen(true);
               };
@@ -1786,7 +1785,7 @@ export function EventDetailScreen() {
                     }
                     gateAuth(openCheckout);
                   }}
-                  disabled={isFreeRsvp ? rsvpMutation.isPending : !selectedCheckoutTier}
+                  disabled={isFreeRsvp ? rsvpMutation.isPending : !selectedCheckoutTier || selectedAllowance <= 0}
                   data-testid="event-purchase-action"
                   className="w-full mt-4 h-12 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-white font-bold disabled:opacity-50"
                 >
@@ -1794,9 +1793,13 @@ export function EventDetailScreen() {
                     ? "RSVP"
                     : !selectedCheckoutTier
                       ? "Select an available ticket"
-                      : tierDisplayPriceCents(selectedCheckoutTier) === 0
-                        ? "Get free ticket"
-                        : "Get tickets"}
+                      : selectedAllowance <= 0
+                        ? "Maximum per person reached"
+                        : hasTicket
+                          ? "Buy additional tickets"
+                          : tierDisplayPriceCents(selectedCheckoutTier) === 0
+                            ? "Get free ticket"
+                            : "Get tickets"}
                 </button>
               );
             })()}
@@ -2077,7 +2080,7 @@ export function EventDetailScreen() {
           ) : null}
 
           {/* Who All Over There — ephemeral event moments (ticket holders + host) */}
-          <WhoAllOverThere eventId={eventId} canUpload={isHost || hasTicket} />
+          <WhoAllOverThere eventId={eventId} canUpload={isHost || hasAdmissionTicket} />
 
           {/* Ratings & Reviews */}
           {avgRating > 0 || reviews.length > 0 ? (
@@ -2271,12 +2274,14 @@ export function EventDetailScreen() {
           (t) => String(t.id) === String(selectedTierId),
         )}
         addons={eventAddons}
+        maxQuantity={selectedAllowance}
         qty={ticketQty}
         setQty={setTicketQty}
         promoCode={promoCode}
         setPromoCode={setPromoCode}
         isCheckingOut={isCheckingOut}
         onCheckout={async () => {
+          if (!useEventDetailUiStore.getState().checkoutOpen || isCheckingOut) return;
           const tier = (liveTicketTypes as TicketTypeRecord[]).find(
             (t) => String(t.id) === String(selectedTierId),
           );
@@ -2286,6 +2291,12 @@ export function EventDetailScreen() {
               "Pick a tier",
               "Select a ticket tier to continue.",
             );
+            return;
+          }
+
+          if (isCancelledEvent || eventSalesClosed(e) || !selectedCheckoutTier ||
+              ticketQty < 1 || ticketQty > ticketPurchaseAllowance(tier, ownedTickets)) {
+            showToast("error", "Tickets unavailable", "The quantity or availability changed. Review your selection.");
             return;
           }
 
@@ -2311,9 +2322,18 @@ export function EventDetailScreen() {
           const tierIsPaid = (tier.price_cents ?? 0) > 0;
           if (selections.length > 0 || tierIsPaid) {
             const cartStore = useCartStore.getState();
+            // A payment-bound cart must be recovered, not replaced by a new
+            // idempotency key after Back navigation or a second click.
+            if (cartStore.cart && cartStore.cart.status !== "completed" &&
+                (cartStore.cart.paymentIntentId || cartStore.cart.status === "paying")) {
+              setCheckoutOpen(false);
+              router.push("/feed/checkout/review");
+              return;
+            }
+            setCheckoutOpen(false);
             cartStore.startCart(eventId);
             cartStore.addLineItem(eventId, {
-              category: "admission",
+              category: tier.category === "service" || tier.category === "product" ? tier.category : "admission",
               tierId: String(tier.id),
               quantity: ticketQty,
               unitPriceCents: tier.price_cents,
@@ -2377,7 +2397,7 @@ export function EventDetailScreen() {
             return;
           }
           // Free ticket issued server-side — mirror into the ticket store.
-          if (result.free && result.tickets?.length) {
+          if (result.free && result.tickets?.length && !hasTicket && (tier.category ?? "admission") === "admission") {
             const t0 = result.tickets[0];
             setTicket(eventId, {
               id: t0.id,
@@ -2390,12 +2410,20 @@ export function EventDetailScreen() {
               eventTitle: e.title,
             });
           }
+          // The server-issued library is authoritative; never replace an
+          // admission credential with a standalone service in the legacy map.
+          void queryClient.invalidateQueries({ queryKey: qk.tickets.mine(viewerId) });
+          void queryClient.invalidateQueries({ queryKey: qk.tickets.forEvent(viewerId, eventId) });
+          void queryClient.invalidateQueries({ queryKey: eventKeys.all });
           setCheckoutOpen(false);
+          setTicketQty(1);
           setPromoCode("");
           showToast(
             "success",
             result.free ? "Confirmed" : "Ticket purchased",
-            `You're going to ${e.title}!`,
+            tier.category === "service" || tier.category === "product"
+              ? `${tier.name} is confirmed. Event admission is sold separately.`
+              : `You're going to ${e.title}!`,
           );
         }}
       />
@@ -2714,6 +2742,7 @@ function CheckoutSheet({
   eventTitle,
   tier,
   addons,
+  maxQuantity,
   qty,
   setQty,
   promoCode,
@@ -2727,6 +2756,7 @@ function CheckoutSheet({
   eventTitle: string;
   tier: TicketTypeRecord | undefined;
   addons: AddonRecord[];
+  maxQuantity: number;
   qty: number;
   setQty: (q: number) => void;
   promoCode: string;
@@ -2734,7 +2764,7 @@ function CheckoutSheet({
   isCheckingOut: boolean;
   onCheckout: () => void;
 }) {
-  const maxPer = tier?.max_per_user ?? 6;
+  const maxPer = maxQuantity;
   const subtotalCents = (tier?.price_cents ?? 0) * qty;
 
   // Add-on upsell selections (WS-3) — preview math only; server reprices.
@@ -2943,7 +2973,7 @@ function CheckoutSheet({
 
         <button
           onClick={() => { if (codeReady) onCheckout(); }}
-          disabled={isCheckingOut || !tier || !codeReady}
+          disabled={isCheckingOut || !tier || !codeReady || qty > maxPer || maxPer <= 0}
           className="w-full h-12 rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] text-white font-bold disabled:opacity-50"
         >
           {isCheckingOut
@@ -2952,7 +2982,7 @@ function CheckoutSheet({
               ? `Review order · ${money(totalCents)}`
               : totalCents
                 ? `Pay ${money(totalCents)}`
-                : "Confirm RSVP"}
+                : tier?.category === "service" || tier?.category === "product" ? "Confirm item" : "Confirm RSVP"}
         </button>
       </div>
     </BottomSheet>

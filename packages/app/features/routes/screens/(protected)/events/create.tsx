@@ -1,3 +1,4 @@
+import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
 import { shouldDiscardPreparedRoom } from "@dvnt/app/lib/events/event-publish-error";
 import { prepareEventLynkRoom } from "@dvnt/app/lib/events/prepare-event-lynk-room";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
@@ -855,7 +856,7 @@ function CreateEventScreenContent() {
           for (const tier of ticketTiers) {
             const createdTier = await ticketTypesApi.create({
               eventId: String(data.id),
-              name: tier.name,
+              name: tier.name || defaultTicketTypeName(tier.category),
               category: tier.category || "admission",
               description: tier.description || undefined,
               priceCents: tier.priceCents,
@@ -2462,6 +2463,8 @@ function CreateEventScreenContent() {
                           return (
                             <Pressable
                               key={option.value}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected }}
                               onPress={() =>
                                 setTicketTiers((prev) =>
                                   prev.map((t) =>
@@ -2515,7 +2518,7 @@ function CreateEventScreenContent() {
                           className="flex-1 text-[11px] font-semibold text-muted-foreground"
                           style={{ letterSpacing: 0.4 }}
                         >
-                          MAX / ORDER
+                          MAX / PERSON
                         </Text>
                       </View>
 
@@ -2692,12 +2695,13 @@ function CreateEventScreenContent() {
                         </View>
                       )}
 
-                      {/* Tier type — v2 enum (GA / VIP / Early Bird / Table / Group) */}
+                      {/* Admission styles do not classify services/products. */}
+                      {isAdmissionCategory(tier.category) ? <>
                       <Text
                         className="text-[11px] font-semibold text-muted-foreground mt-3 mb-1 px-1"
                         style={{ letterSpacing: 0.4 }}
                       >
-                        TIER TYPE
+                        ADMISSION TIER TYPE
                       </Text>
                       <View className="flex-row gap-2 mb-2">
                         {TIER_TYPE_OPTIONS.map((option) => {
@@ -2706,6 +2710,8 @@ function CreateEventScreenContent() {
                           return (
                             <Pressable
                               key={option.value}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected }}
                               onPress={() =>
                                 setTicketTiers((prev) =>
                                   prev.map((t) =>
@@ -2737,6 +2743,7 @@ function CreateEventScreenContent() {
                           );
                         })}
                       </View>
+                      </> : null}
 
                       {/* Visibility — public / hidden / locked (+ unlock code) */}
                       <Text
@@ -2752,6 +2759,8 @@ function CreateEventScreenContent() {
                           return (
                             <Pressable
                               key={option.value}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected }}
                               onPress={() =>
                                 setTicketTiers((prev) =>
                                   prev.map((t) =>

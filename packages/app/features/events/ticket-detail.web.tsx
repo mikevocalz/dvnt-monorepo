@@ -1,4 +1,5 @@
 "use client";
+import { defaultTicketTypeName, ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 
 /**
  * Ticket Detail — web (port of native `app/(protected)/ticket/[id].tsx`).
@@ -141,7 +142,7 @@ function dbToTicket(rec: TicketRecord): Ticket {
         : (rec.purchase_amount_cents ?? 0) === 0
           ? "free"
           : "ga") as TicketTierLevel,
-    tierName: rec.ticket_type_name || "General Admission",
+    tierName: rec.ticket_type_name || defaultTicketTypeName(rec.category),
     eventTitle: rec.event_title || "",
     eventDate: rec.event_date || "",
     eventTz: rec.event_tz ?? null,
@@ -599,7 +600,7 @@ export function TicketDetailScreen() {
           </p>
           <div className="mt-6 space-y-3">
             {passes.map((pass, index) => {
-              const label = pass.category === "coat_check" ? "Coat check" : pass.ticket_type_name || "Admission";
+              const label = pass.category === "coat_check" ? "Coat check" : pass.ticket_type_name || ticketCategoryLabel(pass.category);
               const status = pass.status === "active" ? "Ready to scan"
                 : pass.status === "scanned" ? "Already used"
                 : pass.status === "transfer_pending" ? "Transfer pending"

@@ -87,7 +87,7 @@ test("red titles name the rejection, because each sends the guest elsewhere", ()
 
 test("admitted leads with the verdict, and add-ons are their own outcome", () => {
   assert.match(scanVerdictTitle("success", null), /^Admitted/);
-  assert.equal(scanVerdictTitle("success", null, "addon"), "Add-on redeemed");
+  assert.equal(scanVerdictTitle("success", null, "addon"), "Add-on redeemed — not event entry");
 });
 
 test("an unknown token while offline is a no-verdict, never a rejection", () => {
@@ -101,4 +101,17 @@ test("an unknown token while offline is a no-verdict, never a rejection", () => 
   assert.match(scanVerdictMessage(OFFLINE_UNVERIFIED), /may be out of date/i);
   // It must never read as a claim about the ticket's authenticity.
   assert.doesNotMatch(scanVerdictMessage(OFFLINE_UNVERIFIED), /not a valid ticket/i);
+});
+
+test("services and products are redeemed, never event admission", () => {
+  assert.equal(scanVerdictTitle("success", null, "service"), "Service redeemed — not event entry");
+  assert.equal(scanVerdictTitle("success", null, "product"), "Product redeemed — not event entry");
+  assert.equal(scanVerdictTitle("success", null, "unknown"), "Credential redeemed — verify entry separately");
+});
+
+test("old scanner capability refusal is a retryable update requirement, not invalid admission", () => {
+  assert.equal(scanFailureReasonForStatus(426), "scanner_update_required");
+  assert.equal(isScanFailure("scanner_update_required"), true);
+  assert.match(scanVerdictTitle("no_verdict", "scanner_update_required"), /update scanner/);
+  assert.match(scanVerdictMessage("scanner_update_required"), /current web scanner/);
 });

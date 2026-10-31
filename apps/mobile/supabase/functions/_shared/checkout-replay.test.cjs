@@ -71,7 +71,12 @@ function checkout(rail, patch = {}, options = {}) {
     },
     rpc: async (name, args) => {
       ops.push({ action: "rpc", name, args });
-      assert.equal(name, "ticket_hold_create_atomic");
+      if (name === "free_ticket_checkout_atomic") {
+        if (options.raceOrder) { insertLost = true; return { data: { ok: true, idempotent: true, order: options.raceOrder, tickets: options.tickets }, error: null }; }
+        issued.push(...args.p_ticket_rows);
+        return { data: { ok: true, idempotent: false, order: { id: "order-1", ...args.p_order }, tickets: args.p_ticket_rows }, error: null };
+      }
+      assert.equal(name, "ticket_purchase_hold_atomic");
       return { data: { ok: true, hold_id: "hold-1" }, error: null };
     },
   };
@@ -191,7 +196,7 @@ for (const [label, rail, identity] of rails) {
         assert.equal(body.order_id, undefined);
         assert.equal(body.tickets, undefined);
         assert.equal(fn.issued.length, 0);
-        assert.equal(fn.qr.length, 0);
+        assert.equal(fn.qr.length, race ? 2 : 0, "A race may prepare unused QRs before the atomic allocator; it never persists them");
         assert.equal(fn.stripe.length, 0);
         assert.equal(fn.deliveries.length, 0);
         if (!race) assert.deepEqual(fn.ops.filter((op) => op.action !== "select"), []);
@@ -216,7 +221,7 @@ for (const [label, rail, identity] of rails) {
         });
       }
       assert.equal(fn.issued.length, 0);
-      assert.equal(fn.qr.length, 0);
+      assert.equal(fn.qr.length, race ? 2 : 0, "A race may prepare unused QRs before the atomic allocator; it never persists them");
       assert.equal(fn.stripe.length, 0);
     });
     for (const [state, rows] of [

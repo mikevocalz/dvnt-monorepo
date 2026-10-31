@@ -1,3 +1,4 @@
+import type { ScanCredentialKind } from "@dvnt/app/lib/tickets/scan-verdict";
 /**
  * Ticket Scanner Screen — VisionCamera QR Code Scanner
  *
@@ -82,7 +83,7 @@ const hasVisionCamera =
 type ScanResult = {
   type: "success" | "error" | "already_scanned" | "not_found";
   /** "addon" when the scanned QR was an order_addons redemption. */
-  kind?: "ticket" | "addon";
+  kind?: ScanCredentialKind;
   name?: string;
   tierName?: string;
   message?: string;
@@ -609,7 +610,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
               };
               setScanResult({
                 type: "success",
-                kind: data.kind ?? "ticket",
+                kind: data.kind ?? "unknown",
                 name,
                 tierName,
                 addons: data.addons,
@@ -636,7 +637,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                   : ("not_found" as const);
               setScanResult({
                 type: resultType,
-                kind: data.kind ?? "ticket",
+                kind: data.kind ?? "unknown",
                 name:
                   data.kind === "addon" && data.addon
                     ? [data.addon.name, data.addon.variant_name]

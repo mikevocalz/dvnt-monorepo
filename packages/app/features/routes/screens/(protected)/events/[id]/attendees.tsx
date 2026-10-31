@@ -1,3 +1,4 @@
+import { hasAdmissionPurpose, ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 /**
  * Event Attendees Screen — host roster with filter chips + search +
  * server-side pagination.
@@ -68,14 +69,14 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "void", label: "Void" },
 ];
 
-function statusBadge(status: string): {
+function statusBadge(status: string, category?: string | null): {
   Icon: typeof CheckCircle2;
   color: string;
   label: string;
 } {
   switch (status) {
     case "scanned":
-      return { Icon: CheckCircle2, color: "#22C55E", label: "Scanned" };
+      return { Icon: CheckCircle2, color: "#22C55E", label: hasAdmissionPurpose(category) ? "Scanned" : "Redeemed" };
     case "refunded":
       return { Icon: XCircle, color: "#FC253A", label: "Refunded" };
     case "transfer_pending":
@@ -87,7 +88,7 @@ function statusBadge(status: string): {
       return {
         Icon: Circle,
         color: "rgba(255,255,255,0.45)",
-        label: "Unscanned",
+        label: hasAdmissionPurpose(category) ? "Unscanned" : "Unredeemed",
       };
   }
 }
@@ -231,8 +232,8 @@ function ScopedAttendees({ accountKey }: { accountKey: string }) {
 
   const renderItem = useCallback(
     ({ item }: { item: any }) => {
-      const { Icon, color, label } = statusBadge(item.status);
-      const tier = item.ticket_type_name || "General";
+      const { Icon, color, label } = statusBadge(item.status, item.category);
+      const tier = item.ticket_type_name || ticketCategoryLabel(item.category);
       const refundable = isOrganizerPaidRefundCandidate(item);
       const isSelected = selected.has(item.id);
       const handlePress = () => {
@@ -297,7 +298,7 @@ function ScopedAttendees({ accountKey }: { accountKey: string }) {
                 style={[styles.tierBadge, { borderColor: tierAccent("ga") }]}
               >
                 <Text style={[styles.tierText, { color: tierAccent("ga") }]}>
-                  {tier}
+                  {tier}{!hasAdmissionPurpose(item.category) ? " · No admission" : ""}
                 </Text>
               </View>
               {item.purchase_amount_cents != null && (

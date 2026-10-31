@@ -3,7 +3,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),ts=require('typescript');
 const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
-const token=(n,patch={})=>({id:id(n),event_id:7,status:'active',qr_token:`SYNTHETIC-${n}`,guest_email:'never-return@example.test',...patch});
+const token=(n,patch={})=>({id:id(n),event_id:7,status:'active',qr_token:`SYNTHETIC-${n}`,guest_email:'never-return@example.test',ticket_type_id:'fixture-tier',category:'admission',ticket_types:{category:'admission'},...patch});
 function harness({cap=1000,tickets=Array.from({length:1207},(_,i)=>token(i+1)),addons=Array.from({length:1301},(_,i)=>token(i+1,{status:i%2?'fulfilled':'unfulfilled',qr_token:`SYNTHETIC-ADDON-${i+1}`})),actor='host',role='owner',accepted=true,eventStatus='published',latestStatus=eventStatus,eventMissing=false,latestMissing=false,lateFailure=null,latestError=false}={}) {
  let handler;const calls=[],logs=[],pages={},eventReads={n:0};
  const response=(body,status=200)=>new Response(JSON.stringify(body),{status});
@@ -11,7 +11,7 @@ function harness({cap=1000,tickets=Array.from({length:1207},(_,i)=>token(i+1)),a
   let seed,error=null;
   if(table==='events'){eventReads.n++;seed=(eventReads.n===1?eventMissing:latestMissing)?[]:[{id:7,host_id:'host',status:eventReads.n===1?eventStatus:latestStatus}];if(eventReads.n>1&&latestError)error={message:'SYNTHETIC_PRIVATE_DETAIL'};}
   else if(table==='event_co_organizers')seed=role==='owner'||role==='outsider'?[]:[{event_id:7,user_id:actor,role,accepted}];
-  else {assert.ok(['tickets','order_addons'].includes(table));seed=table==='tickets'?tickets:addons;pages[table]=(pages[table]||0)+1;if(table===lateFailure&&pages[table]===2)error={message:'SYNTHETIC_PRIVATE_DETAIL'};assert.equal(fields,'id, qr_token');assert.equal(take,1000);assert.deepEqual(JSON.parse(JSON.stringify(sorts)),[['id',{ascending:true}]]);}
+  else {assert.ok(['tickets','order_addons'].includes(table));seed=table==='tickets'?tickets:addons;pages[table]=(pages[table]||0)+1;if(table===lateFailure&&pages[table]===2)error={message:'SYNTHETIC_PRIVATE_DETAIL'};assert.equal(fields,table==='tickets'?'id, qr_token, ticket_type_id, category, ticket_types(category)':'id, qr_token');assert.equal(take,1000);assert.deepEqual(JSON.parse(JSON.stringify(sorts)),[['id',{ascending:true}]]);}
   let data=seed.filter(x=>filters.every(fn=>fn(x))).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0).slice(0,Math.min(cap,take));calls.push({table,fields,rows:data.length});return{data:single?data[0]||null:data,error};},then(resolve,reject){return q.result().then(resolve,reject);},maybeSingle(){return q.result(true);}};return q;}
  const db={from:query};const helper={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../_shared/read-all-rows.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:helper});
  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'index.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:{},console:{error:(...args)=>logs.push(args)},Deno:{env:{get:()=>''},serve:fn=>handler=fn},require:name=>name.includes('supabase-js')?{createClient:()=>db}:name.endsWith('read-all-rows.ts')?helper:name.endsWith('verify-session.ts')?{verifySession:async()=>actor,jsonResponse:response,errorResponse:(error,status)=>response({error},status),optionsResponse:()=>response({})}:name.endsWith('organizer-free-cancellation.ts')?{}:(()=>{throw Error(name)})()});
@@ -25,3 +25,15 @@ for(const config of [{actor:null,role:'outsider'},{actor:'outsider',role:'outsid
 for(const eventStatus of ['cancelled','deleted'])test(`${eventStatus} event never downloads tokens`,async()=>{const h=harness({eventStatus});assert.equal((await h.call()).status,409);assert.ok(!h.calls.some(c=>['tickets','order_addons'].includes(c.table)));});
 for(const config of [{latestStatus:'cancelled'},{latestStatus:'deleted'},{latestMissing:true},{latestError:true}])test(`event changes during pagination fail full snapshot${JSON.stringify(config)}`,async()=>{const r=await harness({...config,tickets:[token(1)],addons:[]}).call();assert.equal(r.status,config.latestError?503:config.latestMissing?404:409);assert.equal(r.body.qr_tokens,undefined);assert.equal(r.body.addon_qr_tokens,undefined);});
 test('empty rails remain a genuine complete success',async()=>{const r=await harness({tickets:[],addons:[]}).call();assert.equal(r.status,200);assert.deepEqual(r.body,{ok:true,qr_tokens:[],addon_qr_tokens:[]});});
+
+test('service/product/unknown credentials never enter admission-only offline allowlist',async()=>{
+ const h=harness({tickets:[token(1),token(2,{ticket_types:{category:'service'}}),token(3,{ticket_types:{category:'product'}}),token(4,{ticket_types:{category:'coat_check'}}),token(5,{ticket_types:null}),token(6,{ticket_types:[{category:'admission'}]})],addons:[]});
+ const r=await h.call();assert.equal(r.status,200);
+ assert.deepEqual(r.body.qr_tokens,['SYNTHETIC-1','SYNTHETIC-6']);
+ assert.deepEqual(r.body.addon_qr_tokens,[]);
+});
+
+test('untiered free RSVPs retain offline admission without treating a missing referenced tier as admission',async()=>{
+ const h=harness({tickets:[token(1,{ticket_type_id:null,ticket_types:null}),token(2,{ticket_types:null})],addons:[]});
+ const r=await h.call();assert.deepEqual(r.body.qr_tokens,['SYNTHETIC-1']);
+});

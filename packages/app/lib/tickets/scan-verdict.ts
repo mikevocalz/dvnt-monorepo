@@ -1,3 +1,6 @@
+/** Authoritative credential purpose, independent of its redemption rail. */
+export type ScanCredentialKind = "ticket" | "addon" | "service" | "product" | "unknown";
+
 /**
  * Door scan verdicts — "the ticket is bad" vs "we could not ask".
  *
@@ -15,12 +18,14 @@ export type ScanFailureReason =
   | "unauthorized"
   | "forbidden"
   | "rate_limited"
+  | "scanner_update_required"
   | "server_error";
 
 const FAILURE_REASONS: readonly ScanFailureReason[] = [
   "unauthorized",
   "forbidden",
   "rate_limited",
+  "scanner_update_required",
   "server_error",
 ];
 
@@ -41,6 +46,7 @@ export function scanFailureReasonForStatus(status: number): ScanFailureReason {
   if (status === 401) return "unauthorized";
   if (status === 403) return "forbidden";
   if (status === 429) return "rate_limited";
+  if (status === 426) return "scanner_update_required";
   return "server_error";
 }
 
@@ -81,6 +87,8 @@ export function scanVerdictMessage(reason: string | null | undefined): string {
       return "This account is not on the event's door staff. Ask the host to add you (and accept the invite).";
     case "rate_limited":
       return "Scanning too fast — wait a few seconds and rescan. The ticket was NOT checked.";
+    case "scanner_update_required":
+      return "This is not an admission credential. Update the app or use the current web scanner to redeem it. Nothing was redeemed.";
     case "server_error":
     case "network_error":
       return "Confirmation was lost. The scan may have completed — check the attendee’s admission status before trying again.";
@@ -116,13 +124,17 @@ export function scanVerdictMessage(reason: string | null | undefined): string {
 export function scanVerdictTitle(
   outcome: "success" | "rejected" | "no_verdict",
   reason: string | null | undefined,
-  kind?: "ticket" | "addon",
+  kind?: ScanCredentialKind,
 ): string {
   if (outcome === "success" && reason === "offline_pending") {
     return "Provisional offline — pending sync";
   }
   if (outcome === "success") {
-    return kind === "addon" ? "Add-on redeemed" : "Admitted — let them in";
+    if (kind === "addon") return "Add-on redeemed — not event entry";
+    if (kind === "service") return "Service redeemed — not event entry";
+    if (kind === "product") return "Product redeemed — not event entry";
+    if (kind === "unknown") return "Credential redeemed — verify entry separately";
+    return "Admitted — let them in";
   }
 
   if (outcome === "no_verdict") {
@@ -133,6 +145,8 @@ export function scanVerdictTitle(
         return "Not checked in — you're not on door staff";
       case "rate_limited":
         return "Not checked in — scanning too fast";
+      case "scanner_update_required":
+        return "Not redeemed — update scanner";
       case "network_error":
         return "Scan outcome unknown — no signal";
       case "offline_unverified":

@@ -37,7 +37,7 @@ const entry=`import React,{act} from 'react';import {createRoot} from 'react-dom
   const f=require(path.join(dir,'test.cjs'));const flush=fn=>f.act(async()=>{await fn?.();await new Promise(r=>setTimeout(r,0));});
   const stat=label=>{const text=[...document.querySelectorAll('span')].find(e=>e.textContent.trim()===label);assert.ok(text,`Missing ${label}`);return Number.parseInt(text.parentElement.textContent.trim(),10);};
   for(const platform of ['web','native'])for(const total of [0,205,1207]){
-   const rows=Array.from({length:total},(_,i)=>({id:`synthetic-ticket-${i}`,event_id:17,status:'active',purchase_amount_cents:0,created_at:'2026-01-01T00:00:00Z',createdAt:'2026-01-01T00:00:00Z',checked_in_at:null,holder_name:'Fixture holder'}));
+   const rows=Array.from({length:total},(_,i)=>({id:`synthetic-ticket-${i}`,event_id:17,category:'admission',status:'active',purchase_amount_cents:0,created_at:'2026-01-01T00:00:00Z',createdAt:'2026-01-01T00:00:00Z',checked_in_at:null,holder_name:'Fixture holder'}));
    if(total){rows[0].status='scanned';rows[1].checked_in_at='2026-01-02T00:00:00Z';rows[2].status='refunded';rows[3].status='void';rows[4].status='transfer_pending';rows[5].status='refunded';rows[5].checked_in_at='2026-01-02T00:00:00Z';}
    f.state.rows=rows;f.state.calls=[];f.state.toasts=[];
    const node=document.createElement('div');document.body.append(node);const app=f.mount(node,platform);
@@ -50,7 +50,7 @@ const entry=`import React,{act} from 'react';import {createRoot} from 'react-dom
    }finally{await flush(()=>app.unmount());node.remove();}
   }
   for(const platform of ['web','native']) {
-   f.state.rows=Array.from({length:205},(_,i)=>({id:`retry-ticket-${i}`,event_id:17,status:'active',createdAt:'2026-01-01T00:00:00Z',created_at:'2026-01-01T00:00:00Z'}));
+   f.state.rows=Array.from({length:205},(_,i)=>({id:`retry-ticket-${i}`,event_id:17,category:'admission',status:'active',createdAt:'2026-01-01T00:00:00Z',created_at:'2026-01-01T00:00:00Z'}));
    f.state.fail=true;f.state.defer=true;f.state.releases=[];
    const node=document.createElement('div');document.body.append(node);const app=f.mount(node,platform);
    const findButton=text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text);
@@ -70,15 +70,29 @@ const entry=`import React,{act} from 'react';import {createRoot} from 'react-dom
    }finally{f.state.fail=false;f.state.defer=false;await flush(()=>app.unmount());node.remove();}
   }
   for(const platform of ['web','native']) {
-   f.useRoute.setState({id:'17'});f.state.rows=Array.from({length:205},(_,i)=>({id:`old-${i}`,status:'active'}));f.state.defer=true;f.state.releases=[];
+   f.useRoute.setState({id:'17'});f.state.rows=Array.from({length:205},(_,i)=>({id:`old-${i}`,category:'admission',status:'active'}));f.state.defer=true;f.state.releases=[];
    const node=document.createElement('div');document.body.append(node);const app=f.mount(node,platform);
    try{
     await flush(()=>app.render());
-    f.state.defer=false;f.state.rows=Array.from({length:13},(_,i)=>({id:`new-${i}`,status:'active'}));
+    f.state.defer=false;f.state.rows=Array.from({length:13},(_,i)=>({id:`new-${i}`,category:'admission',status:'active'}));
     await flush(()=>f.useRoute.setState({id:'18'}));await flush();assert.equal(stat('Issued tickets'),13);
     await flush(()=>f.state.releases.splice(0).forEach(resolve=>resolve()));assert.equal(stat('Issued tickets'),13,'late previous-event response cannot replace current counts');
     count++;console.log(`ok ${count} - ${platform}: stale previous-event completions cannot replace current counts`);
    }finally{f.state.defer=false;await flush(()=>app.unmount());node.remove();}
+  }
+  for(const platform of ['web','native']) {
+   f.state.rows=[
+    {id:'service-active',category:'service',status:'active'},
+    {id:'service-used',category:'service',status:'scanned',checked_in_at:'2099-01-01T00:00:00Z'},
+    {id:'admission-active',category:'admission',status:'active'},
+    {id:'admission-used',category:'admission',status:'scanned',checked_in_at:'2099-01-01T00:00:00Z'},
+   ];
+   const node=document.createElement('div');document.body.append(node);const app=f.mount(node,platform);
+   try { await flush(()=>app.render());await flush();
+    assert.equal(stat('Issued tickets'),4);assert.equal(stat('Checked In'),1);assert.equal(stat('Awaiting check-in'),1);
+    assert.match(node.textContent,/Redeemed/);assert.match(node.textContent,/Service · No admission/);
+    count++;console.log(`ok ${count} - ${platform}: service history visible but not admission progress`);
+   }finally{await flush(()=>app.unmount());node.remove();}
   }
   console.log(`PASS: ${count} mounted actual organizer screen count scenarios (offline API boundary)`);
  }finally{fs.rmSync(dir,{recursive:true,force:true});await window.happyDOM.abort();}

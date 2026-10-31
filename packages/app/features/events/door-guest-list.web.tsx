@@ -30,6 +30,7 @@ import { create } from "zustand";
 import { Search, Check, X } from "lucide-react";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { qk } from "@dvnt/app/lib/query/keys";
+import { hasAdmissionPurpose, ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 import { isAdmissible, isListable } from "@dvnt/app/lib/tickets/ticket-access";
 import { REFUND_DOOR_NOTE, REFUND_REASON } from "@dvnt/app/lib/tickets/refund-notice";
 import {
@@ -142,15 +143,16 @@ export function DoorGuestList({
     if (live.length) snapshotRoster(eventId, live);
   }, [data, eventId]);
 
-  // Counts describe ADMISSIBLE passes only. A refunded ticket is still listed
+  // Admission progress excludes services/products; All still lists those
+  // credentials for lookup/redemption. A refunded ticket is still listed
   // — staff need to find that person when they turn up insisting they have a
   // ticket — but it is not a guest who is coming, so it must not inflate the
   // denominator that tells the door how far through the queue they are.
   const counts = useMemo(() => {
-    const admissible = tickets.filter((t) => isAdmissible(t.status));
-    const checkedIn = admissible.filter((t) => !!t.checked_in_at).length;
+    const admissible = tickets.filter((t) => isAdmissible(t.status) && hasAdmissionPurpose(t.category));
+    const checkedIn = admissible.filter((t) => t.status === "scanned" || !!t.checked_in_at).length;
     return {
-      all: admissible.length,
+      all: tickets.filter((t) => isAdmissible(t.status)).length,
       in: checkedIn,
       out: admissible.length - checkedIn,
       refunded: tickets.filter((t) => !isAdmissible(t.status)).length,
@@ -191,8 +193,9 @@ export function DoorGuestList({
       // actually coming.
       const admissible = isAdmissible(t.status);
       if (filter === "refunded" ? admissible : !admissible) return false;
-      if (filter === "in" && !t.checked_in_at) return false;
-      if (filter === "out" && t.checked_in_at) return false;
+      if ((filter === "in" || filter === "out") && !hasAdmissionPurpose(t.category)) return false;
+      if (filter === "in" && t.status !== "scanned" && !t.checked_in_at) return false;
+      if (filter === "out" && (t.status === "scanned" || t.checked_in_at)) return false;
       if (!q) return true;
       // Match every name the row can carry, not just the resolved one. An
       // owner/admin roster returns the full ticket, so a guest who bought
@@ -374,7 +377,7 @@ function GuestRow({
   onCheckIn: (qrToken: string) => void;
 }) {
   const when = minutesSince(ticket.checked_in_at);
-  const isIn = !!ticket.checked_in_at;
+  const isIn = ticket.status === "scanned" || !!ticket.checked_in_at;
 
   return (
     <div className="flex min-h-[56px] items-center gap-3 border-b border-white/8 py-2 pr-1">
@@ -383,7 +386,8 @@ function GuestRow({
           {ticket.holder_name ?? "Guest"}
         </p>
         <p className="truncate text-[12px] text-white/50">
-          {ticket.ticket_type_name ?? "General"}
+          {ticket.ticket_type_name ?? ticketCategoryLabel(ticket.category)}
+          {!hasAdmissionPurpose(ticket.category) ? ` · ${ticket.category ? ticketCategoryLabel(ticket.category) : "Purpose not verified"}` : ""}
           {holding && holding.of > 1 ? ` · ticket ${holding.n} of ${holding.of}` : ""}
           {ticket.status === "refunded" ? " · Refunded" : ""}
         </p>
@@ -396,6 +400,10 @@ function GuestRow({
         <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-semibold text-[#F59E0B]">
           <X size={15} aria-hidden />
           Not valid
+        </span>
+      ) : !hasAdmissionPurpose(ticket.category) ? (
+        <span className="shrink-0 text-[12px] font-semibold text-white/65">
+          {isIn ? "Redeemed · no entry" : "Not admission"}
         </span>
       ) : isIn ? (
         // State, not an action: word + glyph, so it is never colour alone and
@@ -435,9 +443,9 @@ export function useDoorRosterCounts(eventId: string) {
     enabled: !!eventId,
     staleTime: 30_000,
   });
-  const tickets = (data?.tickets ?? []).filter((t) => t.status !== "void");
+  const tickets = (data?.tickets ?? []).filter((t) => isAdmissible(t.status) && hasAdmissionPurpose(t.category));
   return {
     total: tickets.length,
-    checkedIn: tickets.filter((t) => !!t.checked_in_at).length,
+    checkedIn: tickets.filter((t) => t.status === "scanned" || !!t.checked_in_at).length,
   };
 }
