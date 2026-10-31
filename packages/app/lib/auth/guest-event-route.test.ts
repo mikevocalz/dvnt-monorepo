@@ -39,3 +39,22 @@ test("query input cannot change origin, path or create a redirect destination", 
   assert.equal(url.searchParams.has("callbackURL"), false);
   assert.equal(url.searchParams.has("redirect_uri"), false);
 });
+
+test("review links authenticate with a canonical event-specific return target", () => {
+  for (const path of ["/feed/events/42/reviews", "/feed/events/42/reviews/", "/public/events/42/reviews"]) {
+    const result = guestEventRoute(path, "?returnTo=//evil.invalid&next=/feed&event_id=99&rating=5")!;
+    const url = new URL(result, "https://fixture.invalid");
+    assert.equal(url.pathname, "/auth/login");
+    assert.equal(url.searchParams.get("returnTo"), "/feed/events/42/reviews");
+    assert.equal([...url.searchParams].length, 1);
+  }
+});
+
+test("review path tricks cannot create a login return target or public bypass", () => {
+  for (const path of ["/feed/events/0/reviews", "/feed/events/01/reviews", "/feed/events/-1/reviews",
+    "/feed/events/1.5/reviews", "/feed/events/9007199254740992/reviews", "/feed/events/42/reviews\n",
+    "/feed/events/42/reviews//", "/feed/events/42/reviews/../organizer", "/feed/events/%34%32/reviews",
+    "//evil.invalid/feed/events/42/reviews", "/feed/events/42/reviews?returnTo=/feed", "/feed/events/42/reviews\\evil"]) {
+    assert.equal(guestEventRoute(path), null, path);
+  }
+});

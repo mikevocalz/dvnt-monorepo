@@ -22,7 +22,7 @@ const { build } = require('esbuild');
   const mockState = `
     import { create } from 'zustand';
     const initial = () => ({ selectedMedia: [], caption: '', textSlides: [{ id: 'slide', content: '', order: 0 }], activeTextSlideIndex: 0, isNSFW: false, tags: [], postKind: 'media', textTheme: 'graphite' });
-    export const fixture = { published: [], toasts: [], routes: [], deferGate: false, gate: null };
+    export const fixture = { published: [], toasts: [], routes: [], deferGate: false, gate: null, progress: [], failPublish: false, deferPublish: false, finishPublish: null };
     export const store = create((set) => ({ ...initial(), setSelectedMedia: selectedMedia => set({selectedMedia}), setCaption: caption => set({caption}), setPostKind: postKind => set({postKind}), setIsNSFW: isNSFW => set({isNSFW}), reset: () => set(initial()), setTextTheme: textTheme => set({textTheme}), setActiveTextSlideIndex: () => {}, updateTextSlide: () => {}, addTextSlide: () => {}, removeTextSlide: () => {}, addTag: () => {}, removeTag: () => {} }));
     export const ui = create(set => ({ isSubmitLocked: false, tagInput: '', setTagInput: tagInput => set({tagInput}), setIsSubmitLocked: isSubmitLocked => set({isSubmitLocked}) }));
     export const camera = create(() => ({ result: null, clear: () => {} }));
@@ -34,9 +34,10 @@ const { build } = require('esbuild');
     '@dvnt/app/lib/stores/create-post-store': `export {store as useCreatePostStore} from 'composer-fixture';`,
     '@dvnt/app/lib/hooks/use-verified-gate': `import {fixture} from 'composer-fixture'; export const useVerifiedGate = () => (_action, callback) => { if(fixture.deferGate) fixture.gate = callback; else callback(); };`,
     '@dvnt/app/lib/hooks/use-publish-post': `import {fixture} from 'composer-fixture'; export const usePublishPost = () => draft => { fixture.published.push(draft.selectedMedia.map(item => ({...item}))); return 'fixture'; };`,
-    '@dvnt/app/lib/posts/publish-queue': `export const postPublishQueue = { whenFinished: async () => {} };`,
-    '@dvnt/app/lib/profile/new-member-progress': `export const fetchNewMemberProgress = async () => ({step:'complete',hasPost:true});`,
+    '@dvnt/app/lib/posts/publish-queue': `import {fixture} from 'composer-fixture'; export const postPublishQueue = { whenFinished: async () => { if(fixture.failPublish) throw Error('fixture publication failed'); if(fixture.deferPublish) await new Promise(resolve=>{fixture.finishPublish=resolve}); } };`,
+    '@dvnt/app/lib/profile/new-member-progress': `import {fixture} from 'composer-fixture'; export const fetchNewMemberProgress = async () => fixture.progress.shift() || ({step:'complete',hasPost:true});`,
     '@dvnt/app/lib/posts/first-post-event': `export const assertFirstPostPublishable = async () => {};`,
+    '@dvnt/app/lib/stores/auth-store': `export const useAuthStore={getState:()=>({user:{id:'fixture-member'}})};`,
     '@dvnt/app/lib/stores/first-post-offer-store': `export const useFirstPostOfferStore = {getState:()=>({clearPending:()=>{}})};`,
     '@dvnt/app/lib/stores/ui-store': `import {fixture} from 'composer-fixture'; export const useUIStore = selector => selector({showToast:(...args)=>fixture.toasts.push(args)});`,
     '@dvnt/app/lib/stores/camera-result-store': `export {camera as useCameraResultStore} from 'composer-fixture';`,
@@ -127,8 +128,32 @@ const { build } = require('esbuild');
     assert.match(fixture.toasts.at(-1)[1], /still being checked/);
     const late = probes()[0]; await cancel(); await act(async () => ready(late));
     fixture.deferGate = false;
+    window.sessionStorage.setItem('dvnt:review-return', JSON.stringify({userId:'fixture-member',target:'/feed/events/42/reviews',savedAt:Date.now()}));
+    fixture.progress = [{step:'first_post',hasPost:false}]; fixture.failPublish = true;
+    await act(async () => share().click());
+    assert.equal(fixture.routes.length, 0, 'failed first post must not redirect or consume review intent');
+    assert.ok(window.sessionStorage.getItem('dvnt:review-return'));
+    fixture.failPublish = false; fixture.published.length = 0;
+    fixture.progress = [{step:'first_post',hasPost:false}, {step:'complete',hasPost:true}];
     await act(async () => share().click()); assert.equal(fixture.published.length, 1);
+    assert.equal(fixture.routes.at(-1), '/feed/events/42/reviews', 'only confirmed first-post completion resumes review');
+    assert.equal(window.sessionStorage.getItem('dvnt:review-return'), null);
     assert.equal(fixture.published[0].length, 3); assert.equal(assets().length, 0);
+
+    await pick([image('cancel-first-post.jpg')]);
+    fixture.progress = [{step:'first_post',hasPost:false}, {step:'complete',hasPost:true}]; fixture.deferPublish = true;
+    window.sessionStorage.setItem('dvnt:review-return', JSON.stringify({userId:'fixture-member',target:'/feed/events/42/reviews',savedAt:Date.now()}));
+    await act(async () => share().click());
+    assert.equal(typeof fixture.finishPublish, 'function');
+    const routesBeforeClose = fixture.routes.length;
+    await act(async () => node.querySelector('[aria-label="Close"]').click());
+    await act(async () => fixture.finishPublish());
+    assert.equal(fixture.routes.length, routesBeforeClose + 1, 'Close is not followed by late publish navigation');
+    assert.equal(fixture.routes.at(-1), 'back');
+    assert.equal(assets().length, 1, 'late completion cannot reset a newer draft');
+    assert.equal(window.sessionStorage.getItem('dvnt:review-return'), null);
+    fixture.deferPublish = false; fixture.progress = [];
+    await act(async () => store.getState().reset());
 
     const allFiles = Array.from({ length: 10 }, (_, i) => [image(`still-${i}.jpg`), movie(`clip-${i}.mov`)]).flat();
     await pick(allFiles); await finishBatch(); assert.equal(assets().length, 20); assert.equal(share().disabled, true);

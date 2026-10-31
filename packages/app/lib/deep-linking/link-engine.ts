@@ -107,7 +107,7 @@ export function parseIncomingUrl(url: string): ParsedDeepLink | null {
     const match = matchRoute(path);
     const requiresAuth = match ? match.entry.auth === "auth-required" : true;
     const routerPath = match
-      ? buildRouterPath(match.entry.routerPath, { ...match.params, ...params })
+      ? buildRouterPath(match.entry.routerPath, { ...params, ...match.params })
       : path;
 
     // Merge route params with query params

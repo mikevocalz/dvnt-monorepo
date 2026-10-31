@@ -49,7 +49,7 @@ permissions:
   contents: read
 jobs:
   real-feed-playback:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Allow slow hosted Ubuntu mirrors without skipping any playback assertions.
     timeout-minutes: 45
     steps:

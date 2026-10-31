@@ -1,3 +1,4 @@
+import { authPathWithReturn, readReturnToFromUrl } from "../../../lib/auth/return-to";
 import { hydrateAuthProfile } from "@dvnt/app/lib/auth/hydrate-auth-profile";
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
@@ -67,7 +68,8 @@ export function SignupScreen() {
   }, [activeStep, verification.data?.state]);
   // Next app uses Solito/Next routing (no TanStack RouterProvider).
   const router = useRouter();
-  const navigate = ({ to }: { to: string }) => router.push(to);
+  const navigate = ({ to }: { to: "/auth/login" | "/auth/verify-email" }) =>
+    router.push(authPathWithReturn(to, readReturnToFromUrl('')));
 
   const form = useForm({
     defaultValues: { email: '', username: '', password: '', dateOfBirth: '' },
@@ -91,7 +93,7 @@ export function SignupScreen() {
         // move the stepper to show work is happening.
         setIsSubmitting(true);
         try {
-          const { data, error } = await signUp.email({ email: value.email, password: value.password, name: value.username, dateOfBirth: value.dateOfBirth, callbackURL: `${window.location.origin}/auth/verify-email` } as any);
+          const { data, error } = await signUp.email({ email: value.email, password: value.password, name: value.username, dateOfBirth: value.dateOfBirth, callbackURL: `${window.location.origin}${authPathWithReturn('/auth/verify-email', readReturnToFromUrl(''))}` } as any);
           if (error) throw Object.assign(new Error((error as any).message || 'Signup failed'), { code: (error as any).code });
           if (!data?.user) throw new Error('Could not create account — no user was returned.');
           if (data?.user) {
@@ -234,7 +236,7 @@ export function SignupScreen() {
               onPress={async () => {
                 setVerificationStartError(null);
                 try {
-                  const result = await startVerification.mutateAsync({ returnUrl: window.location.origin + '/auth/signup' });
+                  const result = await startVerification.mutateAsync({ returnUrl: window.location.origin + authPathWithReturn('/auth/signup', readReturnToFromUrl('')) });
                   if (result.status === 'passed') {
                     await verification.refetch();
                     setActiveStep(3);

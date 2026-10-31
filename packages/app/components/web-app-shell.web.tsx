@@ -17,6 +17,7 @@ import { Main } from "@dvnt/app/components/ui/html";
 import { useRouter, usePathname } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { routeIsImmersive, routeOwnsHeader } from "@dvnt/app/lib/web-chrome";
+import { clearReviewReturnOutsideSetup } from "@dvnt/app/lib/auth/review-return";
 import { guestEventRoute } from "@dvnt/app/lib/auth/guest-event-route";
 
 export function WebAppShell({
@@ -41,9 +42,14 @@ export function WebAppShell({
   const immersive = routeIsImmersive(pathname);
 
   useEffect(() => {
+    if (hasHydrated) clearReviewReturnOutsideSetup(pathname);
+  }, [hasHydrated, pathname]);
+
+  useEffect(() => {
     if (requireAuth && hasHydrated && !isAuthenticated) {
       // Existing/shared event links must keep guests on that event. Only the
-      // exact detail route has a public equivalent; member tools stay gated.
+      // exact detail route has a public equivalent; reviews retain their login
+      // return target, while member tools stay gated.
       router.replace(guestEventRoute(pathname, window.location.search) ?? "/");
     }
   }, [requireAuth, hasHydrated, isAuthenticated, pathname, router]);
