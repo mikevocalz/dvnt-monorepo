@@ -36,6 +36,7 @@ test('review intent survives setup reloads, is newest-wins, account-bound and si
 });
 
 test('only canonical positive event review paths may survive required setup', () => {
+  assert.equal(reviewReturnPath('/public/events/42/reviews'), '/feed/events/42/reviews');
   for (const value of ['/feed', '/auth/login', '//evil.invalid', '/feed/events/42/reviews?next=/feed',
     '/feed/events/0/reviews', '/feed/events/42/reviews\n', '/feed/events/42/reviews/../organizer']) {
     assert.equal(reviewReturnPath(value), null);

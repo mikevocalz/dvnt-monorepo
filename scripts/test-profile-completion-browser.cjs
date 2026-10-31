@@ -172,7 +172,9 @@ async function runScenarios(page, errors) {
   assert.equal(await postButton().count(), 0, 'photo precedes first post when both are missing');
   await dismissFails();
   count = await requestCount();
+  await update({path:'/public/events/42/reviews'}); await photoButton().waitFor();
   await photoButton().click(); await assertNoDialog();
+  assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('dvnt:review-return')).target), '/feed/events/42/reviews');
   assert.equal(await page.evaluate(() => window.fixture.navigations.at(-1)), '/feed/onboarding/photo');
   await unchangedRequests(count, 'photo action only navigates');
 

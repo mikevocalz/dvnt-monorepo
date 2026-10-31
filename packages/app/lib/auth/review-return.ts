@@ -4,7 +4,7 @@ const KEY = 'dvnt:review-return';
 const MAX_AGE_MS = 60 * 60 * 1000;
 
 export function reviewReturnPath(raw: string): string | null {
-  const match = /^\/feed\/events\/([1-9]\d*)\/reviews\/?$/.exec(raw);
+  const match = /^\/(?:feed|public)\/events\/([1-9]\d*)\/reviews\/?$/.exec(raw);
   return match && match[0] === raw && Number.isSafeInteger(Number(match[1]))
     ? `/feed/events/${match[1]}/reviews` : null;
 }

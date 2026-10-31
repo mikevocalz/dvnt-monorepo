@@ -99,7 +99,7 @@ export function CreatePostScreen() {
   const filePickVersion = useRef(0);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; filePickVersion.current += 1; };
+    return () => { mounted.current = false; filePickVersion.current += 1; useCreatePostUIStore.getState().setIsSubmitLocked(false); };
   }, []);
 
   // Preview tiles scale with the window instead of being frozen at two across —
@@ -209,10 +209,15 @@ export function CreatePostScreen() {
 
   // ---- Publish (same upload + mutation path as native) ----
 
-  const handlePost = () => guardVerified("post", () => void submitPost());
+  const handlePost = () => {
+    const operation = filePickVersion.current;
+    guardVerified("post", () => {
+      if (mounted.current && filePickVersion.current === operation) void submitPost();
+    });
+  };
 
   const submitPost = async () => {
-    if (submittingRef.current) return;
+    if (!mounted.current || submittingRef.current) return;
     // A ref closes the same-event/verification-delay race before React rerenders.
     if (pendingMediaRef.current || handoffPendingRef.current) {
       showToast("warning", "Media is still being checked", "Wait for the selected files or motion to finish, or cancel checking before sharing.");
@@ -224,24 +229,32 @@ export function CreatePostScreen() {
     }
     filePickVersion.current += 1;
     const submittingUserId = useAuthStore.getState().user?.id;
+    const operation = filePickVersion.current;
+    const stillCurrent = () => mounted.current && filePickVersion.current === operation &&
+      useAuthStore.getState().user?.id === submittingUserId;
     submittingRef.current = true;
     ui.setIsSubmitLocked(true);
     try {
       // Same publication-time visibility recheck as native.
       await assertFirstPostPublishable();
+      if (!stillCurrent()) return;
       // Ordinary members keep the background publish queue. During mandatory
       // first-post onboarding, do NOT clear the draft or navigate on enqueue:
       // only a successfully persisted server post unlocks the app.
       const progress = await fetchNewMemberProgress();
+      if (!stillCurrent()) return;
       const mandatoryFirstPost = progress.step === "first_post";
       const publishId = publishPost(useCreatePostStore.getState());
       if (mandatoryFirstPost) {
         await postPublishQueue.whenFinished(publishId);
+        if (!stillCurrent()) return;
         const checked = await fetchNewMemberProgress();
+        if (!stillCurrent()) return;
         if (checked.step !== "complete" || !checked.hasPost) {
           throw new Error("Your first post is still processing. Please retry after it finishes.");
         }
       }
+      if (!stillCurrent()) return;
       useFirstPostOfferStore.getState().clearPending();
       reset();
       ui.setTagInput("");
@@ -249,10 +262,10 @@ export function CreatePostScreen() {
         router.replace((mandatoryFirstPost ? consumeReviewReturn(submittingUserId) : null) || "/feed");
       }
     } catch (error) {
-      showToast("error", "Could not share", error instanceof Error ? error.message : "Please try again.");
+      if (stillCurrent()) showToast("error", "Could not share", error instanceof Error ? error.message : "Please try again.");
     } finally {
       submittingRef.current = false;
-      ui.setIsSubmitLocked(false);
+      if (stillCurrent()) ui.setIsSubmitLocked(false);
     }
   };
 
@@ -263,7 +276,7 @@ export function CreatePostScreen() {
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
-        <button onClick={() => { filePickVersion.current += 1; clearReviewReturn(); router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
+        <button onClick={() => { filePickVersion.current += 1; clearReviewReturn(); ui.setIsSubmitLocked(false); router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
           <X size={22} />
         </button>
         <h1 className="text-[17px] font-semibold">New Post</h1>
