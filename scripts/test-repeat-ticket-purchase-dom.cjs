@@ -615,3 +615,40 @@ test('service link change on the same mounted event replaces prior selection but
   assert.equal(ui.getState().selectedTierId, secondService.id, 'Forward restores the service choice');
   assert.equal(scenario.carts.length, 0);
 });
+
+for (const [description, initialSelection, initialQuery, nextQuery, expectedSelection] of [
+  ['GA sheet to Coat Check link', paid.id, '', `serviceTier=${service.id}`, service.id],
+  ['Coat Check sheet to another service link', service.id, `serviceTier=${service.id}`, 'serviceTier=55555555-5555-4555-8555-555555555555', '55555555-5555-4555-8555-555555555555'],
+  ['Back removes the Coat Check link', service.id, `serviceTier=${service.id}`, '', null],
+  ['stale service link points to a missing tier', service.id, `serviceTier=${service.id}`, 'serviceTier=synthetic-missing-service', 'synthetic-missing-service'],
+]) {
+  test(`changing the wallet URL closes an already-open checkout: ${description}`, async () => {
+    const otherService = { ...service, id: '55555555-5555-4555-8555-555555555555', name: 'Synthetic Drink Service' };
+    holderWithService(holderKinds[0]);
+    scenario.tiersQuery = query([paid, service, otherService]);
+    scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [paid, service, otherService] });
+    scenario.searchParams = initialQuery;
+    await render();
+    await click(tierButton(initialSelection));
+    await click(purchaseButton());
+    assert.equal(ui.getState().checkoutOpen, true);
+    assert.ok(document.querySelector('[role="dialog"]'));
+    const previousSubmit = submitButton();
+    scenario.searchParams = nextQuery;
+    await render();
+    assert.equal(ui.getState().selectedTierId, expectedSelection);
+    assert.equal(ui.getState().ticketQty, 1);
+    assert.equal(scenario.carts.length, 0, 'route changes never create an order');
+    assert.equal(scenario.memberCheckouts.length, 0);
+    assert.equal(ui.getState().checkoutOpen, false, 'new URL selection must not inherit the prior checkout consent');
+    assert.equal(document.querySelector('[role="dialog"]'), null);
+    await click(previousSubmit);
+    assert.equal(scenario.carts.length, 0, 'dismissed submit cannot create a cart for a changed target');
+    assert.equal(scenario.memberCheckouts.length, 0);
+    if (expectedSelection === service.id || expectedSelection === otherService.id) {
+      await click(purchaseButton());
+      assert.equal(ui.getState().checkoutOpen, true, 'the changed selection still has an explicit checkout path');
+      assert.equal(scenario.carts.length, 0);
+    }
+  });
+}

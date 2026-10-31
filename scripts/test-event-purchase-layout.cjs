@@ -338,10 +338,10 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       evidence.checks.push(size.name+': authenticated holder View ticket + Buy additional remain distinct, service selection and checkout dismissal, no overlap/overflow, minimum touch targets');
       // The wallet service link must select Coat Check for comp/scanned holders,
       // without routing through upgrades or opening a payment automatically.
+      await page.getByTestId('ticket-tier-'+PAID).click();await tick(page);
       for (const status of ['active','scanned']) {
         await page.evaluate(({serviceId,status})=>{
           history.replaceState(null,'','?serviceTier='+serviceId);
-          window.fixture.ui.getState().setSelectedTierId(null);
           window.fixture.configure({ownedTicket:{...window.fixture.ownedTicket,purchase_amount_cents:0,status}});
         },{serviceId:SERVICE,status});
         await tick(page);

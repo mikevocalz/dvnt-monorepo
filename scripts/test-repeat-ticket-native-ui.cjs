@@ -183,7 +183,7 @@ const destinationContext = {
 vm.runInNewContext(ts.transpileModule(`exports.Destination = () => {
   ${names.map(name => { assert.ok(nativeDeclarations.has(name), name); return 'const ' + nativeDeclarations.get(name) + ';'; }).join('\n')}
   ${selectionEffects.join('\n')}
-  const handleGetTickets = () => checkoutAttempts.push({ ticketTypeId: selectedTier?.id, quantity: ticketQty });
+  const handleGetTickets = entryHandler ?? (() => checkoutAttempts.push({ ticketTypeId: selectedTier?.id, quantity: ticketQty }));
   return <><div>${tierListSource}</div>${screenCtaSource}</>;
 };`, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, destinationContext);
 const dbAdmission = { id: paidTier.id, event_id: 42, name: paidTier.name, category: 'admission', price_cents: 2500, quantity_total: 20, quantity_sold: 20, max_per_user: 1, is_active: true, status: 'on_sale' };
@@ -196,7 +196,7 @@ async function destination({ requested = dbService.id, service = dbService, even
     liveTicketTypes: eventData.ticketTiers, ownedTickets: owned, hasTicket: true,
     isCheckingOut: false, isNativeCheckoutLoading: false, pendingNativeCheckout: null,
     isPast: false, isCancelled: false, handleViewTicket: () => state.credentials++,
-    checkoutAttempts: [], waitlistJoined: false, handleJoinWaitlist: () => {}, handleLeaveWaitlist: () => {},
+    checkoutAttempts: [], entryHandler: undefined, waitlistJoined: false, handleJoinWaitlist: () => {}, handleLeaveWaitlist: () => {},
     isWaitlistBusy: false, notifyOnSaleOpen: false, handleToggleSaleNotify: () => {},
   });
   await renderDestination();
@@ -277,4 +277,58 @@ test('native service link fails closed on authoritative category drift, then all
   await click(additional());
   assert.equal(destinationContext.checkoutAttempts.length, 1);
   assert.equal(destinationContext.checkoutAttempts[0].ticketTypeId, differentService.id);
+});
+
+test('native wallet URL changes preserve an earlier pending payment and actual recovery never starts another checkout', async () => {
+  const storage = new Map();
+  mocks['@dvnt/app/lib/mmkv-zustand'] = { mmkvStorage: {
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, JSON.parse(JSON.stringify(value))),
+    removeItem: key => storage.delete(key),
+  } };
+  const { useNativeTicketCheckoutStore: pendingStore, nativeTicketCheckoutKey } = loadNative(path.join(appRoot, 'lib/stores/native-ticket-checkout-store.ts'));
+  const { completeNativeTicketCheckout } = loadNative(path.join(appRoot, 'lib/tickets/native-checkout-outcome.ts'));
+  const key = nativeTicketCheckoutKey('synthetic-viewer', '42');
+  const original = { paymentIntentId: 'pi_synthetic_original_admission', ticketTypeId: dbAdmission.id, quantity: 2 };
+  pendingStore.getState().remember(key, original);
+  await destination();
+  let reads = 0;
+  let payments = 0;
+  const context = {
+    eventData: destinationContext.eventData, eventId: '42', viewerId: 'synthetic-viewer', nativeCheckoutKey: key,
+    useEventDetailScreenStore: nativeStore, useNativeTicketCheckoutStore: pendingStore,
+    setIsCheckingOut: nativeStore.getState().setIsCheckingOut, setTicketQty: nativeStore.getState().setTicketQty,
+    showToast: () => {}, promoCode: '', console,
+    nativeCheckout: async () => { payments++; assert.fail('pending recovery must not initiate another payment'); },
+    completeNativeTicketCheckout: input => completeNativeTicketCheckout({ ...input, wait: async () => {} }),
+    ticketsApi: { getMyTickets: async () => { reads++; return []; } },
+    qk: loadNative(path.join(appRoot, 'lib/query/keys.ts')).qk,
+    eventKeys: { all: ['events'] }, queryClient: { invalidateQueries: () => {} },
+  };
+  function actualCallback(name) {
+    const ast = ts.createSourceFile('callback.ts', 'const ' + nativeDeclarations.get(name) + ';', ts.ScriptTarget.Latest, true);
+    const body = ast.statements[0].declarationList.declarations[0].initializer.arguments[0].getText(ast);
+    return vm.runInNewContext(ts.transpileModule(`(${body});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
+  }
+  context.handleNativeTicketCheckout = actualCallback('handleNativeTicketCheckout');
+  const recover = actualCallback('handleGetTickets');
+  destinationContext.pendingNativeCheckout = pendingStore.getState().pending[key];
+  destinationContext.entryHandler = () => {
+    context.selectedTier = nativeStore.getState().selectedTier;
+    context.ticketQty = nativeStore.getState().ticketQty;
+    return recover();
+  };
+  for (const request of ['missing-service', dbService.id, undefined]) {
+    destinationContext.requestedServiceTierId = request;
+    await renderDestination();
+    assert.equal(JSON.stringify(pendingStore.getState().pending[key]), JSON.stringify(original));
+    assert.equal(additional(), undefined, 'original payment recovery has priority over the new selection');
+    assert.ok(button('Check ticket status'));
+  }
+  await click(button('Check ticket status'));
+  assert.equal(reads, 5, 'the actual outcome handler only polls original payment issuance');
+  assert.equal(payments, 0);
+  assert.equal(JSON.stringify(pendingStore.getState().pending[key]), JSON.stringify(original), 'a URL/quantity change cannot replace or clear the pending purchase');
+  assert.deepEqual(destinationContext.checkoutAttempts, []);
+  pendingStore.getState().clear(key);
 });

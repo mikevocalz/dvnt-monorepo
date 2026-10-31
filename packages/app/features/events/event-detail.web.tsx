@@ -438,9 +438,11 @@ export function EventDetailScreen() {
   // Keep a missing/sold-out request selected so it cannot silently become GA.
   useEffect(() => {
     if (!eventId) return;
+    // A different URL selection never inherits consent from an open sheet.
+    setCheckoutOpen(false);
     setSelectedTierId(requestedServiceTierId ?? null);
     setTicketQty(1);
-  }, [requestedServiceTierId, eventId, setSelectedTierId, setTicketQty]);
+  }, [requestedServiceTierId, eventId, setSelectedTierId, setTicketQty, setCheckoutOpen]);
 
 
   // Sale-open reminder. Same store and same `toggle-sale-notify` edge function

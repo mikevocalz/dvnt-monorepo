@@ -108,7 +108,7 @@ test(process.env.POSTGRES_SINGLE_USER ? 'repeat purchases: actual PostgreSQL seq
         const unchangedAdmission = await ticketSnapshot(original.id);
 
         const paidServiceId = await tier('service', 1, 1000, 20);
-        assert.equal((await sql('SELECT ticket_buyer_reserved_quantity($1,$2,NULL) AS n', [paidServiceId,buyer]))[0].n, 0);
+        assert.equal(Number((await sql('SELECT ticket_buyer_reserved_quantity($1,$2,NULL) AS n', [paidServiceId,buyer]))[0].n), 0);
         const serviceCart = await cart(paidServiceId, buyer);
         assert.equal((await holdCart(serviceCart)).ok, true);
         const paidService = await payCart(serviceCart, buyer);
