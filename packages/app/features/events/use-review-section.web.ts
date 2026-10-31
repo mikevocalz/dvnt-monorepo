@@ -18,7 +18,7 @@ export function useReviewSection(eventId: string | number | null | undefined, re
       const rect = section.getBoundingClientRect();
       if (rect.height <= 0) return; // hidden/unmounted surface, not a layout target
       let inset = parseFloat(window.getComputedStyle(section).scrollMarginTop) || 96;
-      for (const header of document.querySelectorAll("header")) {
+      for (const header of Array.from(document.querySelectorAll("header"))) {
         const style = window.getComputedStyle(header);
         const box = header.getBoundingClientRect();
         if ((style.position === "fixed" || style.position === "sticky") &&
@@ -44,7 +44,7 @@ export function useReviewSection(eventId: string | number | null | undefined, re
     if (typeof window.ResizeObserver === "function") {
       observer = new window.ResizeObserver(clearOverlap);
       observer.observe(document.body);
-      for (const header of document.querySelectorAll("header")) observer.observe(header);
+      for (const header of Array.from(document.querySelectorAll("header"))) observer.observe(header);
     }
     // Only initial media/font settling: never retain an indefinite scroll lock.
     settleTimer = setTimeout(stop, 3000);
