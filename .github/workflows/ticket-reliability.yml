@@ -46,6 +46,8 @@ jobs:
           node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Organizer platform fee reporting
+        run: pnpm test:platform-fees
       - run: pnpm verify:issuance
       - run: pnpm verify:release
       - name: Guest, native, hosted, delivery, refund and check-in contracts

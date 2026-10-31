@@ -22,6 +22,7 @@ import {
   corsHeaders,
   optionsResponse,
 } from "../_shared/verify-session.ts";
+import { loadCachedOrganizerPlatformFees } from "../_shared/organizer-platform-fee-cache.ts";
 import { readAllRows } from "../_shared/read-all-rows.ts";
 import { ADDON_REVENUE_SELECT, addonKeptCents } from "../_shared/addon-revenue.ts";
 
@@ -238,6 +239,9 @@ Deno.serve(async (req: Request) => {
     tonight.sort(byStart);
     upcoming.sort(byStart);
 
+    // Reporting cache only: no payment, ticket or payout mutation.
+    const platformFees = await loadCachedOrganizerPlatformFees(supabase, authId, eventIds, new Date());
+
     return json(
       {
         ok: true,
@@ -246,6 +250,7 @@ Deno.serve(async (req: Request) => {
           stats: {
             monthSold,
             monthRevenueCents,
+            platformFees,
             scanRate, // null if no past events
           },
           tonight,

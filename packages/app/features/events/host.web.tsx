@@ -1,11 +1,13 @@
 "use client";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { platformFeePresentation } from "@dvnt/app/lib/organizer/platform-fees";
 
 /**
  * Host Multi-Event Dashboard — web (port of native
  * `app/(protected)/events/host.tsx`).
  *
  * Law 1 (data is sacred): wires the EXACT native data flow — TanStack Query
- * `useQuery({ queryKey: ["host-dashboard"], queryFn: getHostDashboard })` from
+ * Account-scoped host dashboard query from
  * `@dvnt/app/lib/api/privileged`, plus `tierAccent` from
  * `@dvnt/app/lib/theme/tier-colors`. Stats row + TONIGHT / UPCOMING /
  * collapsible DRAFTS + PAST sections mirror native 1:1.
@@ -290,13 +292,17 @@ function SavedDrafts({
 
 export function HostScreen() {
   const router = useRouter();
+  const user = useAuthStore(s => s.user);
+  const accountKey = user ? `${user.id}:${user.authId || ""}` : "";
   const q = useQuery({
-    queryKey: ["host-dashboard"],
+    queryKey: ["host-dashboard", accountKey],
+    enabled: !!accountKey,
     queryFn: getHostDashboard,
     staleTime: 30_000,
   });
   const savedDrafts = useQuery({
-    queryKey: ["event-drafts"],
+    queryKey: ["event-drafts", accountKey],
+    enabled: !!accountKey,
     queryFn: async () => {
       const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
       return eventDraftsApi.list();
@@ -405,7 +411,7 @@ export function HostScreen() {
         <h1 className="flex-1 text-[17px] font-semibold">Host Dashboard</h1>
       </div>
 
-      {q.isLoading ? (
+      {q.isLoading || !accountKey ? (
         <div className="flex flex-col items-center justify-center py-24">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-cyan-500" />
         </div>
@@ -449,6 +455,17 @@ export function HostScreen() {
               accent={tierAccent("free")}
             />
           </div>
+
+          <section aria-label="DVNT platform fees" className="mx-2 mb-4 min-w-0 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+            <p className="mb-3 text-xs leading-relaxed text-white/50">{platformFeePresentation(data.stats.platformFees).period}</p>
+            <h2 className="text-sm font-medium text-white/80">DVNT platform fees</h2>
+            <p className="mt-2 break-words text-2xl font-semibold tabular-nums text-cyan-200">{platformFeePresentation(data.stats.platformFees).amount}</p>
+            <p className="mt-2 text-xs text-white/50">Stripe processing fees excluded</p>
+            {platformFeePresentation(data.stats.platformFees).through && <p className="mt-2 text-xs text-white/50">{platformFeePresentation(data.stats.platformFees).through}</p>}
+            {platformFeePresentation(data.stats.platformFees).asOf && <p className="mt-2 text-xs text-white/50">{platformFeePresentation(data.stats.platformFees).asOf}</p>}
+            {platformFeePresentation(data.stats.platformFees).noTransactions && <p className="mt-3 text-xs text-white/50">No transactions this month</p>}
+            {platformFeePresentation(data.stats.platformFees).unavailable && <p className="mt-3 text-xs text-white/50">{data.stats.platformFees?.status === "pending" ? "Verification pending" : "Verified total unavailable"}</p>}
+          </section>
 
           <SavedDrafts
             drafts={savedDrafts.data ?? []}
