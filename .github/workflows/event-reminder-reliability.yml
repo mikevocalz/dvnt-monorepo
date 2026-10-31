@@ -1,0 +1,34 @@
+name: Event reminder reliability
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
+      - 'package.json'
+      - '.github/workflows/event-reminder-reliability.yml'
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  reminder-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/reminder-tests" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.28.1 typescript@5.9.2 pg@8.21.0
+      - name: Offline actual handler and delivery regression tests
+        env:
+          NODE_PATH: ${{ runner.temp }}/reminder-tests/node_modules
+        run: npm run test:event-reminders
+      - name: Disposable socket-only PostgreSQL reservations and concurrency
+        env:
+          NODE_PATH: ${{ runner.temp }}/reminder-tests/node_modules
+        run: npm run test:event-reminders:sql
