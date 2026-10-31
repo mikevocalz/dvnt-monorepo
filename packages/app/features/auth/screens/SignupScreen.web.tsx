@@ -1,3 +1,4 @@
+import { rememberSignupContinuation } from "../../../lib/auth/signup-continuation";
 import { authPathWithReturn, readReturnToFromUrl } from "../../../lib/auth/return-to";
 import { hydrateAuthProfile } from "@dvnt/app/lib/auth/hydrate-auth-profile";
 import { useEffect, useState } from 'react';
@@ -97,6 +98,8 @@ export function SignupScreen() {
           if (error) throw Object.assign(new Error((error as any).message || 'Signup failed'), { code: (error as any).code });
           if (!data?.user) throw new Error('Could not create account — no user was returned.');
           if (data?.user) {
+            rememberSignupContinuation(data.user.id);
+            try { window.sessionStorage.setItem('dvnt:signup:verification', 'pending'); } catch { /* optional */ }
             let profile: any;
             try { profile = await syncAuthUser(); } catch { profile = await auth.getProfile(data.user.id, data.user.email); }
             if (profile) setUser(hydrateAuthProfile(profile));

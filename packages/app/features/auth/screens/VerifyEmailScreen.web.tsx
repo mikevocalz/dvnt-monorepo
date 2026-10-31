@@ -1,3 +1,4 @@
+import { clearSignupContinuation } from "../../../lib/auth/signup-continuation";
 import { loginPathWithReturn, readReturnToFromUrl } from "../../../lib/auth/return-to";
 import { useAuthStore } from "../../../lib/stores/auth-store";
 import { invalidateProfileCompletion } from "../../../lib/profile/profile-completion-invalidation";
@@ -32,6 +33,7 @@ export function VerifyEmailScreen() {
         const onVerified = () => {
           if (cancelled) return;
           invalidateProfileCompletion(verifyingMember);
+          clearSignupContinuation();
           setStatus('success');
           toast.success('Email verified', { description: 'Your email has been confirmed' });
           // '/story' is not a route. Bare /story 404s — next.config only

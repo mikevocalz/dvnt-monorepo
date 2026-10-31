@@ -247,7 +247,7 @@ export function LoginScreen() {
             <View style={styles.signupRow}>
               <Text style={styles.muted}>Don't have an account?</Text>
               <Pressable
-                onPress={() => router.push(authPathWithReturn('/auth/signup', readReturnToFromUrl('')))}
+                onPress={() => router.push(authPathWithReturn('/auth/signup', readReturnToFromUrl('')) + (readReturnToFromUrl('') ? '&' : '?') + 'entry=login')}
                 accessibilityRole="link"
               >
                 <Text style={[styles.link, styles.signupLink, { color: P }]}>Sign up</Text>
