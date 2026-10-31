@@ -156,6 +156,15 @@ export const ROUTE_REGISTRY: RouteEntry[] = [
     label: "Event Reviews",
   },
   {
+    // Android currently claims the whole host, including browser email paths.
+    // Future builds must route this spelling too; old installs need a browser.
+    urlPattern: "/public/events/:id/reviews",
+    routerPath: "/(protected)/events/:id/reviews",
+    auth: "auth-required",
+    paramsSchema: eventReviewSchema,
+    label: "Event Reviews (email alias)",
+  },
+  {
     urlPattern: "/events/:id/reviews",
     routerPath: "/(protected)/events/:id/reviews",
     auth: "auth-required",
