@@ -11,12 +11,13 @@ import {
   Platform,
   Alert,
   TextInput,
+  type ScrollView,
 } from "react-native";
 // Galeria → MediaLightbox temporary swap (iOS 26 gesture issue, no native dep)
 import { useEventLynkEntry } from "@dvnt/app/lib/hooks/use-event-lynk-entry";
 import { MediaLightbox as Galeria } from "@dvnt/app/components/media/MediaLightbox";
 import { LegendList } from "@dvnt/app/components/list";
-import React, { useEffect, useCallback, useMemo } from "react";
+import React, { useEffect, useCallback, useMemo, useRef } from "react";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
@@ -332,7 +333,7 @@ function EventDetailScreenContent() {
   // DEV-only loop detection
   useRenderLoopDetector("EventDetail");
 
-  const rawParams = useLocalSearchParams<{ id: string; ref?: string; serviceTier?: string }>();
+  const rawParams = useLocalSearchParams<{ id: string; ref?: string; serviceTier?: string; section?: string }>();
   const requestedServiceTierId = Array.isArray(rawParams.serviceTier) ? rawParams.serviceTier[0] : rawParams.serviceTier;
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -343,6 +344,26 @@ function EventDetailScreenContent() {
     [rawParams.id],
   );
   const eventId = normalizedParams.id || "";
+  const requestedSection = rawParams.section === "reviews" ? "reviews" : null;
+  const detailsScrollRef = useRef<ScrollView>(null);
+  const sectionLayout = useRef<{ eventId: string; contentY?: number; reviewsY?: number; handled: boolean }>({ eventId, handled: false });
+  if (sectionLayout.current.eventId !== eventId) {
+    sectionLayout.current = { eventId, handled: false };
+  }
+  const scrollToRequestedSection = useCallback(() => {
+    const layout = sectionLayout.current;
+    if (requestedSection !== "reviews" || layout.eventId !== eventId || layout.handled ||
+      layout.contentY === undefined || layout.reviewsY === undefined || !detailsScrollRef.current) return;
+    detailsScrollRef.current.scrollTo({
+      y: Math.max(0, layout.contentY + layout.reviewsY - insets.top - 64),
+      animated: false,
+    });
+    layout.handled = true;
+  }, [eventId, requestedSection, insets.top]);
+  useEffect(() => {
+    sectionLayout.current.handled = false;
+    scrollToRequestedSection();
+  }, [scrollToRequestedSection]);
 
   // A tracked promoter ref follows the buyer into checkout and is also bound
   // to the signed-in account, so login/navigation/device changes do not drop
@@ -1940,6 +1961,8 @@ function EventDetailScreenContent() {
       {/* Capped reading column. The header below is deliberately OUTSIDE it. */}
       <View style={s.root}>
       <Animated.ScrollView
+        ref={detailsScrollRef}
+        onContentSizeChange={scrollToRequestedSection}
         style={s.scroll}
         showsVerticalScrollIndicator={false}
         onScroll={scrollHandler}
@@ -2050,7 +2073,11 @@ function EventDetailScreenContent() {
         </View>
 
         {/* ── 2. CORE INFO BLOCK ───────────────────────────────── */}
-        <View style={s.content}>
+        <View key={eventId} style={s.content} onLayout={(event) => {
+          if (sectionLayout.current.eventId !== eventId) return;
+          sectionLayout.current.contentY = event.nativeEvent.layout.y;
+          scrollToRequestedSection();
+        }}>
           {/* Identity first. The title used to be the SEVENTH element on
               this screen — below the hero, a cancellation banner, a sale
               card, the tier selector, a promo-code field and an "Upgrade
@@ -2725,7 +2752,11 @@ function EventDetailScreenContent() {
           </View>
 
           {/* ── Ratings & Reviews ─────────────────────────────────── */}
-          <View style={s.section}>
+          <View style={s.section} onLayout={(event) => {
+            if (sectionLayout.current.eventId !== eventId) return;
+            sectionLayout.current.reviewsY = event.nativeEvent.layout.y;
+            scrollToRequestedSection();
+          }}>
             <View style={s.sectionHeader}>
               <View style={s.sectionHeaderLeft}>
                 <Star size={18} color="#FFD700" />

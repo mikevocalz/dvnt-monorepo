@@ -2,6 +2,10 @@ name: Review email auth return
 on:
   pull_request:
     paths:
+      - 'packages/app/features/events/**'
+      - 'packages/app/features/routes/screens/(protected)/events/**'
+      - 'scripts/test-review-section-dom.cjs'
+      - 'scripts/test-event-review-detail-dom.cjs'
       - 'packages/app/lib/auth/**'
       - 'packages/app/lib/deep-linking/**'
       - 'apps/web/src/app/(frontend)/public/events/**'
@@ -36,3 +40,8 @@ jobs:
         run: NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-browser-live-photo-import-dom.cjs
       - name: Native routes and browser-only email landing
         run: NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-review-native-links.cjs
+      - name: Existing detail section scroll and auth handoff
+        run: |
+          NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-review-section-dom.cjs
+          REVIEW_SECTION_TARGET=1 NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-review-auth-return-dom.cjs
+          NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-event-review-detail-dom.cjs

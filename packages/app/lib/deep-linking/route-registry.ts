@@ -148,6 +148,14 @@ export const ROUTE_REGISTRY: RouteEntry[] = [
   },
 
   // ── Events ─────────────────────────────────────────────────────────
+  // Email links target the existing event detail section, not the all-reviews screen.
+  ...["/public/events/:id", "/feed/events/:id"].map((urlPattern): RouteEntry => ({
+    urlPattern,
+    routerPath: "/(protected)/events/:id",
+    auth: "auth-required",
+    paramsSchema: eventReviewSchema,
+    label: "Event Detail (email alias)",
+  })),
   {
     urlPattern: "/feed/events/:id/reviews",
     routerPath: "/(protected)/events/:id/reviews",

@@ -12,7 +12,7 @@ const dom = new JSDOM('<div id="root"></div>', { url: 'https://fixture.invalid/'
 Object.assign(global, { window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage });
 global.IS_REACT_ACT_ENVIRONMENT = true;
 dom.window.HTMLMediaElement.prototype.play = () => Promise.resolve();
-const target = '/feed/events/42/reviews';
+const target = process.env.REVIEW_SECTION_TARGET === '1' ? '/feed/events/42?section=reviews' : '/feed/events/42/reviews';
 let state, onSubmit, root;
 const noop = () => {};
 const router = { replace: p => state.navigation.push(p), push: p => state.navigation.push(p), back: noop };
@@ -83,7 +83,7 @@ async function mount(file, exportName, pathname, options={}) {
   assert.deepEqual(state.navigation, [], 'wait for hydration');
   await mount(shell, 'WebAppShell', target, {auth:{isAuthenticated:false,_hasHydrated:true}});
   assert.deepEqual(state.navigation, ['/auth/login?returnTo='+encodeURIComponent(target)]);
-  await mount(shell, 'WebAppShell', '/public/events/42/reviews', {auth:{isAuthenticated:false,_hasHydrated:true}});
+  await mount(shell, 'WebAppShell', (process.env.REVIEW_SECTION_TARGET === '1' ? target : '/public/events/42/reviews'), {auth:{isAuthenticated:false,_hasHydrated:true}});
   assert.deepEqual(state.navigation, ['/auth/login?returnTo='+encodeURIComponent(target)], 'browser email landing is still gated');
   await mount(shell, 'WebAppShell', '/public/events/42/reviews');
   assert.deepEqual(state.navigation, [], 'signed-in browser landing stays on same event review surface');

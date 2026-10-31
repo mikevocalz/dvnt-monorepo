@@ -58,3 +58,9 @@ test("review path tricks cannot create a login return target or public bypass", 
     assert.equal(guestEventRoute(path), null, path);
   }
 });
+
+test('detail review section auth target excludes unrelated query instructions', () => {
+  const result = guestEventRoute('/feed/events/82', '?section=reviews&returnTo=//evil.invalid&id=85&rating=5')!;
+  assert.equal(new URL(result, 'https://fixture.invalid').searchParams.get('returnTo'), '/feed/events/82?section=reviews');
+  assert.ok(!guestEventRoute('/feed/events/82', '?section=reviews&section=other')?.startsWith('/auth/'));
+});

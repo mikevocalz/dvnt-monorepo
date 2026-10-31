@@ -13,6 +13,11 @@ export function guestEventRoute(pathname: string, search = ""): string | null {
   const match = /^\/feed\/events\/([1-9]\d*)\/?$/.exec(pathname);
   if (!match || match[0] !== pathname || !Number.isSafeInteger(Number(match[1]))) return null;
 
+  const section = new URLSearchParams(search);
+  if (section.getAll("section").length === 1 && section.get("section") === "reviews") {
+    return loginPathWithReturn(`/feed/events/${match[1]}?section=reviews`);
+  }
+
   // Keep event/ticket/promotion/payment parameters as query data, never as a
   // navigation destination. Serializing also encodes fragments and controls.
   const params = new URLSearchParams(search);
