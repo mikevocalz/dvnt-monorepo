@@ -346,7 +346,8 @@ export default function ProtectedLayout() {
           progress.step === "complete" || progress.step === "pending_verification") return;
       const path = memberPath.toLowerCase();
       // Ticket buying, identity flow and saved tickets must never be blocked.
-      if (/\/(checkout|payment|tickets?|orders?)(\/|$)/.test(path)) return;
+      if (path === "/events/my-tickets" ||
+          /\/(checkout|payment|tickets?|orders?)(\/|$)/.test(path)) return;
       if (progress.step === "photo") {
         if (path !== "/edit-profile" && path !== "/profile/edit") {
           memberRouter.replace("/(protected)/edit-profile" as any);
