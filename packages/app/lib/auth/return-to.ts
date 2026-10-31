@@ -66,3 +66,18 @@ export function isStaffReturnTo(returnTo: string): boolean {
     path.startsWith("/console/")
   );
 }
+
+/** Carry the validated destination through optional first-browser welcome. */
+export function welcomePathWithReturn(returnTo?: string | null): string {
+  const safe = safeReturnTo(returnTo, "");
+  return safe ? `/auth/welcome?returnTo=${encodeURIComponent(safe)}` : "/auth/welcome";
+}
+
+/** Auth screens carry intent as URL data, so refreshes/new verification tabs work. */
+export function authPathWithReturn(
+  path: "/auth/signup" | "/auth/verify-email" | "/auth/login",
+  returnTo?: string | null,
+): string {
+  const safe = safeReturnTo(returnTo, "");
+  return safe ? `${path}?returnTo=${encodeURIComponent(safe)}` : path;
+}

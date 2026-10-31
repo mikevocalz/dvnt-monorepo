@@ -1,3 +1,4 @@
+import { loginPathWithReturn, readReturnToFromUrl } from "../../../lib/auth/return-to";
 import { useAuthStore } from "../../../lib/stores/auth-store";
 import { invalidateProfileCompletion } from "../../../lib/profile/profile-completion-invalidation";
 import { useState, useEffect } from 'react';
@@ -15,15 +16,21 @@ export function VerifyEmailScreen() {
   const [status, setStatus] = useState<Status>('checking');
   // Next app uses Solito/Next routing (no TanStack RouterProvider).
   const router = useRouter();
-  const navigate = ({ to }: { to: string }) => router.push(to);
+  const navigate = ({ to }: { to: string }) => router.push(
+    to === '/auth/login' ? loginPathWithReturn(readReturnToFromUrl('')) : to,
+  );
 
   useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const destination = readReturnToFromUrl('/feed');
     const verifyingMember = useAuthStore.getState().user;
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
     const verify = async () => {
       if (token) {
         const onVerified = () => {
+          if (cancelled) return;
           invalidateProfileCompletion(verifyingMember);
           setStatus('success');
           toast.success('Email verified', { description: 'Your email has been confirmed' });
@@ -31,7 +38,7 @@ export function VerifyEmailScreen() {
           // redirects /story/:id to /feed/story/:id — so confirming an email
           // dropped the member on a dead page at the exact moment they had
           // just done what we asked. The authenticated web app is /feed.
-          setTimeout(() => navigate({ to: '/feed' }), 2000);
+          timer = setTimeout(() => { if (!cancelled) router.replace(destination); }, 2000);
         };
         // Token-based verification (cookie-independent) — same reason as reset.
         try {
@@ -49,12 +56,13 @@ export function VerifyEmailScreen() {
             return;
           }
         } catch {}
-        setStatus('error');
+        if (!cancelled) setStatus('error');
       } else {
         setStatus('waiting');
       }
     };
     void verify();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, []);
 
   const handleResend = async () => {

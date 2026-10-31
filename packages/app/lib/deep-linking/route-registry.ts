@@ -26,6 +26,7 @@ export interface RouteEntry {
 
 const usernameSchema = z.object({ username: z.string().min(1) });
 const idSchema = z.object({ id: z.string().min(1) });
+const eventReviewSchema = z.object({ id: z.string().regex(/^[1-9]\d*$/).refine(id => Number.isSafeInteger(Number(id))) });
 const postIdSchema = z.object({ postId: z.string().min(1) });
 const commentIdSchema = z.object({ commentId: z.string().min(1) });
 const roomIdSchema = z.object({ roomId: z.string().min(1) });
@@ -147,6 +148,20 @@ export const ROUTE_REGISTRY: RouteEntry[] = [
   },
 
   // ── Events ─────────────────────────────────────────────────────────
+  {
+    urlPattern: "/feed/events/:id/reviews",
+    routerPath: "/(protected)/events/:id/reviews",
+    auth: "auth-required",
+    paramsSchema: eventReviewSchema,
+    label: "Event Reviews",
+  },
+  {
+    urlPattern: "/events/:id/reviews",
+    routerPath: "/(protected)/events/:id/reviews",
+    auth: "auth-required",
+    paramsSchema: eventReviewSchema,
+    label: "Event Reviews (alias)",
+  },
   {
     urlPattern: "/e/:id",
     routerPath: "/(protected)/events/:id",

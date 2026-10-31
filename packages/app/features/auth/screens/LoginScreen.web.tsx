@@ -13,7 +13,7 @@ import { useAuthStore } from '../../../lib/stores/auth-store';
 import { useLoginUiStore } from '../../../lib/stores/login-ui-store';
 import { syncAuthUser } from '../../../lib/api/privileged';
 import { auth } from '../../../lib/api/auth';
-import { isStaffReturnTo, loginPathWithReturn, readReturnToFromUrl } from '../../../lib/auth/return-to';
+import { isStaffReturnTo, loginPathWithReturn, readReturnToFromUrl, welcomePathWithReturn, authPathWithReturn } from '../../../lib/auth/return-to';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
 
 /**
@@ -84,7 +84,7 @@ export function LoginScreen() {
             // Honor intent: return to the gated URL the user came from
             // (validated internal-only), else the feed.
             const destination = readReturnToFromUrl('/feed');
-            router.replace(welcomeDone || isStaffReturnTo(destination) ? destination : '/auth/welcome');
+            router.replace(welcomeDone || isStaffReturnTo(destination) ? destination : welcomePathWithReturn(destination));
           } else {
             toast.error('Login Failed', { description: 'Could not load user profile from database' });
           }
@@ -247,7 +247,7 @@ export function LoginScreen() {
             <View style={styles.signupRow}>
               <Text style={styles.muted}>Don't have an account?</Text>
               <Pressable
-                onPress={() => router.push('/auth/signup')}
+                onPress={() => router.push(authPathWithReturn('/auth/signup', readReturnToFromUrl('')))}
                 accessibilityRole="link"
               >
                 <Text style={[styles.link, styles.signupLink, { color: P }]}>Sign up</Text>

@@ -1,0 +1,140 @@
+// Mount production auth surfaces with fixture IO; no real accounts or network.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const ts = require('typescript');
+const React = require('react');
+const { createRoot } = require('react-dom/client');
+const { JSDOM } = require('jsdom');
+const ROOT = path.resolve(__dirname, '..');
+const dom = new JSDOM('<div id="root"></div>', { url: 'https://fixture.invalid/' });
+Object.assign(global, { window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage });
+global.IS_REACT_ACT_ENVIRONMENT = true;
+dom.window.HTMLMediaElement.prototype.play = () => Promise.resolve();
+const target = '/feed/events/42/reviews';
+let state, onSubmit, root;
+const noop = () => {};
+const router = { replace: p => state.navigation.push(p), push: p => state.navigation.push(p), back: noop };
+const auth = (selector = x => x) => selector({ ...state.auth, setUser: user => { state.auth.user = user; state.auth.isAuthenticated = true; }, updateUser: noop });
+auth.getState = () => ({ ...state.auth, setUser: user => { state.auth.user = user; state.auth.isAuthenticated = true; } });
+const box = ({children}) => React.createElement('div', null, children);
+const button = ({children, onPress, onClick, ...props}) => React.createElement('button', { onClick: onPress || onClick, disabled: props.disabled }, children);
+const real = ['lib/auth/return-to', 'lib/auth/review-return', 'lib/auth/guest-event-route'];
+const caches = new Map();
+function load(relative) {
+  const file = path.resolve(ROOT, relative);
+  if (caches.has(file)) return caches.get(file);
+  const source = fs.readFileSync(file, 'utf8');
+  const exports = {}; caches.set(file, exports);
+  const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const imports = {};
+  for (const statement of ast.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const stub = imports[statement.moduleSpecifier.text] = { __esModule: true, default: () => null };
+    const named = statement.importClause?.namedBindings;
+    if (named && ts.isNamedImports(named)) for (const binding of named.elements) stub[(binding.propertyName || binding.name).text] = /^[A-Z]/.test(binding.name.text) ? () => null : noop;
+  }
+  const requireModule = name => {
+    if (name === 'react' || name === 'react/jsx-runtime') return require(name);
+    const match = real.find(s => name.includes(s));
+    if (match) return load(`packages/app/${match}.ts`);
+    if (name === './return-to.ts') return load('packages/app/lib/auth/return-to.ts');
+    if (name === 'react-native') return { View: box, Text: box, ScrollView: box, Pressable: button, StyleSheet: { create: x => x } };
+    if (name.endsWith('/navigation')) return { useRouter: () => router, usePathname: () => state.pathname };
+    if (name.includes('auth-store')) return { useAuthStore: auth };
+    if (name.includes('hydrate-auth-profile')) return { hydrateAuthProfile: x => x };
+    if (name.includes('auth-client')) return { authClient: {getSession:async()=>({data:{user:{email:'member@example.invalid',emailVerified:true}}})}, resendVerificationEmail:async()=>({}), submitEmailVerification:async()=>({}), signUp: {email: async args => {state.signup=args; return {data:{user:{id:'auth-a'}}};}}, signIn: { email: async () => ({data:{user:{id:'auth-a'}}}), social: async args => { state.social = args; return {}; }, magicLink: async args => { state.magic = args; return {}; } }, resumeAuthSession: async () => !state.failSession };
+    if (name.includes('api/privileged')) return { syncAuthUser: async () => ({id:'member-a'}), updateProfile: async () => {} };
+    if (name.includes('use-age-verification')) return {useVerificationState:()=>({data:{state:'not_started'},refetch:async()=>({data:{state:'approved'}})}),useStartVerification:()=>({isPending:false,mutateAsync:async args=>{state.didit=args;return {status:'passed'};}})};
+    if (name.includes('use-media-upload')) return {useMediaUpload:()=>({uploadSingle:async()=>({success:true,url:'https://fixture.invalid/avatar.jpg'})})};
+    if (name.includes('utils/age-verification')) return {validateDateOfBirth:()=>({errorMessage:null,isValid:true})};
+    if (name.includes('legal/content')) return {TERMS_OF_SERVICE_MD:'Fixture terms',PRIVACY_POLICY_MD:'Fixture privacy'};
+    if (name.includes('new-member-progress')) return { fetchNewMemberProgress: async () => state.progress };
+    if (name.includes('own-identity')) return { fetchOwnIdentity: async () => ({ ok: true, data: {} }), onboardingState: () => 'complete' };
+    if (name.includes('use-member-map')) return { useLocationSettings: () => ({}) };
+    if (name.includes('location-access-store')) return { useLocationAccessStore: Object.assign(() => ({}), {getState: () => ({})}), locationAllowedFor: () => false };
+    if (name.includes('login-ui-store')) return { useLoginUiStore: () => ({isSubmitting:false,setSubmitting:noop}) };
+    if (name === '@tanstack/react-form') return { useForm: opts => { onSubmit = opts.onSubmit; return { handleSubmit: noop, getFieldValue: () => 'member@example.invalid' }; } };
+    if (name === 'hls.js') return { __esModule:true, default: { isSupported: () => false } };
+    if (name.includes('ui/button')) return { Button: button };
+    if (name.includes('ui/html')) return { Main: box };
+    if (name.includes('web-chrome')) return { routeIsImmersive: () => false, routeOwnsHeader: () => false };
+    if (name.includes('events-location-store')) return { useEventsLocationStore: () => ({}) };
+    if (name.includes('constants/identity')) return { IDENTITY_OPTIONS: [], AUDIENCE_OPTIONS: [] };
+    if (name === 'sonner') return { toast: {error:noop,success:noop} };
+    return imports[name] || {};
+  };
+  const compiled = ts.transpileModule(source, { fileName:file, compilerOptions:{ module:ts.ModuleKind.CommonJS, jsx:ts.JsxEmit.ReactJSX, jsxImportSource:'react', target:ts.ScriptTarget.ES2022 } });
+  vm.runInNewContext(compiled.outputText, {exports,require:requireModule,window,document,localStorage,console,URL,URLSearchParams,Date,setTimeout,clearTimeout}, {filename:file});
+  return exports;
+}
+async function mount(file, exportName, pathname, options={}) {
+  if (root) await React.act(async () => root.unmount());
+  dom.reconfigure({ url: 'https://fixture.invalid' + pathname });
+  state = { pathname: pathname.split('?')[0], navigation:[], auth:{user:{id:'member-a'},isAuthenticated:true,_hasHydrated:true}, progress:{step:'complete'}, ...options };
+  const C = load(file)[exportName];
+  root = createRoot(document.getElementById('root'));
+  await React.act(async () => { root.render(React.createElement(C, options.componentProps || null, React.createElement('p',null,'Fixture content'))); });
+}
+(async () => {
+  const shell = 'packages/app/components/web-app-shell.web.tsx';
+  await mount(shell, 'WebAppShell', target, {auth:{isAuthenticated:false,_hasHydrated:false}});
+  assert.deepEqual(state.navigation, [], 'wait for hydration');
+  await mount(shell, 'WebAppShell', target, {auth:{isAuthenticated:false,_hasHydrated:true}});
+  assert.deepEqual(state.navigation, ['/auth/login?returnTo='+encodeURIComponent(target)]);
+  await mount(shell, 'WebAppShell', '/public/events/42/reviews', {auth:{isAuthenticated:false,_hasHydrated:true}});
+  assert.deepEqual(state.navigation, ['/auth/login?returnTo='+encodeURIComponent(target)], 'browser email landing is still gated');
+  await mount(shell, 'WebAppShell', '/public/events/42/reviews');
+  assert.deepEqual(state.navigation, [], 'signed-in browser landing stays on same event review surface');
+  await mount(shell, 'WebAppShell', target);
+  assert.deepEqual(state.navigation, [], 'signed-in review route remains unchanged');
+  await mount(shell, 'WebAppShell', '/feed/events/42/organizer', {auth:{isAuthenticated:false,_hasHydrated:true}});
+  assert.deepEqual(state.navigation, ['/'], 'management stays gated');
+  const loginUrl='/auth/login?returnTo='+encodeURIComponent(target);
+  await mount('packages/app/components/web-auth-redirect.web.tsx','RedirectIfAuthed',loginUrl,{componentProps:{to:target}});
+  assert.deepEqual(state.navigation,[target], 'profile CTA sends existing members to the review instead of duplicate signup');
+  for (const done of [true,false]) {
+    localStorage.clear(); if (done) localStorage.setItem('dvnt-welcome-member-a','1');
+    await mount('packages/app/features/auth/screens/LoginScreen.web.tsx','LoginScreen',loginUrl);
+    await React.act(async () => onSubmit({value:{email:'member@example.invalid',password:'fixture-only'}}));
+    assert.deepEqual(state.navigation,[done?target:'/auth/welcome?returnTo='+encodeURIComponent(target)]);
+    await mount('apps/web/src/app/(frontend)/auth/social-callback/page.tsx','default','/auth/social-callback?returnTo='+encodeURIComponent(target));
+    assert.deepEqual(state.navigation,[done?target:'/auth/welcome?returnTo='+encodeURIComponent(target)]);
+  }
+  await mount('apps/web/src/app/(frontend)/auth/social-callback/page.tsx','default','/auth/social-callback?error=cancelled&returnTo='+encodeURIComponent(target));
+  assert.deepEqual(state.navigation,[loginUrl], 'cancelled social auth retains retry target');
+  const welcomeUrl='/auth/welcome?returnTo='+encodeURIComponent(target);
+  await mount('packages/app/features/auth/screens/WelcomeScreen.web.tsx','WelcomeScreen',welcomeUrl);
+  assert.deepEqual(state.navigation,[target], 'completed profile returns to reviews');
+  for (const step of ['photo','first_post']) {
+    window.sessionStorage.clear();
+    await mount('packages/app/features/auth/screens/WelcomeScreen.web.tsx','WelcomeScreen',welcomeUrl,{progress:{step}});
+    assert.deepEqual(state.navigation,[step==='photo'?'/feed/onboarding/photo':'/feed/create']);
+    assert.equal(JSON.parse(window.sessionStorage.getItem('dvnt:review-return')).target,target, 'required setup retains intent without bypass');
+  }
+  const signupUrl='/auth/signup?returnTo='+encodeURIComponent(target);
+  await mount('packages/app/features/auth/screens/SignupScreen.web.tsx','SignupScreen',signupUrl);
+  await React.act(async () => onSubmit({value:{dateOfBirth:'1990-01-01'}}));
+  const terms = [...document.querySelectorAll('button')].find(b=>b.textContent.includes('I agree'));
+  assert.ok(terms);
+  await React.act(async () => terms.click());
+  await React.act(async () => onSubmit({value:{email:'member@example.invalid',password:'fixture-only',username:'member',dateOfBirth:'1990-01-01'}}));
+  assert.equal(state.signup.callbackURL,'https://fixture.invalid/auth/verify-email?returnTo='+encodeURIComponent(target));
+  const start = [...document.querySelectorAll('button')].find(b=>b.textContent.includes('Start secure'));
+  await React.act(async () => start.click());
+  assert.equal(state.didit.returnUrl,'https://fixture.invalid'+signupUrl);
+  const verifyUrl='/auth/verify-email?token=fixture&returnTo='+encodeURIComponent(target);
+  await mount('packages/app/features/auth/screens/VerifyEmailScreen.web.tsx','VerifyEmailScreen',verifyUrl);
+  await React.act(async () => new Promise(resolve=>setTimeout(resolve,2050)));
+  assert.deepEqual(state.navigation,[target], 'new-tab verification preserves review URL');
+  await mount('packages/app/features/auth/screens/VerifyEmailScreen.web.tsx','VerifyEmailScreen',verifyUrl);
+  await React.act(async () => root.unmount()); root=null;
+  await new Promise(resolve=>setTimeout(resolve,2050));
+  assert.deepEqual(state.navigation,[], 'leaving verification cancels delayed navigation');
+  window.sessionStorage.setItem('dvnt:review-return',JSON.stringify({userId:'member-a',target,savedAt:Date.now()}));
+  await mount('apps/web/src/app/(frontend)/feed/onboarding/photo/page.tsx','default','/feed/onboarding/photo');
+  assert.deepEqual(state.navigation,[target], 'server-complete setup consumes correct account return');
+  await React.act(async () => root.unmount());
+  console.log('PASS: mounted shell, password/OAuth login, cancellation retry, first-browser welcome, signup/ID/email verification, cancelled navigation, and required-setup handoff');
+})().catch(error=>{console.error(error);process.exitCode=1});

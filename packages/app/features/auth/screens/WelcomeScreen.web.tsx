@@ -1,3 +1,5 @@
+import { rememberReviewReturn } from "../../../lib/auth/review-return";
+import { readReturnToFromUrl } from "../../../lib/auth/return-to";
 import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
 import { locationAllowedFor, useLocationAccessStore } from "@dvnt/app/lib/stores/location-access-store";
 import { useEffect, useState } from 'react';
@@ -77,7 +79,7 @@ export function WelcomeScreen() {
     if (user?.id && typeof localStorage !== 'undefined') {
       localStorage.setItem(welcomeDoneKey(user.id), '1');
     }
-    router.replace('/feed');
+    router.replace(readReturnToFromUrl('/feed'));
   };
 
   // If identity is already saved (maybe on mobile), skip straight to the feed.
@@ -90,9 +92,12 @@ export function WelcomeScreen() {
     // optional location/interests welcome questions or the main app.
     try {
       const progress = await fetchNewMemberProgress();
+      if (progress.step === 'photo' || progress.step === 'first_post') {
+        rememberReviewReturn(userId, readReturnToFromUrl(''));
+      }
       if (progress.step === 'photo') { router.replace('/feed/onboarding/photo'); return; }
       if (progress.step === 'first_post') { router.replace('/feed/create'); return; }
-      if (progress.step === 'complete') { router.replace('/feed'); return; }
+      if (progress.step === 'complete') { router.replace(readReturnToFromUrl('/feed')); return; }
     } catch {
       // A network error is not proof onboarding is complete. The shared
       // site guard will retry rather than setting a client "done" flag.
@@ -281,7 +286,7 @@ export function WelcomeScreen() {
             </Text>
             <Button onPress={() => user?.id && void checkIdentity(user.id)}>Try again</Button>
             {/* Leave without the done flag, so welcome is offered again. */}
-            <Pressable onPress={() => router.replace('/feed')} accessibilityRole="button">
+            <Pressable onPress={() => router.replace(readReturnToFromUrl('/feed'))} accessibilityRole="button">
               <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 14, fontWeight: '700' }}>Not now</Text>
             </Pressable>
           </>

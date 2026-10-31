@@ -16,6 +16,9 @@
  * Camera links to /feed/camera. Avatars / media tiles are rounded SQUARES, no pills.
  */
 
+import { clearReviewReturn, consumeReviewReturn } from "@dvnt/app/lib/auth/review-return";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+
 import { getCaptionMetrics, validatePostCaption, MAX_CAPTION_LENGTH, MAX_CAPTION_RAW_LENGTH } from "@dvnt/app/lib/posts/post-caption";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -220,6 +223,7 @@ export function CreatePostScreen() {
       return;
     }
     filePickVersion.current += 1;
+    const submittingUserId = useAuthStore.getState().user?.id;
     submittingRef.current = true;
     ui.setIsSubmitLocked(true);
     try {
@@ -241,7 +245,9 @@ export function CreatePostScreen() {
       useFirstPostOfferStore.getState().clearPending();
       reset();
       ui.setTagInput("");
-      router.replace("/feed");
+      if (useAuthStore.getState().user?.id === submittingUserId) {
+        router.replace((mandatoryFirstPost ? consumeReviewReturn(submittingUserId) : null) || "/feed");
+      }
     } catch (error) {
       showToast("error", "Could not share", error instanceof Error ? error.message : "Please try again.");
     } finally {
@@ -257,7 +263,7 @@ export function CreatePostScreen() {
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
-        <button onClick={() => { filePickVersion.current += 1; router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
+        <button onClick={() => { filePickVersion.current += 1; clearReviewReturn(); router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
           <X size={22} />
         </button>
         <h1 className="text-[17px] font-semibold">New Post</h1>

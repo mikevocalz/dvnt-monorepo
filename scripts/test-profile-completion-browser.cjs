@@ -412,6 +412,7 @@ async function runScenarios(page, errors) {
       build.onResolve({ filter: /.*/ }, args => {
         if (Object.hasOwn(boundaries,args.path)) return {path:args.path,namespace:'fixture'};
         if (args.path === '@dvnt/ui') return {path:path.join(ROOT,'packages/ui/src/form/Dialog.web.tsx')};
+        if (args.path === '@dvnt/app/lib/auth/review-return') return {path:path.join(ROOT,'packages/app/lib/auth/review-return.ts')};
         if (args.path === '@dvnt/app/lib/auth/session-lifecycle') return {path:path.join(ROOT,'packages/app/lib/auth/session-lifecycle.ts')};
         if (args.path.startsWith('@dvnt/app/lib/profile/')) return {path:path.join(ROOT,'packages/app/lib/profile',args.path.split('/').at(-1)+'.ts')};
       });

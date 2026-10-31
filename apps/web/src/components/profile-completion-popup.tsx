@@ -1,5 +1,7 @@
 "use client";
 
+import { rememberReviewReturn } from "@dvnt/app/lib/auth/review-return";
+
 import { usePathname, useRouter } from "next/navigation";
 import { ArrowUpRight, Camera, CheckCircle2, ImagePlus, PenLine, Sparkles } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
@@ -187,7 +189,7 @@ export function ProfileCompletionPopup() {
         <button
           type="button"
           data-autofocus
-          onClick={() => router.push(action.to)}
+          onClick={() => { rememberReviewReturn(user?.id, pathname); router.push(action.to); }}
           className="flex min-h-13 w-full items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-[#35D2EF] to-[#B75BE8] px-4 py-3 text-left text-[15px] font-extrabold text-[#07040C] transition-transform hover:scale-[1.01] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#35D2EF]"
         >
           <span className="flex items-center gap-3">

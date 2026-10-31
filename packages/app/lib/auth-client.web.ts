@@ -1,3 +1,4 @@
+import { authPathWithReturn, readReturnToFromUrl } from "./auth/return-to";
 /**
  * Better Auth Client for Web (Vite)
  * Uses cookies + credentials:include — no expo-secure-store, no @better-auth/expo
@@ -111,7 +112,7 @@ export async function resendVerificationEmail(email: string) {
   // verify screen so the click lands back on a working page.
   const callbackURL =
     typeof window !== "undefined"
-      ? `${window.location.origin}/auth/verify-email`
+      ? `${window.location.origin}${authPathWithReturn('/auth/verify-email', readReturnToFromUrl(''))}`
       : "https://dvntapp.live/auth/verify-email";
   return recoveryClient.sendVerificationEmail({ email, callbackURL });
 }
