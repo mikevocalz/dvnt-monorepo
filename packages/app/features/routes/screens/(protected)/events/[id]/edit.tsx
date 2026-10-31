@@ -1,3 +1,4 @@
+import { EventFollowupSettings } from "@dvnt/app/features/events/ui/followup-settings.native";
 import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
 import { eventTypeOptions } from "@dvnt/app/lib/events/event-type";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
@@ -2084,6 +2085,7 @@ function EditEventScreenContent() {
             }}
           />
         </View>
+        <EventFollowupSettings eventId={Number(id)} />
       </KeyboardAwareScrollView>
     </SafeAreaView>
   );

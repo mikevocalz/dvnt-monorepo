@@ -1,0 +1,27 @@
+name: Event follow-up settings
+on:
+  pull_request:
+    paths:
+      - 'packages/app/**'
+      - 'scripts/test-event-followup-*.cjs'
+      - '.github/workflows/event-followup-settings.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'packages/app/**'
+      - 'scripts/test-event-followup-*.cjs'
+      - '.github/workflows/event-followup-settings.yml'
+permissions:
+  contents: read
+jobs:
+  opt-in-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node scripts/test-event-followup-settings-dom.cjs
+      - run: node scripts/test-event-followup-api.cjs
