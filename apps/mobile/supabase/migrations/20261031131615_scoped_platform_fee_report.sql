@@ -27,7 +27,7 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_t
  AND bool_and(coalesce(e.host_id=p_auth AND o.type='event_ticket' AND o.status IN ('paid','partially_refunded','refunded')
  AND o.paid_at>=p_start AND o.paid_at<p_end AND o.paid_at<=now()
  AND lower(o.currency)=p_currency AND coalesce(o.charge_model,'destination_charge')='destination_charge'
- AND o.total_cents>=0 AND (o.total_cents>0 OR coalesce(o.platform_fee_cents,o.dvnt_total_fee_cents)=0)
+ AND o.total_cents>=0 AND (o.total_cents>0 OR coalesce(o.platform_fee_cents,o.dvnt_total_fee_cents,CASE WHEN o.total_cents=0 THEN 0 END)=0)
  AND coalesce(o.platform_fee_cents,o.dvnt_total_fee_cents,CASE WHEN o.total_cents=0 THEN 0 END)>=0
  AND (o.platform_fee_cents IS NULL OR o.dvnt_total_fee_cents IS NULL OR o.platform_fee_cents=o.dvnt_total_fee_cents),false))
  AND sum(coalesce(o.platform_fee_cents,o.dvnt_total_fee_cents,CASE WHEN o.total_cents=0 THEN 0 END))=p_fee
@@ -124,7 +124,7 @@ BEGIN
  min(lower(o.currency)) currency,bool_and(coalesce(o.total_cents=0,false)) all_free,
  bool_and(coalesce(coalesce(o.platform_fee_cents,o.dvnt_total_fee_cents,CASE WHEN o.total_cents=0 THEN 0 END)>=0
  AND (o.platform_fee_cents IS NULL OR o.dvnt_total_fee_cents IS NULL OR o.platform_fee_cents=o.dvnt_total_fee_cents)
- AND o.total_cents>=0 AND (o.total_cents>0 OR coalesce(o.platform_fee_cents,o.dvnt_total_fee_cents)=0) AND lower(o.currency)='usd' AND coalesce(o.charge_model,'destination_charge')='destination_charge',false)) valid
+ AND o.total_cents>=0 AND (o.total_cents>0 OR coalesce(o.platform_fee_cents,o.dvnt_total_fee_cents,CASE WHEN o.total_cents=0 THEN 0 END)=0) AND lower(o.currency)='usd' AND coalesce(o.charge_model,'destination_charge')='destination_charge',false)) valid
  FROM orders o WHERE o.id=ANY(v_ids) GROUP BY o.stripe_payment_intent_id LOOP
  IF g.valid IS DISTINCT FROM true OR g.fee IS NULL THEN v_invalid:=v_invalid+g.n;CONTINUE;END IF;
  IF g.fee=0 THEN IF NOT g.all_free THEN v_invalid:=v_invalid+g.n;END IF;CONTINUE;END IF;
