@@ -39,6 +39,16 @@ BEGIN
       INSERT INTO public.checkins(ticket_id,event_id,scanned_by,device_id,result,offline) VALUES(v_ticket.id,p_event_id,p_scanned_by,p_device_id,'invalid',coalesce(p_offline,false));
       RETURN jsonb_build_object('result','event_cancelled','eventId',p_event_id);
     END IF;
+    -- UPDATE statement triggers upsert this row. Prelock it without waiting:
+    -- legacy issuers take financials via an order INSERT before event attendance.
+    -- Never create a missing summary here (accounting is outside scan authority).
+    BEGIN
+      PERFORM 1 FROM public.event_financials WHERE event_id=p_event_id
+        FOR NO KEY UPDATE NOWAIT;
+      IF NOT FOUND THEN RETURN jsonb_build_object('result','financials_unavailable'); END IF;
+    EXCEPTION WHEN lock_not_available THEN
+      RETURN jsonb_build_object('result','retry_later');
+    END;
   END IF;
   -- Atomic CAS: only an 'active' ticket for THIS event flips to scanned.
   UPDATE public.tickets
@@ -128,6 +138,16 @@ BEGIN
       INSERT INTO public.checkins(ticket_id,order_addon_id,event_id,scanned_by,device_id,result,offline) VALUES(v_row.ticket_id,v_row.id,p_event_id,p_scanned_by,p_device_id,'invalid',coalesce(p_offline,false));
       RETURN jsonb_build_object('result','event_cancelled','eventId',p_event_id);
     END IF;
+    -- UPDATE statement triggers upsert this row. Prelock it without waiting:
+    -- legacy issuers take financials via an order INSERT before event attendance.
+    -- Never create a missing summary here (accounting is outside scan authority).
+    BEGIN
+      PERFORM 1 FROM public.event_financials WHERE event_id=p_event_id
+        FOR NO KEY UPDATE NOWAIT;
+      IF NOT FOUND THEN RETURN jsonb_build_object('result','financials_unavailable'); END IF;
+    EXCEPTION WHEN lock_not_available THEN
+      RETURN jsonb_build_object('result','retry_later');
+    END;
   END IF;
   -- Atomic CAS: only an admittable add-on for THIS event flips to redeemed.
   UPDATE public.order_addons

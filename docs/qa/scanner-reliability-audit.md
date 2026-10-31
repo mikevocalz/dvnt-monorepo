@@ -56,3 +56,14 @@ all existing shared auth/HMAC/rate-limit/Sentry helpers byte-for-byte. Live
 metadata at audit: ticket-scan v56; all five shared helper files exactly equal
 repository source. No PR210, RLS/publication, credential, legacy-auth, historical
 scan edits or accounting schema changes are included.
+
+### Ordered rollout / rollback
+
+Deploy the reviewed ticket-scan edge closure **before** applying the lifecycle
+migration: old edge code does not understand `event_cancelled`, `retry_later` or
+`financials_unavailable` and would mislabel them ticket-not-found. The new edge
+remains compatible with the old RPCs. Prefer client web update before enabling
+new result states; installed native updates remain separate. Deploy the complete
+get-event-tickets closure with unchanged helpers plus read-all-rows. Preserve all
+existing JWT verification flags. If rolling back, restore old RPC definitions
+before reverting the edge enum handling; never leave old edge with new RPCs.

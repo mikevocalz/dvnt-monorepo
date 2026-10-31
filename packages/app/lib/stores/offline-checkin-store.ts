@@ -54,6 +54,7 @@ interface OfflineCheckinState {
 
   // Actions
   setTokensForEvent: (eventId: string, tokens: string[]) => void;
+  setOfflineSnapshot: (eventId: string, tokens: string[], addonTokens: string[]) => void;
   setAddonTokensForEvent: (eventId: string, tokens: string[]) => void;
   markScannedOffline: (
     eventId: string,
@@ -72,6 +73,7 @@ interface OfflineCheckinState {
   clearEventData: (eventId: string) => void;
   /** Revoke admission evidence without losing queued scans or duplicate history. */
   invalidateAdmissionForEvent: (eventId: string) => void;
+  invalidateAdmissionToken: (eventId: string, qrToken: string) => void;
   isTokenValid: (eventId: string, qrToken: string) => boolean;
   isAddonTokenValid: (eventId: string, qrToken: string) => boolean;
   isAlreadyScanned: (eventId: string, qrToken: string) => boolean;
@@ -87,6 +89,17 @@ export const useOfflineCheckinStore = create<OfflineCheckinState>()(
       pendingScans: [],
       lastDownloaded: {},
       addonLastDownloaded: {},
+
+      setOfflineSnapshot: (eventId, tokens, addonTokens) =>
+        set((state) => {
+          const downloadedAt = new Date().toISOString();
+          return {
+            tokensByEvent: { ...state.tokensByEvent, [eventId]: tokens },
+            addonTokensByEvent: { ...state.addonTokensByEvent, [eventId]: addonTokens },
+            lastDownloaded: { ...state.lastDownloaded, [eventId]: downloadedAt },
+            addonLastDownloaded: { ...state.addonLastDownloaded, [eventId]: downloadedAt },
+          };
+        }),
 
       setTokensForEvent: (eventId, tokens) =>
         set((state) => ({
@@ -145,6 +158,12 @@ export const useOfflineCheckinStore = create<OfflineCheckinState>()(
           pendingScans: state.pendingScans.filter(
             (s) => !(s.eventId === eventId && tokens.includes(s.qrToken)),
           ),
+        })),
+
+      invalidateAdmissionToken: (eventId, qrToken) =>
+        set((state) => ({
+          tokensByEvent: { ...state.tokensByEvent, [eventId]: (state.tokensByEvent[eventId] ?? []).filter((token) => token !== qrToken) },
+          addonTokensByEvent: { ...state.addonTokensByEvent, [eventId]: (state.addonTokensByEvent[eventId] ?? []).filter((token) => token !== qrToken) },
         })),
 
       invalidateAdmissionForEvent: (eventId) =>

@@ -1,6 +1,7 @@
 import { supabase } from "../supabase/client";
 import { getCurrentUserAuthId } from "./auth-helper";
-import { requireBetterAuthToken } from "../auth/identity";
+import { useAuthStore } from "../stores/auth-store";
+import { requireBetterAuthToken, getCurrentUserRow } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
 import { ticketTransferError } from "./ticket-transfer-error";
 import { scanFailureReasonForStatus } from "../tickets/scan-verdict";
@@ -14,11 +15,26 @@ import type { PlanKey } from "@dvnt/app/lib/subscription/types";
 import type { PerkKey } from "@dvnt/app/lib/perks/perk-config";
 import type { TicketSelfServiceAction } from "../tickets/self-service-action";
 
+const offlineDownloadRevisions = new Map<string, number>();
+function advanceOfflineRevision(eventId: string): number {
+  const next = (offlineDownloadRevisions.get(eventId) ?? 0) + 1;
+  offlineDownloadRevisions.set(eventId, next);
+  return next;
+}
+
 /** An authoritative refusal revokes cached admission evidence, not audit queues. */
 async function invalidateOfflineAdmission(eventId: string | undefined): Promise<void> {
   if (!eventId) return;
+  advanceOfflineRevision(eventId);
   const { useOfflineCheckinStore } = await import("@dvnt/app/lib/stores/offline-checkin-store");
   useOfflineCheckinStore.getState().invalidateAdmissionForEvent(eventId);
+}
+
+async function invalidateRejectedOfflineToken(eventId: string | undefined, qrToken: string, reason: string | undefined): Promise<void> {
+  if (!eventId || !["already_scanned", "refunded", "voided", "void", "wrong_event", "transfer_pending", "ticket_not_found", "invalid_status", "addon_not_found", "already_redeemed"].includes(reason ?? "")) return;
+  advanceOfflineRevision(eventId);
+  const { useOfflineCheckinStore } = await import("@dvnt/app/lib/stores/offline-checkin-store");
+  useOfflineCheckinStore.getState().invalidateAdmissionToken(eventId, qrToken);
 }
 
 /** Keyset cursor for the roster — the previous page's last row. */
@@ -584,6 +600,7 @@ export const ticketsApi = {
         return { valid: false, reason: "server_error" };
       }
       if (verdict.reason === "event_cancelled") await invalidateOfflineAdmission(eventId);
+      else if (verdict.valid === false) await invalidateRejectedOfflineToken(eventId, qrToken, verdict.reason);
       return verdict;
     } catch {
       // A malformed HTTP response is not a transport outage and must never
@@ -640,6 +657,10 @@ export const ticketsApi = {
    * type stays ticket-tokens-only for existing callers.
    */
   async downloadOfflineTokens(eventId: string): Promise<string[]> {
+    const revision = advanceOfflineRevision(eventId);
+    const assertCurrent = () => {
+      if (offlineDownloadRevisions.get(eventId) !== revision) throw new Error("Offline ticket refresh was superseded");
+    };
     const { data, error } = await invokeEdge<{
       ok: boolean;
       qr_tokens: string[];
@@ -657,20 +678,15 @@ export const ticketsApi = {
         (data.addon_qr_tokens !== undefined && !Array.isArray(data.addon_qr_tokens))) {
       throw new Error("Invalid offline ticket data response");
     }
+    assertCurrent();
     const addonTokens = (data.addon_qr_tokens ?? []).filter(Boolean);
-    try {
-      // Lazy import mirrors the store→api dynamic import and avoids a
-      // static cycle (the store lazy-imports this module for auto-drain).
-      const { useOfflineCheckinStore } = await import(
-        "@dvnt/app/lib/stores/offline-checkin-store"
-      );
-      useOfflineCheckinStore
-        .getState()
-        .setAddonTokensForEvent(eventId, addonTokens);
-    } catch (e) {
-      console.warn("[Tickets] offline addon-token seed failed:", e);
-    }
-    return (data.qr_tokens ?? []).filter(Boolean);
+    const tokens = data.qr_tokens.filter(Boolean);
+    // Commit both rails atomically here, not in an awaiting caller whose late
+    // continuation could resurrect a snapshot after cancellation invalidated it.
+    const { useOfflineCheckinStore } = await import("@dvnt/app/lib/stores/offline-checkin-store");
+    assertCurrent();
+    useOfflineCheckinStore.getState().setOfflineSnapshot(eventId, tokens, addonTokens);
+    return tokens;
   },
 
   /**
@@ -693,46 +709,59 @@ export const ticketsApi = {
   ): Promise<{ synced: string[]; failed: string[] }> {
     const synced: string[] = [];
     const failed: string[] = [];
-    // Resolve once; one session token for the whole batch.
-    let token: string | null = null;
+    const viewerId = useAuthStore.getState().user?.id;
+    let obsolete = false;
+    const current = () => !!viewerId && !obsolete && useAuthStore.getState().user?.id === viewerId;
+    const unsubscribe = useAuthStore.subscribe((state) => {
+      if (state.user?.id !== viewerId) obsolete = true;
+    });
     try {
-      token = await requireBetterAuthToken();
-    } catch {
-      // Without a session every scan will 401 — mark all as failed so the
-      // queue stays intact for the next online sync attempt.
-      return { synced, failed: scans.map((s) => s.qrToken) };
-    }
-    for (const scan of scans) {
-      try {
-        const { data, error } = await supabase.functions.invoke("ticket-scan", {
-          body: {
-            qr_token: scan.qrToken,
-            scanned_by: scan.scannedBy,
-            offline_scanned_at: scan.scannedAt,
-            ...(scan.eventId ? { event_id: scan.eventId } : {}),
-          },
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "x-auth-token": token,
-          },
-        });
-        if (error) {
-          const status = (error as { context?: { status?: number } })?.context?.status;
-          if ([401, 403, 404, 409].includes(Number(status))) await invalidateOfflineAdmission(scan.eventId);
-          throw error;
-        }
-        const verdict = typeof data === "string" ? JSON.parse(data) : data;
-        if (verdict?.reason === "event_cancelled") await invalidateOfflineAdmission(scan.eventId);
-        // HTTP 200 includes rejected tickets and no-verdict failures. Keep
-        // those queued for staff reconciliation; never silently erase them.
-        // Even already_scanned can be another device's conflicting admission.
-        if (verdict?.valid !== true) throw new Error("Offline scan was not confirmed");
-        synced.push(scan.qrToken);
-      } catch {
-        failed.push(scan.qrToken);
+      if (!current()) return { synced, failed: scans.map((scan) => scan.qrToken) };
+      const owner = await getCurrentUserRow();
+      if (!current() || !owner?.authId || (viewerId !== String(owner.id) && viewerId !== owner.authId)) {
+        return { synced, failed: scans.map((scan) => scan.qrToken) };
       }
+      const token = await requireBetterAuthToken();
+      for (const scan of scans) {
+        try {
+          // Preserve legacy/unattributed entries for explicit staff review;
+          // never replay another account's queue with the current session.
+          if (!current() || !scan.scannedBy ||
+              ![String(owner.id), owner.authId].includes(scan.scannedBy)) {
+            throw new Error("Offline scan belongs to another account");
+          }
+          const { data, error } = await supabase.functions.invoke("ticket-scan", {
+            body: {
+              qr_token: scan.qrToken,
+              scanned_by: owner.authId,
+              offline_scanned_at: scan.scannedAt,
+              ...(scan.eventId ? { event_id: scan.eventId } : {}),
+            },
+            headers: { Authorization: `Bearer ${token}`, "x-auth-token": token },
+          });
+          if (!current()) throw new Error("Offline sync account changed");
+          if (error) {
+            const status = (error as { context?: { status?: number } })?.context?.status;
+            if ([401, 403, 404, 409].includes(Number(status))) await invalidateOfflineAdmission(scan.eventId);
+            throw error;
+          }
+          const verdict = typeof data === "string" ? JSON.parse(data) : data;
+          if (verdict?.reason === "event_cancelled") await invalidateOfflineAdmission(scan.eventId);
+          else if (verdict?.valid === false) await invalidateRejectedOfflineToken(scan.eventId, scan.qrToken, verdict.reason);
+          // A 200 rejection (including another device's duplicate) is not an
+          // acknowledgement. Preserve it in the queue for staff review.
+          if (!current() || verdict?.valid !== true) throw new Error("Offline scan was not confirmed");
+          synced.push(scan.qrToken);
+        } catch {
+          failed.push(scan.qrToken);
+        }
+      }
+      return { synced, failed };
+    } catch {
+      return { synced, failed: scans.filter((scan) => !synced.includes(scan.qrToken)).map((scan) => scan.qrToken) };
+    } finally {
+      unsubscribe();
     }
-    return { synced, failed };
   },
 
   /**

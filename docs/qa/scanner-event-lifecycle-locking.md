@@ -43,3 +43,31 @@ These fixtures do not check in live tickets, use private QR codes, exercise
 physical cameras, or prove actual-device transport/throughput. The migration is
 source-only until separately approved and applied; CI results must be checked
 for the exact published head before release.
+
+## Financial trigger prerequisite
+
+The ticket/add-on statement triggers also upsert `event_financials`. An issuer
+can lock that row from its order insertion before trying to update attendance;
+scanner event-lock then financial-lock waiting would form a deadlock. The scan
+therefore takes the existing financial row with NOWAIT before mutating its
+credential. Contention returns `retry_later`. A missing (including another
+transaction's uncommitted) row returns `financials_unavailable`/HTTP 503 without
+creating a zero summary or recomputing accounting. This avoids an unbounded
+unique-index wait and requires a legitimate financial summary before admission.
+A missing summary needs separate investigation, not repeated blind scanning.
+
+The lifecycle fixture runs the actual repository attendance functions and
+financial row/statement triggers, with the deployed financial recomputation body
+verified by read-only comparison. It tests order-first financial contention and
+missing/uncommitted summaries on both rails. Existing production metadata showed
+zero missing summaries among the 28 events with active admission credentials at
+review time; that aggregate is not a guarantee for future rows or native devices.
+
+## Required release order
+
+Deploy the reviewed `ticket-scan` edge handler that understands
+`event_cancelled`, `retry_later`, and `financials_unavailable` **before** applying
+the new RPC definitions. Old handlers classify unfamiliar RPC results as an
+invalid/missing ticket, so migration-first rollout is unsafe. Client retry/error
+handling must also be verified; never treat HTTP 503 as permission for offline
+admission. All migration/deployment steps still require explicit approval.

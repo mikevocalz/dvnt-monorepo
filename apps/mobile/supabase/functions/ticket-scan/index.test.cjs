@@ -156,3 +156,11 @@ test('legacy event-less replay still resolves its authorized event', async () =>
   assert.equal(status, 200);
   assert.equal(body.valid, true);
 });
+
+for (const qr_payload of ['ticket-payload', 'addon-payload']) {
+  test(`missing admission summary is retryable for ${qr_payload}`, async () => {
+    const { status, body } = await scan({ qr_payload, event_id: EVENT_ID }, { rpcResult: { result: 'financials_unavailable' } });
+    assert.equal(status, 503);
+    assert.equal(body.valid, undefined);
+  });
+}

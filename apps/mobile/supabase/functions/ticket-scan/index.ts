@@ -356,7 +356,7 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       .from("events")
       .select("host_id, status")
       .eq("id", scanEventId)
-      .single());
+      .maybeSingle());
     if (!scanEvent) {
       return json({ valid: false, reason: "event_not_found" }, 404);
     }
@@ -414,6 +414,7 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       };
 
       switch (addonResult.result) {
+        case "financials_unavailable":
         case "retry_later":
           return json({ error: "Another event update is in progress. Please retry the scan." }, 503);
         case "event_cancelled":
@@ -470,6 +471,7 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
     if (rpcError) throw rpcError;
 
     switch (rpcResult.result) {
+      case "financials_unavailable":
       case "retry_later":
         return json({ error: "Another event update is in progress. Please retry the scan." }, 503);
       case "event_cancelled":

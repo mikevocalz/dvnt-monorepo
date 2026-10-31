@@ -24,13 +24,18 @@ function storeFixture() {
 }
 function apiFixture(response, download = response) {
   const f = storeFixture();
-  return { ...f, api: load('packages/app/lib/api/tickets.ts', {
-    '../supabase/client': { supabase: { functions: { invoke: async () => response } } },
-    '../auth/identity': { requireBetterAuthToken: async () => 'synthetic-session' },
-    './invoke-edge': { invokeEdge: async () => download },
+  const auth = require('zustand/vanilla').createStore(()=>({user:{id:'11',authId:'staff'}}));
+  const calls=[];
+  const api = load('packages/app/lib/api/tickets.ts', {
+    '../supabase/client': { supabase: { functions: { invoke: async (name,request) => { calls.push(request); return typeof response === 'function' ? response(request) : response; } } } },
+    '../stores/auth-store': {useAuthStore:auth},
+    '../auth/identity': { requireBetterAuthToken: async () => `synthetic-${auth.getState().user?.id}`,
+      getCurrentUserRow: async () => auth.getState().user ? {id:Number(auth.getState().user.id),authId:auth.getState().user.authId} : null },
+    './invoke-edge': { invokeEdge: async () => typeof download === 'function' ? download() : download },
     '../tickets/scan-verdict': load('packages/app/lib/tickets/scan-verdict.ts'),
     '@dvnt/app/lib/stores/offline-checkin-store': f,
-  }).ticketsApi };
+  }).ticketsApi;
+  return { ...f, api, auth, calls };
 }
 test('actual offline store rejects missing, expired and future timestamps independently for both rails', () => {
   const { useOfflineCheckinStore: store, OFFLINE_ALLOWLIST_MAX_AGE_MS: max } = storeFixture();
@@ -72,13 +77,13 @@ test('successful empty download clears addon snapshot and caller can revoke tick
 for (const data of [null, '{bad json', {valid:false,reason:'already_scanned'}, {valid:false,reason:'wrong_event'}, {valid:false,reason:'refunded'}, {valid:false,reason:'voided'}, {valid:false,reason:'server_error'}, {valid:false,reason:'unauthorized'}]) {
   test(`HTTP200 non-confirmed sync remains queued: ${JSON.stringify(data)}`,async () => {
     const { api } = apiFixture({data});
-    const result = await api.syncOfflineScans([{qrToken:'synthetic',eventId:'7',scannedAt:'2026-01-01T00:00:00Z'}]);
+    const result = await api.syncOfflineScans([{qrToken:'synthetic',eventId:'7',scannedBy:'staff',scannedAt:'2026-01-01T00:00:00Z'}]);
     assert.deepEqual(Array.from(result.synced),[]); assert.deepEqual(Array.from(result.failed),['synthetic']);
   });
 }
 test('only positive server confirmation resolves queued scan',async () => {
   const { api } = apiFixture({data:{valid:true}});
-  const result = await api.syncOfflineScans([{qrToken:'synthetic',eventId:'7',scannedAt:'2026-01-01T00:00:00Z'}]);
+  const result = await api.syncOfflineScans([{qrToken:'synthetic',eventId:'7',scannedBy:'staff',scannedAt:'2026-01-01T00:00:00Z'}]);
   assert.deepEqual(Array.from(result.synced),['synthetic']); assert.equal(result.failed.length,0);
 });
 for (const data of [null, '{bad json', {}, {valid:'yes'}]) test('malformed online response cannot trigger offline admission',async () => {
@@ -156,10 +161,10 @@ for (const file of [
   }
   visit(source);assert.ok(declaration);
   const name=declaration.declarationList.declarations[0].name.getText(source);
-  const {useOfflineCheckinStore: store}=storeFixture();store.getState().setTokensForEvent('7',['old']);
+  const {api,useOfflineCheckinStore: store}=apiFixture({data:{ok:true,qr_tokens:[],addon_qr_tokens:[]}});store.getState().setTokensForEvent('7',['old']);
   const exports={};
   const context={exports,useCallback:fn=>fn,eventId:'7',offlineStore:store.getState(),offlineCheckin:store.getState(),
-    ticketsApi:{downloadOfflineTokens:async()=>[]},showToast(){},setDownloading(){},setIsDownloading(){},console};
+    ticketsApi:api,showToast(){},setDownloading(){},setIsDownloading(){},console};
   vm.runInNewContext(ts.transpileModule(declaration.getText(source)+`\nexports.run=${name};`,{
     compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},
   }).outputText,context);
@@ -183,4 +188,54 @@ test('reconciliation cancellation revokes local admission evidence while retaini
   s.setTokensForEvent('7',['ticket']);s.markScannedOffline('7','ticket','staff');
   const result=await api.syncOfflineScans(store.getState().pendingScans);
   assert.equal(s.hasOfflineData('7'),false);assert.equal(result.failed.length,1);assert.equal(store.getState().pendingScans.length,1);
+});
+for (const reason of ['refunded','voided','transfer_pending','ticket_not_found','wrong_event','already_scanned'])test(`known rejected token ${reason} cannot later admit offline, while other tickets and audit remain`,async()=>{
+  const {api,useOfflineCheckinStore:store}=apiFixture({data:{valid:false,reason}});const s=store.getState();
+  s.setTokensForEvent('7',['rejected','other']);s.markScannedOffline('7','queued','staff');
+  await api.scanTicket('rejected','staff','7');
+  assert.equal(s.isTokenValid('7','rejected'),false);assert.equal(s.isTokenValid('7','other'),true);assert.equal(store.getState().pendingScans.length,1);
+});
+test('late allowlist download cannot resurrect tokens after authoritative cancellation',async()=>{
+  let resolve;const waiting=new Promise(r=>resolve=r);
+  const {api,useOfflineCheckinStore:store}=apiFixture({data:{valid:false,reason:'event_cancelled'}},()=>waiting);
+  store.getState().setTokensForEvent('7',['old']);
+  const download=api.downloadOfflineTokens('7');
+  await api.scanTicket('old','staff','7');
+  resolve({data:{ok:true,qr_tokens:['stale'],addon_qr_tokens:['stale-addon']}});
+  await assert.rejects(download,/superseded/);assert.equal(store.getState().hasOfflineData('7'),false);
+});
+test('newer allowlist refresh wins when responses finish out of order',async()=>{
+  let resolve;const waiting=new Promise(r=>resolve=r);let calls=0;
+  const {api,useOfflineCheckinStore:store}=apiFixture({},()=>++calls===1?waiting:{data:{ok:true,qr_tokens:['current'],addon_qr_tokens:['current-addon']}});
+  const old=api.downloadOfflineTokens('7');const fresh=await api.downloadOfflineTokens('7');store.getState().setTokensForEvent('7',fresh);
+  resolve({data:{ok:true,qr_tokens:['old'],addon_qr_tokens:['old-addon']}});
+  await assert.rejects(old,/superseded/);assert.equal(store.getState().isTokenValid('7','current'),true);assert.equal(store.getState().isAddonTokenValid('7','old-addon'),false);
+});
+test('B cannot replay A scans; A returning can sync own numeric or auth identity only',async()=>{
+  const {api,auth,calls}=apiFixture({data:{valid:true}});
+  const scans=[{qrToken:'A',eventId:'7',scannedBy:'staff',scannedAt:'2026-01-01T00:00:00Z'},{qrToken:'legacy-unknown',eventId:'7',scannedAt:'2026-01-01T00:00:00Z'}];
+  auth.setState({user:{id:'12',authId:'staff-b'}});
+  const b=await api.syncOfflineScans(scans);assert.equal(b.synced.length,0);assert.equal(calls.length,0);
+  auth.setState({user:{id:'11',authId:'staff'}});
+  const a=await api.syncOfflineScans(scans);assert.deepEqual(Array.from(a.synced),['A']);assert.deepEqual(Array.from(a.failed),['legacy-unknown']);
+  assert.equal(calls.length,1);assert.equal(calls[0].headers['x-auth-token'],'synthetic-11');assert.equal(calls[0].body.scanned_by,'staff');
+});
+for(const back of [false,true])test(`mid-flight account switch${back?' A→B→A':''} cannot acknowledge old queue or dispatch next scan`,async()=>{
+  let resolve;const waiting=new Promise(r=>resolve=r);const {api,auth,calls}=apiFixture(()=>waiting);
+  const scans=['first','second'].map(qrToken=>({qrToken,eventId:'7',scannedBy:'11',scannedAt:'2026-01-01T00:00:00Z'}));
+  const task=api.syncOfflineScans(scans);
+  while(calls.length===0)await Promise.resolve();
+  auth.setState({user:{id:'12',authId:'staff-b'}});if(back)auth.setState({user:{id:'11',authId:'staff'}});
+  resolve({data:{valid:true}});const result=await task;
+  assert.equal(result.synced.length,0);assert.equal(result.failed.length,2);assert.equal(calls.length,1);
+});
+test('atomic download commit cannot be resurrected by awaiting caller after cancellation',async()=>{
+  const {api,useOfflineCheckinStore:store}=apiFixture({data:{valid:false,reason:'event_cancelled'}},{data:{ok:true,qr_tokens:['old'],addon_qr_tokens:[]}});
+  const tokens=await api.downloadOfflineTokens('7');assert.equal(tokens[0],'old');assert.equal(store.getState().isTokenValid('7','old'),true);
+  await api.scanTicket('old','staff','7');
+  // All real caller handlers now only report the returned count; none writes it.
+  assert.equal(store.getState().isTokenValid('7','old'),false);
+  for(const file of ['packages/app/features/events/door-offline-kit.web.ts','packages/app/features/events/organizer.web.tsx','packages/app/features/routes/screens/(protected)/events/[id]/organizer.tsx','packages/app/features/routes/screens/(protected)/events/[id]/index.tsx']){
+    assert.doesNotMatch(fs.readFileSync(path.join(root,file),'utf8'),/setTokensForEvent\(eventId, tokens\)/);
+  }
 });
