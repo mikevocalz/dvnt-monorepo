@@ -10,16 +10,19 @@ One organizer-dashboard card shows the current New York calendar month's DVNT ap
 - Missing currency, inconsistent recorded amounts, unsupported rails, provider failures, changed ownership, or incomplete evidence never become a zero or partial total.
 - True free transactions remain zero. No current fee policy is reapplied to historical orders.
 
-## Proposed activation bundle (not applied)
+## Revised reporting-only activation bundle
 
-1. Empty, RLS-protected, service-only snapshot migration.
-2. `reconcile-orders` closure adding bounded processing of explicitly enrolled fee snapshots only.
-3. `get-host-dashboard` closure enrolling only the authenticated owner's current-month cohort and reading complete snapshots.
-4. Web source release. Native source is included but requires its own normal release; no OTA implied.
+1. **Already applied:** empty RLS-protected, service-only cache migration `20261031131615_scoped_platform_fee_report.sql`. Do not reapply it. No historical rows were enrolled by the migration.
+2. New `refresh-platform-fees` reporting-only function. Its runtime closure contains only its handler and the fee-reader helper. It does not import, invoke or replace `reconcile-orders` or any ticket, payment, cancellation, payout or email recovery code.
+3. `get-host-dashboard` update to enroll only the authenticated owner's current-month cohort and read verified reporting results.
+4. A separately approved dispatcher/schedule migration for only the new reporting worker. Proposed cadence: minutes 7, 22, 37 and 52 of every hour, leaving the existing recovery schedule untouched. It references the existing `CRON_SECRET` Vault entry; no secret creation or rotation is included.
+5. Web source release. Native source is included but requires its own normal release; no OTA implied.
 
-The dashboard's existing POST acquires a **new reporting-cache enrollment side effect**. Activation needs explicit approval for cache writes and bounded read-only Stripe reconciliation of the enrolled historical current-month cohort. It does not alter orders, accounting amounts, tickets, refunds, transfers, payouts or emails. No global payment scan, automatic historical backfill, credential change or cron change is included.
+The dashboard's existing POST acquires a **reporting-cache enrollment side effect**. Activation needs explicit approval for cache writes, the new reporting-only schedule, and bounded read-only Stripe verification of the enrolled current-month cohort. No payment, refund, ticket, payout, email or accounting-repair operations are added. There is no global history scan or manual full synchronization.
 
-Retain the deployed reconcile-orders fee-calculator dependency byte-for-byte; repository/runtime drift in that pre-existing helper is unrelated and must not be deployed accidentally.
+The reporting worker's database adapter exposes only `claim_platform_fee_snapshots` and `complete_platform_fee_snapshot`; even an attempted call to enrollment or a payment RPC is rejected. The provider helper uses GET only, rejects redirects, and permits only fixed Stripe PaymentIntent/charge/application-fee resources. Database scope checks revalidate ownership before reads and publication. Existing server credentials have broader underlying permissions; these code-level boundaries are not a claim that the credentials themselves are read-only.
+
+No existing recovery function or schedule is changed or redeployed by this revised design.
 
 ## Freshness and timing
 

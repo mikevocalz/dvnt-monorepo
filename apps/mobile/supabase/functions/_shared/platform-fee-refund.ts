@@ -17,7 +17,7 @@ export async function fetchPlatformFeeEvidence(secret: string, row: {
       const remaining = Math.min(4000, deadline - Date.now());
       if (remaining <= 0) return null;
       const response = await fetch(`https://api.stripe.com/v1${path}`, {
-        method: "GET", headers: {Authorization: `Bearer ${secret}`},
+        method: "GET", redirect: "error", headers: {Authorization: `Bearer ${secret}`},
         signal: AbortSignal.timeout(Math.max(1, Math.floor(remaining))),
       });
       if (!response.ok) return null;
@@ -50,7 +50,7 @@ export async function fetchPlatformFeeEvidence(secret: string, row: {
   return {amountCents: fee.amount, refundedCents: fee.amount_refunded, currency: fee.currency};
 }
 
-/** Existing authenticated reconciliation worker calls this; no enrollment here.
+/** Dedicated authenticated reporting-only worker calls this; no enrollment here.
  * SQL claim revalidates the owner and full payment cohort before any GET.
  */
 export async function reconcilePlatformFeeSnapshots(db: any, secret: string): Promise<{verified: number; unavailable: number}> {
@@ -63,6 +63,13 @@ export async function reconcilePlatformFeeSnapshots(db: any, secret: string): Pr
   while (processed < 100 && Date.now() < deadline) {
     const claimed = await db.rpc("claim_platform_fee_snapshots", {p_limit: 4});
     if (claimed.error || !Array.isArray(claimed.data)) throw new Error("Fee snapshot queue unavailable");
+    if (claimed.data.length > 4 || new Set(claimed.data.map((row: any) => row?.payment_intent_id)).size !== claimed.data.length ||
+        claimed.data.some((row: any) => !row || typeof row !== "object" || Array.isArray(row) ||
+          typeof row.payment_intent_id !== "string" || !/^pi_[A-Za-z0-9]+$/.test(row.payment_intent_id) ||
+          !cents(row.expected_fee_cents) || row.expected_fee_cents === 0 || row.currency !== "usd" ||
+          typeof row.lease_token !== "string" || !row.lease_token.trim())) {
+      throw new Error("Fee snapshot claim contract invalid");
+    }
     if (claimed.data.length === 0) break;
     processed += claimed.data.length;
     await Promise.all(claimed.data.map(async (row: any) => {

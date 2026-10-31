@@ -30,4 +30,4 @@ jobs:
       - name: Disposable synthetic database contracts (no external connection)
         env:
           NODE_PATH: ${{ runner.temp }}/fee-tests/node_modules
-        run: node --test apps/mobile/supabase/functions/_shared/platform-fee-snapshot-sql.cjs
+        run: node --test apps/mobile/supabase/functions/_shared/platform-fee-snapshot-sql.cjs apps/mobile/supabase/functions/_shared/reporting-only-fee-schedule-sql.cjs

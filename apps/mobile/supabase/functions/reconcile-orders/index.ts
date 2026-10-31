@@ -24,7 +24,6 @@ import { deliverTicketReceipts } from "../_shared/ticket-receipt-delivery.ts";
 import { excludeReceiptManagedOrders } from "../_shared/receipt-managed-orders.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
 import { syncOrderStripeProcessingFeeSafely } from "../_shared/stripe-processing-fee.ts";
-import { reconcilePlatformFeeSnapshots } from "../_shared/platform-fee-refund.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -833,13 +832,6 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
       await deliverTicketReceipts(supabase, undefined, 25);
     } catch {
       console.warn("[reconcile] receipt queue unavailable; retry on next sweep");
-    }
-    // Refresh only organizer-enrolled fee cohorts. No global history discovery,
-    // payment mutation, or new schedule. Queue failures never undo fulfillment.
-    try {
-      await reconcilePlatformFeeSnapshots(supabase, STRIPE_SECRET_KEY);
-    } catch {
-      console.warn("[reconcile] enrolled fee snapshot queue unavailable");
     }
     console.log("[reconcile] Complete:", stats);
     return json({ success: true, stats });

@@ -127,16 +127,3 @@ test('receipt queue outage never undoes successful payment reconciliation', asyn
  assert.equal(f.ops.filter(op=>op.rpc==='claim_ticket_receipts').length,1);
  assert.equal(f.ops.find(op=>op.rpc==='claim_ticket_receipts').args.p_limit,25);
 });
-
-
-test('enrolled platform-fee queue remains behind existing cron authentication', async () => {
- const f=fixture({status:'paid'}); const r=await f.reconcile({'x-cron-secret':'wrong'});
- assert.equal(r.status,401); assert.equal(f.ops.some(op=>op.rpc==='claim_platform_fee_snapshots'),false);
-});
-test('enrolled fee snapshot queue outage cannot undo successful payment reconciliation', async () => {
- const f=fixture({status:'payment_failed',cartStatus:'abandoned'}); f.state.platformFeeQueueError=true;
- const r=await f.reconcile(); assert.equal(r.status,200); assert.equal((await r.json()).stats.reconciled,1);
- assert.equal(f.order.status,'paid'); assert.equal(f.cart.status,'completed');
- assert.equal(f.ops.filter(op=>op.rpc==='claim_platform_fee_snapshots').length,1);
- assert.equal(f.ops.some(op=>op.rpc==='enroll_platform_fee_snapshots'),false);
-});

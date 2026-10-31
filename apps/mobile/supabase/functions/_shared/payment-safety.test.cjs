@@ -69,9 +69,9 @@ function harness(config = {}) {
     const source = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText;
-    vm.runInNewContext(source, { exports, Response, Request, URLSearchParams, crypto, TextEncoder,
+    vm.runInNewContext(source, { exports, Response, Request, URLSearchParams, crypto, TextEncoder, AbortSignal,
       console: { log() {}, error() {}, warn() {} },
-      Deno: { env: { get: () => 'test' }, serve: fn => { handler = fn; } },
+      Deno: { env: { get: name => config.env && Object.hasOwn(config.env,name) ? config.env[name] : 'test' }, serve: fn => { handler = fn; } },
       fetch: async (url, init) => { requests.push({ url, body: new URLSearchParams(init.body) });
         assert.ok(!url.includes('/refunds'), 'must never refund a paid cart on issuance failure');
         if (config.stripeFetch) return config.stripeFetch(url, init);
@@ -82,10 +82,10 @@ function harness(config = {}) {
     return exports;
   }
   return { writes, calls, requests, load,
-    async invoke(fn, body, headers = {}) {
+    async invoke(fn, body, headers = {}, method = "POST") {
       load(path.resolve(__dirname, '..', fn, 'index.ts'));
-      return handler(new Request('http://test', { method: 'POST', headers,
-        body: typeof body === 'string' ? body : JSON.stringify(body) }));
+      return handler(new Request('http://test', { method, headers,
+        ...(method === 'GET' || method === 'HEAD' ? {} : {body: typeof body === 'string' ? body : JSON.stringify(body)}) }));
     } };
 }
 

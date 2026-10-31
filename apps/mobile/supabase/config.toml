@@ -592,3 +592,8 @@ verify_jwt = false
 
 [functions.organizer-cancel-free-ticket]
 verify_jwt = false
+
+# Reporting-only cron: constant-time CRON_SECRET validation in the handler.
+# Separate activation/schedule approval required; never invokes recovery workers.
+[functions.refresh-platform-fees]
+verify_jwt = false
