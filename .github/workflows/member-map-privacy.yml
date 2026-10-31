@@ -56,6 +56,10 @@ jobs:
           node scripts/test-unified-native-map.cjs
           node scripts/test-member-map-controls.cjs
           MAP_BROWSER=webkit node scripts/test-member-map-controls.cjs
+          node scripts/test-member-map-consent.cjs
+          MAP_BROWSER=webkit node scripts/test-member-map-consent.cjs
+          node scripts/test-member-map-consent-ui.cjs
+          MAP_BROWSER=webkit node scripts/test-member-map-consent-ui.cjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

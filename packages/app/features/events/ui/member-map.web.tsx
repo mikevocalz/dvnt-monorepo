@@ -8,6 +8,7 @@ import { RoundedMapMarker } from "./rounded-map-marker.web";
 import { useRouter } from "solito/navigation";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { savedMapArea } from "./member-map-area";
+import { MapSharingConsent } from "./map-sharing-consent";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dvnt/app/lib/hooks/use-member-map";
 import { mapAvatarUrl, mapMemberInitials, mapMemberProfilePath, visibleMapMembers, type MapMember } from "./member-map-render-policy";
@@ -73,7 +74,7 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
             </Map>
           </div>
           <p className="text-sm text-white/65">Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</p>
-          <LocationControls allowSharing={ready} />
+          <MapSharingConsent active={ready} />
           <p role="status" className="text-sm text-white/60">{members.length ? `${members.length} ${members.length === 1 ? 'avatar' : 'avatars'} sharing an approximate area` : sharing ? 'Your avatar will appear when a fresh permitted location is available.' : 'Turn on avatar sharing to show yourself and nearby members.'}</p>
           <ul aria-label="Nearby members" className="grid sm:grid-cols-2 gap-2">
             {members.map((member) => (

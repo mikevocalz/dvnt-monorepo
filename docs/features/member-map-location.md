@@ -21,3 +21,9 @@ Focused SQL/edge/policy/browser tests plus existing Events regression. Fixtures 
 
 ## Withdrawal recovery
 Only owner-scoped negative withdrawal intent is persisted, never coordinates or positive consent. Failed withdrawal stays locally off across settings-fetch failures, reload and account changes until a confirmed explicit mutation. Persistence errors must not prevent emergency server revoke; the UI warns to keep the app open and retry if local durability fails. If both local persistence and server withdrawal fail, overall device-location preferences cannot be guaranteed after restart. Avatar GPS additionally requires explicit consent or Update my location once per session/account; fetched server-on settings and an existing OS grant alone do not restart avatar updates.
+
+## Explicit map permission flow (draft)
+
+Opening the ready Events map offers an optional disclosure before requesting OS/browser location. “Share my location” requests a fresh foreground fix, then records a four-hour grant and publishes only the existing approximately 1 km cell. No separate Settings toggle is required. Existing device permission is not public-sharing consent. Not now dismisses the offer with an account-scoped seven-day cooldown; a manual share entry remains. Expired grants are not automatically renewed or automatically prompted again.
+
+Stop sharing remains directly on the map. Permission denial/revocation stops publication and attempts server withdrawal, with a visible retry warning if withdrawal cannot be confirmed. Account changes, cancellation and obsolete callbacks cannot publish a later location; interrupted writes are compensated or recorded as a durable negative withdrawal intent. This is code only: no deployment, migrations, or live-user location changes are part of this change.
