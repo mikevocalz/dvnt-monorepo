@@ -1,0 +1,33 @@
+name: Event follow-up reliability
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/_shared/event-followup*'
+      - 'apps/mobile/supabase/functions/_shared/email/**'
+      - 'apps/mobile/supabase/functions/process-event-followups/**'
+      - 'apps/mobile/supabase/functions/event-followup-settings/**'
+      - 'apps/mobile/supabase/migrations/*event_followup*'
+      - '.github/workflows/event-followup-reliability.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'apps/mobile/supabase/**'
+permissions:
+  contents: read
+jobs:
+  delivery-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated dependencies
+        run: npm install --prefix "$RUNNER_TEMP/followup-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.2 @electric-sql/pglite@0.3.14
+      - name: Offline handler, delivery, rendering and embedded PostgreSQL contracts
+        env:
+          NODE_PATH: ${{ runner.temp }}/followup-tests/node_modules
+        run: node --test apps/mobile/supabase/functions/_shared/event-followup*.test.cjs apps/mobile/supabase/functions/process-event-followups/*.test.cjs apps/mobile/supabase/functions/event-followup-settings/*.test.cjs
