@@ -42,3 +42,12 @@ test('only canonical positive event review paths may survive required setup', ()
     assert.equal(reviewReturnPath(value), null);
   }
 });
+
+test('existing detail review sections survive setup without accepting query instructions', () => {
+  for (const prefix of ['feed', 'public']) {
+    assert.equal(reviewReturnPath(`/${prefix}/events/82?section=reviews`), '/feed/events/82?section=reviews');
+  }
+  for (const raw of ['/feed/events/0?section=reviews', '/feed/events/01?section=reviews', '/feed/events/9007199254740992?section=reviews', '/feed/events/82?section=reviews&next=/feed', '/feed/events/82?section=reviews&section=reviews', '/feed/events/82?section=reviews\n']) {
+    assert.equal(reviewReturnPath(raw), null);
+  }
+});

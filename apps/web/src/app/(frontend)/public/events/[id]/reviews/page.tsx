@@ -1,16 +1,9 @@
-'use client';
+import { notFound, redirect } from 'next/navigation';
 
-import dynamic from 'next/dynamic';
-import { WebAppShell } from '@dvnt/app/components/web-app-shell';
-
-const EventReviewsScreen = dynamic(
-  () => import('@dvnt/app/features/events/reviews.web').then(m => m.EventReviewsScreen),
-  { ssr: false },
-);
-
-/** Browser-only email landing: /public/events is deliberately not claimed by
- * Universal Links, so older installed apps cannot swallow the rating link.
- * This is still an authenticated surface, not public review submission. */
-export default function Page() {
-  return <WebAppShell><EventReviewsScreen /></WebAppShell>;
+/** Compatibility for earlier email links: use the event's existing section,
+ * not a second reviews surface. Public details still gate all member writes. */
+export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  if (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id))) notFound();
+  redirect(`/public/events/${id}?section=reviews`);
 }

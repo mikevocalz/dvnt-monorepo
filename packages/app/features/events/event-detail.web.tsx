@@ -1,3 +1,4 @@
+import { useReviewSection } from "./use-review-section.web";
 import { useEventLynkEntry } from "@dvnt/app/lib/hooks/use-event-lynk-entry";
 import { useEventAttendeePrivacy } from "@dvnt/app/lib/hooks/use-event-attendee-privacy";
 import { EVENT_FLYER_ASPECT } from "@dvnt/app/lib/events/flyer-layout";
@@ -287,7 +288,9 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 export function EventDetailScreen() {
   const params = useParams();
-  const requestedServiceTierId = useSearchParams()?.get("serviceTier") || undefined;
+  const searchParams = useSearchParams();
+  const requestedServiceTierId = searchParams?.get("serviceTier") || undefined;
+  const requestedReviews = searchParams?.getAll("section").length === 1 && searchParams.get("section") === "reviews";
   const router = useRouter();
   const pathname = usePathname() ?? "";
   // This screen mounts at BOTH /events/[slug] and /feed/events/[id]. The [id]
@@ -347,6 +350,7 @@ export function EventDetailScreen() {
   const { data: full } = eventQuery;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const e = (full ?? listPreview) as any;
+  const reviewSectionRef = useReviewSection(resolvedId, requestedReviews, !!full);
   const showGoing = useEventAttendeePrivacy(resolvedId ? String(resolvedId) : undefined, e);
 
   // Cover dominant color: db value if the edge fn already set it, else extract
@@ -371,7 +375,8 @@ export function EventDetailScreen() {
   // guest handlers below and never treat missing ticket data as an auth gate.
   const gateAuth = (action: () => void) => {
     if (!isAuthenticated) {
-      router.push(loginPathWithReturn(pathname));
+      router.push(loginPathWithReturn(requestedReviews && resolvedId
+        ? `/feed/events/${resolvedId}?section=reviews` : pathname));
       return;
     }
     action();
@@ -2098,7 +2103,8 @@ export function EventDetailScreen() {
           {/* Who All Over There — ephemeral event moments (ticket holders + host) */}
           <WhoAllOverThere eventId={eventId} canUpload={isHost || hasAdmissionTicket} />
 
-          {/* Ratings & Reviews */}
+          {/* Existing Ratings & Reviews section: email links reveal, never auto-submit. */}
+          <div id="reviews" ref={reviewSectionRef} tabIndex={-1} className="scroll-mt-24 outline-none" aria-label="Ratings & Reviews">
           {avgRating > 0 || reviews.length > 0 ? (
             <Section title="Ratings & Reviews" Icon={Star}>
               {avgRating > 0 ? (
@@ -2161,6 +2167,8 @@ export function EventDetailScreen() {
               </button>
             </Section>
           ) : null}
+
+          </div>
 
           {/* Comments — members-only; logged-out sees a blurred teaser. */}
           {comments.length > 0 || !isAuthenticated ? (
