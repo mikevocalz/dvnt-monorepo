@@ -70,6 +70,8 @@ export function scanVerdictMessage(reason: string | null | undefined): string {
       return "This ticket was voided";
     case "event_cancelled":
       return "This event has been cancelled. Do not admit; contact the organizer.";
+    case "event_unavailable":
+      return "The event is unavailable. Ask the organizer to review this admission.";
     case "transfer_pending":
       return "Ticket is mid-transfer — the new holder's ticket is the valid one";
     // ── no verdict: tell staff what to do, never that the ticket is fake ──

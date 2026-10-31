@@ -164,3 +164,10 @@ for (const qr_payload of ['ticket-payload', 'addon-payload']) {
     assert.equal(body.valid, undefined);
   });
 }
+
+test('well-formed missing event is authoritative not-found, not database failure', async () => {
+  const { status, body, db } = await scan({ qr_payload: 'ticket-payload', event_id: 999 });
+  assert.equal(status, 404);
+  assert.deepEqual(body, { valid: false, reason: 'event_not_found' });
+  assert.equal(db.rpcCalls.length, 0);
+});

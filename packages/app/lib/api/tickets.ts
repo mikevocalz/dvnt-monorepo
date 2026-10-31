@@ -16,6 +16,7 @@ import type { PerkKey } from "@dvnt/app/lib/perks/perk-config";
 import type { TicketSelfServiceAction } from "../tickets/self-service-action";
 
 const offlineDownloadRevisions = new Map<string, number>();
+const offlineReplayInFlight = new Set<string>();
 function advanceOfflineRevision(eventId: string): number {
   const next = (offlineDownloadRevisions.get(eventId) ?? 0) + 1;
   offlineDownloadRevisions.set(eventId, next);
@@ -566,6 +567,9 @@ export const ticketsApi = {
       // ticket-scan requires a Better Auth session (host / door staff).
       token = await requireBetterAuthToken();
     } catch {
+      // Token retrieval also fails during transport outages. Only a known
+      // logged-out state is authority to revoke the cached admission evidence.
+      if (useAuthStore.getState().authStatus === "unauthenticated") await invalidateOfflineAdmission(eventId);
       return { valid: false, reason: "unauthorized" };
     }
 
@@ -658,9 +662,14 @@ export const ticketsApi = {
    */
   async downloadOfflineTokens(eventId: string): Promise<string[]> {
     const revision = advanceOfflineRevision(eventId);
+    const viewerId = useAuthStore.getState().user?.id;
+    let obsolete = false;
+    const unsubscribe = useAuthStore.subscribe((state) => { if (state.user?.id !== viewerId) obsolete = true; });
     const assertCurrent = () => {
-      if (offlineDownloadRevisions.get(eventId) !== revision) throw new Error("Offline ticket refresh was superseded");
+      if (!viewerId || obsolete || useAuthStore.getState().user?.id !== viewerId || offlineDownloadRevisions.get(eventId) !== revision) throw new Error("Offline ticket refresh was superseded");
     };
+    try {
+    assertCurrent();
     const { data, error } = await invokeEdge<{
       ok: boolean;
       qr_tokens: string[];
@@ -669,6 +678,7 @@ export const ticketsApi = {
       event_id: parseInt(eventId),
       offline: true,
     });
+    assertCurrent();
     if (error) {
       if ([401, 403, 404, 409].includes(Number(error.status))) await invalidateOfflineAdmission(eventId);
       console.error("[Tickets] downloadOfflineTokens failed");
@@ -687,6 +697,7 @@ export const ticketsApi = {
     assertCurrent();
     useOfflineCheckinStore.getState().setOfflineSnapshot(eventId, tokens, addonTokens);
     return tokens;
+    } finally { unsubscribe(); }
   },
 
   /**
@@ -705,6 +716,7 @@ export const ticketsApi = {
       scannedBy?: string;
       eventId?: string;
       kind?: "ticket" | "addon";
+      conflict?: { reason: string };
     }[],
   ): Promise<{ synced: string[]; failed: string[] }> {
     const synced: string[] = [];
@@ -723,13 +735,20 @@ export const ticketsApi = {
       }
       const token = await requireBetterAuthToken();
       for (const scan of scans) {
+        let heldReplayKey: string | undefined;
         try {
           // Preserve legacy/unattributed entries for explicit staff review;
           // never replay another account's queue with the current session.
-          if (!current() || !scan.scannedBy ||
+          if (scan.conflict || !current() || !scan.scannedBy ||
               ![String(owner.id), owner.authId].includes(scan.scannedBy)) {
             throw new Error("Offline scan belongs to another account");
           }
+          const { useOfflineCheckinStore } = await import("@dvnt/app/lib/stores/offline-checkin-store");
+          const stored = useOfflineCheckinStore.getState().pendingScans.find((pending) => pending.eventId === scan.eventId && pending.qrToken === scan.qrToken);
+          const replayKey = JSON.stringify([owner.authId, scan.eventId, scan.qrToken]);
+          if (!current() || stored?.conflict || offlineReplayInFlight.has(replayKey)) throw new Error("Offline scan already needs review or is syncing");
+          offlineReplayInFlight.add(replayKey);
+          heldReplayKey = replayKey;
           const { data, error } = await supabase.functions.invoke("ticket-scan", {
             body: {
               qr_token: scan.qrToken,
@@ -743,17 +762,35 @@ export const ticketsApi = {
           if (error) {
             const status = (error as { context?: { status?: number } })?.context?.status;
             if ([401, 403, 404, 409].includes(Number(status))) await invalidateOfflineAdmission(scan.eventId);
+            if (scan.eventId && current() && [403, 404, 409].includes(Number(status))) {
+              useOfflineCheckinStore.getState().markScanConflict(scan.eventId, scan.qrToken, {
+                reason: status === 403 ? "forbidden" : status === 409 ? "event_cancelled" : "event_unavailable",
+                lastAttemptAt: new Date().toISOString(),
+              });
+            }
             throw error;
           }
           const verdict = typeof data === "string" ? JSON.parse(data) : data;
           if (verdict?.reason === "event_cancelled") await invalidateOfflineAdmission(scan.eventId);
           else if (verdict?.valid === false) await invalidateRejectedOfflineToken(scan.eventId, scan.qrToken, verdict.reason);
+          if (verdict?.valid === false && scan.eventId &&
+              ["already_scanned", "refunded", "voided", "void", "wrong_event", "transfer_pending", "ticket_not_found", "invalid_status", "addon_not_found", "already_redeemed", "event_cancelled"].includes(verdict.reason)) {
+            const { useOfflineCheckinStore } = await import("@dvnt/app/lib/stores/offline-checkin-store");
+            if (current()) useOfflineCheckinStore.getState().markScanConflict(scan.eventId, scan.qrToken, {
+              reason: verdict.reason,
+              lastAttemptAt: new Date().toISOString(),
+              checkedInAt: typeof verdict.checked_in_at === "string" ? verdict.checked_in_at : null,
+              checkedInByName: typeof verdict.checked_in_by_name === "string" ? verdict.checked_in_by_name : null,
+            });
+          }
           // A 200 rejection (including another device's duplicate) is not an
           // acknowledgement. Preserve it in the queue for staff review.
           if (!current() || verdict?.valid !== true) throw new Error("Offline scan was not confirmed");
           synced.push(scan.qrToken);
         } catch {
           failed.push(scan.qrToken);
+        } finally {
+          if (heldReplayKey) offlineReplayInFlight.delete(heldReplayKey);
         }
       }
       return { synced, failed };

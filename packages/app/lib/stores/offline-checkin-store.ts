@@ -30,6 +30,13 @@ export function isOfflineAllowlistFresh(downloadedAt: string | undefined, now = 
 /** Discriminates the rail a queued scan belongs to (WS-8 × WS-3). */
 export type OfflineScanKind = "ticket" | "addon";
 
+export interface OfflineScanConflict {
+  reason: string;
+  lastAttemptAt: string;
+  checkedInAt?: string | null;
+  checkedInByName?: string | null;
+}
+
 interface PendingScan {
   qrToken: string;
   scannedAt: string; // ISO timestamp
@@ -37,6 +44,7 @@ interface PendingScan {
   scannedBy?: string;
   /** Absent on legacy persisted entries — treat as "ticket". */
   kind?: OfflineScanKind;
+  conflict?: OfflineScanConflict;
 }
 
 interface OfflineCheckinState {
@@ -70,6 +78,7 @@ interface OfflineCheckinState {
    */
   markScannedLocal: (eventId: string, qrToken: string) => void;
   removePendingScans: (eventId: string, tokens: string[]) => void;
+  markScanConflict: (eventId: string, qrToken: string, conflict: OfflineScanConflict) => void;
   clearEventData: (eventId: string) => void;
   /** Revoke admission evidence without losing queued scans or duplicate history. */
   invalidateAdmissionForEvent: (eventId: string) => void;
@@ -152,6 +161,11 @@ export const useOfflineCheckinStore = create<OfflineCheckinState>()(
             },
           };
         }),
+
+      markScanConflict: (eventId, qrToken, conflict) =>
+        set((state) => ({
+          pendingScans: state.pendingScans.map((scan) => scan.eventId === eventId && scan.qrToken === qrToken ? { ...scan, conflict } : scan),
+        })),
 
       removePendingScans: (eventId, tokens) =>
         set((state) => ({
@@ -237,8 +251,9 @@ let _flushing = false;
  */
 async function flushPendingScans(): Promise<void> {
   if (_flushing) return;
-  const { pendingScans, removePendingScans } =
+  const { pendingScans: allPendingScans, removePendingScans } =
     useOfflineCheckinStore.getState();
+  const pendingScans = allPendingScans.filter((scan) => !scan.conflict);
   if (pendingScans.length === 0 || !isOnline()) return;
   _flushing = true;
   try {

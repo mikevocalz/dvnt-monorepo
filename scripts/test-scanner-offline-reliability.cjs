@@ -8,18 +8,20 @@ const root = path.resolve(__dirname, '..');
 function load(file, modules = {}) {
   const exports = {};
   const code = ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   vm.runInNewContext(code, { exports, Date, console: { warn() {}, error() {} },
     require: name => modules[name] ?? {},
   });
   return exports;
 }
-function storeFixture() {
+function storeFixture(api = {}) {
   const storage = { getItem: () => null, setItem() {}, removeItem() {} };
   return load('packages/app/lib/stores/offline-checkin-store.ts', {
     zustand: require('zustand'), 'zustand/middleware': require('zustand/middleware'),
     '@dvnt/app/lib/mmkv-zustand': { mmkvStorage: storage },
+    '@dvnt/app/lib/stores/connectivity-store': {isOnline:()=>true},
+    '@dvnt/app/lib/api/tickets': {ticketsApi:api},
   });
 }
 function apiFixture(response, download = response) {
@@ -29,7 +31,7 @@ function apiFixture(response, download = response) {
   const api = load('packages/app/lib/api/tickets.ts', {
     '../supabase/client': { supabase: { functions: { invoke: async (name,request) => { calls.push(request); return typeof response === 'function' ? response(request) : response; } } } },
     '../stores/auth-store': {useAuthStore:auth},
-    '../auth/identity': { requireBetterAuthToken: async () => `synthetic-${auth.getState().user?.id}`,
+    '../auth/identity': { requireBetterAuthToken: async () => { if(!auth.getState().user)throw new Error('no token');return `synthetic-${auth.getState().user.id}`; },
       getCurrentUserRow: async () => auth.getState().user ? {id:Number(auth.getState().user.id),authId:auth.getState().user.authId} : null },
     './invoke-edge': { invokeEdge: async () => typeof download === 'function' ? download() : download },
     '../tickets/scan-verdict': load('packages/app/lib/tickets/scan-verdict.ts'),
@@ -238,4 +240,64 @@ test('atomic download commit cannot be resurrected by awaiting caller after canc
   for(const file of ['packages/app/features/events/door-offline-kit.web.ts','packages/app/features/events/organizer.web.tsx','packages/app/features/routes/screens/(protected)/events/[id]/organizer.tsx','packages/app/features/routes/screens/(protected)/events/[id]/index.tsx']){
     assert.doesNotMatch(fs.readFileSync(path.join(root,file),'utf8'),/setTokensForEvent\(eventId, tokens\)/);
   }
+});
+test('terminal reconciliation stores original server evidence and is never replayed by manual or automatic sync',async()=>{
+  const {api,useOfflineCheckinStore:store,calls}=apiFixture({data:{valid:false,reason:'already_scanned',checked_in_at:'2026-01-01T00:01:00Z',checked_in_by_name:'Synthetic staff'}});
+  store.getState().markScannedOffline('7','conflict','staff');
+  await api.syncOfflineScans(store.getState().pendingScans);
+  const conflict=store.getState().pendingScans[0].conflict;
+  assert.equal(conflict.reason,'already_scanned');assert.equal(conflict.checkedInByName,'Synthetic staff');assert.ok(conflict.lastAttemptAt);
+  await api.syncOfflineScans(store.getState().pendingScans);assert.equal(calls.length,1);assert.equal(store.getState().pendingScans.length,1);
+  let batches=[];const automatic=storeFixture({syncOfflineScans:async scans=>{batches.push(scans);return{synced:[],failed:[]}}});
+  automatic.useOfflineCheckinStore.setState({pendingScans:store.getState().pendingScans});
+  await automatic.flushOfflineScansNow();assert.equal(batches.length,0);
+  automatic.useOfflineCheckinStore.getState().markScannedOffline('7','retryable','staff');
+  await automatic.flushOfflineScansNow();assert.equal(batches.length,1);assert.equal(batches[0].length,1);assert.equal(batches[0][0].qrToken,'retryable');
+});
+test('old refusal cannot erase newer successful snapshot',async()=>{
+  let resolve;const waiting=new Promise(r=>resolve=r);let calls=0;
+  const {api,useOfflineCheckinStore:store}=apiFixture({},()=>++calls===1?waiting:{data:{ok:true,qr_tokens:['current'],addon_qr_tokens:[]}});
+  const old=api.downloadOfflineTokens('7');await api.downloadOfflineTokens('7');resolve({error:{status:409,message:'old refusal'}});
+  await assert.rejects(old,/superseded/);assert.equal(store.getState().isTokenValid('7','current'),true);
+});
+for(const back of [false,true])test(`download account switch${back?' A→B→A':''} never commits an obsolete snapshot`,async()=>{
+  let resolve;const waiting=new Promise(r=>resolve=r);const{api,auth,useOfflineCheckinStore:store}=apiFixture({},()=>waiting);
+  const old=api.downloadOfflineTokens('7');auth.setState({user:{id:'12',authId:'staff-b'}});if(back)auth.setState({user:{id:'11',authId:'staff'}});
+  resolve({data:{ok:true,qr_tokens:['old'],addon_qr_tokens:['old-addon']}});await assert.rejects(old,/superseded/);assert.equal(store.getState().hasOfflineData('7'),false);
+});
+test('shared web/native conflict panel shows own event evidence without QR or destructive controls',()=>{
+  const React=require('react');const {renderToStaticMarkup}=require('react-dom/server');
+  const {useOfflineCheckinStore:store}=storeFixture();let user={id:'11',authId:'staff'};
+  const box=tag=>({children})=>React.createElement(tag,null,children);
+  const component=load('packages/app/features/events/offline-scan-conflicts.tsx',{
+    'react/jsx-runtime':require('react/jsx-runtime'),
+    'react-native':{View:box('div'),Text:box('span'),ScrollView:box('div')},
+    '@dvnt/app/lib/stores/offline-checkin-store':{useOfflineCheckinStore:select=>select(store.getState())},
+    '@dvnt/app/lib/stores/auth-store':{useAuthStore:select=>select({user})},
+    '@dvnt/app/lib/tickets/scan-verdict':load('packages/app/lib/tickets/scan-verdict.ts'),
+  }).OfflineScanConflicts;
+  store.getState().markScannedOffline('7','SECRET-QR','11');store.getState().markScanConflict('7','SECRET-QR',{reason:'already_scanned',lastAttemptAt:'2026-01-01T00:02:00Z',checkedInAt:'2026-01-01T00:01:00Z',checkedInByName:'Synthetic staff'});
+  const html=renderToStaticMarkup(React.createElement(component,{eventId:'7'}));
+  assert.match(html,/Automatic retries are paused/);assert.match(html,/Synthetic staff/);assert.match(html,/Last attempt/);assert.doesNotMatch(html,/SECRET-QR|<button/);
+  assert.equal(renderToStaticMarkup(React.createElement(component,{eventId:'8'})),'');
+  user={id:'12',authId:'staff-b'};assert.equal(renderToStaticMarkup(React.createElement(component,{eventId:'7'})),'');
+});
+test('stale captured queue cannot retry a now-persisted terminal conflict',async()=>{
+  const{api,useOfflineCheckinStore:store,calls}=apiFixture({data:{valid:false,reason:'refunded'}});store.getState().markScannedOffline('7','ticket','staff');
+  const stale=store.getState().pendingScans;await api.syncOfflineScans(stale);await api.syncOfflineScans(stale);assert.equal(calls.length,1);
+});
+test('concurrent manual and automatic reconciliation dispatches one request per owned token',async()=>{
+  let resolve;const waiting=new Promise(r=>resolve=r);const{api,useOfflineCheckinStore:store,calls}=apiFixture(()=>waiting);store.getState().markScannedOffline('7','ticket','staff');
+  const scans=store.getState().pendingScans;const first=api.syncOfflineScans(scans);while(!calls.length)await Promise.resolve();
+  const second=await api.syncOfflineScans(scans);assert.equal(calls.length,1);assert.equal(second.synced.length,0);
+  resolve({data:{valid:true}});assert.equal((await first).synced.length,1);
+});
+test('known logout invalidates cached admission without deleting queued evidence',async()=>{
+  const{api,auth,useOfflineCheckinStore:store}=apiFixture({});store.getState().setTokensForEvent('7',['ticket']);store.getState().markScannedOffline('7','queued','staff');
+  auth.setState({user:null,authStatus:'unauthenticated'});const result=await api.scanTicket('ticket','staff','7');assert.equal(result.reason,'unauthorized');assert.equal(store.getState().hasOfflineData('7'),false);assert.equal(store.getState().pendingScans.length,1);
+});
+for(const status of [403,404,409])test(`terminal HTTP${status} reconciliation refusal is parked rather than endlessly retried`,async()=>{
+  const{api,useOfflineCheckinStore:store,calls}=apiFixture({error:{context:{status}}});store.getState().markScannedOffline('7','ticket','staff');
+  const scans=store.getState().pendingScans;await api.syncOfflineScans(scans);await api.syncOfflineScans(scans);
+  assert.equal(calls.length,1);assert.ok(store.getState().pendingScans[0].conflict);assert.equal(store.getState().pendingScans.length,1);
 });

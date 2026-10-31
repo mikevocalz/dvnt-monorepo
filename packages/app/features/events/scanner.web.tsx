@@ -67,6 +67,7 @@ import type { ScanAddonSummary } from "@dvnt/app/lib/api/tickets";
 import { useScanTicket } from "@dvnt/app/lib/hooks/use-tickets";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { OfflineScanConflicts } from "./offline-scan-conflicts";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/auth/identity";
 import {
@@ -842,6 +843,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
       ) : null}
 
       <DoorSyncRow phase={syncPhase} queued={queued} listUpdatedAt={listUpdatedAt} />
+      <OfflineScanConflicts eventId={eventId} />
 
       {/* Manual entry — type / paste a ticket token at the door. Scan mode
           only: in list mode the list IS the fallback. */}

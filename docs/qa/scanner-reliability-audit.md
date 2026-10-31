@@ -22,7 +22,14 @@ performed by this PR.
   from authoritative empty or revoked allowlists.
 - Offline caches never expired; each rail now has its own 24-hour maximum age.
 - Offline replay erased rejected HTTP-200 results. Only valid:true is confirmed;
-  conflicts remain visible for staff review instead of silently disappearing.
+  terminal conflicts are retained with reason/original check-in attribution and
+  shown in a read-only list, excluded from automatic retries so they cannot
+  consume the scanner rate limit indefinitely. No automatic conflict dismissal.
+- Replay used the current session even for another operator’s saved scans.
+  Canonical owner checks and account-change guards preserve the original queue;
+  unowned legacy records remain retained, never attributed to a different user.
+- Latest-request and account guards plus atomic both-rail cache commits prevent
+  old refreshes from resurrecting known revoked credentials.
 - Network errors claimed the ticket had not been checked despite possible lost
   responses after commit. UI now states that confirmation is unknown.
 
@@ -34,7 +41,8 @@ results, retryable lock contention and legacy calls. PostgreSQL suites exercise
 one-winner concurrency, credential rotation, void/refund races, independent comp
 credentials, audit rollback, cancellation before/after scans and bounded retries.
 The PostgreSQL suites require a disposable server and explicitly fail if missing;
-local server binaries were unavailable, so CI must pass before release readiness.
+local server binaries were unavailable. Revised actual-trigger PostgreSQL suites
+passed in CI at c5fe050; final-head CI must still pass before release readiness.
 Actual API, persisted Zustand store and mounted React fixtures cover offline
 refresh, expiry, replay verdicts and visible pending conflicts. Physical iOS/
 Android camera permissions, venue connectivity and real attendee check-in were

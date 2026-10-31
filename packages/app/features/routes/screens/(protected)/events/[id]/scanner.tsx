@@ -47,6 +47,7 @@ import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { scannerAccessGate } from "@dvnt/app/lib/events/scanner-access";
+import { OfflineScanConflicts } from "@dvnt/app/features/events/offline-scan-conflicts";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/auth/identity";
 import * as Haptics from "expo-haptics";
@@ -867,6 +868,10 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
             <Zap size={18} color="#fff" />
           )}
         </Pressable>
+      </View>
+
+      <View style={{ position: "absolute", top: insets.top + 64, left: 16, right: 16 }}>
+        <OfflineScanConflicts eventId={eventId} />
       </View>
 
       {/* Bottom stats + history */}
