@@ -4,10 +4,11 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { getSessionLifecycle, subscribeSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
 import { eventFollowupsApi } from "@dvnt/app/lib/api/event-followups";
 import { createFollowupSettingsStore } from "@dvnt/app/lib/events/followup-settings";
+const sessionEpoch = () => getSessionLifecycle().epoch;
 export function useFollowupScope(eventId: number) {
   const owner = useAuthStore(s => s.user?.id);
-  const session = useSyncExternalStore(subscribeSessionLifecycle, getSessionLifecycle, getSessionLifecycle);
-  return `${eventId}:${owner ?? "guest"}:${session.epoch}`;
+  const epoch = useSyncExternalStore(subscribeSessionLifecycle, sessionEpoch, sessionEpoch);
+  return `${eventId}:${owner ?? "guest"}:${epoch}`;
 }
 export function useFollowupSettings(eventId: number) {
   const ref = useRef<ReturnType<typeof createFollowupSettingsStore> | null>(null);
