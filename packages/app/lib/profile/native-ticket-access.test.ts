@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { URL } from "node:url";
 
 // Exercise the actual native layout's progress callback, not a second policy.
 // Its only TypeScript syntax is the router destination's `as any` assertion.
