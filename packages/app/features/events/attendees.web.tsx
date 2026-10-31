@@ -34,6 +34,7 @@
  * The server is still the authority; this only stops the UI promising a 403.
  */
 
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useMemo, useRef, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CompCancelModal } from "./ui/comp-cancel-modal";
@@ -211,14 +212,28 @@ function AttendeeRow({ item }: { item: TicketRecord }) {
 
 export function AttendeesScreen() {
   const params = useParams();
+  const user = useAuthStore(s => s.user);
+  const accountKey = user ? `${user.id}:${user.authId || ""}` : "";
+  const eventId = parseInt(String((params as any)?.id || "0"), 10);
+  return <ScopedAttendees key={`${eventId}:${accountKey}`} accountKey={accountKey} />;
+}
+function ScopedAttendees({ accountKey }: { accountKey: string }) {
+  const params = useParams();
   const router = useRouter();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rawId = String((params as any)?.id ?? "");
   const eventId = parseInt(rawId || "0", 10);
 
-  const statusFilter = useAttendeesStore((s) => s.statusFilter);
+  const scope = `${eventId}:${accountKey}`;
+  const rosterScope = useAttendeesStore(s => s.rosterScope);
+  const setRosterScope = useAttendeesStore(s => s.setRosterScope);
+  useEffect(() => { setRosterScope(scope); }, [scope, setRosterScope]);
+  const scopeReady = rosterScope === scope;
+  const storedStatus = useAttendeesStore((s) => s.statusFilter);
+  const statusFilter = scopeReady ? storedStatus : "all";
   const setStatusFilter = useAttendeesStore((s) => s.setStatusFilter);
-  const searchInput = useAttendeesStore((s) => s.searchInput);
+  const storedSearch = useAttendeesStore((s) => s.searchInput);
+  const searchInput = scopeReady ? storedSearch : "";
   const setSearchInput = useAttendeesStore((s) => s.setSearchInput);
   const compOpen = useAttendeesStore((s) => s.compOpen);
   const openComp = useAttendeesStore((s) => s.openComp);
@@ -232,6 +247,7 @@ export function AttendeesScreen() {
     queryKey: [
       "event-attendees",
       eventId,
+      accountKey,
       statusFilter,
       searchDebounced.trim(),
     ],
@@ -244,15 +260,17 @@ export function AttendeesScreen() {
       }),
     getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
     initialPageParam: 1,
-    enabled: Number.isFinite(eventId) && eventId > 0,
+    enabled: !!accountKey && scopeReady && Number.isFinite(eventId) && eventId > 0,
   });
 
+  const pendingSearch = !scopeReady || searchInput.trim() !== searchDebounced.trim();
+  const resultsKnown = !!accountKey && !pendingSearch && !query.isError;
   const flat = useMemo(
-    () => query.data?.pages.flatMap((p) => p.tickets) ?? [],
-    [query.data],
+    () => resultsKnown ? query.data?.pages.flatMap((p) => p.tickets) ?? [] : [],
+    [query.data, resultsKnown],
   );
-  const total = query.data?.pages[query.data.pages.length - 1]?.total ?? null;
-  const role = query.data?.pages[0]?.role ?? null;
+  const total = resultsKnown ? query.data?.pages[query.data.pages.length - 1]?.total ?? null : null;
+  const role = resultsKnown ? query.data?.pages[0]?.role ?? null : null;
   const canComp = canCompTickets(role);
 
   const search = searchDebounced.trim();
@@ -290,7 +308,7 @@ export function AttendeesScreen() {
           <h1 className="text-[17px] font-semibold leading-tight">Attendees</h1>
           {total != null ? (
             <p className="mt-0.5 text-xs text-white/45">
-              {total} total
+              {total} {searchInput.trim() || statusFilter !== "all" ? "matching tickets" : "tickets"}
               {role === "scanner" ? " · scanner view" : ""}
             </p>
           ) : null}
@@ -323,12 +341,15 @@ export function AttendeesScreen() {
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search ticket id"
+            placeholder="Search name, @username, or ticket ID"
+          maxLength={200}
+            aria-label="Search attendees by name, username, or ticket ID"
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
             className="min-w-0 flex-1 bg-transparent text-[15px] text-white placeholder:text-white/35 outline-none"
           />
+          {searchInput ? <button aria-label="Clear attendee search" onClick={() => setSearchInput("")}><X size={16} /></button> : null}
         </div>
 
         {/* Filter chips */}
@@ -339,6 +360,7 @@ export function AttendeesScreen() {
               <button
                 key={f.value}
                 onClick={() => setStatusFilter(f.value)}
+                aria-pressed={selected}
                 className={`rounded-full border px-3 py-1.5 text-[13px] font-medium transition-colors ${
                   selected
                     ? "border-white bg-white text-black"
@@ -352,7 +374,7 @@ export function AttendeesScreen() {
         </div>
 
         {/* List / states */}
-        {query.isLoading ? (
+        {pendingSearch || query.isLoading || !accountKey ? (
           <div className="flex flex-col items-center justify-center py-24">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-cyan-500" />
             <p className="mt-4 text-sm text-white/40">Loading attendees...</p>

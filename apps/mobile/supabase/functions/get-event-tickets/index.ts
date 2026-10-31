@@ -8,7 +8,8 @@
  *   { event_id, page, pageSize, status, search }
  *     → paginated, server-filtered. status is one of
  *       'active' | 'scanned' | 'refunded' | 'transfer_pending' | 'void' | 'all'
- *       search matches qr_token / user info (case-insensitive prefix).
+ *       search matches holder names / @usernames (literal case-insensitive partial),
+ *       ticket UUID / legacy qr_token (prefix).
  *   { event_id, offline: true }
  *     → minimal payload for offline check-in: just qr_tokens of active
  *       tickets. Same auth gate. Bypasses pagination since the roster
@@ -96,10 +97,6 @@ function clampInt(
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
-}
-
-function escapeLike(s: string): string {
-  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
 Deno.serve(async (req: Request) => {
@@ -240,13 +237,23 @@ Deno.serve(async (req: Request) => {
     const page = clampInt(body.page, 1, 1, 1_000_000);
     const offset = (page - 1) * pageSize;
     const status = typeof body.status === "string" ? body.status : "all";
+    if (body.search !== undefined && typeof body.search !== "string") {
+      return errorResponse("search must be a string", 400);
+    }
     const search =
       typeof body.search === "string" ? body.search.trim() : "";
 
-    let query = supabase
-      .from("tickets")
-      .select("*, ticket_types(name)", { count: "exact" })
-      .eq("event_id", eventIdNum);
+    if (search.length > 200) return errorResponse("Search must be 200 characters or fewer", 400);
+
+    // SQL restricts matches to this authorized event before count/pagination.
+    // SETOF tickets preserves the ticket_types relationship and existing sort,
+    // cursor, status and response projections; no global profile lookup or
+    // unbounded ticket-ID list is sent through a PostgREST URL.
+    let query = search
+      ? supabase.rpc("search_event_tickets", {
+          p_event_id: eventIdNum, p_auth_id: authId, p_search: search,
+        }, { count: "exact" }).select("*, ticket_types(name)")
+      : supabase.from("tickets").select("*, ticket_types(name)", { count: "exact" }).eq("event_id", eventIdNum);
 
     if (
       status &&
@@ -258,13 +265,6 @@ Deno.serve(async (req: Request) => {
       query = query.eq("status", status);
     }
 
-    if (search) {
-      // qr_token prefix match (case-insensitive) is the cheapest +
-      // most useful search target. We don't join users here to keep
-      // this query fast; user-by-name search would benefit from a
-      // dedicated FTS index and is left for a follow-up.
-      query = query.ilike("qr_token", `${escapeLike(search)}%`);
-    }
 
     // ── Ordering + keyset pagination (WS-2) ────────────────────────────
     // Offset paging (.range) duplicates and skips rows the moment a ticket is
