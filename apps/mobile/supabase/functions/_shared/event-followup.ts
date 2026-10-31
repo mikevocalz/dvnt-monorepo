@@ -235,6 +235,7 @@ export function buildFollowupEmail(args: {
     paragraph(`<span style="white-space:pre-wrap">${message}</span>`),
     button(args.reviewUrl, escapeHtml(args.ctaLabel || "Leave a review")),
     args.profileUrl ? button(args.profileUrl, "Join the community") : "",
+    paragraph(`If the app opens instead, copy this link into your browser’s address bar:<br/><a href="${escapeHtml(args.reviewUrl)}" style="color:${COLORS.textMuted};word-break:break-all">${escapeHtml(args.reviewUrl)}</a>`, { size: 12, color: COLORS.textMuted }),
     paragraph(
       (args.preview ? `This is your requested preview for ${escapeHtml(title)}. ` : `You got this because you had a ticket to ${escapeHtml(title)}. `) +
       `<a href="${escapeHtml(args.unsubscribeUrl)}" style="color:${COLORS.textMuted};text-decoration:underline">Unsubscribe from event follow-up emails</a>.`,
