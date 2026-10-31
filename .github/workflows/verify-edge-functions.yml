@@ -115,7 +115,22 @@ jobs:
       # These edge suites do not depend on the app's npm workspace. Prevent
       # auto-install of unrelated frontend/optional-platform packages while
       # retaining Deno's dependency-age policy and automatic @types/node support.
-      - run: deno test --node-modules-dir=auto --no-lock --allow-net --allow-env --allow-read apps/mobile/supabase/functions/_shared/
+      # Run every shared test with its native runner. CJS tests need the Node
+      # transpiler; do not silently omit them from the previous directory scan.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --prefix "$RUNNER_TEMP/shared-test-deps" --ignore-scripts --no-audit --no-fund typescript@5.9.2 zod@3.25.76
+      - name: All shared Node suites
+        run: |
+          mapfile -d '' tests < <(find apps/mobile/supabase/functions/_shared -type f \( -name '*.test.cjs' -o -name '*.test.mjs' \) -print0)
+          test "${#tests[@]}" -gt 0
+          NODE_PATH="$RUNNER_TEMP/shared-test-deps/node_modules" node --test "${tests[@]}"
+      - name: All shared Deno suites
+        run: |
+          mapfile -d '' tests < <(find apps/mobile/supabase/functions/_shared -type f -name '*.test.ts' -print0)
+          test "${#tests[@]}" -gt 0
+          deno test --node-modules-dir=auto --no-lock --allow-net --allow-env --allow-read "${tests[@]}"
         env:
           DENO_NO_PACKAGE_JSON: '1'
 
