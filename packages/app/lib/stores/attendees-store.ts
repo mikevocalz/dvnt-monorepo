@@ -17,6 +17,8 @@ export type AttendeesStatusFilter =
   | "void"
 
 interface AttendeesState {
+  rosterScope: string | null
+  setRosterScope: (scope: string) => void
   statusFilter: AttendeesStatusFilter
   searchInput: string
   /**
@@ -53,6 +55,8 @@ const EMPTY_COMP = {
 } as const
 
 export const useAttendeesStore = create<AttendeesState>((set) => ({
+  rosterScope: null,
+  setRosterScope: (rosterScope) => set({ rosterScope, statusFilter: "all", searchInput: "", ...EMPTY_COMP }),
   statusFilter: "all",
   searchInput: "",
   ...EMPTY_COMP,

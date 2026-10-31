@@ -14,7 +14,8 @@
  *   - anyone else → server returns 403 and we show an empty state
  */
 
-import React, { useCallback, useMemo, useState } from "react";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import React, { useEffect, useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -105,6 +106,12 @@ export function isOrganizerPaidRefundCandidate(ticket: {
 
 export default function EventAttendeesScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const user = useAuthStore(s => s.user);
+  const accountKey = user ? `${user.id}:${user.authId || ""}` : "";
+  return <ScopedAttendees key={`${id}:${accountKey}`} accountKey={accountKey} />;
+}
+function ScopedAttendees({ accountKey }: { accountKey: string }) {
+  const { id } = useLocalSearchParams<{ id: string }>();
   const eventId = parseInt(id || "0", 10);
   const router = useRouter();
 
@@ -117,6 +124,7 @@ export default function EventAttendeesScreen() {
     queryKey: [
       "event-attendees",
       eventId,
+      accountKey,
       statusFilter,
       searchDebounced.trim(),
     ],
@@ -129,15 +137,17 @@ export default function EventAttendeesScreen() {
       }),
     getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
     initialPageParam: 1,
-    enabled: Number.isFinite(eventId) && eventId > 0,
+    enabled: !!accountKey && Number.isFinite(eventId) && eventId > 0,
   });
 
+  const pendingSearch = searchInput.trim() !== searchDebounced.trim();
+  const resultsKnown = !!accountKey && !pendingSearch && !query.isError;
   const flat = useMemo(
-    () => query.data?.pages.flatMap((p) => p.tickets) ?? [],
-    [query.data],
+    () => resultsKnown ? query.data?.pages.flatMap((p) => p.tickets) ?? [] : [],
+    [query.data, resultsKnown],
   );
-  const total = query.data?.pages[query.data.pages.length - 1]?.total ?? null;
-  const role = query.data?.pages[0]?.role ?? null;
+  const total = resultsKnown ? query.data?.pages[query.data.pages.length - 1]?.total ?? null : null;
+  const role = resultsKnown ? query.data?.pages[0]?.role ?? null : null;
   const canExport = role === "owner" || role === "admin" || role === "editor";
   const canBroadcast = role === "owner" || role === "admin";
   const canComp = role === "owner" || role === "admin";
@@ -148,6 +158,7 @@ export default function EventAttendeesScreen() {
   const [refundOpen, setRefundOpen] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  useEffect(() => { setSelected(new Set()); setSelecting(false); setRefundOpen(false); }, [searchInput, statusFilter]);
   const showToast = useUIStore((s) => s.showToast);
   const queryClient = useQueryClient();
 
@@ -271,14 +282,14 @@ export default function EventAttendeesScreen() {
               ]}
             >
               <Text style={styles.avatarText}>
-                {(item.qr_token || "?").slice(0, 1).toUpperCase()}
+                {(item.username || item.holder_name || "?").slice(0, 1).toUpperCase()}
               </Text>
             </View>
           )}
           <View style={styles.body}>
             <Text style={styles.name} numberOfLines={1}>
-              {item.guest_name ||
-                item.guest_email ||
+              {(item.username ? `@${item.username}` : item.holder_name) ||
+                item.guest_name ||
                 `Ticket ${String(item.id).slice(0, 8)}`}
             </Text>
             <View style={styles.metaRow}>
@@ -337,7 +348,7 @@ export default function EventAttendeesScreen() {
           <Text style={styles.headerTitle}>Attendees</Text>
           {total != null && (
             <Text style={styles.headerSubtitle}>
-              {total} total
+              {total} {searchInput.trim() || statusFilter !== "all" ? "matching tickets" : "tickets"}
               {role === "scanner" ? " · scanner view" : ""}
             </Text>
           )}
@@ -438,12 +449,15 @@ export default function EventAttendeesScreen() {
         <TextInput
           value={searchInput}
           onChangeText={setSearchInput}
-          placeholder="Search ticket id"
+          placeholder="Search name, @username, or ticket ID"
+          maxLength={200}
+          accessibilityLabel="Search attendees by name, username, or ticket ID"
           placeholderTextColor="rgba(255,255,255,0.35)"
           autoCapitalize="none"
           autoCorrect={false}
           style={styles.searchInput}
         />
+        {searchInput ? <Pressable accessibilityLabel="Clear attendee search" onPress={() => setSearchInput("")}><XIcon size={16} color="#fff" /></Pressable> : null}
       </View>
 
       <View style={styles.chipsWrap}>
@@ -453,6 +467,7 @@ export default function EventAttendeesScreen() {
             <Pressable
               key={f.value}
               onPress={() => setStatusFilter(f.value)}
+              accessibilityState={{ selected }}
               style={[styles.chip, selected && styles.chipSelected]}
             >
               <Text
@@ -465,15 +480,16 @@ export default function EventAttendeesScreen() {
         })}
       </View>
 
-      {query.isLoading ? (
+      {pendingSearch || query.isLoading || !accountKey ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator color="rgba(255,255,255,0.4)" />
         </View>
       ) : query.isError ? (
         <View style={styles.loadingWrap}>
           <Text style={styles.dim}>
-            Couldn't load attendees. Pull to retry.
+            Couldn't load attendees. Try again.
           </Text>
+          <Pressable onPress={() => query.refetch()} accessibilityLabel="Retry attendees"><Text style={styles.dim}>Retry</Text></Pressable>
         </View>
       ) : flat.length === 0 ? (
         <View style={styles.loadingWrap}>

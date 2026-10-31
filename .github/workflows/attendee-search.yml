@@ -1,0 +1,38 @@
+name: Attendee search
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
+      - 'packages/app/features/events/**'
+      - 'packages/app/features/routes/screens/(protected)/events/**'
+      - 'packages/app/lib/stores/attendees-store.ts'
+      - 'scripts/test-attendee-search-dom.cjs'
+      - 'package.json'
+      - '.github/workflows/attendee-search.yml'
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  attendee-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/attendee-tests" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.28.1 typescript@5.9.2 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 happy-dom@20.10.3 @tanstack/react-query@5.90.5 @tanstack/react-pacer@0.21.1 pg@8.21.0
+      - name: Actual handler and mounted web/native search
+        env:
+          NODE_PATH: ${{ runner.temp }}/attendee-tests/node_modules
+        run: npm run test:attendee-search
+      - name: Disposable PostgreSQL search, counts, pagination and role boundaries
+        env:
+          NODE_PATH: ${{ runner.temp }}/attendee-tests/node_modules
+        run: npm run test:attendee-search:sql
