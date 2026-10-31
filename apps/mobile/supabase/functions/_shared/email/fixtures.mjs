@@ -5,6 +5,14 @@ const { buildFollowupEmail } = await import('../event-followup.ts');
 const url = 'https://example.test/action?token=preview-only&source=email';
 export const fixtures = {
   verification: templates.verificationCode('123456'),
+  reminderAddons: templates.ticketConfirmation({
+    eventTitle: 'Reminder preview', heading: "It's almost time.",
+    subject: 'Reminder preview — starts in 3 hours', claimUrl: null,
+    greeting: 'Your event starts soon. Open each ticket and add-on below.',
+    tickets: [{ tier: 'ga', tierLabel: 'Admission', lookupUrl: url }, { tier: 'service', tierLabel: 'Coat check pass', lookupUrl: url }],
+    addons: [{ name: 'Separate coat check', quantity: 2, status: 'unfulfilled', lookupUrl: url }],
+    manageUrl: url,
+  }),
   transfer: templates.ticketConfirmation({
     eventTitle: 'Preview “Night Out”', dateLine: 'Sun, Nov 1, 2:00 AM', location: 'Preview Venue',
     greeting: '@preview_host sent you a ticket for Preview “Night Out” — it\'s yours now.',
