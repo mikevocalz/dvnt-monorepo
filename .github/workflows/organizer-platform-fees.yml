@@ -1,0 +1,33 @@
+name: Organizer platform fee database contracts
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/**'
+      - '.github/workflows/organizer-platform-fees.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'apps/mobile/supabase/**'
+      - '.github/workflows/organizer-platform-fees.yml'
+permissions:
+  contents: read
+jobs:
+  isolated-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/fee-tests" --ignore-scripts pg@8.16.3
+          sudo apt-get update
+          sudo apt-get install --yes postgresql
+      - name: Disposable synthetic database contracts (no external connection)
+        env:
+          NODE_PATH: ${{ runner.temp }}/fee-tests/node_modules
+        run: node --test apps/mobile/supabase/functions/_shared/platform-fee-snapshot-sql.test.cjs

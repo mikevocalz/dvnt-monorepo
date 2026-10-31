@@ -355,6 +355,7 @@ export interface HostDashboardEvent {
 export interface HostDashboard {
   ok: boolean;
   stats: {
+    platformFees?: import("../../organizer/platform-fees").PlatformFees;
     monthSold: number;
     monthRevenueCents: number;
     scanRate: number | null;

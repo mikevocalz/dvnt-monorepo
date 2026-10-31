@@ -1,3 +1,5 @@
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { platformFeePresentation } from "@dvnt/app/lib/organizer/platform-fees";
 /**
  * Host Multi-Event Dashboard
  *
@@ -268,13 +270,17 @@ function SavedDrafts({
 
 export default function HostDashboardScreen() {
   const router = useRouter();
+  const user = useAuthStore(s => s.user);
+  const accountKey = user ? `${user.id}:${user.authId || ""}` : "";
   const q = useQuery({
-    queryKey: ["host-dashboard"],
+    queryKey: ["host-dashboard", accountKey],
+    enabled: !!accountKey,
     queryFn: getHostDashboard,
     staleTime: 30_000,
   });
   const savedDrafts = useQuery({
-    queryKey: ["event-drafts"],
+    queryKey: ["event-drafts", accountKey],
+    enabled: !!accountKey,
     queryFn: eventDraftsApi.list,
     staleTime: 10_000,
   });
@@ -330,7 +336,7 @@ export default function HostDashboardScreen() {
     [router],
   );
 
-  if (q.isLoading) {
+  if (q.isLoading || !accountKey) {
     return (
       <SafeAreaView edges={["top"]} style={styles.container}>
         <View style={styles.header}>
@@ -418,6 +424,16 @@ export default function HostDashboardScreen() {
             Icon={Calendar}
             accent={tierAccent("free")}
           />
+        </View>
+
+        <View accessibilityLabel="DVNT platform fees" style={{marginHorizontal:16,marginBottom:16,padding:16,borderRadius:16,borderWidth:1,borderColor:"rgba(255,255,255,0.1)",backgroundColor:"rgba(255,255,255,0.04)"}}>
+          <Text style={{color:"rgba(255,255,255,0.5)",fontSize:12,marginBottom:12}}>{platformFeePresentation(data.stats.platformFees).period}</Text>
+          <Text style={{color:"rgba(255,255,255,0.8)",fontSize:14}}>DVNT platform fees</Text>
+          <Text style={{color:"#3FDCFF",fontSize:24,fontWeight:"600",fontVariant:["tabular-nums"],marginTop:8}}>{platformFeePresentation(data.stats.platformFees).amount}</Text>
+          <Text style={{color:"rgba(255,255,255,0.5)",fontSize:12,marginTop:8}}>Stripe processing fees excluded</Text>
+          {platformFeePresentation(data.stats.platformFees).asOf && <Text style={{color:"rgba(255,255,255,0.5)",fontSize:12,marginTop:8}}>{platformFeePresentation(data.stats.platformFees).asOf}</Text>}
+          {platformFeePresentation(data.stats.platformFees).noTransactions && <Text style={{color:"rgba(255,255,255,0.5)",fontSize:12,marginTop:12}}>No transactions this month</Text>}
+          {platformFeePresentation(data.stats.platformFees).unavailable && <Text style={{color:"rgba(255,255,255,0.5)",fontSize:12,marginTop:12}}>{data.stats.platformFees?.status === "pending" ? "Verification pending" : "Verified total unavailable"}</Text>}
         </View>
 
         <SavedDrafts
