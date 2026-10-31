@@ -5,10 +5,10 @@ function harness(opts={}) {
  const receipt={id:'receipt-1',source_kind:'member_comp',event_id:7,recipient_auth_id:'member',guest_email:null,ticket_ids:['ticket-1','ticket-2'],lease_token:'lease',...opts.receipt};
  const tickets=opts.tickets||receipt.ticket_ids.map(id=>({id,event_id:7,user_id:receipt.recipient_auth_id,guest_email:receipt.guest_email,status:'active',guest_lookup_token:'private-'+id,ticket_type:{name:'Influencer'}}));
  const calls=[],emails=[],templates=[];let payload=opts.payload||null;let outcome=null;let claimed=0;
- const db={from(table){const q={select(){return q},in(){return q},eq(){return q},maybeSingle(){return q},then(resolve){return Promise.resolve({data:table==='ticket_receipt_outbox'?(opts.pendingRows||[]):table==='tickets'?tickets:table==='events'?{id:7,title:'Synthetic Night',status:'published',start_date:new Date(Date.now()+180*60000).toISOString(),...opts.event}:opts.account===null?null:{email:'member@example.test',emailVerified:true,...opts.account},error:opts.readError?{code:'offline'}:null}).then(resolve)}};return q;},async rpc(name,args){calls.push({name,args});if(name==='claim_event_reminders'){claimed++;return{data:opts.queueError?null:opts.unclaimed?[]:[{...receipt,provider_payload:payload}],error:opts.queueError?{}:null}}if(name==='prepare_event_reminder'){if(opts.prepareFails)return{error:{}};payload ||=args.p_payload;return{data:{ok:true,payload}}}if(name==='complete_event_reminder'){outcome=args;if(opts.stampFails)return{error:{}};return{data:true}}throw Error(name)}};
+ const queries=[]; const db={from(table){let filters=[],max=200;const q={select(columns){queries.push({table,columns});return q},in(k,vs){filters.push(r=>vs.includes(r[k]));return q},eq(k,v){filters.push(r=>r[k]===v);return q},gt(k,v){filters.push(r=>r[k]>v);return q},order(){return q},range(a,b){max=Math.min(b-a+1,opts.cap||200);return q},maybeSingle(){return q},then(resolve){return Promise.resolve({data:table==='order_addons'?(opts.addons||[]).filter(r=>filters.every(f=>f(r))).sort((a,b)=>a.id.localeCompare(b.id)).slice(0,max):table==='ticket_receipt_outbox'?(opts.pendingRows||[]):table==='tickets'?tickets:table==='events'?{id:7,title:'Synthetic Night',status:'published',start_date:new Date(Date.now()+180*60000).toISOString(),...opts.event}:opts.account===null?null:{email:'member@example.test',emailVerified:true,...opts.account},error:opts.readError||(table==='order_addons'&&opts.addonReadError)?{code:'offline'}:null}).then(resolve)}};return q;},async rpc(name,args){calls.push({name,args});if(name==='claim_event_reminders'){claimed++;return{data:opts.queueError?null:opts.unclaimed?[]:[{...receipt,provider_payload:payload}],error:opts.queueError?{}:null}}if(name==='prepare_event_reminder'){if(opts.prepareFails)return{error:{}};payload ||=args.p_payload;return{data:{ok:true,payload}}}if(name==='complete_event_reminder'){outcome=args;if(opts.stampFails)return{error:{}};return{data:true}}throw Error(name)}};
  const mod={exports:{}};const source=ts.transpileModule(fs.readFileSync(path.join(__dirname,'event-reminder-delivery.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  new Function('require','module','exports','Deno',source)(()=>({ticketConfirmation:p=>{templates.push(p);return{subject:'ticket',html:JSON.stringify(p)}},sendResendEmail:async p=>{emails.push(p);if(opts.sendFails)throw Error('private provider error');return opts.noReceipt?null:opts.blankReceipt?'   ':'message-1'}}),mod,mod.exports,{env:{get:k=>k==='PUBLIC_SITE_URL'?'https://offline.test':k==='RESEND_FROM_EMAIL'?'DVNT <noreply@example.test>':''}});
- return {...mod.exports,db,calls,emails,templates,get payload(){return payload},get outcome(){return outcome},get claimed(){return claimed}};
+ return {...mod.exports,db,calls,emails,templates,queries,get payload(){return payload},get outcome(){return outcome},get claimed(){return claimed}};
 }
 test('member bundle groups two exact tickets into one authenticated receipt, no QR or guest access',async()=>{const h=harness();const [r]=await h.deliverEventReminders(h.db,['receipt-1']);assert.equal(r.status,'delivered');assert.equal(h.emails.length,1);assert.equal(h.templates[0].tickets.length,2);assert.equal(h.templates[0].claimUrl,null);assert.deepEqual(h.templates[0].tickets.map(t=>t.lookupUrl),['https://offline.test/ticket/ticket-1','https://offline.test/ticket/ticket-2']);assert.ok(!JSON.stringify(h.emails).includes('private-'));assert.equal(h.emails[0].idempotencyKey,'event-reminder:v1:receipt-1');assert.equal(h.outcome.p_outcome,'sent');});
 test('guest bundle preserves each separate guest link and has no account requirement',async()=>{const h=harness({receipt:{recipient_auth_id:null,guest_email:'guest@example.test',source_kind:'guest_comp'}});const [r]=await h.deliverEventReminders(h.db,['receipt-1']);assert.equal(r.status,'delivered');assert.equal(h.emails[0].to,'guest@example.test');assert.ok(h.templates[0].tickets.every(t=>t.lookupUrl.includes('/public/tickets/guest/')));assert.equal(h.templates[0].guestNudge,true);});
@@ -27,3 +27,40 @@ for (const minutes of [149,211]) test(`outside original band ${minutes} minutes 
 test('frozen body still requires live lease prepare before resend',async()=>{const h=harness({prepareFails:true,payload:{to:'member@example.test',from:'sender',subject:'x',html:'x',ticket_ids:['ticket-1','ticket-2']}});assert.equal((await h.deliverEventReminders(h.db))[0].status,'failed');assert.equal(h.emails.length,0);assert.ok(h.calls.some(c=>c.name==='prepare_event_reminder'))});
 test('reminder date uses event timezone, not server timezone',async()=>{const h=harness({event:{event_tz:'America/New_York'}});await h.deliverEventReminders(h.db);assert.match(h.templates[0].dateLine,/E[DS]T/)});
 test('invalid event timezone safely falls back to explicit UTC',async()=>{const h=harness({event:{event_tz:'Invalid/Zone'}});await h.deliverEventReminders(h.db);assert.match(h.templates[0].dateLine,/UTC/)});
+
+const addon=(id,patch={})=>({id,event_id:7,user_id:'member',status:'unfulfilled',quantity:1,ticket_addon:{name:'Coat Check'},variant:null,qr_token:'never-email-addon-secret',...patch});
+test('separate bound and unbound add-ons are named with owner-authenticated access, not counted as tickets',async()=>{
+ const h=harness({addons:[addon('a',{ticket_id:'ticket-1'}),addon('b',{ticket_id:null,quantity:2,variant:{name:'Large'}})]});
+ assert.equal((await h.deliverEventReminders(h.db))[0].status,'delivered');
+ assert.equal(h.templates[0].tickets.length,2);assert.equal(h.templates[0].addons.length,2);
+ assert.deepEqual(h.templates[0].addons.map(a=>[a.name,a.quantity,a.lookupUrl]),[['Coat Check',1,'https://offline.test/ticket/ticket-1'],['Coat Check',2,'https://offline.test/ticket/ticket-1']]);
+ assert.deepEqual(h.payload.addon_ids,['a','b']);assert.ok(!JSON.stringify(h.emails).includes('never-email-addon-secret'));
+ assert.ok(h.queries.filter(q=>q.table==='order_addons').every(q=>!q.columns.includes('qr_')));
+});
+test('add-on query excludes other owners/events and refunded purchases; preserves fulfilled status',async()=>{
+ const h=harness({addons:[addon('a',{user_id:'other'}),addon('b',{event_id:8}),addon('c',{status:'refunded'}),addon('d',{status:'redeemed'}),addon('e',{status:'fulfilled'})]});
+ await h.deliverEventReminders(h.db);assert.deepEqual(h.templates[0].addons.map(a=>a.status),['redeemed','fulfilled']);assert.deepEqual(h.payload.addon_ids,['d','e']);
+});
+test('add-on traversal does not silently stop at a lower server row cap',async()=>{
+ const h=harness({addons:[addon('a'),addon('b'),addon('c')],cap:1});await h.deliverEventReminders(h.db);assert.equal(h.templates[0].addons.length,3);
+});
+test('guest reminders do not query account-owned add-ons or promise inaccessible addon links',async()=>{
+ const h=harness({receipt:{recipient_auth_id:null,guest_email:'guest@example.test'},addons:[addon('a')]});await h.deliverEventReminders(h.db);assert.equal(h.templates[0].addons.length,0);assert.ok(!h.queries.some(q=>q.table==='order_addons'));
+});
+test('add-on read outage retries instead of silently omitting purchases',async()=>{
+ const h=harness({addonReadError:true});assert.equal((await h.deliverEventReminders(h.db))[0].status,'failed');assert.equal(h.emails.length,0);assert.equal(h.outcome.p_outcome,'retry');
+});
+test('frozen reminder retains exact addon body after new purchase and safely suppresses after refund',async()=>{
+ const addons=[addon('a')];const opts={addons,stampFails:true};const h=harness(opts);await h.deliverEventReminders(h.db);addons.push(addon('b'));await h.deliverEventReminders(h.db);assert.deepEqual(h.emails[0],h.emails[1]);assert.equal(h.templates.length,1);
+ opts.stampFails=false;addons[0].status='refunded';assert.equal((await h.deliverEventReminders(h.db))[0].status,'not_available');assert.equal(h.emails.length,2);assert.equal(h.outcome.p_error,'addons_no_longer_owned_or_valid');
+});
+test('legacy frozen reminder is unchanged and does not newly query addons',async()=>{
+ const payload={to:'member@example.test',from:'sender',subject:'legacy',html:'legacy',ticket_ids:['ticket-1','ticket-2']};const h=harness({payload,addonReadError:true});await h.deliverEventReminders(h.db);assert.equal(h.emails[0].html,'legacy');assert.ok(!h.queries.some(q=>q.table==='order_addons'));
+});
+test('actual email template separates addons, escapes purchase labels, and links without QR credentials',()=>{
+ const cache=new Map();function load(file){if(cache.has(file))return cache.get(file);const exports={};cache.set(file,exports);const source=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;new Function('require','exports',source)(name=>load(path.resolve(path.dirname(file),name)),exports);return exports;}
+ const {ticketConfirmation}=load(path.join(__dirname,'email/templates.ts'));
+ const {html}=ticketConfirmation({eventTitle:'Fixture Night',claimUrl:null,tickets:[{tierLabel:'Admission',lookupUrl:'https://offline.test/ticket/one'}],addons:[{name:'Coat <Check>',variant:'A & B',quantity:2,status:'unfulfilled',lookupUrl:'https://offline.test/ticket/one'},{name:'Drink',quantity:1,status:'redeemed',lookupUrl:'https://offline.test/ticket/one'}]});
+ assert.match(html,/Your add-ons/);assert.match(html,/Coat &lt;Check&gt; · A &amp; B × 2/);assert.match(html,/Already redeemed/);assert.match(html,/View your add-on in app/);assert.ok(!html.includes('api.qrserver.com'));assert.ok(!html.includes('Ticket 2 of'));assert.ok(!html.includes('<Check>'));
+ const legacy=ticketConfirmation({eventTitle:'Fixture Night',claimUrl:null,tickets:[]}).html;assert.ok(!legacy.includes('Your add-ons'));
+});
