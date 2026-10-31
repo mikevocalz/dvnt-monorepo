@@ -6,6 +6,7 @@ export interface PlatformFees {
   timeZone: "America/New_York";
   status: "ready" | "pending" | "unavailable";
   asOf?: string;
+  through?: string;
   reason?: string;
 }
 export function platformFeePresentation(fees?: PlatformFees | null) {
@@ -20,5 +21,8 @@ export function platformFeePresentation(fees?: PlatformFees | null) {
   const asOfMs = fees?.asOf ? Date.parse(fees.asOf) : NaN;
   const asOf = fees?.status === "ready" && Number.isFinite(asOfMs)
     ? `Verified ${new Intl.DateTimeFormat("en-US", {month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",timeZone:"America/New_York",timeZoneName:"short"}).format(new Date(asOfMs))}` : null;
-  return { noTransactions, asOf, period: `${month} · America/New_York`, amount, unavailable: amount === "—" && !noTransactions };
+  const throughMs = fees?.through ? Date.parse(fees.through) : NaN;
+  const through = fees?.status === "ready" && Number.isFinite(throughMs)
+    ? `Sales through ${new Intl.DateTimeFormat("en-US", {month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",timeZone:"America/New_York",timeZoneName:"short"}).format(new Date(throughMs))}` : null;
+  return { noTransactions, asOf, through, period: `${month} · America/New_York`, amount, unavailable: amount === "—" && !noTransactions };
 }

@@ -461,6 +461,7 @@ export function HostScreen() {
             <h2 className="text-sm font-medium text-white/80">DVNT platform fees</h2>
             <p className="mt-2 break-words text-2xl font-semibold tabular-nums text-cyan-200">{platformFeePresentation(data.stats.platformFees).amount}</p>
             <p className="mt-2 text-xs text-white/50">Stripe processing fees excluded</p>
+            {platformFeePresentation(data.stats.platformFees).through && <p className="mt-2 text-xs text-white/50">{platformFeePresentation(data.stats.platformFees).through}</p>}
             {platformFeePresentation(data.stats.platformFees).asOf && <p className="mt-2 text-xs text-white/50">{platformFeePresentation(data.stats.platformFees).asOf}</p>}
             {platformFeePresentation(data.stats.platformFees).noTransactions && <p className="mt-3 text-xs text-white/50">No transactions this month</p>}
             {platformFeePresentation(data.stats.platformFees).unavailable && <p className="mt-3 text-xs text-white/50">{data.stats.platformFees?.status === "pending" ? "Verification pending" : "Verified total unavailable"}</p>}

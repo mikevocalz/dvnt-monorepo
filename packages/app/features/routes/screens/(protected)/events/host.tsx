@@ -431,6 +431,7 @@ export default function HostDashboardScreen() {
           <Text style={{color:"rgba(255,255,255,0.8)",fontSize:14}}>DVNT platform fees</Text>
           <Text style={{color:"#3FDCFF",fontSize:24,fontWeight:"600",fontVariant:["tabular-nums"],marginTop:8}}>{platformFeePresentation(data.stats.platformFees).amount}</Text>
           <Text style={{color:"rgba(255,255,255,0.5)",fontSize:12,marginTop:8}}>Stripe processing fees excluded</Text>
+          {platformFeePresentation(data.stats.platformFees).through && <Text style={{color:"rgba(255,255,255,0.5)",fontSize:12,marginTop:8}}>{platformFeePresentation(data.stats.platformFees).through}</Text>}
           {platformFeePresentation(data.stats.platformFees).asOf && <Text style={{color:"rgba(255,255,255,0.5)",fontSize:12,marginTop:8}}>{platformFeePresentation(data.stats.platformFees).asOf}</Text>}
           {platformFeePresentation(data.stats.platformFees).noTransactions && <Text style={{color:"rgba(255,255,255,0.5)",fontSize:12,marginTop:12}}>No transactions this month</Text>}
           {platformFeePresentation(data.stats.platformFees).unavailable && <Text style={{color:"rgba(255,255,255,0.5)",fontSize:12,marginTop:12}}>{data.stats.platformFees?.status === "pending" ? "Verification pending" : "Verified total unavailable"}</Text>}

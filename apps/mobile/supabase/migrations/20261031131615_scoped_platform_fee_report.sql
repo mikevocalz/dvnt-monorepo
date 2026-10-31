@@ -70,11 +70,11 @@ DECLARE r platform_fee_reports%ROWTYPE;g record;s platform_fee_snapshots%ROWTYPE
 BEGIN
  SELECT * INTO r FROM platform_fee_reports WHERE auth_id=p_auth AND month_start=p_start FOR UPDATE;
  IF NOT FOUND OR r.target_state<>'pending' THEN RETURN; END IF;
- IF EXISTS(SELECT 1 FROM platform_fee_snapshots s WHERE s.auth_id=p_auth AND s.month_start=p_start AND s.order_ids<@r.target_order_ids AND s.status='failed') THEN
+ IF EXISTS(SELECT 1 FROM platform_fee_snapshots queued WHERE queued.auth_id=p_auth AND queued.month_start=p_start AND queued.order_ids<@r.target_order_ids AND queued.status='failed') THEN
  UPDATE platform_fee_reports SET target_state='failed' WHERE auth_id=p_auth AND month_start=p_start;RETURN;END IF;
  -- Avoid rescanning every source order and snapshot for each individual
  -- completion. Full provenance is checked once the target queue is drained.
- IF EXISTS(SELECT 1 FROM platform_fee_snapshots s WHERE s.auth_id=p_auth AND s.month_start=p_start AND s.order_ids<@r.target_order_ids AND s.status IN ('pending','refreshing')) THEN RETURN;END IF;
+ IF EXISTS(SELECT 1 FROM platform_fee_snapshots queued WHERE queued.auth_id=p_auth AND queued.month_start=p_start AND queued.order_ids<@r.target_order_ids AND queued.status IN ('pending','refreshing')) THEN RETURN;END IF;
  IF r.target_invalid>0 OR r.target_fingerprint IS NULL OR platform_fee_report_source(r.auth_id,r.target_order_ids,r.month_start,r.month_end,r.target_through) IS DISTINCT FROM r.target_fingerprint THEN
  UPDATE platform_fee_reports SET target_state='failed' WHERE auth_id=p_auth AND month_start=p_start;RETURN;END IF;
  FOR g IN SELECT o.stripe_payment_intent_id pi,array_agg(o.id ORDER BY o.id) ids,
