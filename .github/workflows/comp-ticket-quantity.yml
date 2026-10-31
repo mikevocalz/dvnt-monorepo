@@ -9,6 +9,11 @@ on:
       - 'packages/app/lib/stores/attendees-store.ts'
       - 'packages/app/lib/api/privileged/index.ts'
       - 'scripts/test-comp-quantity-ui.cjs'
+      - 'scripts/test-scanner-offline-reliability.cjs'
+      - 'packages/app/lib/stores/offline-checkin-store.ts'
+      - 'packages/app/lib/api/tickets.ts'
+      - 'packages/app/features/events/scanner.web.tsx'
+      - 'packages/app/features/routes/screens/**/events/**/scanner.tsx'
       - 'package.json'
       - '.github/workflows/comp-ticket-quantity.yml'
   push:
@@ -32,9 +37,13 @@ jobs:
       - name: Mounted web/native selectors, edge quantities, and transfer credentials
         env:
           NODE_PATH: ${{ runner.temp }}/comp-tests/node_modules
-        run: npm run test:comp-tickets
+        run: |
+          npm run test:comp-tickets
+          node --test scripts/test-scanner-offline-reliability.cjs apps/mobile/supabase/functions/get-event-tickets/offline.test.cjs
       - name: Real PostgreSQL concurrency, capacity, claim and migration contracts
         env:
           NODE_PATH: ${{ runner.temp }}/comp-tests/node_modules
         # Disposable socket-only local DB. No secrets and no skip fallback.
-        run: npm run test:comp-tickets:sql
+        run: |
+          npm run test:comp-tickets:sql
+          node --test apps/mobile/supabase/functions/ticket-scan/lifecycle-sql.test.cjs

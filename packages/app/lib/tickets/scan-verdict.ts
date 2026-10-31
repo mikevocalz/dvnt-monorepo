@@ -68,6 +68,8 @@ export function scanVerdictMessage(reason: string | null | undefined): string {
       return "This ticket is for a different event";
     case "voided":
       return "This ticket was voided";
+    case "event_cancelled":
+      return "This event has been cancelled. Do not admit; contact the organizer.";
     case "transfer_pending":
       return "Ticket is mid-transfer — the new holder's ticket is the valid one";
     // ── no verdict: tell staff what to do, never that the ticket is fake ──
@@ -79,7 +81,7 @@ export function scanVerdictMessage(reason: string | null | undefined): string {
       return "Scanning too fast — wait a few seconds and rescan. The ticket was NOT checked.";
     case "server_error":
     case "network_error":
-      return "Couldn't reach the server — rescan. The ticket was NOT checked.";
+      return "Confirmation was lost. The scan may have completed — check the attendee’s admission status before trying again.";
     case "offline_unverified":
       // NOT "this is not a ticket". The downloaded list is active tickets as
       // of the last refresh, so anything sold since — at the door, or while
@@ -106,14 +108,17 @@ export function scanVerdictMessage(reason: string | null | undefined): string {
  *     before the detail
  *   • red titles name the actual rejection, because already-scanned, refunded
  *     and wrong-event send the guest to three different places
- *   • every no-verdict title opens with "Not checked in", so the ticket's
- *     state is the first fact and never a footnote
+ *   • pre-admission refusal says "Not checked in"; a lost confirmation says
+ *     "Scan outcome unknown" because the server may already have committed.
  */
 export function scanVerdictTitle(
   outcome: "success" | "rejected" | "no_verdict",
   reason: string | null | undefined,
   kind?: "ticket" | "addon",
 ): string {
+  if (outcome === "success" && reason === "offline_pending") {
+    return "Provisional offline — pending sync";
+  }
   if (outcome === "success") {
     return kind === "addon" ? "Add-on redeemed" : "Admitted — let them in";
   }
@@ -127,11 +132,11 @@ export function scanVerdictTitle(
       case "rate_limited":
         return "Not checked in — scanning too fast";
       case "network_error":
-        return "Not checked in — no signal";
+        return "Scan outcome unknown — no signal";
       case "offline_unverified":
         return "Not checked in — can't verify offline";
       default:
-        return "Not checked in — the server didn't answer";
+        return "Scan outcome unknown — confirmation unavailable";
     }
   }
 
@@ -142,6 +147,8 @@ export function scanVerdictTitle(
       return "Refunded — don't let them in";
     case "voided":
       return "Ticket cancelled — don't let them in";
+    case "event_cancelled":
+      return "Event cancelled — don't let them in";
     case "wrong_event":
       return "Wrong event — don't let them in";
     case "transfer_pending":

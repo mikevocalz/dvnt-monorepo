@@ -19,6 +19,14 @@ import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
 import { addOutboxDrainListener } from "@dvnt/app/lib/outbox";
 import { isOnline } from "@dvnt/app/lib/stores/connectivity-store";
 
+// Match the remembered door-role shift limit. A cached list is never proof of
+// current validity after this window (nor of refunds on another offline device).
+export const OFFLINE_ALLOWLIST_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+export function isOfflineAllowlistFresh(downloadedAt: string | undefined, now = Date.now()): boolean {
+  const age = now - Date.parse(downloadedAt ?? "");
+  return Number.isFinite(age) && age >= 0 && age <= OFFLINE_ALLOWLIST_MAX_AGE_MS;
+}
+
 /** Discriminates the rail a queued scan belongs to (WS-8 × WS-3). */
 export type OfflineScanKind = "ticket" | "addon";
 
@@ -42,6 +50,7 @@ interface OfflineCheckinState {
   pendingScans: PendingScan[];
   // Last download timestamp per event
   lastDownloaded: Record<string, string>;
+  addonLastDownloaded: Record<string, string>;
 
   // Actions
   setTokensForEvent: (eventId: string, tokens: string[]) => void;
@@ -61,6 +70,8 @@ interface OfflineCheckinState {
   markScannedLocal: (eventId: string, qrToken: string) => void;
   removePendingScans: (eventId: string, tokens: string[]) => void;
   clearEventData: (eventId: string) => void;
+  /** Revoke admission evidence without losing queued scans or duplicate history. */
+  invalidateAdmissionForEvent: (eventId: string) => void;
   isTokenValid: (eventId: string, qrToken: string) => boolean;
   isAddonTokenValid: (eventId: string, qrToken: string) => boolean;
   isAlreadyScanned: (eventId: string, qrToken: string) => boolean;
@@ -75,6 +86,7 @@ export const useOfflineCheckinStore = create<OfflineCheckinState>()(
       scannedTokens: {},
       pendingScans: [],
       lastDownloaded: {},
+      addonLastDownloaded: {},
 
       setTokensForEvent: (eventId, tokens) =>
         set((state) => ({
@@ -87,6 +99,7 @@ export const useOfflineCheckinStore = create<OfflineCheckinState>()(
 
       setAddonTokensForEvent: (eventId, tokens) =>
         set((state) => ({
+          addonLastDownloaded: { ...state.addonLastDownloaded, [eventId]: new Date().toISOString() },
           addonTokensByEvent: {
             ...state.addonTokensByEvent,
             [eventId]: tokens,
@@ -134,6 +147,14 @@ export const useOfflineCheckinStore = create<OfflineCheckinState>()(
           ),
         })),
 
+      invalidateAdmissionForEvent: (eventId) =>
+        set((state) => ({
+          tokensByEvent: { ...state.tokensByEvent, [eventId]: [] },
+          addonTokensByEvent: { ...state.addonTokensByEvent, [eventId]: [] },
+          lastDownloaded: { ...state.lastDownloaded, [eventId]: "" },
+          addonLastDownloaded: { ...state.addonLastDownloaded, [eventId]: "" },
+        })),
+
       clearEventData: (eventId) =>
         set((state) => {
           const { [eventId]: _t, ...restTokens } = state.tokensByEvent;
@@ -141,11 +162,13 @@ export const useOfflineCheckinStore = create<OfflineCheckinState>()(
             state.addonTokensByEvent;
           const { [eventId]: _s, ...restScanned } = state.scannedTokens;
           const { [eventId]: _d, ...restDownloaded } = state.lastDownloaded;
+          const { [eventId]: _ad, ...restAddonDownloaded } = state.addonLastDownloaded ?? {};
           return {
             tokensByEvent: restTokens,
             addonTokensByEvent: restAddonTokens,
             scannedTokens: restScanned,
             lastDownloaded: restDownloaded,
+            addonLastDownloaded: restAddonDownloaded,
             pendingScans: state.pendingScans.filter(
               (s) => s.eventId !== eventId,
             ),
@@ -154,12 +177,12 @@ export const useOfflineCheckinStore = create<OfflineCheckinState>()(
 
       isTokenValid: (eventId, qrToken) => {
         const tokens = get().tokensByEvent[eventId];
-        return tokens ? tokens.includes(qrToken) : false;
+        return isOfflineAllowlistFresh(get().lastDownloaded[eventId]) && !!tokens?.includes(qrToken);
       },
 
       isAddonTokenValid: (eventId, qrToken) => {
         const tokens = get().addonTokensByEvent[eventId];
-        return tokens ? tokens.includes(qrToken) : false;
+        return isOfflineAllowlistFresh(get().addonLastDownloaded?.[eventId]) && !!tokens?.includes(qrToken);
       },
 
       isAlreadyScanned: (eventId, qrToken) => {
@@ -171,8 +194,8 @@ export const useOfflineCheckinStore = create<OfflineCheckinState>()(
         const tokens = get().tokensByEvent[eventId];
         const addonTokens = get().addonTokensByEvent[eventId];
         return (
-          (Array.isArray(tokens) && tokens.length > 0) ||
-          (Array.isArray(addonTokens) && addonTokens.length > 0)
+          (isOfflineAllowlistFresh(get().lastDownloaded[eventId]) && Array.isArray(tokens) && tokens.length > 0) ||
+          (isOfflineAllowlistFresh(get().addonLastDownloaded?.[eventId]) && Array.isArray(addonTokens) && addonTokens.length > 0)
         );
       },
     }),

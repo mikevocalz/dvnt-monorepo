@@ -627,10 +627,12 @@ function ScannerActive({ eventId }: { eventId: string }) {
                 offlineStore.markScannedOffline(eventId, qrToken, authUser?.id);
                 setScanResult({
                   type: "success",
-                  name: "Verified Offline",
+                  reason: "offline_pending",
+                  message: "Provisional only. Refunds, transfers and scans on other devices cannot be checked until sync.",
+                  name: "Offline admission queued",
                   tierName: undefined,
                 });
-                recordSuccess({ name: "Verified Offline" });
+                recordSuccess({ name: "Offline admission queued" });
               } else if (offlineStore.isAddonTokenValid(eventId, qrToken)) {
                 // Add-on rail — queue with the kind discriminator.
                 offlineStore.markScannedOffline(
@@ -642,9 +644,11 @@ function ScannerActive({ eventId }: { eventId: string }) {
                 setScanResult({
                   type: "success",
                   kind: "addon",
-                  name: "Add-on Verified Offline",
+                  reason: "offline_pending",
+                  message: "Provisional only. Server confirmation is pending sync.",
+                  name: "Offline redemption queued",
                 });
-                recordSuccess({ kind: "addon", name: "Add-on Verified Offline" });
+                recordSuccess({ kind: "addon", name: "Offline redemption queued" });
               } else {
                 // Amber, NOT red. The downloaded list is active tickets as of
                 // the last refresh, and it is frozen for as long as this phone
@@ -663,7 +667,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
               setScanResult({
                 type: "error",
                 reason: "network_error",
-                message: "Network error. Download tickets for offline scanning.",
+                message: scanVerdictMessage("network_error"),
               });
             }
           },
@@ -1004,9 +1008,11 @@ function DoorSyncRow({ phase, queued, listUpdatedAt }: {
         }
       : phase === "syncing"
         ? { dot: "bg-[#3FDCFF]", text: "Syncing…" }
-        : phase === "synced"
-          ? { dot: "bg-[#22C55E]", text: "Synced" }
-          : {
+        : queued > 0
+          ? { dot: "bg-[#F59E0B]", text: `${queued} ${queued === 1 ? "scan needs" : "scans need"} sync or staff review — not confirmed` }
+          : phase === "synced"
+            ? { dot: "bg-[#22C55E]", text: "Synced" }
+            : {
               dot: "bg-[#22C55E]",
               text:
                 minutesAgo === null

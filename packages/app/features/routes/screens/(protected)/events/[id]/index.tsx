@@ -421,6 +421,7 @@ function EventDetailScreenContent() {
     showToast("info", "Downloading...", "Fetching ticket data for offline use");
     try {
       const tokens = await ticketsApi.downloadOfflineTokens(eventId);
+      offlineCheckin.setTokensForEvent(eventId, tokens);
       if (tokens.length === 0) {
         showToast(
           "warning",
@@ -429,7 +430,6 @@ function EventDetailScreenContent() {
         );
         return;
       }
-      offlineCheckin.setTokensForEvent(eventId, tokens);
       showToast(
         "success",
         "Downloaded",

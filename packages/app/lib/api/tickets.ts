@@ -14,6 +14,13 @@ import type { PlanKey } from "@dvnt/app/lib/subscription/types";
 import type { PerkKey } from "@dvnt/app/lib/perks/perk-config";
 import type { TicketSelfServiceAction } from "../tickets/self-service-action";
 
+/** An authoritative refusal revokes cached admission evidence, not audit queues. */
+async function invalidateOfflineAdmission(eventId: string | undefined): Promise<void> {
+  if (!eventId) return;
+  const { useOfflineCheckinStore } = await import("@dvnt/app/lib/stores/offline-checkin-store");
+  useOfflineCheckinStore.getState().invalidateAdmissionForEvent(eventId);
+}
+
 /** Keyset cursor for the roster — the previous page's last row. */
 export interface RosterCursor {
   value: string | number | null;
@@ -567,10 +574,22 @@ export const ticketsApi = {
         console.warn("[Tickets] scanTicket transport failure:", error);
         throw error;
       }
+      if ([401, 403, 404, 409].includes(status)) await invalidateOfflineAdmission(eventId);
       console.error("[Tickets] scanTicket HTTP", status);
       return { valid: false, reason: scanFailureReasonForStatus(status) };
     }
-    return typeof data === "string" ? JSON.parse(data) : data;
+    try {
+      const verdict = typeof data === "string" ? JSON.parse(data) : data;
+      if (!verdict || typeof verdict.valid !== "boolean") {
+        return { valid: false, reason: "server_error" };
+      }
+      if (verdict.reason === "event_cancelled") await invalidateOfflineAdmission(eventId);
+      return verdict;
+    } catch {
+      // A malformed HTTP response is not a transport outage and must never
+      // fall into the scanner's offline-admission branch.
+      return { valid: false, reason: "server_error" };
+    }
   },
 
   /**
@@ -630,10 +649,14 @@ export const ticketsApi = {
       offline: true,
     });
     if (error) {
-      console.error("[Tickets] downloadOfflineTokens error:", error.message);
-      return [];
+      if ([401, 403, 404, 409].includes(Number(error.status))) await invalidateOfflineAdmission(eventId);
+      console.error("[Tickets] downloadOfflineTokens failed");
+      throw new Error("Could not refresh offline ticket data");
     }
-    if (!data?.ok) return [];
+    if (!data?.ok || !Array.isArray(data.qr_tokens) ||
+        (data.addon_qr_tokens !== undefined && !Array.isArray(data.addon_qr_tokens))) {
+      throw new Error("Invalid offline ticket data response");
+    }
     const addonTokens = (data.addon_qr_tokens ?? []).filter(Boolean);
     try {
       // Lazy import mirrors the store→api dynamic import and avoids a
@@ -693,7 +716,17 @@ export const ticketsApi = {
             "x-auth-token": token,
           },
         });
-        if (error) throw error;
+        if (error) {
+          const status = (error as { context?: { status?: number } })?.context?.status;
+          if ([401, 403, 404, 409].includes(Number(status))) await invalidateOfflineAdmission(scan.eventId);
+          throw error;
+        }
+        const verdict = typeof data === "string" ? JSON.parse(data) : data;
+        if (verdict?.reason === "event_cancelled") await invalidateOfflineAdmission(scan.eventId);
+        // HTTP 200 includes rejected tickets and no-verdict failures. Keep
+        // those queued for staff reconciliation; never silently erase them.
+        // Even already_scanned can be another device's conflicting admission.
+        if (verdict?.valid !== true) throw new Error("Offline scan was not confirmed");
         synced.push(scan.qrToken);
       } catch {
         failed.push(scan.qrToken);

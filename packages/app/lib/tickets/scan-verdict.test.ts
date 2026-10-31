@@ -30,9 +30,13 @@ test("a failure is never confused with a bad ticket", () => {
   }
 });
 
-test("failure copy tells staff the ticket was NOT checked", () => {
-  for (const r of ["unauthorized", "rate_limited", "server_error", "network_error"]) {
+test("pre-admission failures say not checked; lost responses explicitly remain unknown", () => {
+  for (const r of ["unauthorized", "rate_limited"]) {
     assert.match(scanVerdictMessage(r), /NOT checked/);
+  }
+  for (const reason of ["server_error", "network_error"]) {
+    assert.match(scanVerdictMessage(reason), /may have completed/);
+    assert.doesNotMatch(scanVerdictMessage(reason), /NOT checked/);
   }
   assert.match(scanVerdictMessage("forbidden"), /door staff/);
 });
@@ -53,10 +57,10 @@ test("a rejection and a no-verdict never share a title", () => {
   const noVerdict = scanVerdictTitle("no_verdict", "server_error");
   assert.notEqual(rejected, noVerdict);
   assert.match(rejected, /already scanned/i);
-  assert.match(noVerdict, /^Not checked in/);
+  assert.match(noVerdict, /^Scan outcome unknown/);
 });
 
-test("every no-verdict title states the ticket was not checked in, first", () => {
+test("no-verdict title distinguishes pre-admission refusal from uncertain committed outcome", () => {
   for (const reason of [
     "unauthorized",
     "forbidden",
@@ -67,8 +71,8 @@ test("every no-verdict title states the ticket was not checked in, first", () =>
   ]) {
     assert.match(
       scanVerdictTitle("no_verdict", reason),
-      /^Not checked in/,
-      `no-verdict title for ${String(reason)} must open with "Not checked in"`,
+      ["unauthorized", "forbidden", "rate_limited"].includes(reason ?? "") ? /^Not checked in/ : /^Scan outcome unknown/,
+      `no-verdict title for ${String(reason)} must accurately describe admission uncertainty`,
     );
   }
 });

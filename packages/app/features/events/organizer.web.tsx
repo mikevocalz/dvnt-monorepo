@@ -337,8 +337,9 @@ export function EventOrganizerScreen() {
     setDownloading(true);
     try {
       const tokens = await ticketsApi.downloadOfflineTokens(eventId);
+      // An authoritative empty list must revoke the previous cache too.
+      offlineStore.setTokensForEvent(eventId, tokens);
       if (tokens.length > 0) {
-        offlineStore.setTokensForEvent(eventId, tokens);
         showToast(
           "success",
           "Downloaded",

@@ -95,6 +95,7 @@ export function useDoorOfflineKit(eventId: string) {
   useEffect(() => {
     const onOnline = () => {
       setSync({ phase: "online" });
+      void refreshTokens();
       void drain();
     };
     const onOffline = () => setSync({ phase: "offline" });
@@ -106,7 +107,7 @@ export function useDoorOfflineKit(eventId: string) {
       window.removeEventListener("offline", onOffline);
       if (id !== null) window.clearInterval(id);
     };
-  }, [drain, queued, setSync]);
+  }, [drain, queued, refreshTokens, setSync]);
 
   return { queued, refreshTokens };
 }

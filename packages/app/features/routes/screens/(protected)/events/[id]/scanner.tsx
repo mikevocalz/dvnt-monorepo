@@ -698,7 +698,9 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
                 setScanResult({
                   type: "success",
-                  name: "Verified Offline",
+                  reason: "offline_pending",
+                  message: "Provisional only. Refunds, transfers and scans on other devices cannot be checked until sync.",
+                  name: "Offline admission queued",
                   tierName: undefined,
                 });
                 setScanCount((c) => c + 1);
@@ -707,7 +709,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                     {
                       id: `${Date.now()}`,
                       type: "success" as const,
-                      name: "Verified Offline",
+                      name: "Offline admission queued",
                       timestamp: Date.now(),
                     },
                     ...h,
@@ -725,7 +727,9 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                 setScanResult({
                   type: "success",
                   kind: "addon",
-                  name: "Add-on Verified Offline",
+                  reason: "offline_pending",
+                  message: "Provisional only. Server confirmation is pending sync.",
+                  name: "Offline redemption queued",
                 });
                 setScanCount((c) => c + 1);
                 setScanHistory((h) =>
@@ -733,7 +737,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                     {
                       id: `${Date.now()}`,
                       type: "success" as const,
-                      name: "Add-on Verified Offline",
+                      name: "Offline redemption queued",
                       timestamp: Date.now(),
                     },
                     ...h,
@@ -768,8 +772,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
               setScanResult({
                 reason: "network_error",
                 type: "error",
-                message:
-                  "Network error. Download tickets for offline scanning.",
+                message: scanVerdictMessage("network_error"),
               });
             }
           },

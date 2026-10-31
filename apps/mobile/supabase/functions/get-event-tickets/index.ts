@@ -27,6 +27,7 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 
+import { readAllRows } from "../_shared/read-all-rows.ts";
 import { organizerFreeCancellation } from "../_shared/organizer-free-cancellation.ts";
 
 // ── Membership tier resolution (Host & Guest WS-1) ─────────────────────────
@@ -142,7 +143,7 @@ Deno.serve(async (req: Request) => {
     // get a PII-redacted payload when their role is 'scanner'.
     const { data: event } = await supabase
       .from("events")
-      .select("id, host_id, title, location")
+      .select("id, host_id, title, location, status")
       .eq("id", eventIdNum)
       .maybeSingle();
     if (!event) return errorResponse("Event not found", 404);
@@ -187,47 +188,45 @@ Deno.serve(async (req: Request) => {
     // Scanners need this even in offline mode, so it's allowed at any
     // role tier. Returns just qr_tokens (no PII).
     if (body.offline === true) {
-      const { data, error } = await supabase
-        .from("tickets")
-        .select("qr_token")
-        .eq("event_id", eventIdNum)
-        .eq("status", "active")
-        .not("qr_token", "is", null);
-      if (error) {
-        console.error("[get-event-tickets] offline query error:", error);
-        return errorResponse("Could not fetch tokens", 500);
+      if (["cancelled", "deleted"].includes(event.status)) {
+        return errorResponse("Event is not available for scanning", 409);
       }
-      const qrTokens = (data || [])
-        .map((t: any) => t.qr_token)
-        .filter(Boolean);
-
-      // Add-on allowlist for offline door validation (WS-3 × WS-8):
-      // unredeemed redeemable add-ons carry their own qr_token
-      // (order_addons, 20260613000100). Same no-PII discipline — tokens
-      // only. Display-only extra: never fail the whole download over it.
-      let addonQrTokens: string[] = [];
-      const { data: addonRows, error: addonError } = await supabase
-        .from("order_addons")
-        .select("qr_token")
-        .eq("event_id", eventIdNum)
-        .in("status", ["unfulfilled", "fulfilled"])
-        .not("qr_token", "is", null);
-      if (addonError) {
-        console.error(
-          "[get-event-tickets] offline addon query error:",
-          addonError,
-        );
-      } else {
-        addonQrTokens = (addonRows || [])
-          .map((a: any) => a.qr_token)
-          .filter(Boolean);
+      try {
+        // Both admission rails are required. PostgREST may cap a response below
+        // the requested size, so scan stable IDs until an empty terminal page.
+        const [tickets, addons] = await Promise.all([
+          readAllRows(() => supabase.from("tickets")
+            .select("id, qr_token")
+            .eq("event_id", eventIdNum)
+            .eq("status", "active")
+            .not("qr_token", "is", null)),
+          readAllRows(() => supabase.from("order_addons")
+            .select("id, qr_token")
+            .eq("event_id", eventIdNum)
+            .in("status", ["unfulfilled", "fulfilled"])
+            .not("qr_token", "is", null)),
+        ]);
+        // Do not mint a newly downloaded allowlist if cancellation/deletion
+        // happened during the multi-page read. Offline use is still a snapshot.
+        const { data: latestEvent, error: eventError } = await supabase.from("events")
+          .select("id, status").eq("id", eventIdNum).maybeSingle();
+        if (eventError) throw eventError;
+        if (!latestEvent) return errorResponse("Event not found", 404);
+        if (["cancelled", "deleted"].includes(latestEvent.status)) {
+          return errorResponse("Event is not available for scanning", 409);
+        }
+        const tokens = (rows: any[]) => rows.map(row => row.qr_token)
+          .filter((token): token is string => typeof token === "string" && token.length > 0);
+        return jsonResponse({
+          ok: true,
+          qr_tokens: tokens(tickets),
+          addon_qr_tokens: tokens(addons),
+        });
+      } catch {
+        // An incomplete rail must never look like a successful empty renewal.
+        console.error("[get-event-tickets] complete offline allowlist unavailable");
+        return errorResponse("Could not fetch complete offline tokens. Please retry.", 503);
       }
-
-      return jsonResponse({
-        ok: true,
-        qr_tokens: qrTokens,
-        addon_qr_tokens: addonQrTokens,
-      });
     }
 
     // Pagination + status filter + search — server-side per Phase 5
