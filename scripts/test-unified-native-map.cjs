@@ -8,6 +8,7 @@ const member={id:'self',username:'fixture',displayName:'Fixture',avatarUrl:'http
 const event={id:1,title:'Party',image:'https://fixture.example/flyer.png'};
 const row={id:1,title:'Party',visibility:'public',is_hidden:false,publish_at:null,status:'active',is_online:false,location_type:'venue',location:'Public venue',location_name:null,location_lat:33.78,location_lng:-84.41};
 const mocks={
+ './map-sharing-consent': `import React from 'react';export const MapSharingConsent=({active})=>React.createElement('button',{onClick:()=>{window.fixture.sharing=false;window.renderFixture()},disabled:!active},'Stop sharing');`,
  '@shopify/react-native-skia':require('./fixtures/native-map-icon-boundary.cjs'),
  'react-native':`import React from 'react';export const Platform={OS:window.fixture.platform};const Box=({children,accessibilityLabel})=>React.createElement('div',{'aria-label':accessibilityLabel},children);export const View=Box,Text=Box,ScrollView=Box,ActivityIndicator=()=>null;export const Modal=({visible,children})=>visible?React.createElement("div",{role:"dialog"},children):null;export const Pressable=({children,onPress,accessibilityLabel,disabled})=>React.createElement('button',{onClick:onPress,'aria-label':accessibilityLabel,disabled},children);export const Image=()=>null;`,
  'expo-router':`export const useRouter=()=>({push:p=>window.fixture.route=p});`,

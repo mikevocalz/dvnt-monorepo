@@ -9,6 +9,7 @@ import { eventMapIds, eventMapPins, eventListAllowsMap, attachEventMapFlyers } f
 import { useRouter } from "expo-router";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { savedMapArea } from "./member-map-area";
+import { MapSharingConsent } from "./map-sharing-consent";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dvnt/app/lib/hooks/use-member-map";
 import { mapAvatarUrl, mapMemberInitials, mapMemberProfilePath, visibleMapMembers, type MapMember } from "./member-map-render-policy";
@@ -138,7 +139,7 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
             />
           </View>
           <Text style={{ color: '#bbb', fontSize: 13 }}>Party flyers and member avatars share this map. Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</Text>
-          <LocationControls allowSharing={Boolean(NativeMap)} />
+          <MapSharingConsent active={Boolean(NativeMap)} />
           <Text style={{ color: '#bbb' }}>{`${eventPins.length} public event locations · ${members.length} sharing avatars`}</Text>
           {locations.isError ? <View><Text accessibilityRole="alert" style={{ color: '#ddd' }}>Event locations could not be refreshed. Event pins have been hidden.</Text><Pressable accessibilityRole="button" onPress={() => void locations.refetch()}><Text style={{ color: '#3FDCFF', paddingVertical: 12 }}>Retry event locations</Text></Pressable></View> : null}
           {eventPins.map(pin => <Pressable key={pin.id} accessibilityRole="button" accessibilityLabel={`Open event ${pin.title}`} onPress={() => openEvent(pin.id)} style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
