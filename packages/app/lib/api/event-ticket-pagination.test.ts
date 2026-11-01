@@ -57,3 +57,13 @@ test('a changing cursor with no new tickets cannot cause an unbounded loop',asyn
   await assert.rejects(()=>f.api.getEventTickets('17'));
   assert.equal(f.calls.length,2);
 });
+
+for (const changeAt of ['before', 'after-first', 'after-second']) test(`door roster discards cancelled/account-switched scope ${changeAt}`, async () => {
+  let current = changeAt !== 'before';
+  const f = fixture((_body, n) => {
+    if (changeAt === 'after-first' || (changeAt === 'after-second' && n === 2)) current = false;
+    return {data:{ok:true,tickets:[row(n)],hasMore:n===1,nextCursor:n===1?{value:'time-1',id:'ticket-1'}:null}};
+  });
+  await assert.rejects(() => f.api.getEventTickets('17', () => current), /scope changed/);
+  assert.equal(f.calls.length, changeAt === 'before' ? 0 : changeAt === 'after-first' ? 1 : 2);
+});

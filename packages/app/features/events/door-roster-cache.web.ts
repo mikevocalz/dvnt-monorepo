@@ -26,7 +26,7 @@
 
 import type { TicketRecord } from "@dvnt/app/lib/api/tickets";
 
-const KEY = "dvnt.door.roster.v2";
+const KEY = "dvnt.door.roster.v3";
 
 /** Only the fields the list renders. A full roster row is mostly dead weight. */
 export interface CachedGuest {
@@ -41,6 +41,7 @@ export interface CachedGuest {
 
 interface Snapshot {
   at: number;
+  accountKey: string;
   guests: CachedGuest[];
 }
 
@@ -59,8 +60,8 @@ function read(): Store {
   }
 }
 
-export function snapshotRoster(eventId: string, tickets: TicketRecord[]): void {
-  if (typeof window === "undefined" || !eventId || tickets.length === 0) return;
+export function snapshotRoster(eventId: string, tickets: TicketRecord[], accountKey: string): void {
+  if (typeof window === "undefined" || !eventId || !accountKey) return;
   const guests: CachedGuest[] = tickets.map((t) => ({
     id: String(t.id),
     qr_token: t.qr_token,
@@ -74,7 +75,7 @@ export function snapshotRoster(eventId: string, tickets: TicketRecord[]): void {
     // Last event wins. A phone works one door at a time.
     window.localStorage.setItem(
       KEY,
-      JSON.stringify({ [eventId]: { at: Date.now(), guests } } satisfies Store),
+      JSON.stringify({ [eventId]: { at: Date.now(), accountKey, guests } } satisfies Store),
     );
   } catch {
     // Quota or private mode. The cache is a bonus, never a requirement.
@@ -83,7 +84,8 @@ export function snapshotRoster(eventId: string, tickets: TicketRecord[]): void {
 
 export function recallRoster(
   eventId: string,
+  accountKey: string,
 ): { guests: CachedGuest[]; at: number } | null {
   const snap = read()[eventId];
-  return snap && snap.guests.length ? { guests: snap.guests, at: snap.at } : null;
+  return accountKey && snap?.accountKey === accountKey && snap.guests.length ? { guests: snap.guests, at: snap.at } : null;
 }
