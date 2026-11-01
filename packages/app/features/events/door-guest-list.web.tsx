@@ -113,8 +113,9 @@ export function DoorGuestList({
    * list and no way to look anyone up.
    */
   const denied = [401, 403].includes(Number((error as { status?: number } | null)?.status));
-  const cached = useMemo(() => (isError && !denied && typeof navigator !== "undefined" && navigator.onLine === false
-    ? recallRoster(eventId, accountKey) : null), [isError, denied, eventId, accountKey]);
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const cached = useMemo(() => (isError && !denied && offline
+    ? recallRoster(eventId, accountKey) : null), [isError, denied, offline, eventId, accountKey]);
 
   const tickets = useMemo(() => {
     const live = (data?.tickets ?? []).filter((t) => isListable(t.status));

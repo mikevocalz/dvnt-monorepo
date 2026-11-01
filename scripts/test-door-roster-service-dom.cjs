@@ -57,6 +57,7 @@ const mocks={
   f.state.error=true;f.state.rows=[];
   await flush(()=>{f.store.getState().setQuery('Holder 400');renderer.render(f.React.createElement(f.App));});
   assert.match(host.textContent,/Offline/);assert.match(host.textContent,/Holder 400/);
+  navigator.onLine=true;await flush(()=>renderer.render(f.React.createElement(f.App)));assert.doesNotMatch(host.textContent,/Holder 400|Offline/,'reconnect does not retain memoized offline snapshot');navigator.onLine=false;
   f.state.status=403;await flush(()=>renderer.render(f.React.createElement(f.App)));assert.doesNotMatch(host.textContent,/Holder 400|Offline/,'revoked access never uses offline snapshot');f.state.status=null;
   f.state.account='another';await flush(()=>renderer.render(f.React.createElement(f.App)));
   assert.doesNotMatch(host.textContent,/Holder 400|Offline/);assert.equal(checkButtons().length,0);
