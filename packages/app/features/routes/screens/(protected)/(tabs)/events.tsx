@@ -32,6 +32,7 @@ import {
 } from "lucide-react-native";
 import { EmptyState } from "@dvnt/app/components/ui/empty-state";
 import { useRouter } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useIsLargeScreen } from "@dvnt/app/lib/hooks/use-is-large-screen";
@@ -63,6 +64,7 @@ import { eventEnded } from "@dvnt/app/lib/events/event-time";
 import { pastTabEvents } from "@dvnt/app/lib/events/past-tab";
 import { EventCollectionRow } from "@dvnt/app/features/events";
 import { EventsMapSheet } from "@dvnt/app/features/events";
+import { MapSharingConsent } from "@dvnt/app/features/events/ui/map-sharing-consent";
 import { EventFilterSheet } from "@dvnt/app/features/events";
 import { SpotlightSection } from "@dvnt/app/features/events";
 import { PromoteEventSheet } from "@dvnt/app/features/events";
@@ -373,6 +375,7 @@ const MIN_CARD_WIDTH = 400;
 
 function EventsScreenContent() {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const { colors } = useColorScheme();
   const insets = useSafeAreaInsets();
   const tabBarInset = useTabBarInset();
@@ -1137,6 +1140,9 @@ function EventsScreenContent() {
         </View>
         {/* /centred content column */}
       </Main>
+
+      {/* Ask on Events entry, before a visitor opens the map. */}
+      <MapSharingConsent active={isFocused} promptOnly />
 
       {/* Event Filter Sheet */}
       <EventFilterSheet

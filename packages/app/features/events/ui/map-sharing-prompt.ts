@@ -6,7 +6,7 @@ export const MAP_SHARING_DISCLOSURE = "Your avatar, profile name and approximate
 const COOLDOWN = 7 * 24 * 60 * 60 * 1000;
 // Negative prompt preference only: never persist coordinates or permission grants.
 const dismissed = new Map<string, number>();
-export function useMapSharingPrompt(owner: string, active: boolean) {
+export function useMapSharingPrompt(owner: string, active: boolean, autoPrompt = true) {
   const location = useLocationSettings();
   const consent = useMapSharingConsent(active);
   const [open, setOpen] = useState(false);
@@ -21,7 +21,7 @@ export function useMapSharingPrompt(owner: string, active: boolean) {
     try { void Promise.resolve(mmkvStorage?.setItem(`member-map-prompt:${owner}`, { state: { until }, version: 1 })).catch(() => {}); } catch { /* In-memory suppression still prevents repeat prompts this session. */ }
   };
   useEffect(() => {
-    if (!available || attempted.current) return;
+    if (!autoPrompt || !available || attempted.current) return;
     // Expired grants are never renewed or accompanied by an automatic popup.
     if (location.sharing || location.settings?.shareUntil || location.settings?.eventsMapEnabled) { attempted.current = true; return; }
     let current = true;
@@ -38,7 +38,7 @@ export function useMapSharingPrompt(owner: string, active: boolean) {
       } catch { /* Unreadable dismissal preference must not cause repeat prompts. */ }
     })();
     return () => { current = false; };
-  }, [available, owner, location.sharing, location.settings?.shareUntil, location.settings?.eventsMapEnabled]);
+  }, [autoPrompt, available, owner, location.sharing, location.settings?.shareUntil, location.settings?.eventsMapEnabled]);
   useEffect(() => { if (!active) { consent.cancel(); setOpen(false); } }, [active]);
   const dismiss = () => { consent.cancel(); suppress(); setOpen(false); };
   const share = async () => {
