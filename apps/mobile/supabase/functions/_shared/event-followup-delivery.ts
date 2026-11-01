@@ -64,7 +64,7 @@ export async function deliverFollowup(db: any, row: any, config: { site: string;
       const token = await signUnsubscribeToken(config.unsubscribeSecret, row.recipient_email);
       const copy = row.purpose === "preview" ? (row.content_override || campaign) : campaign;
       const content = buildFollowupEmail({ eventTitle: event.title, subject: copy?.subject ?? null, message: (member ? copy?.member_message : copy?.guest_message) ?? copy?.message ?? null,
-        ctaLabel: copy?.cta_label ?? null, joinUrl: member ? undefined : `${config.site}/auth/signup?returnTo=${encodeURIComponent(`/feed/events/${event.id}?section=reviews`)}`, preview: row.purpose === "preview", reviewUrl: `${config.site}/public/events/${event.id}?section=reviews`,
+        ctaLabel: copy?.cta_label ?? null, joinUrl: member ? undefined : `${config.site}/auth/signup?returnTo=${encodeURIComponent(`/feed/events/${event.id}?section=reviews`)}`, preview: row.purpose === "preview", reviewUrl: `${config.site}/feed/events/${event.id}?section=reviews`,
         unsubscribeUrl: `${config.supabaseUrl}/functions/v1/event-followup-unsubscribe?token=${encodeURIComponent(token)}` });
       payload = { to: row.recipient_email, from: config.from, ...content };
     }

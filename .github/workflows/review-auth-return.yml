@@ -10,6 +10,8 @@ on:
       - 'packages/app/components/signup-entry.web.tsx'
       - 'scripts/test-signup-entry-dom.cjs'
       - 'packages/app/lib/auth/**'
+      - 'apps/web/src/components/site-chrome.tsx'
+      - 'scripts/test-member-event-entry-dom.cjs'
       - 'packages/app/lib/deep-linking/**'
       - 'apps/web/src/app/(frontend)/public/events/**'
       - 'apps/web/src/app/.well-known/apple-app-site-association/**'
@@ -34,7 +36,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: node --test packages/app/lib/auth/guest-event-route.test.ts packages/app/lib/auth/return-to.test.ts packages/app/lib/auth/review-return.test.ts packages/app/lib/auth/signup-continuation.test.ts
+      - run: node --test packages/app/lib/auth/member-event-route.test.ts packages/app/lib/auth/guest-event-route.test.ts packages/app/lib/auth/return-to.test.ts packages/app/lib/auth/review-return.test.ts packages/app/lib/auth/signup-continuation.test.ts
       - name: Install isolated mounted fixtures
         run: npm install --prefix "$RUNNER_TEMP/review-fixtures" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 react@19.2.3 react-dom@19.2.3 jsdom@26.1.0 esbuild@0.25.11 happy-dom@20.10.3 zustand@5.0.14 lucide-react@1.30.0 zod@4.6.5
       - name: Real auth surfaces and required-setup handoff
@@ -56,3 +58,6 @@ jobs:
         run: NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-review-section-layout-browser.cjs
       - name: Already signed-in Join invitation and guest signup continuation
         run: NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-signup-entry-dom.cjs
+
+      - name: Public event links enter signed-in event details after hydration
+        run: NODE_PATH="$RUNNER_TEMP/review-fixtures/node_modules" node scripts/test-member-event-entry-dom.cjs
