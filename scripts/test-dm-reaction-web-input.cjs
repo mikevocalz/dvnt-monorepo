@@ -33,7 +33,7 @@ function fixture(sender, context = {}) {
     window: { confirm: () => { state.confirms++; return true; } },
     require: name => {
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'Fragment' };
-      if (name === 'react') return { useCallback: callback => callback, useRef: value => ({ current: value }), useMemo: create => create() };
+      if (name === 'react') return { useEffect() {}, useCallback: callback => callback, useRef: value => ({ current: value }), useMemo: create => create() };
       if (name.endsWith('/stores/chat-store')) return { useChatStore: selector => selector(chat) };
       if (name.endsWith('/stores/chat-screen-store')) return { useChatScreenStore: selector => selector(screen) };
       return new Proxy({}, { get: () => () => null });

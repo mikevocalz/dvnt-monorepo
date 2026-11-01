@@ -247,11 +247,14 @@ function LightboxProvider({ urls, media, children, onOpenChange }: LightboxProps
 interface LightboxImageProps {
   index: number;
   children: React.ReactElement;
+  /** Optional contextual action on the same native press target as open. */
+  onLongPress?: () => void;
+  delayLongPress?: number;
   /** Galeria-compat passthrough props (ignored for now). */
   edgeToEdge?: boolean;
 }
 
-function LightboxImage({ index, children }: LightboxImageProps) {
+function LightboxImage({ index, children, onLongPress, delayLongPress }: LightboxImageProps) {
   const ctx = useContext(LightboxContext);
   const onPress = useCallback(() => ctx?.open(index), [ctx, index]);
   // Pressable wraps the visible thumbnail. Pressable's default onPress
@@ -259,7 +262,12 @@ function LightboxImage({ index, children }: LightboxImageProps) {
   // not depend on any native gestureRecognizer registered by a third-party
   // library, so iOS 26 doesn't break it.
   return (
-    <Pressable onPress={onPress} accessibilityRole="button">
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={delayLongPress}
+      accessibilityRole="button"
+    >
       {children}
     </Pressable>
   );
