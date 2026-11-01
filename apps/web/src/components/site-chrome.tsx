@@ -18,7 +18,8 @@
  */
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
-import { usePathname } from 'solito/navigation';
+import { usePathname, useRouter } from 'solito/navigation';
+import { memberEventRoute } from '@dvnt/app/lib/auth/member-event-route';
 import { useGuestCheckoutStore } from '@dvnt/app/lib/stores/guest-checkout-store';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
 import { AppShell } from '@dvnt/app/components/app-shell';
@@ -67,6 +68,8 @@ const isAppSurface = (path: string) =>
 
 export function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? '/';
+  const router = useRouter();
+  const memberEventTarget = memberEventRoute(pathname);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
   const guestCheckoutOpen = useGuestCheckoutStore((s) => s.open);
@@ -99,6 +102,16 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
     const t = setInterval(ensure, 4 * 60 * 1000);
     return () => clearInterval(t);
   }, [hasHydrated, isAuthenticated]);
+
+  // Previously sent review emails and shared public links must enter the member
+  // event detail for signed-in visitors. Wait for persistence hydration before
+  // mounting either shell; replace avoids trapping Back in a public/member loop.
+  useEffect(() => {
+    if (!mounted || !hasHydrated || !isAuthenticated || !memberEventTarget) return;
+    const target = memberEventRoute(pathname, window.location.search);
+    if (target) router.replace(target + window.location.hash);
+  }, [mounted, hasHydrated, isAuthenticated, memberEventTarget, pathname, router]);
+  if (memberEventTarget && (!mounted || !hasHydrated || isAuthenticated)) return null;
 
   // Auth flow renders without site chrome.
   if (pathname.startsWith('/auth')) return <>{children}</>;

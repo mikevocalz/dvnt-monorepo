@@ -43,13 +43,13 @@ export const fixtures = {
   followupMember: buildFollowupEmail({
     eventTitle: 'Synthetic Community Night', subject: 'How was your night?',
     message: 'Thanks for celebrating with us. Tell us what worked and what could be better.\n\nShare photos, meet people and find another event. This is synthetic preview copy, not a real campaign.',
-    ctaLabel: 'Rate the party', reviewUrl: 'https://example.test/public/events/7?section=reviews',
+    ctaLabel: 'Rate the party', reviewUrl: 'https://example.test/feed/events/7?section=reviews',
     unsubscribeUrl: 'https://example.test/unsubscribe?token=synthetic-preview', preview: true,
   }),
   followupGuest: buildFollowupEmail({
     eventTitle: 'Synthetic Community Night', subject: 'Stay connected',
     message: 'Make a profile and connect with the community. Share your photos and discover future events. This is synthetic preview copy, not a real campaign.',
-    ctaLabel: 'Rate the party', reviewUrl: 'https://example.test/public/events/7?section=reviews',
+    ctaLabel: 'Rate the party', reviewUrl: 'https://example.test/feed/events/7?section=reviews',
     joinUrl: 'https://example.test/auth/signup?returnTo=%2Ffeed%2Fevents%2F7%3Fsection%3Dreviews',
     unsubscribeUrl: 'https://example.test/unsubscribe?token=synthetic-preview', preview: true,
   }),
