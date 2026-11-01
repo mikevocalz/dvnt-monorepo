@@ -225,16 +225,18 @@ export const ticketsApi = {
    * to 200 rows; follow the server's stable cursor, never an offset that moves
    * under new sales. Do not publish a partial roster if any page fails.
    */
-  async getEventTickets(eventId: string): Promise<TicketRecord[]> {
+  async getEventTickets(eventId: string, isCurrent: () => boolean = () => true): Promise<TicketRecord[]> {
     const rows = new Map<string, TicketRecord>();
     const seenCursors = new Set<string>();
     let cursor: RosterCursor | null = null;
     for (;;) {
+      if (!isCurrent()) throw new Error("Roster scope changed. Please refresh.");
       const page = await ticketsApi.getEventTicketsPaginated(eventId, {
         pageSize: 200,
         sort: "purchased_at",
         cursor,
       });
+      if (!isCurrent()) throw new Error("Roster scope changed. Please refresh.");
       const previousSize = rows.size;
       for (const ticket of page.tickets) rows.set(ticket.id, ticket);
       if (!page.hasMore) return [...rows.values()];

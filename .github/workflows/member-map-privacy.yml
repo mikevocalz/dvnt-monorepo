@@ -45,7 +45,7 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/member-map/node_modules
         run: node --test packages/app/lib/api/member-map.test.ts packages/app/lib/location/*.test.ts packages/app/features/events/ui/member-map-render-policy.test.ts packages/app/features/events/ui/member-map-area.test.ts packages/app/features/events/ui/member-map-clusters.test.ts
       - name: Import-aware map parity regression
-        run: node --test scripts/test-member-map-parity.cjs
+        run: node --test scripts/test-member-map-parity.cjs scripts/test-member-map-entry.cjs
       - name: Install browser engines
         run: node "$RUNNER_TEMP/member-map/node_modules/playwright/cli.js" install --with-deps chromium webkit
       - name: Renderer and controls

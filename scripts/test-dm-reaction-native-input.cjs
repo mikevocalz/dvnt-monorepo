@@ -72,7 +72,7 @@ test('native chat passes the selected message to each shared bubble long-press p
   const source = fs.readFileSync(file, 'utf8');
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const found = new Set();
-  const expected = new Set(['SharedPostBubble', 'StoryReplyBubble', 'EventShareBubble']);
+  const expected = new Set(['SharedPostBubble', 'StoryReplyBubble', 'EventShareBubble', 'MediaMessage']);
   function visit(node) {
     if (ts.isJsxSelfClosingElement(node) && expected.has(node.tagName.getText(ast))) {
       const attribute = node.attributes.properties.find(prop => ts.isJsxAttribute(prop) && prop.name.getText(ast) === 'onLongPress');
@@ -91,3 +91,74 @@ test('native chat passes the selected message to each shared bubble long-press p
   visit(ast);
   assert.deepEqual([...found].sort(), [...expected].sort());
 });
+
+function mediaFixture(mediaList, onLongPress) {
+  const file = path.join(ROOT, 'packages/app/features/routes/screens/(protected)/chat/[id].tsx');
+  const exports = {}, opens = [];
+  const jsx = (type, props) => ({ type, props: props || {} });
+  const output = ts.transpileModule(fs.readFileSync(file, 'utf8') + '\nexport { MediaMessage };', {
+    fileName: file,
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  vm.runInNewContext(output, {
+    exports, console,
+    require: name => {
+      if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
+      if (name === 'react-native') return { View: 'View', Text: 'Text', Pressable: 'Pressable', StyleSheet: { create: x => x, absoluteFill: {} } };
+      if (name.endsWith('/MediaLightbox')) return { MediaLightbox: Object.assign(() => {}, { Image: 'LightboxImage' }) };
+      return new Proxy({}, { get: () => () => null });
+    },
+  }, { filename: file });
+  const tree = exports.MediaMessage({ mediaList, onLongPress, onPress: media => opens.push(media) });
+  const nodes = [];
+  function visit(node) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) return node.forEach(visit);
+    nodes.push(node); visit(node.props?.children);
+  }
+  visit(tree);
+  return { nodes, opens };
+}
+
+for (const type of ['image', 'video']) {
+  test(`native ${type} tile exposes reaction long press on its existing open target`, () => {
+    let holds = 0;
+    const media = { type, uri: 'https://fixture.invalid/media' };
+    const callback = () => holds++;
+    const f = mediaFixture([media], callback);
+    const target = f.nodes.find(n => n.type === (type === 'image' ? 'LightboxImage' : 'Pressable'));
+    assert.ok(target); assert.equal(target.props.onLongPress, callback); assert.equal(target.props.delayLongPress, 400);
+    target.props.onLongPress(); assert.equal(holds, 1); assert.deepEqual(f.opens, []);
+    if (type === 'video') { target.props.onPress(); assert.equal(f.opens[0], media); }
+    else assert.equal(target.props.index, 0, 'image retains gallery index for tap-to-open');
+  });
+}
+
+test('native media overflow overlay cannot intercept the last tile gestures', () => {
+  const f = mediaFixture(Array.from({ length: 5 }, (_, i) => ({ type: 'image', uri: `https://fixture.invalid/${i}` })), () => {});
+  const overlay = f.nodes.find(n => n.props?.style?.backgroundColor === 'rgba(0,0,0,0.55)');
+  assert.ok(overlay); assert.equal(overlay.props.pointerEvents, 'none');
+});
+
+for (const hasAction of [false, true]) {
+  test(`lightbox image preserves tap-to-open ${hasAction ? 'with' : 'without'} contextual action`, () => {
+    const file = path.join(ROOT, 'packages/app/components/media/MediaLightbox.tsx');
+    const exports = {}, opens = [];
+    const jsx = (type, props) => ({ type, props: props || {} });
+    vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+      fileName: file,
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText, { exports, require: name => {
+      if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
+      if (name === 'react') return { createContext: () => ({}), useContext: () => ({ open: index => opens.push(index) }), useCallback: x => x };
+      if (name === 'react-native') return { Pressable: 'Pressable', StyleSheet: { create: x => x } };
+      return new Proxy({}, { get: () => () => null });
+    } }, { filename: file });
+    let holds = 0;
+    const action = hasAction ? () => holds++ : undefined;
+    const tree = exports.MediaLightbox.Image({ index: 2, children: null, onLongPress: action, delayLongPress: hasAction ? 400 : undefined });
+    assert.equal(tree.type, 'Pressable'); assert.equal(tree.props.onLongPress, action);
+    if (hasAction) { tree.props.onLongPress(); assert.equal(holds, 1); assert.deepEqual(opens, []); assert.equal(tree.props.delayLongPress, 400); }
+    tree.props.onPress(); assert.deepEqual(opens, [2]);
+  });
+}
