@@ -8,6 +8,7 @@ on:
       - 'packages/app/features/messages/chat.web.tsx'
       - 'packages/app/features/routes/screens/(protected)/chat/**'
       - 'packages/app/components/chat/**'
+      - 'packages/app/components/media/MediaLightbox.tsx'
       - 'apps/mobile/supabase/functions/react-message/**'
       - 'apps/mobile/supabase/migrations/*message_reactions.sql'
       - 'scripts/test-dm-reaction-*'
@@ -27,7 +28,7 @@ jobs:
         with:
           node-version: 24
       - name: Install isolated, pinned offline-test dependencies
-        run: npm install --prefix "$RUNNER_TEMP/dm-reaction-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 @electric-sql/pglite@0.3.14
+        run: npm install --prefix "$RUNNER_TEMP/dm-reaction-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 @electric-sql/pglite@0.3.14 react@19.2.3 react-dom@19.2.3 jsdom@26.1.0
       - name: Shared store, API, Edge, SQL and web/native input/realtime regressions
         run: NODE_PATH="$RUNNER_TEMP/dm-reaction-tests/node_modules" npm run test:dm-reactions
       - name: Pure reaction helpers typecheck

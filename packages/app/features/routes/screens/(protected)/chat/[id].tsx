@@ -191,6 +191,7 @@ function renderMessageText(
 interface MediaMessageProps {
   mediaList: MediaAttachment[];
   onPress: (media: MediaAttachment) => void;
+  onLongPress?: () => void;
 }
 
 function GroupHeaderAvatarBox({
@@ -274,7 +275,7 @@ function SingleVideoThumb({ media }: { media: MediaAttachment }) {
   );
 }
 
-function MediaMessage({ mediaList, onPress }: MediaMessageProps) {
+function MediaMessage({ mediaList, onPress, onLongPress }: MediaMessageProps) {
   const safeMediaList = mediaList || [];
   const imageUrls = safeMediaList
     .filter((m) => m.type === "image")
@@ -299,6 +300,8 @@ function MediaMessage({ mediaList, onPress }: MediaMessageProps) {
         <Pressable
           key={media.uri}
           onPress={() => onPress(media)}
+          onLongPress={onLongPress}
+          delayLongPress={400}
           style={{
             width: w,
             height: h,
@@ -311,6 +314,8 @@ function MediaMessage({ mediaList, onPress }: MediaMessageProps) {
         </Pressable>
       ) : (
         <Galeria.Image
+          onLongPress={onLongPress}
+          delayLongPress={400}
           key={media.uri}
           index={
             imageUrls.indexOf(media.uri) >= 0
@@ -336,6 +341,7 @@ function MediaMessage({ mediaList, onPress }: MediaMessageProps) {
         <View key={media.uri} style={{ position: "relative" }}>
           {inner}
           <View
+            pointerEvents="none"
             style={{
               ...StyleSheet.absoluteFill,
               borderRadius: 6,
@@ -2025,6 +2031,7 @@ function ChatScreenContent() {
                           <MediaMessage
                             mediaList={item.media!}
                             onPress={(m) => handleMediaPreview(m)}
+                            onLongPress={() => handleLongPressMessage(item)}
                           />
                         </View>
                       )}

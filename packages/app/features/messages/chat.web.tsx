@@ -301,6 +301,20 @@ function MessageRow({
     setShowMessageActions(true);
   }, [item, setSelectedMessage, setShowMessageActions]);
 
+  // Mobile browsers do not consistently emit contextmenu for a held finger.
+  // Track the hold without capturing the pointer or preventing normal scrolling.
+  const holdRef = useRef<{ pointerId: number; x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const suppressHoldClickRef = useRef(false);
+  const cancelHold = useCallback(() => {
+    if (holdRef.current) clearTimeout(holdRef.current.timer);
+    holdRef.current = null;
+  }, []);
+  useEffect(() => {
+    suppressHoldClickRef.current = false;
+    lastTapRef.current = 0;
+    return cancelHold;
+  }, [conversationActionId, item.id, currentUser?.id, cancelHold]);
+
   const hasMedia = !!item.media && item.media.length > 0;
 
   // Special bubbles (shared RN components, render via react-native-web).
@@ -364,10 +378,50 @@ function MessageRow({
   // separate from tap handling so opening a shared post/story/event still navigates.
   const messageBody = (
     <div
-      className="contents"
+      className="min-w-0 select-none [-webkit-touch-callout:none]"
+      tabIndex={0}
+      role="group"
+      aria-label="Message actions"
+      onKeyDown={(e) => {
+        if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+          e.preventDefault();
+          cancelHold();
+          onLongPress();
+        }
+      }}
+      onPointerDownCapture={(e) => {
+        cancelHold();
+        suppressHoldClickRef.current = false;
+        if (e.pointerType === "mouse" || !e.isPrimary || e.button !== 0) return;
+        const pointerId = e.pointerId;
+        holdRef.current = {
+          pointerId, x: e.clientX, y: e.clientY,
+          timer: setTimeout(() => {
+            holdRef.current = null;
+            suppressHoldClickRef.current = true;
+            lastTapRef.current = 0;
+            onLongPress();
+          }, 400),
+        };
+      }}
+      onPointerMoveCapture={(e) => {
+        const hold = holdRef.current;
+        if (hold && (e.pointerId !== hold.pointerId ||
+            Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 10)) cancelHold();
+      }}
+      onPointerUpCapture={cancelHold}
+      onPointerCancelCapture={cancelHold}
+      onPointerLeave={cancelHold}
+      onClickCapture={(e) => {
+        if (!suppressHoldClickRef.current) return;
+        suppressHoldClickRef.current = false;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
-        onLongPress();
+        cancelHold();
+        if (!suppressHoldClickRef.current) onLongPress();
       }}
     >
       {inner}
@@ -658,6 +712,17 @@ export function ChatScreen() {
   const setEditingMessage = useChatScreenStore((s) => s.setEditingMessage);
   const setEditText = useChatScreenStore((s) => s.setEditText);
   const resetChatScreen = useChatScreenStore((s) => s.resetChatScreen);
+
+  useEffect(() => {
+    if (!showMessageActions) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setShowMessageActions(false);
+      setSelectedMessage(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showMessageActions, setShowMessageActions, setSelectedMessage]);
 
   const currentUser = useAuthStore((s) => s.user);
   const currentUserId = useAuthStore((s) => s.user?.id);
