@@ -32,6 +32,7 @@ import {
 } from "../_shared/verify-session.ts";
 
 import { readAllRows } from "../_shared/read-all-rows.ts";
+import { readMonthlyEventFees, selectedNyMonth } from "../_shared/monthly-event-fees.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -49,7 +50,7 @@ Deno.serve(async (req: Request) => {
     const authId = await verifySession(supabase, req);
     if (!authId) return errorResponse("Unauthorized", 401);
 
-    let body: { event_id?: string | number; action?: string } = {};
+    let body: { event_id?: string | number; action?: string; month?: string } = {};
     try {
       body = await req.json();
     } catch {
@@ -57,7 +58,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const eventIdNum = Number(body.event_id);
-    if (!Number.isFinite(eventIdNum) || eventIdNum <= 0) {
+    if (!Number.isSafeInteger(eventIdNum) || eventIdNum <= 0) {
       return errorResponse("event_id required", 400);
     }
 
@@ -190,7 +191,14 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── default action: summary ─────────────────────────────
-    // The four reads below are independent — run them in parallel so
+    // Reject invalid input separately from a temporarily unavailable ledger.
+    try {
+      selectedNyMonth(body.month);
+    } catch {
+      return errorResponse("Invalid or future accounting month", 400);
+    }
+
+    // The reads below are independent — run them in parallel so
     // the dashboard paints at max(latency) instead of sum(latency).
     const [
       financialsRes,
@@ -222,6 +230,17 @@ Deno.serve(async (req: Request) => {
     const { data: rsvpRows, error: rsvpErr } = rsvpRes;
     const { data: tierRows } = tierRes;
     const { data: promoRows } = promoRes;
+
+    // Monthly platform fees are a separate, read-only order ledger. Never
+    // replace the organizer net/payout with the developer after-Stripe amount.
+    let monthlyPlatformFees: Awaited<ReturnType<typeof readMonthlyEventFees>> | null = null;
+    try {
+      monthlyPlatformFees = await readMonthlyEventFees(supabase, eventIdNum, body.month);
+    } catch (error) {
+      console.error("[event-analytics] monthly fee ledger unavailable:", error);
+      // A missing processing fee or failed order read must not hide attendance,
+      // tiers or lifetime analytics. Null means unavailable, never zero fees.
+    }
 
     const revenue = {
       grossCents: Number(financials?.gross_cents ?? 0),
@@ -336,6 +355,7 @@ Deno.serve(async (req: Request) => {
       eventId: String(eventIdNum),
       title: event.title || "",
       revenue,
+      monthlyPlatformFees,
       ticketStats,
       attendanceBreakdown,
       tiers,

@@ -15,6 +15,10 @@ on:
   pull_request:
     paths:
       - "apps/mobile/supabase/**"
+      - "scripts/test-monthly-event-analytics-dom.cjs"
+      - "packages/app/features/events/analytics.web.tsx"
+      - "packages/app/features/routes/screens/(protected)/events/[id]/analytics.tsx"
+      - "packages/app/lib/stores/event-analytics-store.ts"
       - "scripts/verify-edge-functions.mjs"
       - "scripts/verify-users-lockdown.mjs"
       - "scripts/verify-content-lockdown.mjs"
@@ -44,6 +48,10 @@ on:
     branches: [master, main]
     paths:
       - "apps/mobile/supabase/**"
+      - "scripts/test-monthly-event-analytics-dom.cjs"
+      - "packages/app/features/events/analytics.web.tsx"
+      - "packages/app/features/routes/screens/(protected)/events/[id]/analytics.tsx"
+      - "packages/app/lib/stores/event-analytics-store.ts"
       - "scripts/verify-edge-functions.mjs"
       - "scripts/verify-users-lockdown.mjs"
       - "scripts/verify-content-lockdown.mjs"
@@ -74,6 +82,24 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/verify-edge-functions.mjs
+
+  monthly-platform-fee-analytics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Paid-order month boundaries, fee split, Stripe and refund exclusions
+        run: node --test apps/mobile/supabase/functions/event-analytics/index.test.cjs
+      - name: Isolated analytics UI fixtures
+        run: npm install --prefix "$RUNNER_TEMP/analytics-ui" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.0.11 @tanstack/react-query@5.90.5
+      - name: Actual web/native monthly ledger, rolling deploy and stale-response safety
+        env:
+          NODE_PATH: ${{ runner.temp }}/analytics-ui/node_modules
+        run: node scripts/test-monthly-event-analytics-dom.cjs
 
   verification-onboarding-contract:
     # Prevent a recurrence of the 2026-10-08 error: missing Didit secrets
