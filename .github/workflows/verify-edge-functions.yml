@@ -75,6 +75,18 @@ jobs:
           node-version: 22
       - run: node scripts/verify-edge-functions.mjs
 
+  monthly-platform-fee-analytics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Paid-order month boundaries, fee split, Stripe and refund exclusions
+        run: node --test apps/mobile/supabase/functions/event-analytics/index.test.cjs
+
   verification-onboarding-contract:
     # Prevent a recurrence of the 2026-10-08 error: missing Didit secrets
     # must not look like a successful HTTP 200 or expose a bad redirect.
