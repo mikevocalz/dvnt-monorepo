@@ -63,17 +63,13 @@ export async function readMonthlyEventFees(db: any, eventId: number, month?: str
     afterStripeFeeCents: 0, provisional: true,
   };
   for (const row of rows) {
+    const paidAt = Date.parse(row.paid_at);
     if (row.event_id !== eventId || row.type !== "event_ticket" ||
         !["paid", "partially_refunded"].includes(row.status) ||
-        typeof row.paid_at !== "string" ||
-        row.paid_at < window.start || row.paid_at >= window.end) {
-      // Compare timestamps as instants below: source may use +00 instead of Z.
-      const ts = Date.parse(row.paid_at);
-      if (row.event_id !== eventId || row.type !== "event_ticket" ||
-          !["paid", "partially_refunded"].includes(row.status) ||
-          !Number.isFinite(ts) || ts < Date.parse(window.start) || ts >= Date.parse(window.end)) {
-        throw new Error("Out-of-scope fee ledger row");
-      }
+        !Number.isFinite(paidAt) ||
+        paidAt < Date.parse(window.start) || paidAt >= Date.parse(window.end) ||
+        paidAt > now.getTime()) {
+      throw new Error("Out-of-scope fee ledger row");
     }
     if (row.status === "partially_refunded") {
       result.excludedPartiallyRefundedOrders++;
