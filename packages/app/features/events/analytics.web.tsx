@@ -45,7 +45,7 @@ import {
   type PromoterLeaderboardRow,
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
-import { useEventAnalyticsStore } from "@dvnt/app/lib/stores/event-analytics-store";
+import { currentAccountingMonth, useEventAnalyticsStore } from "@dvnt/app/lib/stores/event-analytics-store";
 
 function formatPercent(n: number): string {
   return `${Math.round(n)}%`;
@@ -221,11 +221,13 @@ export function EventAnalyticsScreen() {
   const setTab = useEventAnalyticsStore((s) => s.setTab);
   const isExporting = useEventAnalyticsStore((s) => s.isExporting);
   const setExporting = useEventAnalyticsStore((s) => s.setExporting);
+  const month = useEventAnalyticsStore((s) => s.month);
+  const setMonth = useEventAnalyticsStore((s) => s.setMonth);
 
   const { data, isLoading, isError, refetch, isRefetching } =
     useQuery<EventAnalyticsSummary | null>({
-      queryKey: ["event-analytics", eventId],
-      queryFn: () => eventAnalyticsApi.getSummary(eventId),
+      queryKey: ["event-analytics", eventId, month],
+      queryFn: () => eventAnalyticsApi.getSummary(eventId, month),
       enabled: !!eventId,
       staleTime: 30 * 1000,
     });
@@ -341,7 +343,7 @@ export function EventAnalyticsScreen() {
     );
   }
 
-  const { revenue, ticketStats, tiers, promoCodes } = data;
+  const { revenue, monthlyPlatformFees, ticketStats, tiers, promoCodes } = data;
   const attendanceBreakdown = resolveAttendanceBreakdown(data);
   const checkInPercent =
     ticketStats.total > 0
@@ -349,7 +351,6 @@ export function EventAnalyticsScreen() {
       : 0;
   const remainingTickets = tiers.reduce((sum, t) => sum + t.remaining, 0);
   const totalCapacity = tiers.reduce((sum, t) => sum + t.quantityTotal, 0);
-  const feesTotal = revenue.dvntFeeCents + revenue.stripeFeeCents;
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -386,11 +387,56 @@ export function EventAnalyticsScreen() {
           <StatCard
             icon={<TrendingUp size={16} color="#f59e0b" />}
             iconColor="#f59e0b"
-            label="Fees paid"
-            value={formatCents(feesTotal)}
-            sublabel={`${formatCents(revenue.dvntFeeCents)} DVNT platform · ${formatCents(revenue.stripeFeeCents)} Stripe processing`}
+            label="Stripe costs · event lifetime"
+            value={formatCents(revenue.stripeFeeCents)}
+            sublabel="Not the monthly platform-fee total"
           />
         </div>
+
+        {/* Order-ledger accounting. This is distinct from organizer lifetime estimates. */}
+        <section className="mt-4 rounded-2xl border border-white/10 bg-white/4 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-white">DVNT platform fees · monthly</h2>
+              <p className="text-xs text-white/50">New York accounting month · paid orders only</p>
+            </div>
+            <input type="month" aria-label="Accounting month" value={month}
+              max={currentAccountingMonth()} min="2026-01"
+              onChange={(e) => setMonth(e.target.value)}
+              className="min-w-0 rounded-lg border border-white/15 bg-[#10131d] px-2 py-2 text-sm text-white" />
+          </div>
+          {monthlyPlatformFees && monthlyPlatformFees.month === month ? (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  ["Buyer-side fees", monthlyPlatformFees.buyerFeeCents],
+                  ["Organizer-side fees", monthlyPlatformFees.organizerFeeCents],
+                  ["Gross DVNT fees", monthlyPlatformFees.grossPlatformFeeCents],
+                  ["Stripe processing", monthlyPlatformFees.stripeFeeCents],
+                ].map(([label, cents]) => (
+                  <div key={String(label)}>
+                    <p className="text-xs text-white/50">{label}</p>
+                    <p className="text-lg font-bold text-white">{formatCents(Number(cents))}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 border-t border-white/10 pt-3">
+                <p className="text-xs text-white/60">Provisional DVNT fees after Stripe</p>
+                <p className="text-2xl font-extrabold text-[#3FDCFF]">{formatCents(monthlyPlatformFees.afterStripeFeeCents)}</p>
+                <p className="mt-2 text-xs leading-5 text-white/50">
+                  {monthlyPlatformFees.paidOrders} paid-status orders · {monthlyPlatformFees.chargedOrders} charged checkouts.
+                  {monthlyPlatformFees.excludedPartiallyRefundedOrders > 0
+                    ? ` ${monthlyPlatformFees.excludedPartiallyRefundedOrders} partially refunded order(s) excluded pending fee-reversal reconciliation.`
+                    : ""}
+                  {" "}This is not verified settled proceeds or a developer payout.
+                </p>
+                <p className="mt-1 text-[11px] text-white/40">Checked {new Date(monthlyPlatformFees.asOf).toLocaleString()}</p>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-amber-300">Monthly platform-fee ledger unavailable. Do not use the legacy event estimate for payouts.</p>
+          )}
+        </section>
 
         {/* ── Attendance source breakdown (host-only) ── */}
         <section className="mt-4 rounded-2xl border border-white/10 bg-white/4 p-4">
