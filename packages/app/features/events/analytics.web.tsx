@@ -423,6 +423,11 @@ export function EventAnalyticsScreen() {
               <div className="mt-4 border-t border-white/10 pt-3">
                 <p className="text-xs text-white/60">Provisional DVNT fees after Stripe</p>
                 <p className="text-2xl font-extrabold text-[#3FDCFF]">{formatCents(monthlyPlatformFees.afterStripeFeeCents)}</p>
+                {month === "2026-10" && (
+                  <p className="mt-1 text-[11px] font-medium text-white/60">
+                    final calculated fee as of 3pm November 2nd 2026
+                  </p>
+                )}
                 <p className="mt-2 text-xs leading-5 text-white/50">
                   {monthlyPlatformFees.paidOrders} paid-status orders · {monthlyPlatformFees.chargedOrders} charged checkouts.
                   {monthlyPlatformFees.excludedPartiallyRefundedOrders > 0
