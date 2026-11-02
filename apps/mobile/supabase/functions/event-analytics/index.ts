@@ -32,6 +32,7 @@ import {
 } from "../_shared/verify-session.ts";
 
 import { readAllRows } from "../_shared/read-all-rows.ts";
+import { readMonthlyEventFees } from "../_shared/monthly-event-fees.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -49,7 +50,7 @@ Deno.serve(async (req: Request) => {
     const authId = await verifySession(supabase, req);
     if (!authId) return errorResponse("Unauthorized", 401);
 
-    let body: { event_id?: string | number; action?: string } = {};
+    let body: { event_id?: string | number; action?: string; month?: string } = {};
     try {
       body = await req.json();
     } catch {
@@ -223,6 +224,16 @@ Deno.serve(async (req: Request) => {
     const { data: tierRows } = tierRes;
     const { data: promoRows } = promoRes;
 
+    // Monthly platform fees are a separate, read-only order ledger. Never
+    // replace the organizer net/payout with the developer after-Stripe amount.
+    let monthlyPlatformFees;
+    try {
+      monthlyPlatformFees = await readMonthlyEventFees(supabase, eventIdNum, body.month);
+    } catch (error) {
+      console.error("[event-analytics] monthly fee ledger unavailable:", error);
+      return errorResponse("Monthly platform fee ledger unavailable", 503);
+    }
+
     const revenue = {
       grossCents: Number(financials?.gross_cents ?? 0),
       refundsCents: Number(financials?.refunds_cents ?? 0),
@@ -336,6 +347,7 @@ Deno.serve(async (req: Request) => {
       eventId: String(eventIdNum),
       title: event.title || "",
       revenue,
+      monthlyPlatformFees,
       ticketStats,
       attendanceBreakdown,
       tiers,
