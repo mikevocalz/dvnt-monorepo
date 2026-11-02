@@ -5,8 +5,8 @@
  * `app/(protected)/events/[id]/analytics.tsx`.
  *
  * Law 1 (data flow is sacred): consumes the EXACT same server contract as
- * native — `eventAnalyticsApi.getSummary(eventId)` via TanStack `useQuery`
- * keyed identically `["event-analytics", eventId]` (staleTime 30s). CSV export
+ * native — `eventAnalyticsApi.getSummary(eventId, month)` via TanStack `useQuery`
+ * keyed by event, month and viewer (staleTime 30s). CSV export
  * reuses the same `eventAnalyticsApi.getAttendees` + `attendeesToCsv` pipeline;
  * on web the CSV is downloaded via an object URL instead of expo-sharing.
  * Money is formatted with `formatCents` from the fee-calculator.
@@ -46,6 +46,7 @@ import {
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { currentAccountingMonth, useEventAnalyticsStore } from "@dvnt/app/lib/stores/event-analytics-store";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 
 function formatPercent(n: number): string {
   return `${Math.round(n)}%`;
@@ -221,14 +222,15 @@ export function EventAnalyticsScreen() {
   const setTab = useEventAnalyticsStore((s) => s.setTab);
   const isExporting = useEventAnalyticsStore((s) => s.isExporting);
   const setExporting = useEventAnalyticsStore((s) => s.setExporting);
+  const viewerId = useAuthStore((s) => s.user?.authId ?? s.user?.id ?? null);
   const month = useEventAnalyticsStore((s) => s.month);
   const setMonth = useEventAnalyticsStore((s) => s.setMonth);
 
   const { data, isLoading, isError, refetch, isRefetching } =
     useQuery<EventAnalyticsSummary | null>({
-      queryKey: ["event-analytics", eventId, month],
+      queryKey: ["event-analytics", eventId, month, viewerId],
       queryFn: () => eventAnalyticsApi.getSummary(eventId, month),
-      enabled: !!eventId,
+      enabled: !!eventId && !!viewerId,
       staleTime: 30 * 1000,
     });
 
@@ -237,9 +239,9 @@ export function EventAnalyticsScreen() {
   // re-math beyond formatting, so this section always matches the
   // ledger exactly.
   const { data: promoterLeaderboard } = useQuery<PromoterLeaderboardRow[]>({
-    queryKey: ["event-promoter-leaderboard", eventId],
+    queryKey: ["event-promoter-leaderboard", eventId, viewerId],
     queryFn: () => promotersApi.leaderboard(parseInt(eventId, 10)),
-    enabled: !!eventId,
+    enabled: !!eventId && !!viewerId,
     staleTime: 30 * 1000,
   });
 
@@ -423,16 +425,12 @@ export function EventAnalyticsScreen() {
               <div className="mt-4 border-t border-white/10 pt-3">
                 <p className="text-xs text-white/60">Provisional DVNT fees after Stripe</p>
                 <p className="text-2xl font-extrabold text-[#3FDCFF]">{formatCents(monthlyPlatformFees.afterStripeFeeCents)}</p>
-                {month === "2026-10" && (
-                  <p className="mt-1 text-[11px] font-medium text-white/60">
-                    final calculated fee as of 3pm November 2nd 2026
-                  </p>
-                )}
                 <p className="mt-2 text-xs leading-5 text-white/50">
                   {monthlyPlatformFees.paidOrders} paid-status orders · {monthlyPlatformFees.chargedOrders} charged checkouts.
                   {monthlyPlatformFees.excludedPartiallyRefundedOrders > 0
                     ? ` ${monthlyPlatformFees.excludedPartiallyRefundedOrders} partially refunded order(s) excluded pending fee-reversal reconciliation.`
                     : ""}
+                  {" "}Refund reversals, credits and other deductions are not reconciled.
                   {" "}This is not verified settled proceeds or a developer payout.
                 </p>
                 <p className="mt-1 text-[11px] text-white/40">Checked {new Date(monthlyPlatformFees.asOf).toLocaleString()}</p>
@@ -470,12 +468,12 @@ export function EventAnalyticsScreen() {
         {/* ── Revenue split (SVG donut chart) ── */}
         <section className="mt-4 rounded-2xl border border-white/10 bg-white/4 p-4">
           <p className="mb-3 text-sm font-bold tracking-wide text-white">
-            Revenue split
+            Organizer revenue split · event lifetime
           </p>
           <RevenueDonut
             segments={[
               { label: "Net", value: revenue.netCents, color: "#22C55E" },
-              { label: "DVNT platform fee", value: revenue.dvntFeeCents, color: "#f59e0b" },
+              { label: "Organizer-side fee estimate", value: revenue.dvntFeeCents, color: "#f59e0b" },
               { label: "Refunds", value: revenue.refundsCents, color: "#ef4444" },
             ]}
           />

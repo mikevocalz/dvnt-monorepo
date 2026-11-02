@@ -80,7 +80,8 @@ export interface EventAnalyticsSummary {
   eventId: string;
   title: string;
   revenue: EventRevenueSummary;
-  monthlyPlatformFees: MonthlyPlatformFeeSummary;
+  /** Null on a failed ledger read; absent on older Edge deployments. Never zero-fill. */
+  monthlyPlatformFees?: MonthlyPlatformFeeSummary | null;
   ticketStats: EventTicketStats;
   /** Optional during rolling deploys so old Edge payloads cannot blank UI. */
   attendanceBreakdown?: EventAttendanceBreakdown;

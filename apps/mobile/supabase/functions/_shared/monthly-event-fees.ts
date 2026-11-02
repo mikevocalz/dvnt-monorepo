@@ -42,7 +42,7 @@ const add = (a: number, b: number) => {
 export function selectedNyMonth(month: string | undefined, now = new Date()) {
   const current = nyMonthWindow(now).month;
   const selected = month ?? current;
-  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(selected) || selected > current) {
+  if (typeof selected !== "string" || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(selected) || selected > current) {
     throw new Error("Invalid or future accounting month");
   }
   return nyMonthWindow(new Date(`${selected}-15T12:00:00.000Z`));
@@ -85,6 +85,7 @@ export async function readMonthlyEventFees(db: any, eventId: number, month?: str
     }
     const stripe = checkout > 0 ? cents(row.stripe_fee_cents, "Stripe processing fee") :
       row.stripe_fee_cents == null ? 0 : cents(row.stripe_fee_cents, "Stripe processing fee");
+    if (checkout === 0 && stripe !== 0) throw new Error("Processing fee on a free order");
     result.paidOrders++;
     if (checkout > 0) result.chargedOrders++;
     result.checkoutCents = add(result.checkoutCents, checkout);

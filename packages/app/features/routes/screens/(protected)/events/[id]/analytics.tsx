@@ -33,7 +33,9 @@ import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { currentAccountingMonth, useEventAnalyticsStore } from "@dvnt/app/lib/stores/event-analytics-store";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
+import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import {
   eventAnalyticsApi,
   resolveAttendanceBreakdown,
@@ -126,6 +128,7 @@ function EventAnalyticsContent() {
   const { colors } = useColorScheme();
   const showToast = useUIStore((s) => s.showToast);
   const eventId = Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
+  const viewerId = useAuthStore((s) => s.user?.authId ?? s.user?.id ?? null);
   const month = useEventAnalyticsStore((s) => s.month);
   const setMonth = useEventAnalyticsStore((s) => s.setMonth);
   const shiftMonth = (delta: number) => {
@@ -136,18 +139,18 @@ function EventAnalyticsContent() {
 
   const { data, isLoading, isError, refetch, isRefetching } =
     useQuery<EventAnalyticsSummary | null>({
-      queryKey: ["event-analytics", eventId, month],
+      queryKey: ["event-analytics", eventId, month, viewerId],
       queryFn: () => eventAnalyticsApi.getSummary(eventId, month),
-      enabled: !!eventId,
+      enabled: !!eventId && !!viewerId,
       staleTime: 30 * 1000,
     });
 
   // Promoter leaderboard (WS-4) — ranked server-side by NET ledger
   // earnings (single ledger query). No client re-math beyond formatting.
   const { data: promoterLeaderboard } = useQuery<PromoterLeaderboardRow[]>({
-    queryKey: ["event-promoter-leaderboard", eventId],
+    queryKey: ["event-promoter-leaderboard", eventId, viewerId],
     queryFn: () => promotersApi.leaderboard(parseInt(eventId, 10)),
-    enabled: !!eventId,
+    enabled: !!eventId && !!viewerId,
     staleTime: 30 * 1000,
   });
 
@@ -366,24 +369,23 @@ function EventAnalyticsContent() {
               ] as const).map(([label, cents]) => (
                 <View key={label} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
                   <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>{label}</Text>
-                  <Text style={{ color: colors.foreground, fontWeight: "700" }}>{formatMoney(cents)}</Text>
+                  <Text style={{ color: colors.foreground, fontWeight: "700" }}>{formatCents(cents)}</Text>
                 </View>
               ))}
               <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, marginTop: 4 }}>
                 <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Provisional fees after Stripe</Text>
                 <Text style={{ color: "#3FDCFF", fontSize: 25, fontWeight: "800" }}>
-                  {formatMoney(monthlyPlatformFees.afterStripeFeeCents)}
+                  {formatCents(monthlyPlatformFees.afterStripeFeeCents)}
                 </Text>
-                {month === "2026-10" && (
-                  <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 4 }}>
-                    final calculated fee as of 3pm November 2nd 2026
-                  </Text>
-                )}
                 <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 8 }}>
                   {monthlyPlatformFees.paidOrders} paid orders; {monthlyPlatformFees.chargedOrders} charged.
                   {monthlyPlatformFees.excludedPartiallyRefundedOrders > 0
                     ? ` ${monthlyPlatformFees.excludedPartiallyRefundedOrders} partially refunded order(s) excluded.` : ""}
+                  {" "}Refund reversals, credits and other deductions are not reconciled.
                   {" "}Not verified settled proceeds or a developer payout.
+                </Text>
+                <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 4 }}>
+                  Checked {new Date(monthlyPlatformFees.asOf).toLocaleString()}
                 </Text>
               </View>
             </>

@@ -97,6 +97,21 @@ export function StoryViewer({
   paused = false,
 }: StoryViewerProps) {
   const [activeIndex, setActiveIndex] = useState(currentIndex);
+  const [previousIndex, setPreviousIndex] = useState(currentIndex);
+  const [requestedIndex, setRequestedIndex] = useState(currentIndex);
+  // Do not echo the player's own onStoryStart back as a new currentIndex.
+  // The library treats even that same index as a seek and pauses it; cached
+  // images then have no second load event to restart their progress clock.
+  if (currentIndex !== previousIndex) {
+    setPreviousIndex(currentIndex);
+    if (currentIndex !== activeIndex) setRequestedIndex(currentIndex);
+  }
+  // The library's video clock starts at zero until loaded-data supplies its
+  // duration. Passing isPaused=false before that can finish the entire group
+  // on the first animation frame, even for a valid video on a slow connection.
+  const [videoLoading, setVideoLoading] = useState(
+    stories[currentIndex]?.type === "video" || VIDEO_RE.test(stories[currentIndex]?.url ?? ""),
+  );
   const activeHeader = stories[activeIndex]?.header;
   const mapped: Story[] = stories.map((s) => ({
     url: s.url,
@@ -114,7 +129,22 @@ export function StoryViewer({
   }));
 
   return (
-    <div className="dvnt-story-viewer" style={{ width, height, position: "relative" }}>
+    <div className="dvnt-story-viewer" style={{ width, height, position: "relative" }}
+      onLoadCapture={(event) => {
+        // Skipping a cold video leaves its loaded-data event behind. The next
+        // image must release that readiness hold when its own media is ready.
+        const target = event.target as HTMLElement;
+        if (target.tagName === "IMG" && !target.closest(".dvnt-story-header")) {
+          setVideoLoading(false);
+        }
+      }}
+      onLoadStartCapture={(event) => {
+        if ((event.target as HTMLElement).tagName === "VIDEO") setVideoLoading(true);
+      }}
+      onLoadedDataCapture={(event) => {
+        if ((event.target as HTMLElement).tagName === "VIDEO") setVideoLoading(false);
+      }}
+    >
       {/* The video renderer wraps <video> in a flex div with NO width/height, so
           the video's height:100% collapses (images skip this wrapper, which is
           why only video left a cutout). Force that wrapper + the video to fill
@@ -133,8 +163,8 @@ export function StoryViewer({
         width={width}
         height={height}
         defaultInterval={5000}
-        currentIndex={currentIndex}
-        isPaused={paused}
+        currentIndex={requestedIndex}
+        isPaused={paused || videoLoading}
         loop={loop}
         keyboardNavigation
         header={() => <></>}

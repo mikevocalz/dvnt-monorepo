@@ -69,7 +69,8 @@ export function StoryViewerOverlay() {
   // Which segment inside the current group is playing — drives which item's
   // overlays are shown. react-insta-stories fires onStoryChange (onStoryStart)
   // on every segment start; reset to 0 whenever the group changes (the viewer
-  // remounts per group via key={group.id}).
+  // remounts for each explicit viewing session and group). Reopening a group
+  // must discard the old player's internal index before a shorter list renders.
   const [selection, setSelection] = useState({ viewSession, groupIndex, index: 0 });
   const storyIndex = selection.viewSession === viewSession && selection.groupIndex === groupIndex ? selection.index : 0;
   const segmentEpoch = useRef(0);
@@ -86,8 +87,10 @@ export function StoryViewerOverlay() {
   // here and never take it down. Same mutation native uses, so the rail drops
   // it optimistically and the list refetches behind that.
   const deleteStory = useDeleteStory();
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  useEffect(() => setConfirmingDelete(false), [groupIndex]);
+  const deleteConfirmationKey = `${viewSession}:${groupIndex}:${storyIndex}:${viewer?.id ?? ""}`;
+  const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
+  // Confirmation belongs to this account, segment and viewing session only.
+  const confirmingDelete = deleteConfirmation === deleteConfirmationKey;
 
   // Replying and reacting — the half of stories web never had. Both are DMs
   // carrying story context; the shaping lives in lib/stories/story-message so
@@ -237,7 +240,7 @@ export function StoryViewerOverlay() {
       // The group is gone from the rail either way; leaving the viewer on a
       // deleted story is the one thing that must not happen.
       onSettled: () => {
-        setConfirmingDelete(false);
+        setDeleteConfirmation(null);
         if (groups.length > 1) nextGroup();
         else close();
       },
@@ -365,7 +368,7 @@ export function StoryViewerOverlay() {
           over a playing story is worse than a button that asks once. */}
       {isOwnStory ? (
         <button
-          onClick={() => (confirmingDelete ? removeStory() : setConfirmingDelete(true))}
+          onClick={() => (confirmingDelete ? removeStory() : setDeleteConfirmation(deleteConfirmationKey))}
           disabled={deleteStory.isPending}
           aria-label={confirmingDelete ? "Confirm delete story" : "Delete story"}
           className="absolute right-16 z-10 h-9 rounded-xl flex items-center justify-center gap-2 px-3 active:scale-95 border border-white/20 disabled:opacity-50"
@@ -402,7 +405,7 @@ export function StoryViewerOverlay() {
         }}
       >
         {playbackReady ? <StoryViewer
-          key={group.id}
+          key={`${viewSession}:${group.id}`}
           stories={storyItems}
           currentIndex={storyIndex}
           onAllStoriesEnd={nextGroup}
