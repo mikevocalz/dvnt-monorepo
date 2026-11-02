@@ -374,6 +374,11 @@ function EventAnalyticsContent() {
                 <Text style={{ color: "#3FDCFF", fontSize: 25, fontWeight: "800" }}>
                   {formatMoney(monthlyPlatformFees.afterStripeFeeCents)}
                 </Text>
+                {month === "2026-10" && (
+                  <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 4 }}>
+                    final calculated fee as of 3pm November 2nd 2026
+                  </Text>
+                )}
                 <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 8 }}>
                   {monthlyPlatformFees.paidOrders} paid orders; {monthlyPlatformFees.chargedOrders} charged.
                   {monthlyPlatformFees.excludedPartiallyRefundedOrders > 0
