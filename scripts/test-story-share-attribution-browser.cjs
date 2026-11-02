@@ -91,6 +91,7 @@ const {
         },
       };
       const photo = { ...post, id: "103", url: flyer };
+      const video = { id: "105", type: "video", duration: 60000, url: "data:video/webm;base64,AAAA" };
       const textEvent = { ...event, id: "104", url: undefined, sharedSource: {
         ...event.sharedSource,
         title: "A long original event title that wraps across multiple lines on a narrow story",
@@ -162,7 +163,7 @@ const {
             id: `tag-${index}`, username: `tagged-member-${index}`, avatar,
           })) : []);
         }
-        f.open([makeGroup(kind === "event" ? [event, post] : kind === "text-event" ? [textEvent, post] : kind === "photo" ? [photo, event] : [post, event])]);
+        f.open([makeGroup(kind === "event" ? [event, post] : kind === "text-event" ? [textEvent, post] : kind === "photo" ? [photo, event] : kind === "video" ? [video] : [post, event])]);
       };
       globalThis.__openStory("post");
     });
@@ -393,6 +394,51 @@ const {
       "Shared event by @original",
     );
     assert.equal(await page.locator(".dvnt-story-viewer").count(), 1);
+    // Mobile-web short-video regression: test the REAL production overlay in
+    // Chromium (not CSS/source assertions alone). The story video may fail
+    // decoding this offline fixture, but the real player's video node and
+    // both outer-overlay controls must mount and stay independently tappable.
+    // Prevent autoplay so a missing fixture codec cannot advance the story.
+    for (const viewport of [
+      { width: 320, height: 568 },   // short portrait
+      { width: 375, height: 812 },   // standard iPhone portrait
+      { width: 812, height: 375 },   // phone landscape
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.evaluate(() => {
+        HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
+        globalThis.__openStory("video", "other");
+      });
+      const close = page.getByRole("button", { name: "Close story" });
+      const unmute = page.getByRole("button", { name: "Unmute story" });
+      await close.waitFor();
+      await unmute.waitFor();
+      const closeBox = await close.boundingBox();
+      const soundBox = await unmute.boundingBox();
+      const hit = await page.evaluate(() => {
+        const target = (label) => {
+          const el = document.querySelector('button[aria-label="' + label + '"]');
+          const rect = el.getBoundingClientRect();
+          return el.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+        };
+        return { close: target("Close story"), sound: target("Unmute story") };
+      });
+      const context = JSON.stringify({ viewport, closeBox, soundBox, hit });
+      assert.ok(closeBox.width >= 44 && closeBox.height >= 44, "close touch target: " + context);
+      assert.ok(soundBox.width >= 44 && soundBox.height >= 44, "sound touch target: " + context);
+      assert.ok(soundBox.y >= closeBox.y + closeBox.height + 12 - 1, "at least 12px vertical separation: " + context);
+      assert.ok(soundBox.y + soundBox.height <= viewport.height, "sound accessible in viewport: " + context);
+      assert.deepEqual(hit, { close: true, sound: true }, "both controls receive real pointer hits: " + context);
+      await unmute.click();
+      await page.getByRole("button", { name: "Mute story" }).waitFor();
+      const videoNode = page.locator(".dvnt-story-viewer video");
+      assert.equal(await videoNode.count(), 1, "production video renderer mounted");
+      assert.equal(await videoNode.evaluate((v) => v.muted), false, "sound toggle unmuted player");
+      await page.getByRole("button", { name: "Mute story" }).click();
+      assert.equal(await videoNode.evaluate((v) => v.muted), true, "sound toggle re-muted player");
+      await close.click();
+      await close.waitFor({ state: "detached" });
+    }
     assert.deepEqual(errors, []);
     console.log(
       "PASS story attribution Chromium: actual player, own/other/guest eligibility, 320/375/1440px unboxed two-action footer, Viewers left/source right, text/photo/event, seven 44px reactions, expanded tags, composer focus, hit-testing, keyboard and navigation-close semantics",
