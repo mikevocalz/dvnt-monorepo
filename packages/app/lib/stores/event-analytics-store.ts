@@ -8,11 +8,20 @@ import { create } from "zustand"
  * useState for `isExporting` — web routes it through the store to honor the
  * no-useState rule). None of this changes the server contract.
  */
+export const currentAccountingMonth = () => {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
+  const year = parts.find(p => p.type === 'year')?.value;
+  const month = parts.find(p => p.type === 'month')?.value;
+  return `${year}-${month}`;
+}
+
 export type EventAnalyticsTab = "overview" | "tiers"
 
 interface EventAnalyticsState {
   tab: EventAnalyticsTab
   isExporting: boolean
+  month: string
+  setMonth: (month: string) => void
   setTab: (tab: EventAnalyticsTab) => void
   setExporting: (isExporting: boolean) => void
   reset: () => void
@@ -21,7 +30,9 @@ interface EventAnalyticsState {
 export const useEventAnalyticsStore = create<EventAnalyticsState>((set) => ({
   tab: "overview",
   isExporting: false,
+  month: currentAccountingMonth(),
+  setMonth: (month) => { if (/^20\d{2}-(0[1-9]|1[0-2])$/.test(month) && month <= currentAccountingMonth()) set({ month }) },
   setTab: (tab) => set({ tab }),
   setExporting: (isExporting) => set({ isExporting }),
-  reset: () => set({ tab: "overview", isExporting: false }),
+  reset: () => set({ tab: "overview", isExporting: false, month: currentAccountingMonth() }),
 }))
