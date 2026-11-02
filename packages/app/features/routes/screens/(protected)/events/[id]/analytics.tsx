@@ -32,6 +32,7 @@ import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { currentAccountingMonth, useEventAnalyticsStore } from "@dvnt/app/lib/stores/event-analytics-store";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 import {
   eventAnalyticsApi,
@@ -125,11 +126,18 @@ function EventAnalyticsContent() {
   const { colors } = useColorScheme();
   const showToast = useUIStore((s) => s.showToast);
   const eventId = Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
+  const month = useEventAnalyticsStore((s) => s.month);
+  const setMonth = useEventAnalyticsStore((s) => s.setMonth);
+  const shiftMonth = (delta: number) => {
+    const [year, mon] = month.split("-").map(Number);
+    const d = new Date(Date.UTC(year, mon - 1 + delta, 1));
+    setMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+  };
 
   const { data, isLoading, isError, refetch, isRefetching } =
     useQuery<EventAnalyticsSummary | null>({
-      queryKey: ["event-analytics", eventId],
-      queryFn: () => eventAnalyticsApi.getSummary(eventId),
+      queryKey: ["event-analytics", eventId, month],
+      queryFn: () => eventAnalyticsApi.getSummary(eventId, month),
       enabled: !!eventId,
       staleTime: 30 * 1000,
     });
@@ -245,7 +253,7 @@ function EventAnalyticsContent() {
     );
   }
 
-  const { revenue, ticketStats, tiers, promoCodes } = data;
+  const { revenue, monthlyPlatformFees, ticketStats, tiers, promoCodes } = data;
   const attendanceBreakdown = resolveAttendanceBreakdown(data);
   const checkInPercent =
     ticketStats.total > 0
@@ -327,10 +335,56 @@ function EventAnalyticsContent() {
           <StatCard
             icon={<TrendingUp size={16} color="#f59e0b" />}
             iconColor="#f59e0b"
-            label="Fees paid"
-            value={formatMoney(revenue.dvntFeeCents + revenue.stripeFeeCents)}
-            sublabel={`${formatMoney(revenue.dvntFeeCents)} DVNT platform · ${formatMoney(revenue.stripeFeeCents)} Stripe processing`}
+            label="Stripe costs · lifetime"
+            value={formatMoney(revenue.stripeFeeCents)}
+            sublabel="Not the monthly platform fee"
           />
+        </View>
+
+        {/* Month-scoped paid-order ledger, separate from organizer lifetime net. */}
+        <View style={[styles.section, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>DVNT platform fees · monthly</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 12 }}>
+            <Pressable onPress={() => shiftMonth(-1)} accessibilityLabel="Previous accounting month"
+              style={{ padding: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 8 }}>
+              <Text style={{ color: colors.foreground }}>‹</Text>
+            </Pressable>
+            <Text style={{ color: colors.foreground, fontWeight: "700" }}>{month} · New York</Text>
+            <Pressable onPress={() => shiftMonth(1)} disabled={month >= currentAccountingMonth()}
+              accessibilityLabel="Next accounting month"
+              style={{ padding: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 8, opacity: month >= currentAccountingMonth() ? 0.3 : 1 }}>
+              <Text style={{ color: colors.foreground }}>›</Text>
+            </Pressable>
+          </View>
+          {monthlyPlatformFees && monthlyPlatformFees.month === month ? (
+            <>
+              {([
+                ["Buyer-side fees", monthlyPlatformFees.buyerFeeCents],
+                ["Organizer-side fees", monthlyPlatformFees.organizerFeeCents],
+                ["Gross DVNT platform fees", monthlyPlatformFees.grossPlatformFeeCents],
+                ["Stripe processing costs", monthlyPlatformFees.stripeFeeCents],
+              ] as const).map(([label, cents]) => (
+                <View key={label} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>{label}</Text>
+                  <Text style={{ color: colors.foreground, fontWeight: "700" }}>{formatMoney(cents)}</Text>
+                </View>
+              ))}
+              <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, marginTop: 4 }}>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Provisional fees after Stripe</Text>
+                <Text style={{ color: "#3FDCFF", fontSize: 25, fontWeight: "800" }}>
+                  {formatMoney(monthlyPlatformFees.afterStripeFeeCents)}
+                </Text>
+                <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 8 }}>
+                  {monthlyPlatformFees.paidOrders} paid orders; {monthlyPlatformFees.chargedOrders} charged.
+                  {monthlyPlatformFees.excludedPartiallyRefundedOrders > 0
+                    ? ` ${monthlyPlatformFees.excludedPartiallyRefundedOrders} partially refunded order(s) excluded.` : ""}
+                  {" "}Not verified settled proceeds or a developer payout.
+                </Text>
+              </View>
+            </>
+          ) : (
+            <Text style={{ color: colors.mutedForeground }}>Monthly fee ledger unavailable; do not use legacy event estimates for payouts.</Text>
+          )}
         </View>
 
         {/* ── Attendance source breakdown (host-only) ── */}
