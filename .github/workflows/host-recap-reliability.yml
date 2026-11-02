@@ -1,0 +1,32 @@
+name: Host recap reliability
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/_shared/host-recap*'
+      - 'apps/mobile/supabase/functions/host-recap-email/**'
+      - 'apps/mobile/supabase/migrations/*host_recap*'
+      - '.github/workflows/host-recap-reliability.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'apps/mobile/supabase/functions/_shared/host-recap*'
+      - 'apps/mobile/supabase/functions/host-recap-email/**'
+      - 'apps/mobile/supabase/migrations/*host_recap*'
+permissions:
+  contents: read
+jobs:
+  delivery-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --prefix "$RUNNER_TEMP/host-recap-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.2 @electric-sql/pglite@0.3.14
+      - name: Offline handler and PostgreSQL delivery contracts
+        env:
+          NODE_PATH: ${{ runner.temp }}/host-recap-tests/node_modules
+        run: node --test apps/mobile/supabase/functions/_shared/host-recap*.test.cjs apps/mobile/supabase/functions/host-recap-email/*.test.cjs
