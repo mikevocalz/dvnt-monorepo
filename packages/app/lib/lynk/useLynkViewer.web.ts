@@ -21,6 +21,7 @@ import * as Moq from "@moq/net";
 import * as Watch from "@moq/watch";
 import { Signal, Computed } from "@moq/signals";
 import { useMoqToken } from "./useMoqToken";
+import { useMoqRelayAuthorization } from "./useMoqRelayAuthorization";
 import { deriveLynkState } from "./lynkState";
 import { useSignalValue, useSignalSetKey } from "./moq-signals-react";
 import type { LynkPublisher, LynkViewerBase } from "./types";
@@ -34,9 +35,9 @@ export interface UseLynkViewerResult extends LynkViewerBase {
 const EMPTY_PATHS = new Set<Moq.Path.Valid>();
 
 export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
-  const { token, error: tokenError } = useMoqToken(roomId, "subscribe", !!roomId);
+  const { token, error: tokenError, authorizationScope } = useMoqToken(roomId, "subscribe", !!roomId);
 
-  // One reactive URL signal feeds Connection; token refresh updates it.
+  // One URL signal feeds Connection; healthy same-scope renewal does not redial.
   const urlSignal = useRef(new Signal<URL | undefined>(undefined));
   const reloadRef = useRef<Moq.Connection | null>(null);
   const backends = useRef(new Map<string, {
@@ -89,10 +90,8 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
     };
   }, [roomId]);
 
-  // Push the relay URL into the signal whenever the token (re)mints.
-  useEffect(() => {
-    urlSignal.current.set(!ended && token?.relayUrl ? new URL(token.relayUrl) : undefined);
-  }, [token?.relayUrl, ended, reload]);
+  useMoqRelayAuthorization(reload, urlSignal.current, ended ? null : token,
+    authorizationScope ?? roomId ?? "");
 
   // Reactive connection status + announced publisher paths.
   const status = useSignalValue(

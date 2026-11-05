@@ -178,7 +178,7 @@ const stubs: Record<string, string> = {
   "@moq/net": moduleUrl("export const Connection = globalThis.__lynkMocks.Connection; export const Path = { from: p => p }; export const Time = { Milli: { zero: 0 } };"),
   "@moq/watch": moduleUrl("export const Player = globalThis.__lynkMocks.Player;"),
   "@moq/publish": moduleUrl("export const Broadcast = globalThis.__lynkMocks.Publication; export const Source = { Camera: globalThis.__lynkMocks.Device, Microphone: globalThis.__lynkMocks.Device }; export const Video = { Capture: globalThis.__lynkMocks.Capture, Encoder: globalThis.__lynkMocks.Encoder }; export const Audio = Video;"),
-  "./useMoqToken": moduleUrl("export const useMoqToken = (room, intent, enabled = true) => ({ token: room && enabled && (intent !== 'publish' || globalThis.__lynkMocks.tokenState.publish) ? { relayUrl: 'https://example.invalid/' + room + '/' + intent, namespace: 'lynk/' + room, path: 'lynk/' + room + '/self', peerId: 'self' } : null, error: null });"),
+  "./useMoqToken": moduleUrl("export const useMoqToken = (room, intent, enabled = true) => ({ token: room && enabled && (intent !== 'publish' || globalThis.__lynkMocks.tokenState.publish) ? { expiresAt: new Date(Date.now()+120000).toISOString(), relayUrl: 'https://example.invalid/' + room + '/' + intent, namespace: 'lynk/' + room, path: 'lynk/' + room + '/self', peerId: 'self' } : null, error: null });"),
 };
 const hooks = registerHooks({ resolve(specifier: string, context: { parentURL?: string }, next: (...args: any[]) => any) {
   if (stubs[specifier]) return { url: stubs[specifier], shortCircuit: true };

@@ -27,6 +27,7 @@ import * as Moq from "@moq/net";
 import * as Publish from "@moq/publish";
 import { Signal, Computed } from "@moq/signals";
 import { useMoqToken } from "./useMoqToken";
+import { useMoqRelayAuthorization } from "./useMoqRelayAuthorization";
 import { useLynkViewer } from "./useLynkViewer.web";
 import { deriveLynkState } from "./lynkState";
 import { useSignalValue } from "./moq-signals-react";
@@ -51,7 +52,7 @@ export function useLynkBroadcast(
   roomId: string | undefined,
   canPublish = true,
 ): UseLynkBroadcastResult {
-  const { token, error: tokenError } = useMoqToken(
+  const { token, error: tokenError, authorizationScope } = useMoqToken(
     roomId,
     "publish",
     !!roomId && canPublish,
@@ -181,9 +182,8 @@ export function useLynkBroadcast(
   const camera = devices?.camera ?? null;
   const mic = devices?.mic ?? null;
 
-  useEffect(() => {
-    urlSignal.current.set(!ended && token?.relayUrl ? new URL(token.relayUrl) : undefined);
-  }, [token?.relayUrl, ended, reload]);
+  useMoqRelayAuthorization(reload, urlSignal.current, ended ? null : token,
+    authorizationScope ?? roomId ?? "");
 
   const status = useSignalValue(
     reload?.status ?? new Signal<Moq.Connection.Status>("connecting"),
