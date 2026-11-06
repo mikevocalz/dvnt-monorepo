@@ -501,7 +501,6 @@ function EventDetailScreenContent() {
   // Display only — drives the CTA, never opens a pass.
   const { primary: myTicketData, tickets: myTickets = [] } = useMyTicketStatusForEvent(eventId);
   const { data: liveTicketTypes = [] } = useTicketTypes(eventId);
-  const saleNow = useTicketSaleClock([...(eventData?.ticketTiers ?? []), ...liveTicketTypes]);
   // upgradeOptions computed after upgradeSourceTiers is defined below
   const { mutate: initiateUpgrade, isPending: isUpgradePending } =
     useInitiateUpgrade(eventId);
@@ -585,6 +584,8 @@ function EventDetailScreenContent() {
     staleTime: 0,
     refetchOnMount: "always",
   });
+
+  const saleNow = useTicketSaleClock([...(eventData?.ticketTiers ?? []), ...liveTicketTypes]);
 
   // Server-side RSVP status persists across app restarts
   const serverHasTicket = !!(

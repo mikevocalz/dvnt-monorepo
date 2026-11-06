@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { createRequire } from "node:module";
+import { URL } from "node:url";
 import { filterBuyerVisibleTiers, tierSaleHasStarted } from "./pricing.ts";
 
 const require = createRequire(import.meta.url);
@@ -81,4 +82,26 @@ test("native purchase action cannot fall back to free RSVP when configured tiers
   assert.ok(expression);
   const code = ts.transpileModule(`(${expression.getText(ast)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   assert.equal(vm.runInNewContext(code, { requestedServiceTierId: null, eventData: { price: 0, ticketTiers: [later] }, eventSalesClosed: () => false, selectedTier: null, selectedDbTier: undefined }), "No ticket tiers are available yet");
+});
+
+
+test("native sale clock is declared after its event and live-tier inputs", () => {
+  const source = fs.readFileSync(new URL(native, import.meta.url), "utf8");
+  const ast = ts.createSourceFile("native.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const screen = ast.statements.find((node: any) => ts.isFunctionDeclaration(node) && node.name?.text === "EventDetailScreenContent");
+  assert.ok(screen?.body);
+  const positions = new Map<string, number>();
+  function bind(name: any, position: number) {
+    if (ts.isIdentifier(name)) positions.set(name.text, position);
+    else for (const element of name.elements) if (element.name) bind(element.name, position);
+  }
+  for (const statement of screen.body.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) bind(declaration.name, declaration.pos);
+    }
+  }
+  for (const input of ["eventData", "liveTicketTypes"]) {
+    assert.ok(positions.has(input) && positions.has("saleNow"));
+    assert.ok(positions.get(input)! < positions.get("saleNow")!, `${input} must exist before the clock hook reads it`);
+  }
 });
