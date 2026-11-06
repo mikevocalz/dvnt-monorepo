@@ -151,7 +151,7 @@ function loadNative(file) {
     if (name.startsWith('@dvnt/app/')) return loadNative(path.join(appRoot, name.slice(10)));
     if (name.startsWith('.')) return loadNative(path.resolve(path.dirname(file), name));
     return require(name);
-  }, console, Date, Set });
+  }, console, Date, Set, setTimeout, clearTimeout });
   return exports;
 }
 mocks['react-native-reanimated'].default.createAnimatedComponent = value => value;
@@ -164,18 +164,19 @@ const selectionEffects = [];
 let tierListSource;
 function findNativePurchaseNodes(node) {
   if (ts.isVariableDeclaration(node)) nativeDeclarations.set(node.name.getText(screenAst), node.getText(screenAst));
-  if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && node.expression.expression.getText(screenAst) === 'useEffect' && node.getText(screenAst).includes('requestedServiceTierId')) selectionEffects.push(node.getText(screenAst));
+  if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && node.expression.expression.getText(screenAst) === 'useEffect' && node.getText(screenAst).includes('setSelectedTier')) selectionEffects.push(node.getText(screenAst));
   if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(screenAst) === 'LegendList' && node.getText(screenAst).includes('TicketTierCard')) tierListSource = node.getText(screenAst);
   ts.forEachChild(node, findNativePurchaseNodes);
 }
 findNativePurchaseNodes(screenAst);
-assert.equal(selectionEffects.length, 2, 'URL-reset and actual auto-selection effects both remain mounted');
+assert.equal(selectionEffects.length, 3, 'URL-reset, stale-selection and auto-selection effects remain mounted');
 assert.ok(tierListSource, 'actual native tier list wiring exists');
-const names = ['selectedTier', 'setSelectedTier', 'ticketQty', 'setTicketQty', 'ticketTiers', 'selectedDbTier', 'selectedAllowance', 'purchaseDisabledReason', 'handleSelectTier'];
+const names = ['saleNow', 'selectedTier', 'setSelectedTier', 'ticketQty', 'setTicketQty', 'ticketTiers', 'selectedDbTier', 'selectedAllowance', 'purchaseDisabledReason', 'handleSelectTier'];
 const destinationContext = {
   exports: {}, require, ...React, StickyCTA: CTA, TicketTierCard: NativeTierCard,
   LegendList: ({ data, renderItem }) => React.createElement('div', null, data.map(item => React.createElement(React.Fragment, { key: item.id }, renderItem({ item })))),
   useEventDetailScreenStore: nativeStore, s: {},
+  ...loadNative(path.join(appRoot, 'lib/hooks/use-ticket-sale-clock.ts')),
   ...loadNative(path.join(appRoot, 'lib/tickets/pricing.ts')),
   ...loadNative(path.join(appRoot, 'lib/tickets/purchase-quantity.ts')),
   ...loadNative(path.join(appRoot, 'lib/events/event-time.ts')),
@@ -331,4 +332,26 @@ test('native wallet URL changes preserve an earlier pending payment and actual r
   assert.equal(JSON.stringify(pendingStore.getState().pending[key]), JSON.stringify(original), 'a URL/quantity change cannot replace or clear the pending purchase');
   assert.deepEqual(destinationContext.checkoutAttempts, []);
   pendingStore.getState().clear(key);
+});
+
+
+test('native delayed wallet service is absent and never offers admission as a substitute', async () => {
+  await destination({ service: { ...dbService, sale_start: '2099-01-01T00:00:00Z' } });
+  assert.equal(nativeTierButton('Coat Check'), undefined);
+  assert.equal(nativeStore.getState().selectedTier, null);
+  if (additional()) {
+    assert.equal(additional().disabled, true);
+    await click(additional());
+  }
+  assert.deepEqual(destinationContext.checkoutAttempts, []);
+});
+
+test('native rescheduling a selected service hides it and clears selection without starting a purchase', async () => {
+  await destination();
+  assert.equal(nativeStore.getState().selectedTier.id, dbService.id);
+  destinationContext.liveTicketTypes = [dbAdmission, { ...dbService, sale_start: '2099-01-01T00:00:00Z' }];
+  await renderDestination();
+  assert.equal(nativeTierButton('Coat Check'), undefined);
+  assert.equal(nativeStore.getState().selectedTier, null);
+  assert.deepEqual(destinationContext.checkoutAttempts, []);
 });
