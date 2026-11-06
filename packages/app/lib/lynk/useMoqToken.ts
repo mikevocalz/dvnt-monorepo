@@ -81,6 +81,8 @@ export async function fetchMoqToken(
 }
 
 export interface UseMoqTokenResult {
+  /** Room/account/intent lifetime, including rapid account-switch epochs. */
+  authorizationScope: string;
   token: MoqToken | null;
   loading: boolean;
   error: string | null;
@@ -140,6 +142,6 @@ export function useMoqToken(
   // Re-enabling a previously denied scope must not expose its old error/token
   // during the render before the replacement session effect is installed.
   return state.scope === scope && installedScopeRef.current === scope && enabled
-    ? { token: state.token, loading: state.loading, error: state.error, refresh }
-    : { token: null, loading: false, error: null, refresh };
+    ? { authorizationScope: scope, token: state.token, loading: state.loading, error: state.error, refresh }
+    : { authorizationScope: scope, token: null, loading: false, error: null, refresh };
 }

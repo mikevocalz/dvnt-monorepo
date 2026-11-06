@@ -12,13 +12,13 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
   const { JSDOM } = require(resolve('jsdom'));
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   Object.assign(global, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
-  const f = global.__viewerSdk = { Signals: sm.exports, connections: [], players: [], latest: null };
+  const f = global.__viewerSdk = { Signals: sm.exports, connections: [], players: [], latest: null, tokenVersion: 1, denied: false };
   const bundle = await esbuild.build({ entryPoints: [path.join(__dirname, '../packages/app/lib/lynk/useLynkViewer.web.ts')], bundle: true, write: false, platform: 'node', format: 'cjs', plugins: [{ name: 'boundaries', setup(build) {
     build.onResolve({ filter: /^react$/ }, () => ({ path: resolve('react'), external: true }));
     build.onResolve({ filter: /^(@moq\/|\.\/useMoqToken)/ }, args => ({ path: args.path, namespace: 'fixture' }));
-    build.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path: name }) => ({ contents: name === '@moq/signals' ? `export const {Signal,Computed}=globalThis.__viewerSdk.Signals;` : name === './useMoqToken' ? `export const useMoqToken=room=>({token:{relayUrl:'https://example.invalid/'+room,namespace:'lynk/'+room},error:null});` : name === '@moq/net' ? `
+    build.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path: name }) => ({ contents: name === '@moq/signals' ? `export const {Signal,Computed}=globalThis.__viewerSdk.Signals;` : name === './useMoqToken' ? `const f=globalThis.__viewerSdk;export const useMoqToken=room=>({authorizationScope:room,token:f.denied?null:{expiresAt:new Date(Date.now()+120000).toISOString(),relayUrl:'https://example.invalid/'+room+'?jwt='+f.tokenVersion,namespace:'lynk/'+room},error:f.denied?'Refused':null});` : name === '@moq/net' ? `
       const f=globalThis.__viewerSdk,{Signal}=f.Signals;
-      export class Connection{constructor(){this.status=new Signal('connected');this.error=new Signal(undefined);this.paths=new Signal(new Map());this.origin=new Signal({broadcasts:()=>this.paths});this.probe=new Signal(undefined);f.connections.push(this)}close(){this.closed=true}}
+      export class Connection{constructor(props){this.props=props;this.status=new Signal('connected');this.error=new Signal(undefined);this.paths=new Signal(new Map());this.origin=new Signal({broadcasts:()=>this.paths});this.probe=new Signal(undefined);f.connections.push(this)}close(){this.closed=true}}
       export const Time={Milli:{zero:0}};export const Path={from:p=>p};
     ` : `
       const f=globalThis.__viewerSdk,{Signal}=f.Signals;
@@ -42,6 +42,18 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     assert.equal(f.latest.publishers[0].videoAvailable, false, 'wait for first decoded frame');
     await act(() => player.video.out.frame.set({ timestamp: 1 }));
     assert.equal(f.latest.publishers[0].videoAvailable, true);
+    const originalUrl = connection.props.url.peek().href;
+    for (let i = 2; i <= 12; i++) {
+      f.tokenVersion = i;
+      await act(() => root.render(React.createElement(Harness)));
+      assert.equal(connection.props.url.peek().href, originalUrl, 'successful renewal must not reconnect reception');
+      assert.equal(f.players.length, 1, 'renewal keeps the same audio/decoder backend');
+      assert.equal(player.closed, false);
+      assert.equal(f.latest.publishers[0].videoAvailable, true, 'renewal never flashes avatar');
+    }
+    await act(() => connection.status.set('disconnected'));
+    assert.equal(connection.props.url.peek().searchParams.get('jwt'), '12', 'real loss receives newest credentials');
+    await act(() => connection.status.set('connected'));
     const stablePublishers = f.latest.publishers;
     await act(() => player.video.out.frame.set({ timestamp: 2 }));
     assert.equal(f.latest.publishers, stablePublishers, 'normal frames never drive React tile rerenders');
@@ -71,8 +83,11 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     await act(() => f.latest.attachCanvas(peer, null));
     assert.equal(f.players[1].closed, true, 'truly removed roster tile stops audio before discovery drops');
     await act(() => f.latest.attachCanvas(peer, canvas));
+    f.denied = true;
+    await act(() => root.render(React.createElement(Harness)));
+    assert.equal(connection.props.url.peek(), undefined, 'business refusal revokes even healthy reception');
     await act(() => f.latest.leave());
     assert.ok(f.players.every(p => p.closed)); assert.equal(connection.closed, true);
-    console.log('PASS production web viewer + real SDK signals: audio-only discovery, first frame, remote background avatar/recovery, stable player/audio across ref churn, jitter no-flicker, publisher stalls, peer drop/rejoin and leave cleanup. Relay/decoder mocked.');
+    console.log('PASS production web viewer + real SDK signals: repeated renewal/player continuity, newest-grant reconnect and denial, audio-only discovery, first frame, remote background avatar/recovery, stable player/audio across ref churn, jitter no-flicker, publisher stalls, peer drop/rejoin and leave cleanup. Relay/decoder mocked.');
   } finally { await act(() => root.unmount()); dom.window.close(); delete global.__viewerSdk; }
 })().then(() => process.exit(0)).catch(error => { console.error(error); process.exit(1); });

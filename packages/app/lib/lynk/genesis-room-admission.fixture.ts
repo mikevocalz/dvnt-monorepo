@@ -163,6 +163,7 @@ function client(s: ReturnType<typeof server>, owner = "alice", broadcast = false
     routes = new Signal(new Map([...s.publishers].map((path) => [path, {}])));
     origin = new Signal({ broadcasts: () => this.routes });
     status = new Signal("connected");
+    error = new Signal(undefined);
     probe = new Signal(undefined);
     closed = false;
     constructor(options: any) {

@@ -27,6 +27,7 @@ on:
       - 'scripts/test-lynk-native-session.cjs'
       - 'scripts/test-lynk-web-capture-sdk.cjs'
       - 'scripts/test-lynk-web-viewer-sdk.cjs'
+      - 'scripts/test-lynk-relay-authorization-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   push:
@@ -54,6 +55,7 @@ on:
       - 'scripts/test-lynk-native-session.cjs'
       - 'scripts/test-lynk-web-capture-sdk.cjs'
       - 'scripts/test-lynk-web-viewer-sdk.cjs'
+      - 'scripts/test-lynk-relay-authorization-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   workflow_dispatch:
@@ -70,7 +72,7 @@ jobs:
       - name: Install isolated fixture tools
         run: npm install --prefix "$RUNNER_TEMP/lynk-tests" --no-package-lock --no-save typescript@5.9.3 esbuild@0.25.11 jsdom@26.1.0 react@19.2.3 react-dom@19.2.3 zod@3.22.4 @electric-sql/pglite@0.3.14 zustand@5.0.14
       - name: Install isolated released MoQ SDK (separate Zod 4 peer graph)
-        run: npm install --legacy-peer-deps --prefix "$RUNNER_TEMP/lynk-sdk" --no-package-lock --no-save @moq/publish@0.5.2 @moq/signals@0.2.5 @zod/mini@4.5.0 zod@4.5.0 react@19.2.3
+        run: npm install --legacy-peer-deps --prefix "$RUNNER_TEMP/lynk-sdk" --no-package-lock --no-save @moq/net@0.4.3 @moq/publish@0.5.2 @moq/signals@0.2.5 @zod/mini@4.5.0 zod@4.5.0 react@19.2.3
       - name: Test multi-user chat, media, room end and subscriptions
         env:
           NODE_PATH: ${{ runner.temp }}/lynk-tests/node_modules
@@ -85,4 +87,5 @@ jobs:
           node scripts/test-lynk-native-session.cjs
           node scripts/test-lynk-web-capture-sdk.cjs
           node scripts/test-lynk-web-viewer-sdk.cjs
+          node scripts/test-lynk-relay-authorization-sdk.cjs
           node scripts/verify-lynk.mjs
