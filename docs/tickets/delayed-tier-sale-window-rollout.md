@@ -18,6 +18,26 @@ part of this source change.
 
 ## Cart behavior and limits
 
+### Inactive-tier follow-up
+
+Some organizers disable tiers with `is_active=false` without setting a future
+sale date. Buyer lists now hide those rows as well as future-dated tiers, while
+active sold-out/ended tiers retain their existing display. Both snake-case and
+camel-case payload fields are supported; live records override stale aggregates.
+Organizer/API records are not removed or rewritten.
+
+Apply `20261106160919_cart_hold_inactive_tiers.sql` after the sale-window migration
+to enforce the same inactive flag on new/renewed mixed-cart holds. This separate
+definition-only migration rejects `is_active IS FALSE` under the existing tier
+locks before SQL hold/price mutations. It does not require another edge-function
+release and preserves existing held/paying completion and replay. The existing
+edge handler's pre-RPC unpaid-cart preparation limitation below still applies.
+
+The optional SQL command below runs both sale-window and inactive-tier suites.
+The latter proves the prior inactive/on-sale and inactive/null-status bypass,
+mixed admission/service rejection, renewal preservation, unchanged active/null
+legacy behavior, and pre-existing held/paying completion and replay.
+
 New and renewed cart reservations reject future starts, elapsed ends, infinite
 bounds, and reversed/empty windows. Null bounds remain supported. The function
 locks the cart, its existing lines, and their tier rows before sampling wall time

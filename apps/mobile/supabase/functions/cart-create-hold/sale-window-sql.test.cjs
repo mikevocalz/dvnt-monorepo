@@ -77,6 +77,9 @@ test('actual PostgreSQL mixed-cart sale-window enforcement and payment compatibi
     const fulfillmentBefore = (await sql("SELECT pg_get_functiondef('public.complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz)'::regprocedure) AS def"))[0].def;
     await db.exec(migration);
     await db.exec(migration); // repeatable definition-only rollout
+    // Exercise the full sale-window contract against the follow-up active flag
+    // guard as well; historical migration contents remain immutable.
+    await db.exec(read('20261106160919_cart_hold_inactive_tiers.sql'));
     assert.deepEqual(await snapshot(oldCart), oldSnapshot, 'rollout changes no old hold/cart/price');
     assert.equal((await sql("SELECT pg_get_functiondef('public.complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz)'::regprocedure) AS def"))[0].def, fulfillmentBefore);
 

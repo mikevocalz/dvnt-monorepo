@@ -33,6 +33,22 @@ test("sale visibility preserves sold-out, ended and paused tiers; malformed star
   assert.equal(tierSaleHasStarted({ sale_start: "2026-11-06T03:00:00-05:00" }, NOW), true);
 });
 
+test("inactive admission, service and unlocked tiers stay hidden without sale dates", () => {
+  const rows = [tier("rsvp", { is_active: true, price_cents: 0 }), tier("inactive", { is_active: false }), tier("coat", { is_active: false, category: "service" }), tier("locked", { is_active: false, tier_visibility: "locked" }), tier("camel", { isActive: false })];
+  for (const unlocked of [undefined, new Set(["locked"])]) {
+    const result = filterBuyerVisibleTiers(rows, unlocked, NOW);
+    assert.deepEqual(result.visible.map(t => t.id), ["rsvp"]);
+    assert.equal(result.hasLockedTiers, false);
+  }
+  assert.equal(rows.length, 5, "organizer records are not removed or mutated");
+  assert.equal(rows[1].is_active, false);
+});
+
+test("authoritative snake-case active flag overrides stale camel-case data", () => {
+  const rows = [tier("live-off", { is_active: false, isActive: true }), tier("live-on", { is_active: true, isActive: false }), tier("legacy")];
+  assert.deepEqual(filterBuyerVisibleTiers(rows, undefined, NOW).visible.map(t => t.id), ["live-on", "legacy"]);
+});
+
 function derive(relative: string, name: string, context: any) {
   const file = new URL(relative, import.meta.url);
   const source = fs.readFileSync(file, "utf8");
@@ -61,6 +77,43 @@ test("all-delayed native tiers never become a synthetic free tier, even with tic
     const tiers = derive(native, "ticketTiers", { eventData: { price: 0, ticketingEnabled, ticketTiers: [later] }, liveTicketTypes: [], buildTicketTiers: () => { throw new Error("must not fabricate a tier"); } });
     assert.equal(tiers.length, 0);
   }
+});
+
+test("actual native list hides inactive payload and live rows without fabricating free admission", () => {
+  const inactive = tier("inactive", { is_active: false, sale_start: null });
+  const context = { eventData: { price: 0, ticketingEnabled: true, ticketTiers: [tier("rsvp", { price_cents: 0 }), tier("live-off"), inactive] }, liveTicketTypes: [tier("live-off", { is_active: false })], buildTicketTiers: () => { throw new Error("must not fabricate a tier"); } };
+  assert.deepEqual(Array.from(derive(native, "ticketTiers", context), (t: any) => t.id), ["rsvp"]);
+  for (const ticketingEnabled of [true, false]) {
+    assert.equal(derive(native, "ticketTiers", { ...context, eventData: { price: 0, ticketingEnabled, ticketTiers: [inactive] } }).length, 0);
+  }
+});
+
+test("native upgrade fallback preserves activity, schedule and visibility before buyer filtering", () => {
+  const rows = [
+    tier("snake-off", { is_active: false }),
+    tier("camel-off", { isActive: false }),
+    tier("later", { saleStart: later.sale_start }),
+    tier("hidden", { tier_visibility: undefined, tierVisibility: "hidden" }),
+    tier("locked", { tier_visibility: "locked" }),
+    tier("on", { is_active: true, isActive: false, sale_start: null, saleStart: later.sale_start, saleEnd: "2099-01-01T00:00:00Z" }),
+  ];
+  const mapped = derive(native, "upgradeSourceTiers", { eventData: { ticketTiers: rows }, liveTicketTypes: [], eventId: "42" });
+  assert.deepEqual(filterBuyerVisibleTiers(mapped, undefined, NOW).visible.map((t: any) => t.id), ["on"]);
+  assert.equal(mapped[1].is_active, false);
+  assert.equal(mapped[2].sale_start, later.sale_start);
+  assert.equal(mapped[3].tier_visibility, "hidden");
+  assert.equal(mapped[5].sale_start, null);
+  assert.equal(mapped[5].sale_end, "2099-01-01T00:00:00Z");
+  const live = [tier("live")];
+  assert.equal(derive(native, "upgradeSourceTiers", { eventData: { ticketTiers: rows }, liveTicketTypes: live, eventId: "42" }), live);
+});
+
+test("buyer filtering leaves frozen management source rows intact", () => {
+  const rows = Object.freeze([Object.freeze(tier("inactive", { is_active: false })), Object.freeze(later), Object.freeze(tier("hidden", { tier_visibility: "hidden" })), Object.freeze(tier("rsvp", { price_cents: 0 }))]);
+  assert.deepEqual(filterBuyerVisibleTiers([...rows], undefined, NOW).visible.map(t => t.id), ["rsvp"]);
+  assert.equal(rows.length, 4);
+  assert.equal(rows[0].is_active, false);
+  assert.equal(rows[1].sale_start, later.sale_start);
 });
 
 test("actual public native list hides future tiers and opens at the boundary", () => {

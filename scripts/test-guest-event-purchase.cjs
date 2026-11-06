@@ -519,3 +519,28 @@ test('live schedule overrides stale payload and delayed rows appear at the openi
   assert.ok(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`));
   assertNoPurchase();
 });
+
+test('inactive screenshot tiers disappear while active RSVP stays available', async () => {
+  const rows = [free,
+    { ...paid, id: 'coat-one', name: 'Coat Check', category: 'service', price_cents: 1000, is_active: false, sale_start: null },
+    { ...paid, id: 'coat-two', name: 'Coat Check', category: 'service', price_cents: 1000, is_active: false, sale_start: null },
+    { ...paid, id: 'before-midnight', name: 'Before 12AM Admission', price_cents: 1500, is_active: false, sale_start: null },
+    { ...paid, id: 'general', name: 'General Admission', price_cents: 3000, is_active: false, sale_start: null }];
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: rows.map(row => ({ ...row, is_active: true })) });
+  scenario.tiersQuery = query(rows);
+  await render();
+  for (const row of rows.slice(1)) assert.equal(document.querySelector(`[data-testid="ticket-tier-${row.id}"]`), null);
+  assert.ok(document.querySelector(`[data-testid="ticket-tier-${free.id}"]`));
+  assertNoPurchase();
+});
+
+test('inactive payload stays hidden during refresh and live reactivation reveals it', async () => {
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [{ ...paid, is_active: false }] });
+  scenario.tiersQuery = query(undefined, { isPending: true, isFetching: true });
+  await render();
+  assert.equal(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`), null);
+  scenario.tiersQuery = query([{ ...paid, is_active: true }]);
+  await render();
+  assert.ok(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`));
+  assertNoPurchase();
+});

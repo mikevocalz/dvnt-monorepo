@@ -44,6 +44,8 @@ export interface TierVisibilityInput {
   tierVisibility?: string | null;
   sale_start?: string | null;
   saleStart?: string | null;
+  is_active?: boolean | null;
+  isActive?: boolean | null;
 }
 
 export interface TierInventory {
@@ -266,7 +268,7 @@ export function tierIsLockedForBuyer(
 }
 
 /**
- * Buyer-facing tier list: drops future-sale and hidden tiers, drops locked tiers the
+ * Buyer-facing tier list: drops inactive, future-sale and hidden tiers, drops locked tiers the
  * buyer hasn't unlocked, and reports whether any locked tier remains so the UI
  * can show the unlock-code affordance. Unlock VALIDATION is server-side only —
  * this never compares codes.
@@ -278,7 +280,12 @@ export function filterBuyerVisibleTiers<
   unlockedTierIds?: ReadonlySet<string>,
   nowMs: number = Date.now(),
 ): { visible: T[]; hasLockedTiers: boolean } {
-  const started = tiers.filter((t) => tierSaleHasStarted(t, nowMs));
+  const started = tiers.filter((t) => {
+    // Organizers also delay/disable tiers without setting a sale-start date.
+    // Keep legacy rows without either flag visible; live snake-case wins.
+    const active = t.is_active !== undefined ? t.is_active : t.isActive;
+    return active !== false && tierSaleHasStarted(t, nowMs);
+  });
   const visible = started.filter(
     (t) => !tierIsHiddenFromBuyers(t) && !tierIsLockedForBuyer(t, unlockedTierIds),
   );
