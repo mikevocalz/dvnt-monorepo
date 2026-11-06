@@ -90,7 +90,7 @@ import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
 import { useTicketViewerId, useTicketViewerAuthId } from "@dvnt/app/lib/hooks/use-tickets";
 import { ticketPurchaseAllowance } from "@dvnt/app/lib/tickets/purchase-quantity";
-import { tierIsHiddenFromBuyers, tierIsLockedForBuyer, tierIsPurchasable } from "@dvnt/app/lib/tickets/pricing";
+import { filterBuyerVisibleTiers, tierIsHiddenFromBuyers, tierIsLockedForBuyer, tierIsPurchasable } from "@dvnt/app/lib/tickets/pricing";
 import { qk } from "@dvnt/app/lib/query/keys";
 import * as WebBrowser from "expo-web-browser";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
@@ -155,6 +155,7 @@ import {
 } from "@dvnt/app/lib/hooks/use-ticket-upgrade";
 import { useMyTicketStatusForEvent } from "@dvnt/app/lib/hooks/use-tickets";
 import { useTicketTypes } from "@dvnt/app/lib/hooks/use-tickets";
+import { useTicketSaleClock } from "@dvnt/app/lib/hooks/use-ticket-sale-clock";
 import {
   useEventWaitlistStatus,
   useJoinWaitlist,
@@ -584,6 +585,8 @@ function EventDetailScreenContent() {
     refetchOnMount: "always",
   });
 
+  const saleNow = useTicketSaleClock([...(eventData?.ticketTiers ?? []), ...liveTicketTypes]);
+
   // Server-side RSVP status persists across app restarts
   const serverHasTicket = !!(
     eventData?.userRsvpStatus && eventData.userRsvpStatus !== "none"
@@ -698,21 +701,20 @@ function EventDetailScreenContent() {
   const ticketTiers = useMemo(() => {
     if (!eventData) return [];
     const dbTiers = eventData.ticketTiers;
-    const buyerDbTiers = Array.isArray(dbTiers)
-      ? dbTiers.filter(
-          (t: any) =>
-            !tierIsHiddenFromBuyers({
-              tier_visibility:
-                t.tier_visibility ?? t.tierVisibility ?? null,
-            }),
-        )
-      : [];
+    const buyerDbTiers = filterBuyerVisibleTiers(
+      (Array.isArray(dbTiers) ? dbTiers : []).map((tier: any) => ({
+        ...tier,
+        ...liveTicketTypes.find((live) => String(live.id) === String(tier.id)),
+      })),
+      undefined,
+      saleNow,
+    ).visible;
     const hasDbTiers = buyerDbTiers.length > 0;
     // If the organizer turned ticketing ON but never configured tiers, don't
     // fabricate a synthetic GA card — it can't actually be sold (no real
     // ticket_type_id for Stripe) and tapping Get Tickets would just toast an
     // error. Better: show an empty state and disable the CTA.
-    if (eventData.ticketingEnabled && !hasDbTiers) return [];
+    if (!hasDbTiers && (eventData.ticketingEnabled || (dbTiers?.length ?? 0) > 0)) return [];
     // If the organizer set a price but ticketing is OFF, also don't
     // fabricate synthetic tiers — sales aren't open yet (NOLA Red Dress Run
     // case: event 44 with price=30 + ticketing_enabled=false). Showing a
@@ -754,7 +756,7 @@ function EventDetailScreenContent() {
     }
     // Fall back to synthetic tiers derived from event price/capacity
     return buildTicketTiers(eventData);
-  }, [safeEvent]);
+  }, [eventData, liveTicketTypes, saleNow]);
 
   const selectedDbTier = liveTicketTypes.find((tier) => tier.id === selectedTier?.id)
     ?? eventData?.ticketTiers?.find((tier: any) => tier.id === selectedTier?.id);
@@ -768,6 +770,8 @@ function EventDetailScreenContent() {
     ? "Requested service is unavailable. Select an available tier."
     : eventSalesClosed(eventData)
     ? "Ticket sales ended"
+    : !selectedTier && (eventData?.ticketTiers?.length ?? 0) > 0
+      ? "No ticket tiers are available yet"
     : selectedDbTier && (selectedDbTier.is_active === false || !tierIsPurchasable(selectedDbTier))
       ? "Currently unavailable"
       : selectedDbTier && selectedAllowance <= 0
@@ -818,6 +822,14 @@ function EventDetailScreenContent() {
     setSelectedTier(null);
     setTicketQty(1);
   }, [eventId, requestedServiceTierId, setSelectedTier, setTicketQty]);
+
+  // Clear a stale selection when its sale start is moved into the future.
+  useEffect(() => {
+    if (selectedTier && !ticketTiers.some((tier) => tier.id === selectedTier.id)) {
+      setSelectedTier(null);
+      setTicketQty(1);
+    }
+  }, [ticketTiers, selectedTier, setSelectedTier, setTicketQty]);
 
   // Auto-select first paid tier when paid tiers exist; fall back to first tier
   useEffect(() => {
@@ -1866,14 +1878,7 @@ function EventDetailScreenContent() {
   const heroPrice = useMemo<
     { kind: "free" } | { kind: "from"; label: string } | { kind: "unknown" }
   >(() => {
-    const visibleLivePrices = liveTicketTypes
-      .filter(
-        (t: any) =>
-          !tierIsHiddenFromBuyers({
-            tier_visibility:
-              t.tier_visibility ?? t.tierVisibility ?? null,
-          }),
-      )
+    const visibleLivePrices = filterBuyerVisibleTiers(liveTicketTypes, undefined, saleNow).visible
       .map((t) => t.price_cents || 0);
     const cents = visibleLivePrices.length
       ? visibleLivePrices
@@ -1900,7 +1905,7 @@ function EventDetailScreenContent() {
       };
     }
     return { kind: "unknown" };
-  }, [liveTicketTypes, ticketTiers, isLoading, event?.price]);
+  }, [liveTicketTypes, ticketTiers, isLoading, event?.price, saleNow]);
 
   // Gallery cells follow the window, not the width the app launched with.
   // MUST stay above the loading/error guards below: it used to sit after them,
