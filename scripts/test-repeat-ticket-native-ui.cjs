@@ -355,3 +355,24 @@ test('native rescheduling a selected service hides it and clears selection witho
   assert.equal(nativeStore.getState().selectedTier, null);
   assert.deepEqual(destinationContext.checkoutAttempts, []);
 });
+
+test('native inactive wallet service is absent without a sale-start date', async () => {
+  await destination({ service: { ...dbService, is_active: false, sale_start: null } });
+  assert.equal(nativeTierButton('Coat Check'), undefined);
+  assert.equal(nativeStore.getState().selectedTier, null);
+  if (additional()) assert.equal(additional().disabled, true);
+  assert.deepEqual(destinationContext.checkoutAttempts, []);
+});
+
+test('native deactivation hides and clears selected tier; reactivation restores it', async () => {
+  await destination();
+  destinationContext.liveTicketTypes = [dbAdmission, { ...dbService, is_active: false }];
+  await renderDestination();
+  assert.equal(nativeTierButton('Coat Check'), undefined);
+  assert.equal(nativeStore.getState().selectedTier, null);
+  destinationContext.liveTicketTypes = [dbAdmission, dbService];
+  await renderDestination();
+  assert.ok(nativeTierButton('Coat Check'));
+  assert.equal(nativeStore.getState().selectedTier.id, dbService.id);
+  assert.deepEqual(destinationContext.checkoutAttempts, []);
+});

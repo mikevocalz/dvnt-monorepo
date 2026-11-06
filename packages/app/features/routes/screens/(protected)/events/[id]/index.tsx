@@ -635,9 +635,11 @@ function EventDetailScreenContent() {
         quantity_total: t.quantity_total ?? 0,
         quantity_sold: t.quantity_sold ?? 0,
         max_per_user: t.max_per_user || 4,
-        sale_start: t.sale_start || null,
-        sale_end: t.sale_end || null,
-        is_active: t.is_active !== false,
+        sale_start: (t.sale_start !== undefined ? t.sale_start : t.saleStart) ?? null,
+        sale_end: (t.sale_end !== undefined ? t.sale_end : t.saleEnd) ?? null,
+        is_active: (t.is_active !== undefined ? t.is_active : t.isActive) !== false,
+        tier_visibility: t.tier_visibility ?? t.tierVisibility,
+        status: t.status,
         created_at: t.created_at || "",
       }));
     }, [liveTicketTypes, eventData?.ticketTiers, eventId]);
