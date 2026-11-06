@@ -10,6 +10,8 @@
  * Replaces the cramped inline carousel + modal in app/(protected)/ticket/[id].tsx.
  */
 
+import { filterBuyerVisibleTiers } from "@dvnt/app/lib/tickets/pricing";
+import { useTicketSaleClock } from "@dvnt/app/lib/hooks/use-ticket-sale-clock";
 import {
   isAdmissionUpgradeCategory,
   isAdmissionUpgradeSource,
@@ -183,10 +185,11 @@ function ViewTicketUpgradeScreenContent() {
     };
   }, [dbTicket, allTiers]);
 
+  const saleNow = useTicketSaleClock(allTiers ?? []);
   const upgradeOptions: EnrichedTier[] = React.useMemo(() => {
     if (!dbTicket || !allTiers || !isAdmissionUpgradeSource(dbTicket, allTiers)) return [];
     const paidCents = dbTicket.purchase_amount_cents ?? 0;
-    return allTiers
+    return filterBuyerVisibleTiers(allTiers, undefined, saleNow).visible
       .filter(
         (t) =>
           isAdmissionUpgradeCategory(t.category) &&
@@ -208,7 +211,7 @@ function ViewTicketUpgradeScreenContent() {
         };
       })
       .sort((a, b) => a.price_cents - b.price_cents);
-  }, [dbTicket, allTiers]);
+  }, [dbTicket, allTiers, saleNow]);
 
   const selectedTier = React.useMemo(
     () => upgradeOptions.find((t) => String(t.id) === String(selectedTierId)) ?? null,

@@ -27,6 +27,7 @@ import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useTicketTypes } from "@dvnt/app/lib/hooks/use-tickets";
+import { useTicketSaleClock } from "@dvnt/app/lib/hooks/use-ticket-sale-clock";
 import { usePublicGateStore } from "@dvnt/app/lib/stores/public-gate-store";
 import { GuestCheckoutSheet } from "@dvnt/app/features/events";
 import { formatEventWhen } from "@dvnt/app/lib/events/event-time";
@@ -134,11 +135,14 @@ function PublicEventDetailContent() {
 
   const { data: event, isLoading, isError } = useEvent(eventId);
   const { data: tierRows = [] } = useTicketTypes(eventId);
+  const saleNow = useTicketSaleClock(tierRows);
 
   const tiers: TierLite[] = useMemo(() => {
-    const now = Date.now();
+    const now = saleNow;
     const { visible } = filterBuyerVisibleTiers(
       (tierRows as any[]).filter((t) => t.is_active !== false),
+      undefined,
+      now,
     );
     return visible.map((t) => {
         const total = Number(t.quantity_total || 0);
@@ -163,7 +167,7 @@ function PublicEventDetailContent() {
           saleEnded: !isNaN(saleEndMs) && now >= saleEndMs,
         };
       });
-  }, [tierRows]);
+  }, [tierRows, saleNow]);
 
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
   const [guestSheetOpen, setGuestSheetOpen] = useState(false);

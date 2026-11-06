@@ -339,3 +339,16 @@ test('unattached cancellation is durable and cannot later expose the provider se
  const resumed=await h.call('resume',h.identity);assert.equal(resumed.body.state,'expired');assert.equal(resumed.body.clientSecret,undefined);
  assert.equal(h.tables.ticket_holds[0].status,'expired');
 });
+
+test('delayed tier is absent from descriptor and cannot quote before exact opening', async () => {
+  const h=harness({tier:{sale_start:'2026-10-11T12:00:01Z'}});
+  assert.deepEqual((await h.call('describe')).body.tiers,[]);
+  const quote=await h.call('quote',buyer);
+  assert.equal(quote.status,409);
+  assert.equal(quote.body.code,'tier_unavailable');
+  assert.equal(h.tables.orders.length,0);
+  assert.equal(h.sessions.size,0);
+  h.advance(1000);
+  assert.equal((await h.call('describe')).body.tiers.length,1);
+  assert.equal((await h.call('quote',buyer)).status,200);
+});

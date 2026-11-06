@@ -65,6 +65,7 @@ app('lib/hooks/use-events', {
   useToggleEventLike: () => ({ mutate: noop }),
   useRsvpEvent: () => ({ isPending: false, mutate: (value) => scenario.memberRsvps.push(value) }),
 });
+app('lib/hooks/use-ticket-sale-clock', { useTicketSaleClock: () => scenario.now ?? Date.now() });
 app('lib/hooks/use-event-attendee-privacy', { useEventAttendeePrivacy: (_id, event) => attendeePrivacy.canShowEventAttendees(event) });
 app('components/event/GoingAccordion.web', { GoingAccordion: ({ attendees }) => React.createElement('div', null, attendees.map(a => a.username).join(', ')) });
 app('lib/hooks/use-event-title-route', { useEventTitleRoute: () => ({ ...scenario.indexQuery, routingIndex: !scenario.indexQuery.isError && !scenario.indexQuery.isFetching ? scenario.indexQuery.data : undefined }) });
@@ -474,4 +475,47 @@ test('event Lynk detail disables ended rooms and pending entry and exposes waiti
   assert.equal(document.querySelector('[data-lynk-room]').disabled,true);
   const retry=[...document.querySelectorAll('button')].find(b=>b.textContent==='Try again');
   await click(retry);assert.deepEqual(scenario.retries,['lynk']);
+});
+
+
+test('delayed admission and service tiers are absent, while sold-out and ended tiers remain', async () => {
+  const later = { ...paid, id: 'later', name: 'Delayed admission', sale_start: '2099-01-01T00:00:00Z' };
+  const service = { ...later, id: 'coat', name: 'Delayed coat check', category: 'service' };
+  const ended = { ...paid, id: 'ended', name: 'Ended admission', sale_end: '2000-01-01T00:00:00Z' };
+  const sold = { ...paid, id: 'sold', name: 'Sold-out admission', quantity_sold: 20 };
+  scenario.tiersQuery = query([free, later, service, ended, sold]);
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [free, later, service, ended, sold] });
+  await render();
+  assert.equal(document.querySelector('[data-testid="ticket-tier-later"]'), null);
+  assert.equal(document.querySelector('[data-testid="ticket-tier-coat"]'), null);
+  assert.ok(document.querySelector('[data-testid="ticket-tier-ended"]'));
+  assert.match(document.querySelector('[data-testid="ticket-tier-sold"]').textContent, /Sold out/);
+  assertNoPurchase();
+});
+
+test('fallback payload tiers respect delayed dates while the live query is pending', async () => {
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [{ ...paid, sale_start: '2099-01-01T00:00:00Z' }] });
+  scenario.tiersQuery = query(undefined, { isPending: true, isFetching: true });
+  await render();
+  assert.equal(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`), null);
+  assertNoPurchase();
+});
+
+test('live schedule overrides stale payload and delayed rows appear at the opening boundary', async () => {
+  const opens = Date.now() + 60_000;
+  const later = { ...paid, sale_start: new Date(opens).toISOString() };
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [paid] });
+  scenario.tiersQuery = query([later]);
+  scenario.now = opens - 1;
+  await render();
+  assert.equal(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`), null);
+  scenario.now = opens;
+  await render();
+  assert.ok(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`));
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [later] });
+  scenario.tiersQuery = query([{ ...paid, sale_start: null }]);
+  scenario.now = opens - 1;
+  await render();
+  assert.ok(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`));
+  assertNoPurchase();
 });

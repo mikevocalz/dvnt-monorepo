@@ -6,6 +6,8 @@
  */
 
 import { useMemo } from "react";
+import { filterBuyerVisibleTiers } from "@dvnt/app/lib/tickets/pricing";
+import { useTicketSaleClock } from "@dvnt/app/lib/hooks/use-ticket-sale-clock";
 import {
   isAdmissionUpgradeCategory,
   isAdmissionUpgradeSource,
@@ -33,6 +35,7 @@ export function useTicketUpgradeOptions(
   allTiers: TicketTypeRecord[],
   myTicket: TicketRecord | null | undefined,
 ): UpgradeTierOption[] {
+  const saleNow = useTicketSaleClock(allTiers);
   return useMemo(() => {
     if (!myTicket || myTicket.status !== "active" || myTicket.checked_in_at ||
       !isAdmissionUpgradeSource(myTicket, allTiers)) {
@@ -40,7 +43,7 @@ export function useTicketUpgradeOptions(
     }
     const paidCents = myTicket.purchase_amount_cents || 0;
 
-    return allTiers
+    return filterBuyerVisibleTiers(allTiers, undefined, saleNow).visible
       .filter(
         (t) =>
           isAdmissionUpgradeCategory(t.category) &&
@@ -54,7 +57,7 @@ export function useTicketUpgradeOptions(
         available: (t.quantity_total - t.quantity_sold) > 0,
       }))
       .sort((a, b) => a.tier.price_cents - b.tier.price_cents);
-  }, [allTiers, myTicket]);
+  }, [allTiers, myTicket, saleNow]);
 }
 
 interface InitiateUpgradeParams {

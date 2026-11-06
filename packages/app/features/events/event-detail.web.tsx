@@ -20,6 +20,7 @@ import { canScanTickets, canViewFullRoster } from "@dvnt/app/lib/events/event-ro
  * popover (Share / Edit / Report / Delete). Raw semantic tags + Tailwind; Solito.
  */
 import { useCallback, useEffect } from "react";
+import { useTicketSaleClock } from "@dvnt/app/lib/hooks/use-ticket-sale-clock";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useRouter, usePathname, useSearchParams } from "solito/navigation";
 import { loginPathWithReturn } from "@dvnt/app/lib/auth/return-to";
@@ -146,8 +147,6 @@ import {
 } from "@dvnt/app/lib/api/ticket-types";
 import {
   filterBuyerVisibleTiers,
-  tierIsHiddenFromBuyers,
-  tierIsLockedForBuyer,
   effectiveAddonUnitPriceCents,
   tierDisplayPriceCents,
   tierAvailable,
@@ -561,6 +560,7 @@ export function EventDetailScreen() {
   // ── 1. TICKETS — live ticket types + checkout + my-ticket + upgrade ──
   const ticketTypesQuery = useTicketTypes(eventId);
   const { data: liveTicketTypes = [] } = ticketTypesQuery;
+  const saleNow = useTicketSaleClock([...(full?.ticketTiers ?? []), ...liveTicketTypes]);
   // Display only — drives the CTA, never opens a pass.
   const {
     primary: myTicketData,
@@ -939,28 +939,12 @@ export function EventDetailScreen() {
     ...tiers,
     ...liveList.filter((live) => !tiers.some((t) => String(t.id) === String(live.id))),
   ];
-  const buyerVisibleTiers = displayTiers.filter((t) => {
-    const live = liveById(t.id);
-    const vis = {
-      id: live?.id ?? t.id,
-      tier_visibility:
-        live?.tier_visibility ?? t.tier_visibility ?? t.tierVisibility ?? null,
-    };
-    return (
-      !tierIsHiddenFromBuyers(vis) && !tierIsLockedForBuyer(vis, unlockedSet)
-    );
-  });
-  const hasLockedTiers =
-    liveList.some((t) => t.is_active && tierIsLockedForBuyer(t, unlockedSet)) ||
-    tiers.some((t) =>
-      tierIsLockedForBuyer(
-        {
-          id: t.id,
-          tier_visibility: t.tier_visibility ?? t.tierVisibility ?? null,
-        },
-        unlockedSet,
-      ),
-    );
+  // A live null start also overrides an older delayed date in the aggregate.
+  const { visible: buyerVisibleTiers, hasLockedTiers } = filterBuyerVisibleTiers(
+    displayTiers.map((tier) => ({ ...tier, ...liveById(tier.id) })),
+    unlockedSet,
+    saleNow,
+  );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const attendeeAvatars: any[] = showGoing && Array.isArray(e.attendeeAvatars)
     ? e.attendeeAvatars

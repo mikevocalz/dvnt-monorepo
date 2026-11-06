@@ -23,6 +23,7 @@ import {
   TIER_VISIBILITY_MESSAGES,
 } from "../_shared/tier-visibility.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { tierSaleAvailabilityError } from "../_shared/tier-sale-availability.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -203,8 +204,9 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Services and add-ons must be purchased separately", code: "admission_upgrade_only" }, 400);
     }
 
-    if (newType.is_active === false) {
-      return json({ error: "This tier is not available" }, 400);
+    const saleError = tierSaleAvailabilityError(newType);
+    if (saleError) {
+      return json(saleError, 400);
     }
 
     // ── Tier visibility guard (mirror of cart_create_hold v3) ──

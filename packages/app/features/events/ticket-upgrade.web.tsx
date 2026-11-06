@@ -27,6 +27,7 @@
  * titled "Upgrade Ticket", content `max-w-xl`, bg #06070d, accent cyan #3FDCFF.
  */
 
+import { useTicketSaleClock } from "@dvnt/app/lib/hooks/use-ticket-sale-clock";
 import {
   isAdmissionUpgradeCategory,
   isAdmissionUpgradeSource,
@@ -51,7 +52,7 @@ import {
   type TicketTypeRecord,
 } from "@dvnt/app/lib/api/ticket-types";
 import { addonsApi, type AddonRecord } from "@dvnt/app/lib/api/addons";
-import { effectiveAddonUnitPriceCents } from "@dvnt/app/lib/tickets/pricing";
+import { effectiveAddonUnitPriceCents, filterBuyerVisibleTiers } from "@dvnt/app/lib/tickets/pricing";
 import {
   AddonUpsellStrip,
   addonSelectionsTotalCents,
@@ -270,10 +271,11 @@ export function TicketUpgradeScreen() {
     };
   }, [dbTicket, allTiers]);
 
+  const saleNow = useTicketSaleClock(allTiers ?? []);
   const upgradeOptions: EnrichedTier[] = useMemo(() => {
     if (!dbTicket || !allTiers || !isAdmissionUpgradeSource(dbTicket, allTiers)) return [];
     const paidCents = dbTicket.purchase_amount_cents ?? 0;
-    return allTiers
+    return filterBuyerVisibleTiers(allTiers, undefined, saleNow).visible
       .filter(
         (t) =>
           isAdmissionUpgradeCategory(t.category) &&
@@ -298,7 +300,7 @@ export function TicketUpgradeScreen() {
         };
       })
       .sort((a, b) => a.price_cents - b.price_cents);
-  }, [dbTicket, allTiers]);
+  }, [dbTicket, allTiers, saleNow]);
 
   const selectedTier = useMemo(
     () =>

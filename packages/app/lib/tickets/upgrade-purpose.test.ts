@@ -5,6 +5,7 @@ import vm from "node:vm";
 import { createRequire } from "node:module";
 import { URL } from "node:url";
 import * as purpose from "./upgrade-purpose.ts";
+import * as pricing from "./pricing.ts";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
 const tier = (id: string, category: any = "admission", price_cents = 2000) => ({ id, category, price_cents, is_active: true, quantity_total: 10, quantity_sold: 0, name: id });
@@ -16,6 +17,8 @@ function actualHook() {
   vm.runInNewContext(code, { exports, require(name: string) {
     if (name === "react") return { useMemo: (fn: any) => fn() };
     if (name.endsWith("upgrade-purpose")) return purpose;
+    if (name.endsWith("pricing")) return pricing;
+    if (name.endsWith("use-ticket-sale-clock")) return { useTicketSaleClock: () => Date.now() };
     return {};
   } });
   return exports.useTicketUpgradeOptions;
@@ -56,10 +59,16 @@ for (const [label, relative] of [["web", "../../features/events/ticket-upgrade.w
     }
     visit(ast); assert.ok(callback);
     const code = ts.transpileModule(`(${callback.getText(ast)})()`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-    const evaluate = (tiers: any[], owned: any) => vm.runInNewContext(code, { allTiers: tiers, dbTicket: owned, ...purpose, inferTier: () => "ga", TIER_ACCENT: { ga: "cyan" }, TIER_LABEL: { ga: "GA" }, ticketUpgradeBenefits: () => [], defaultPerks: () => [] });
+    const evaluate = (tiers: any[], owned: any) => vm.runInNewContext(code, { allTiers: tiers, dbTicket: owned, ...purpose, ...pricing, saleNow: Date.now(), inferTier: () => "ga", TIER_ACCENT: { ga: "cyan" }, TIER_LABEL: { ga: "GA" }, ticketUpgradeBenefits: () => [], defaultPerks: () => [] });
     assert.deepEqual(Array.from(evaluate(all, ticket()), (t: any) => t.id), ["vip"]);
+    assert.equal(evaluate([all[0], { ...all[1], sale_start: "2099-01-01T00:00:00Z" }], ticket()).length, 0);
     assert.equal(evaluate(all, ticket({ category: "service" })).length, 0);
     assert.equal(evaluate([tier("source", "service"), tier("vip")], ticket()).length, 0);
     assert.deepEqual(Array.from(evaluate(all, ticket({ purchase_amount_cents: 0 })), (t: any) => t.id), ["vip"]);
   });
 }
+
+test("actual upgrade hook hides future tiers", () => {
+  const future = { ...tier("later"), sale_start: "2099-01-01T00:00:00Z" };
+  assert.deepEqual(Array.from(hook([...all, future], ticket()), (o: any) => o.tier.id), ["vip"]);
+});

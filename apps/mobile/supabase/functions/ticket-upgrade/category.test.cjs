@@ -44,6 +44,7 @@ function fixture({ ticket = {}, sourceTier = {}, targetTier = {}, actor = 'fixtu
       if (name.endsWith('verify-session.ts')) return { verifySession: async () => actor };
       if (name.endsWith('fee-calculator.ts')) return { computeFees: amount => ({ customer_charge_amount: amount + 100, buyer_fee: 100, fee_policy_version: 'fixture' }) };
       if (name.endsWith('tier-visibility.ts')) return { enforceTierVisibility: async () => null, TIER_VISIBILITY_MESSAGES: {} };
+      if (name.endsWith('tier-sale-availability.ts')) return require('../_shared/tier-sale-availability.ts');
       if (name.endsWith('sales-cutoff.ts')) return { isSalesClosed: () => false };
       throw Error(name);
     },
@@ -87,4 +88,24 @@ test('ownership, active status, inventory and price protections remain', async (
   for (const [options, status] of [[{ actor: null }, 401], [{ actor: 'other-buyer' }, 403], [{ ticket: { status: 'scanned' } }, 400], [{ targetTier: { quantity_sold: 100 } }, 400], [{ targetTier: { price_cents: 500 } }, 400], [{ targetTier: { is_active: false } }, 400]]) {
     const f = fixture(options); assert.equal((await f.call()).status, status); assert.equal(f.stripe.length, 0);
   }
+});
+
+for (const [targetTier, code] of [
+  [{ sale_start: '2099-01-01T00:00:00Z' }, 'sale_not_started'],
+  [{ sale_end: '2000-01-01T00:00:00Z' }, 'sale_ended'],
+  [{ status: 'scheduled' }, 'tier_unavailable'],
+  [{ status: 'sold_out' }, 'sold_out'],
+  [{ sale_start: 'invalid' }, 'invalid_sale_window'],
+]) test(`upgrade rejects unavailable sale before Stripe: ${code}`, async () => {
+  const f = fixture({ targetTier });
+  const r = await f.call();
+  assert.equal(r.status, 400);
+  assert.equal(r.body.code, code);
+  assert.equal(f.stripe.length, 0);
+  assert.equal(f.writes.length, 0);
+});
+test('upgrade allows an open sale window', async () => {
+  const f = fixture({ targetTier: { status: 'on_sale', sale_start: '2000-01-01T00:00:00Z', sale_end: '2099-01-01T00:00:00Z' } });
+  assert.equal((await f.call()).status, 200);
+  assert.equal(f.stripe.length, 2);
 });
