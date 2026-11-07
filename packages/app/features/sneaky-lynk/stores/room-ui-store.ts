@@ -8,6 +8,7 @@
  */
 
 import { create } from "zustand";
+import { AudioOutputRouter, initialAudioOutputState, type AudioOutputState } from "../../../lib/lynk/audio-output-router";
 import type { EjectKind } from "../ui/EjectModal.types";
 import type { SneakyRoom } from "@dvnt/app/features/sneaky-lynk/types";
 
@@ -37,6 +38,8 @@ interface RoomUIStore {
   /** Session-only hardware choices, reset on room/account exit. Empty = system default. */
   cameraDeviceId: string;
   microphoneDeviceId: string;
+  audioOutput: AudioOutputRouter;
+  audioOutputState: AudioOutputState;
   isDeviceSettingsOpen: boolean;
   roomSnapshot: SneakyRoom | null;
   closedReason: string | null;
@@ -142,8 +145,10 @@ const initialUIState = {
   serverEndsAt: undefined as string | null | undefined,
 };
 
-export const useRoomUIStore = create<RoomUIStore>((set) => ({
+export const useRoomUIStore = create<RoomUIStore>((set, get) => ({
   ...initialUIState,
+  audioOutputState: initialAudioOutputState,
+  audioOutput: new AudioOutputRouter(audioOutputState => set({ audioOutputState })),
 
   setInitStarted: (initStarted) => set({ initStarted }),
   setPhase: (phase) => set({ phase }),
@@ -169,5 +174,9 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setEjectCountdown: (ejectCountdown) => set({ ejectCountdown }),
   setHostMuteLocked: (hostMuteLocked) => set({ hostMuteLocked }),
   setServerEndsAt: (serverEndsAt) => set({ serverEndsAt }),
-  reset: () => set({ ...initialUIState }),
+  reset: () => {
+    get().audioOutput.dispose();
+    set({ ...initialUIState, audioOutputState: initialAudioOutputState,
+      audioOutput: new AudioOutputRouter(audioOutputState => set({ audioOutputState })) });
+  },
 }));

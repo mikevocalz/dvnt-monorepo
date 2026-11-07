@@ -67,9 +67,9 @@ const fixture = `
   };
   // The production timer only renders during the final minute. Keep a real
   // server deadline in that window so host header geometry includes the badge.
-  f.joinMode=params.get('join');f.joinCalls=0;f.lookupCalls=0;
+  f.joinMode=params.get('join');f.joinCalls=0;f.joinArgs=[];f.lookupCalls=0;
   const success=()=>({ok:true,data:{peer:{role:useFixture.getState().role},user:localUser,room:{id:'fixture-room',title:'A very long Lynk title that must not push host controls outside the phone',hasVideo:true,endsAt:f.deadline}}});
-  export const sneakyLynkApi = { joinRoom:async()=>{f.joinCalls++;if(f.joinMode==='throw')throw new Error('SECRET server failure');if(f.joinMode==='full')return {ok:false,error:{code:'conflict',message:'Room is full'}};if(f.joinMode==='timeout')return new Promise(resolve=>f.resolveJoin=()=>resolve(success()));return success()},
+  export const sneakyLynkApi = { joinRoom:async(...args)=>{f.joinCalls++;f.joinArgs.push(args);if(f.joinMode==='throw')throw new Error('SECRET server failure');if(f.joinMode==='full')return {ok:false,error:{code:'conflict',message:'Room is full'}};if(f.joinMode==='timeout')return new Promise(resolve=>f.resolveJoin=()=>resolve(success()));return success()},
     getRoomById:async()=>{f.lookupCalls++;if(f.joinMode==='throw')throw new Error('SECRET lookup failure');if(f.joinMode==='timeout')return new Promise(resolve=>f.resolveLookup=()=>resolve({id:'fixture-room',title:'Friends',hasVideo:false,status:'open',isLive:true}));return {id:'fixture-room',title:'Friends',hasVideo:false,status:'open',isLive:true}},
     endRoom:async()=>{f.actions.push('endRoom');return {ok:true}},leaveRoom:async()=>{f.actions.push('leaveRoom');return {ok:true}},toggleHand:async()=>({ok:true}) };
   const comments = Array.from({length:30},(_,i)=>({id:i+1,roomId:'fixture-room',authorId:'publisher-1',body:'Earlier message '+i+' with enough text to wrap on a narrow phone.',parentId:null,rootId:null,depth:0,mentions:[],createdAt:new Date(1700000000000+i).toISOString(),author:{displayName:'Participant 01',username:'Participant 01',avatar:''}}));
@@ -80,7 +80,7 @@ const fixture = `
 const boundaries = new Map([
   ['fixture', fixture],
   ['solito/navigation', `import {f} from 'fixture';const router={push:path=>f.routes.push(path),back:()=>{}};export const useRouter=()=>router;export const useParams=()=>({id:'fixture-room'});export const useSearchParams=()=>new URLSearchParams();`],
-  ['@dvnt/app/lib/stores/auth-store', `import {create} from 'zustand';import {localUser} from 'fixture';export const useAuthStore=create(()=>({user:localUser}));`],
+  ['@dvnt/app/lib/stores/auth-store', `import {create} from 'zustand';import {f,localUser} from 'fixture';export const useAuthStore=create(()=>({user:localUser}));f.switchAccount=user=>useAuthStore.setState({user});f.originalUser=localUser;`],
   ['@dvnt/app/lib/stores/ui-store', `import {create} from 'zustand';import {f} from 'fixture';export const useUIStore=create(()=>({showToast:(...args)=>f.toasts.push(args)}));`],
   ['@dvnt/app/lib/lynk/useLynkBroadcast.web', `export {useLynkBroadcast} from 'fixture';`],
   ['@dvnt/app/lib/lynk/useSpeakingDetection.web', `export const useSpeakingDetection=()=>false;`],
@@ -142,7 +142,9 @@ async function buildFixture() {
       fixtureDevices.getUserMedia=()=>{f.previewRequests++;return Promise.reject(Object.assign(new Error('synthetic denied capture'),{name:'NotAllowedError'}))};
       Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:fixtureDevices});
       if(location.search.includes('rail=prejoin'))useRoomUIStore.getState().setJoinCameraOn(false);
+      if(location.search.includes('rail=recovery-auto')){useRoomUIStore.getState().setJoinCameraOn(false);useRoomUIStore.getState().setJoinMicOn(false);useRoomUIStore.getState().setJoinAnonymous(true);}
       f.expireSession=()=>useRoomUIStore.getState().setShowTimeUp(true);
+      f.outputNotice=message=>useRoomUIStore.setState({audioOutputState:{...useRoomUIStore.getState().audioOutputState,message,phase:message?'error':'default'}});
       useSneakyLynkCaptureStore.getState().setWebPeerPresent(true);
       const portrait=document.createElement('canvas');portrait.width=180;portrait.height=320;
       const paint=()=>{const ctx=portrait.getContext('2d');ctx.fillStyle='#21b981';ctx.fillRect(0,0,180,320);ctx.fillStyle='#ef4444';ctx.fillRect(0,0,20,320);ctx.fillStyle='#3b82f6';ctx.fillRect(160,0,20,320);};if(location.search.includes('rail=fill'))paint();
@@ -491,9 +493,9 @@ async function webCases(browser,url) {
       const settingsMounts=await page.evaluate(()=>window.fixture.attachments.length);
       if(c.width<640) {
         await page.getByRole('button',{name:/^Room actions/}).click();
-        await page.getByRole('group',{name:'Room actions',exact:true}).getByRole('button',{name:'Camera & microphone',exact:true}).click();
-      } else await page.getByRole('button',{name:'Camera and microphone settings',exact:true}).click();
-      const devices=page.getByRole('dialog',{name:'Camera & microphone',exact:true});
+        await page.getByRole('group',{name:'Room actions',exact:true}).getByRole('button',{name:'Audio & camera',exact:true}).click();
+      } else await page.getByRole('button',{name:'Audio and camera settings',exact:true}).click();
+      const devices=page.getByRole('dialog',{name:'Audio & camera',exact:true});
       await devices.waitFor();
       await devices.getByLabel('Camera',{exact:true}).selectOption('fixture-camera');
       await devices.getByLabel('Microphone',{exact:true}).selectOption('fixture-microphone');
@@ -503,6 +505,11 @@ async function webCases(browser,url) {
       await assertReachable(devices.getByRole('button',{name:'Close',exact:true}),c.name+' device settings Close');
       if(process.env.LYNK_LAYOUT_OUTPUT)await page.screenshot({path:path.join(path.resolve(process.env.LYNK_LAYOUT_OUTPUT),'devices-'+c.name+'-'+role+'.png')});
       await page.keyboard.press('Escape');assert.equal(await devices.count(),0,'Escape dismisses device settings');
+      await page.evaluate(()=>window.fixture.outputNotice('Room audio is paused. Choose an available speaker or system default.'));
+      const outputNotice=page.locator('[data-audio-output-notice]');await outputNotice.waitFor();
+      assert.match(await outputNotice.innerText(),/Room audio is paused/,'output failure remains visible with settings closed');
+      await outputNotice.getByRole('button',{name:'Audio settings',exact:true}).click();await devices.waitFor();
+      await page.keyboard.press('Escape');await page.evaluate(()=>window.fixture.outputNotice(null));
       await reactionsToggle.click();
       await page.getByRole('button',{name:'Chat',exact:true}).click();
       const chat=page.getByRole('dialog',{name:'Chat',exact:true});
@@ -1069,6 +1076,43 @@ async function recoveryCases(browser,url) {
       assert.deepEqual(errors,[]);assert.deepEqual(unexpectedRequests,[]);
       console.log('PASS actual room recovery '+mode+': bounded admission, safe retry/copy, controls and player retained on transport failure, leave');
     }catch(error){recordFailure('recovery-'+mode,error)}finally{await context.close()}
+  }
+  for(const mode of ['join','cancel','hidden','hidden-batch','account-batch']) {
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'participant','recovery-auto&join=full');
+    try {
+      const automatic=page.getByRole('button',{name:'Try automatically',exact:true});await automatic.waitFor();
+      await page.clock.runFor(31000);assert.equal(await page.evaluate(()=>window.fixture.joinCalls),1,'full rooms never retry without opt-in');
+      await automatic.click();await page.clock.runFor(5001);await tick(page);
+      assert.equal(await page.evaluate(()=>window.fixture.joinCalls),2,'opt-in performs one checked admission after five seconds');
+      assert.match(await page.locator('body').innerText(),/Next attempt in/);
+      await page.getByRole('button',{name:'Stop automatic tries',exact:true}).click();
+      await page.clock.runFor(31000);assert.equal(await page.evaluate(()=>window.fixture.joinCalls),2,'Stop cancels scheduled retries');
+      await automatic.click();
+      if(mode==='join') {
+        await page.evaluate(()=>window.fixture.joinMode=null);
+        await page.clock.runFor(5001);await page.locator('main[data-room-phase="connected"]').waitFor();
+        assert.equal(await page.evaluate(()=>window.fixture.joinCalls),3);
+        assert.equal(await page.evaluate(()=>window.fixture.joinArgs.every(args=>args[1]===true)),true,'automatic admission preserves anonymous intent');
+        assert.equal(await page.evaluate(()=>window.fixture.previewRequests),0,'automatic entry never starts unreviewed capture');
+      } else {
+        await page.evaluate(()=>window.fixture.joinMode='timeout');
+        await page.clock.runFor(5001);await tick(page);
+        assert.equal(await page.evaluate(()=>window.fixture.joinCalls),3);
+        await page.evaluate(()=>window.fixture.configure({hasVideo:false}));await tick(page);
+        assert.equal(await page.evaluate(()=>window.fixture.joinCalls),3,'media metadata cannot replace an owned admission request');
+        if(mode==='cancel')await page.getByRole('button',{name:'Stop automatic tries',exact:true}).click();
+        else if(mode==='account-batch')await page.evaluate(()=>{window.fixture.switchAccount({id:'another-account'});window.fixture.switchAccount(window.fixture.originalUser)});
+        else await page.evaluate(batch=>{Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'));if(batch){Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});document.dispatchEvent(new Event('visibilitychange'))}},mode==='hidden-batch');
+        await page.evaluate(()=>window.fixture.resolveJoin());await tick(page);
+        assert.equal(await page.locator('main[data-room-phase="connected"]').count(),0,'cancelled/backgrounded late admission cannot start media');
+        assert.equal(await page.evaluate(()=>window.fixture.actions.filter(action=>action==='leaveRoom').length),mode==='account-batch'?0:1,'only the unchanged owner can release an abandoned seat');
+        await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});document.dispatchEvent(new Event('visibilitychange'))});
+        await page.clock.runFor(31000);assert.equal(await page.evaluate(()=>window.fixture.joinCalls),3,'returning to foreground never opts in again');
+        await automatic.waitFor();
+      }
+      assert.deepEqual(errors,[]);assert.deepEqual(unexpectedRequests,[]);
+      console.log('PASS full-room '+mode+': opt-in, paced single-flight admission, stop, preserved anonymity, cancelled late-seat cleanup and foreground boundaries');
+    }catch(error){recordFailure('full-room-'+mode,error)}finally{await context.close()}
   }
   for(const mode of ['throw','timeout']) {
     const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'participant','entry&join='+mode);

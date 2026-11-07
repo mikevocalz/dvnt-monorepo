@@ -10,9 +10,9 @@ export function webJoinFeedback(error: ClassifiedError | null) {
   };
   return {
     title: error.title,
-    // Web has no capacity notification subscription. Do not promise auto-entry.
+    // Automatic attempts require a separate opt-in and never reserve a seat.
     body: error.reason === "room_full"
-      ? "Every seat is taken right now. Try again in a moment to check for a space."
+      ? "Every seat is taken right now. Try again, or turn on automatic tries while you keep this page open."
       : error.body,
     retry: error.reason === "unknown" || error.reason === "room_full" || error.reason === "rate_limited",
   };

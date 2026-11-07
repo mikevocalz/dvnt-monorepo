@@ -53,9 +53,13 @@ async function resolveRealtimeRoomId(roomId: string): Promise<string | null> {
 async function callEdgeFunction<T>(
   functionName: string,
   body: Record<string, unknown>,
+  options?: { isCurrent?: () => boolean },
 ): Promise<ApiResponse<T>> {
   try {
+    if (options?.isCurrent && !options.isCurrent()) return { ok: false, error: { code: "cancelled", message: "Request cancelled" } };
     const token = await requireBetterAuthToken();
+    // Auth hydration can outlive Stop, navigation or an account switch.
+    if (options?.isCurrent && !options.isCurrent()) return { ok: false, error: { code: "cancelled", message: "Request cancelled" } };
 
     const { data, error } = await supabase.functions.invoke<ApiResponse<T>>(
       functionName,
@@ -158,12 +162,13 @@ export const videoApi = {
   async joinRoom(
     roomId: string,
     anonymous = false,
+    options?: { isCurrent?: () => boolean },
   ): Promise<ApiResponse<JoinRoomResponse>> {
     return callEdgeFunction<JoinRoomResponse>("video_join_room", {
       roomId,
       anonymous,
       platform: Platform.OS,
-    });
+    }, options);
   },
 
   /**

@@ -120,7 +120,7 @@ export function RoomHeader(props: RoomHeaderProps) {
         </button>
         <>
           <div className="hidden items-center gap-1.5 sm:flex">
-            <button type="button" onClick={props.onDevices} aria-label="Camera and microphone settings" title="Camera and microphone settings" className={buttonStyle}><Settings2 size={18} /></button>
+            <button type="button" onClick={props.onDevices} aria-label="Audio and camera settings" title="Audio and camera settings" className={buttonStyle}><Settings2 size={18} /></button>
             {isHost ? <>
             {raisedHandCount > 0 ? <button type="button" onClick={props.onHandQueue} aria-label={`${raisedHandCount} raised hands`} className={`${buttonStyle} gap-0.5 text-[#FF5BFC]`}><Hand size={14} /><span className="text-xs font-bold">{raisedHandCount}</span></button> : null}
             <button type="button" onClick={props.onMuteAll} aria-label="Mute everyone" title="Mute everyone" className={`${buttonStyle} text-[#FC253A]`}><VolumeX size={16} /></button>
@@ -137,7 +137,7 @@ export function RoomHeader(props: RoomHeaderProps) {
             </button>
             {open ? <div ref={menuRef} id={menuId} role="group" aria-label="Room actions" style={placement}
               className="fixed z-30 w-56 overflow-y-auto overscroll-contain rounded-xl border border-white/15 bg-[#111522] p-1 shadow-xl">
-              <button type="button" onClick={() => select(props.onDevices)} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-sm hover:bg-white/10"><Settings2 size={16} />Camera &amp; microphone</button>
+              <button type="button" onClick={() => select(props.onDevices)} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-sm hover:bg-white/10"><Settings2 size={16} />Audio &amp; camera</button>
               {isHost ? <>
               {raisedHandCount > 0 ? <button type="button" onClick={() => select(props.onHandQueue)} aria-label={`${raisedHandCount} raised hands`} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-sm text-[#FF5BFC] hover:bg-white/10"><Hand size={16} />{raisedHandCount} raised hands</button> : null}
               <button type="button" onClick={() => select(props.onMuteAll)} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-sm text-[#FB7185] hover:bg-white/10"><VolumeX size={16} />Mute everyone</button>

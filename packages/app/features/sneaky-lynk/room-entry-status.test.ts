@@ -56,15 +56,15 @@ test("native and web entry use status, never presence or an event-only access pr
 });
 
 test("prejoin still leads through server admission and event waiting on both platforms", () => {
-  assert.match(web, /await sneakyLynkApi.joinRoom\(id, joinAnonymous\)/);
+  assert.match(web, /await sneakyLynkApi.joinRoom\(id, joinAnonymous(?:,|\))/);
   assert.match(web, /classified.reason === "waiting_for_host"/);
   assert.match(web, /setPhase\("waiting"\)/);
   assert.match(native, /await joinWithReviewedMedia\(\)/);
   const consentGate = native.slice(native.indexOf("const joinWithReviewedMedia ="), native.indexOf("const joinRetryRef ="));
-  assert.match(consentGate, /return await videoRoomRef.current.join\(\)/);
-  assert.ok(consentGate.indexOf("setCameraEnabled(false)") < consentGate.indexOf("videoRoomRef.current.join()"));
-  assert.ok(consentGate.indexOf("setMicEnabled(false)") < consentGate.indexOf("videoRoomRef.current.join()"));
-  assert.equal((native.match(/videoRoom(?:Ref.current)?\.join\(\)/g) ?? []).length, 1, "all native joins use the reviewed-media gate");
+  assert.match(consentGate, /return await videoRoomRef.current.join\(\{\s+isCurrent,/);
+  assert.ok(consentGate.indexOf("setCameraEnabled(false)") < consentGate.indexOf("videoRoomRef.current.join("));
+  assert.ok(consentGate.indexOf("setMicEnabled(false)") < consentGate.indexOf("videoRoomRef.current.join("));
+  assert.equal((native.match(/videoRoom(?:Ref.current)?\.join\(/g) ?? []).length, 1, "all native joins use the reviewed-media gate");
   assert.match(native, /classified.reason === "waiting_for_host"/);
   assert.match(native, /setWaitingForHost\(true\)/);
 });

@@ -24,6 +24,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
+import { useFullRoomRetry } from "@dvnt/app/features/sneaky-lynk/hooks/useFullRoomRetry";
+import { withRoomAdmissionLock } from "@dvnt/app/features/sneaky-lynk/session/room-admission-lock";
 import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { readAdmissionRefusal } from "@dvnt/app/lib/auth/verified-only-prompt";
 import { ErrorBoundary as GlobalErrorBoundary } from "@dvnt/app/components/error-boundary";
@@ -1056,6 +1059,14 @@ function ServerRoom({
   // migration of ServerRoom lives with the rest of the Sneaky Lynk
   // cleanup work, not this targeted fix.
   const [joinError, setJoinError] = useState<ClassifiedError | null>(null);
+  const joinErrorRef = useRef(joinError);
+  joinErrorRef.current = joinError;
+  const joinAttemptReasonRef = useRef<ClassifiedError["reason"] | null>(null);
+  const isFocused = useIsFocused();
+  const navigation = useNavigation();
+  const focusedRef = useRef(isFocused);
+  focusedRef.current = isFocused;
+  const [isAppActive, setIsAppActive] = useState(AppState.currentState === "active");
   // Event Lynk not started by a host yet: show the waiting room, not an
   // error. The ref lets the mount effect see it without re-running.
   const [waitingForHost, setWaitingForHost] = useState(false);
@@ -1088,6 +1099,7 @@ function ServerRoom({
     };
   }, []);
   const deviceIntentEpochRef = useRef(0);
+  const authIntentEpochRef = useRef(0);
   const closedReasonRef = useRef(closedReason);
   closedReasonRef.current = closedReason;
   const micChangeInFlightRef = useRef(false);
@@ -1125,6 +1137,7 @@ function ServerRoom({
       markRoomClosed(roomSnapshot);
     },
     onError: (error, envelope) => {
+      joinAttemptReasonRef.current = null;
       // A verified-admission refusal already opened the verified-only popup
       // (the supabase fetch observer saw it), so no second message here.
       if (readAdmissionRefusal({ ok: false, error: { code: envelope?.code, detail: envelope?.detail } })) {
@@ -1140,12 +1153,13 @@ function ServerRoom({
         error,
         envelope?.detail,
       );
+      joinAttemptReasonRef.current = classified.reason;
       if (classified.reason === "waiting_for_host") {
         waitingForHostRef.current = true;
         setWaitingForHost(true);
         return;
       }
-      if (classified.reason !== "unknown") {
+      if (classified.reason !== "unknown" || joinErrorRef.current?.reason === "room_full") {
         setJoinError(classified);
       } else {
         showToast("error", "Couldn't join", classified.body);
@@ -1166,13 +1180,17 @@ function ServerRoom({
   const videoRoomRef = useRef(videoRoom);
   videoRoomRef.current = videoRoom;
   const admissionInFlightRef = useRef<{ epoch: number; promise: Promise<boolean> } | null>(null);
-  const joinWithReviewedMedia = useCallback((): Promise<boolean> => {
+  const joinWithReviewedMedia = useCallback((shouldContinue: () => boolean = () => true): Promise<boolean> => {
     const epoch = leaveLifetimeRef.current.epoch;
     const intentEpoch = deviceIntentEpochRef.current;
-    const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch && deviceIntentEpochRef.current === intentEpoch && !leavingRef.current && !closedReasonRef.current && !videoRoomRef.current.isEjected;
+    const authEpoch = authIntentEpochRef.current;
+    const owner = useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "";
+    const ownsIdentity = () => authIntentEpochRef.current === authEpoch && (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === owner;
+    const isCurrent = () => ownsIdentity() && shouldContinue() && leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch && deviceIntentEpochRef.current === intentEpoch && !leavingRef.current && !closedReasonRef.current && !videoRoomRef.current.isEjected;
     if (!isCurrent()) return Promise.resolve(false);
     if (admissionInFlightRef.current?.epoch === epoch) return admissionInFlightRef.current.promise;
-    const attempt = (async () => {
+    const attempt = withRoomAdmissionLock(owner, id, async () => {
+      if (!isCurrent()) return false;
       try {
         // Native capture defaults on. Commit safe flags BEFORE admission can
         // grant canPublish, including when permissions were previously granted.
@@ -1194,28 +1212,38 @@ function ServerRoom({
         if (!micAllowed) desiredMicEnabledRef.current = false;
         // This is the only admission call: retries, waiting-host admission and
         // reconnects all pass through the same reviewed choices and mute lock.
-        return await videoRoomRef.current.join();
+        return await videoRoomRef.current.join({
+          isCurrent,
+          onAbandonedAdmission: async () => {
+            // Cleanup only while this mount/account still owns the attempt.
+            // Another screen/account may now have admitted the same room.
+            const mayCleanUp = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch && ownsIdentity() && !videoRoomRef.current.isAdmitted;
+            if (!mayCleanUp()) return;
+            await sneakyLynkApi.leaveRoom(id, { isCurrent: mayCleanUp });
+          },
+        });
       } catch {
         if (isCurrent()) showToast("error", "Couldn't join", "Check your device permissions and connection, then try again.");
         return false;
       }
-    })();
+    });
     admissionInFlightRef.current = { epoch, promise: attempt };
     void attempt.finally(() => {
       if (admissionInFlightRef.current?.promise === attempt) admissionInFlightRef.current = null;
     });
     return attempt;
-  }, [roomHasVideo, showToast]);
+  }, [id, roomHasVideo, showToast]);
   const joinRetryRef = useRef(false);
   const [isJoinRetrying, setIsJoinRetrying] = useState(false);
-  const handleRetryJoin = useCallback(async () => {
+  const runReviewedRetry = useCallback(async (isCurrent?: () => boolean) => {
     if (joinRetryRef.current) return false;
     joinRetryRef.current = true;
     setIsJoinRetrying(true);
     try {
       // The actual native join carries the selected anonymous identity.
-      const joined = await joinWithReviewedMedia();
-      if (joined) setJoinError(null);
+      joinAttemptReasonRef.current = null;
+      const joined = await joinWithReviewedMedia(isCurrent);
+      if (joined && leaveLifetimeRef.current.active) setJoinError(null);
       return joined;
     } catch {
       return false;
@@ -1224,6 +1252,53 @@ function ServerRoom({
       if (leaveLifetimeRef.current.active) setIsJoinRetrying(false);
     }
   }, [joinWithReviewedMedia]);
+  const fullRoomRetry = useFullRoomRetry({
+    roomKey: JSON.stringify([id, authUser?.authId || authUser?.id, anonymous]),
+    eligible: joinError?.reason === "room_full" && !joinError.capacity?.isHost && !videoRoom.isAdmitted && !closedReason && !videoRoom.isEjected && !isLeaving,
+    active: isAppActive && isFocused,
+    onAttempt: async ({ isCurrent }) => {
+      // Read platform state too: it can change before React renders the event.
+      const canContinue = () => isCurrent() && AppState.currentState === "active" && focusedRef.current;
+      const joined = await runReviewedRetry(canContinue);
+      return joined ? "joined" : canContinue() && joinAttemptReasonRef.current === "room_full" ? "full" : "stopped";
+    },
+  });
+  const handleRetryJoin = useCallback(async () => {
+    if (joinErrorRef.current?.reason === "room_full" && !joinErrorRef.current.capacity?.isHost) {
+      return (await fullRoomRetry.retryNow()) === "joined";
+    }
+    return runReviewedRetry();
+  }, [fullRoomRetry.retryNow, runReviewedRetry]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") fullRoomRetry.stop();
+      setIsAppActive(state === "active");
+    });
+    return () => subscription.remove();
+  }, [fullRoomRetry.stop]);
+
+  useEffect(() => {
+    const removeBlur = navigation.addListener("blur", () => {
+      // A quick blur -> focus can be batched into one render. Stop at the event
+      // boundary so returning never silently revives a pending admission.
+      focusedRef.current = false;
+      fullRoomRetry.stop();
+    });
+    const removeFocus = navigation.addListener("focus", () => { focusedRef.current = true; });
+    return () => { removeBlur(); removeFocus(); };
+  }, [navigation, fullRoomRetry.stop]);
+
+  useEffect(() => useAuthStore.subscribe((next, previous) => {
+    const nextOwner = next.user?.authId || next.user?.id;
+    const previousOwner = previous.user?.authId || previous.user?.id;
+    if (nextOwner === previousOwner) return;
+    // Render can coalesce A -> B -> A. Revoke synchronously so an old request
+    // cannot gain admission, capture or clean up a new account's membership.
+    authIntentEpochRef.current += 1;
+    deviceIntentEpochRef.current += 1;
+    fullRoomRetry.stop();
+  }), [fullRoomRetry.stop]);
 
   // Heartbeat the waiting room; when the host starts, run the normal join so
   // video_join_room still applies bans, capacity and verification.
@@ -1712,11 +1787,27 @@ function ServerRoom({
   const roomTitle =
     videoRoom.room?.title || roomSnapshot?.title || paramTitle || "Room";
 
+  const queueRoomDeparture = useCallback((owner: string, authEpoch: number) => {
+    let identityChanged = authIntentEpochRef.current !== authEpoch;
+    // Guest departure outlives its screen. Keep observing identity until the
+    // queued leave settles; a logout/login cycle must not revive its dispatch.
+    const unsubscribe = useAuthStore.subscribe((next, previous) => {
+      if ((next.user?.authId || next.user?.id) !== (previous.user?.authId || previous.user?.id)) identityChanged = true;
+    });
+    const isCurrent = () => !identityChanged && (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === owner;
+    return withRoomAdmissionLock(owner, id, async () => {
+      if (!isCurrent()) return;
+      await sneakyLynkApi.leaveRoom(id, { isCurrent });
+    }).finally(unsubscribe);
+  }, [id]);
 
   const doLeave = useCallback(async () => {
     if (!leaveLifetimeRef.current.active || leavingRef.current) return;
     const epoch = leaveLifetimeRef.current.epoch;
-    const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch;
+    const owner = useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "";
+    const authEpoch = authIntentEpochRef.current;
+    const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch && authIntentEpochRef.current === authEpoch;
+    fullRoomRetry.stop();
     leavingRef.current = true;
     deviceIntentEpochRef.current += 1;
     setIsLeaving(true);
@@ -1735,7 +1826,7 @@ function ServerRoom({
         isCurrent,
         isHost,
         endRoom: () => sneakyLynkApi.endRoom(id),
-        leaveRoom: () => sneakyLynkApi.leaveRoom(id),
+        leaveRoom: () => queueRoomDeparture(owner, authEpoch),
         onFailure: (message) => showToast("error", "Couldn't close Lynk", message),
         exit: () => {
           const listenerCount = useRoomStore.getState().listeners.length;
@@ -1748,7 +1839,7 @@ function ServerRoom({
     } finally {
       if (isCurrent()) { leavingRef.current = false; setIsLeaving(false); }
     }
-  }, [router, id, endRoomHistory, reset, isHost, showToast]);
+  }, [router, id, endRoomHistory, reset, isHost, showToast, fullRoomRetry.stop, queueRoomDeparture]);
 
   // A host leaving ends the room for everyone, so the tap asks first —
   // one stray press used to kill a live Lynk (and every invite sent from it).
@@ -1782,10 +1873,11 @@ function ServerRoom({
     desiredMicEnabledRef.current = false;
     void videoRoomRef.current.leave();
     markRoomClosed(null, "This Lynk reached its session time limit and has ended.");
-    void sneakyLynkApi.leaveRoom(id).catch((error) => {
+    const owner = useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "";
+    void queueRoomDeparture(owner, authIntentEpochRef.current).catch((error) => {
       console.warn("[SneakyLynk:Server] Expired room presence cleanup failed:", error);
     });
-  }, [id, markRoomClosed]);
+  }, [queueRoomDeparture, markRoomClosed]);
 
   const handleToggleMic = useCallback(async () => {
     if (micChangeInFlightRef.current) return;
@@ -2412,17 +2504,24 @@ function ServerRoom({
           onRemove={handleRemoveUser}
         />
 
-        {/* Manual capacity retry uses the real join and preserves anonymity. */}
+        {/* Explicit retries use the real join and preserve reviewed choices. */}
         <RoomFullSheet
           visible={joinError?.reason === "room_full"}
           capacity={joinError?.capacity ?? null}
-          retrying={isJoinRetrying}
+          retrying={isJoinRetrying || fullRoomRetry.retrying}
+          automatic={fullRoomRetry.enabled}
+          secondsUntilRetry={fullRoomRetry.secondsUntilRetry}
+          cooldownSeconds={fullRoomRetry.cooldownSeconds}
+          onStartAutomatic={fullRoomRetry.start}
+          onStopAutomatic={fullRoomRetry.stop}
           onClose={() => {
+            fullRoomRetry.stop();
             setJoinError(null);
             handleLeave();
           }}
           onSeatOpen={() => void handleRetryJoin()}
           onUpgrade={() => {
+            fullRoomRetry.stop();
             // Hand off to the app's upgrade surface. The room's in-room
             // paywall modal targets a different feature (Sneaky Link
             // chat, not Sneaky Lynk rooms). Room-plan upgrades live on
@@ -2435,6 +2534,7 @@ function ServerRoom({
             isFeatureEnabled("sneaky_paywall_enabled") &&
             !joinError?.capacity?.isHost
               ? () => {
+                  fullRoomRetry.stop();
                   setJoinError(null);
                   setShowViewerPaywall(true);
                 }

@@ -126,8 +126,8 @@ export function classifySneakyLynkError(
       title: isHost ? "Your room is full" : "This room is full",
       body: isHost
         ? "You're at the seat limit on your current plan. Upgrade to host larger rooms."
-        : "Every seat is taken right now. We'll slide you in the moment one opens up.",
-      ctaLabel: isHost ? "Upgrade" : "Notify me",
+        : "Every seat is taken right now. Try again, or choose automatic retries while this screen stays open. A seat is not reserved.",
+      ctaLabel: isHost ? "Upgrade" : "Try again",
       rawMessage: raw,
       capacity: { current, max, isHost },
     };

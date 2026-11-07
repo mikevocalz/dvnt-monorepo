@@ -8,7 +8,7 @@
  * its normal join (video_join_room), so bans, capacity and verification
  * still apply.
  *
- * Same shape as useRoomCapacityWatcher: callback in a ref, interval owned
+ * Callback held in a ref, interval owned
  * here, torn down on unmount or when `enabled` goes false.
  */
 import { useEffect, useRef } from "react";

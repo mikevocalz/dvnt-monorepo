@@ -68,7 +68,7 @@ export function PreJoinSetup({ roomTitle, roomHasVideo, onJoin }: {
         </div>
         <p className="mt-3 text-xs leading-5 text-white/60">{microphoneTest.testing ? "Your microphone test is running on this device only. Close device settings to stop it." : micOn ? "Your microphone will turn on when you join, if your room role allows it. You can test it in device settings below." : "You'll join muted. You can unmute in the room if your role allows it."}</p>
         <details onToggle={event => { if (!event.currentTarget.open) microphoneTest.stop(); }} className="mt-3 rounded-xl border border-white/10 bg-white/[0.04] p-3">
-          <summary className={`flex min-h-11 cursor-pointer items-center text-sm font-semibold ${focus}`}>Camera &amp; microphone settings</summary>
+          <summary className={`flex min-h-11 cursor-pointer items-center text-sm font-semibold ${focus}`}>Audio &amp; camera settings</summary>
           <div className="mt-3 grid gap-4">
             <DeviceSelectors roomHasVideo={roomHasVideo} refreshKey={`${preview.state}:${microphoneTest.state}`} />
             <div className="border-t border-white/10 pt-4">

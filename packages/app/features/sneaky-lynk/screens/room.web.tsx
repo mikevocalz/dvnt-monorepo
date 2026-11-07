@@ -78,6 +78,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ConnectionBanner, Dialog, RoomTimer } from "@dvnt/ui";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.web";
 import { DeviceSelectors } from "../ui/web/DeviceSelectors";
+import { useRoomAudioOutput } from "../hooks/use-room-audio-output.web";
 import { PreJoinSetup } from "../ui/web/PreJoinSetup";
 import { CaptureErrorBanner } from "../ui/web/CaptureErrorBanner";
 import { useSpeakingDetection } from "@dvnt/app/lib/lynk/useSpeakingDetection.web";
@@ -92,6 +93,7 @@ import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
 import { getRoomEntryStatus } from "../room-entry-status";
 import { useEventLynkWaitingRoom } from "../hooks/useEventLynkWaitingRoom";
+import { useFullRoomRetry } from "../hooks/useFullRoomRetry";
 import { getSneakyUserLabel } from "../ui/user-labels";
 import {
   bannerPhaseFor,
@@ -101,6 +103,7 @@ import {
 import { isActive } from "../session/machine";
 import { completePreJoin } from "../session/complete-prejoin";
 import { leaveRoomSafely } from "../session/leave-room";
+import { withRoomAdmissionLock } from "../session/room-admission-lock";
 import { useRoomHeartbeat } from "../hooks/useRoomHeartbeat";
 import { useRoomReactions } from "../hooks/useRoomReactions";
 import { buildHandQueue, HAND_QUEUE_COPY } from "../ui/hand-queue";
@@ -426,7 +429,9 @@ function RoomInner({
   const microphoneDeviceId = useRoomUIStore(s => s.microphoneDeviceId);
   const isDeviceSettingsOpen = useRoomUIStore(s => s.isDeviceSettingsOpen);
   const setDeviceSettingsOpen = useRoomUIStore(s => s.setDeviceSettingsOpen);
-  const lynk = useLynkBroadcast(admitted ? id : undefined, canPublish, { cameraDeviceId, microphoneDeviceId });
+  const audioOutput = useRoomAudioOutput();
+  const audioOutputState = useRoomUIStore(state => state.audioOutputState);
+  const lynk = useLynkBroadcast(admitted ? id : undefined, canPublish, { cameraDeviceId, microphoneDeviceId, audioOutput });
 
   // Same session machine as native, now fed from the MoQ lifecycle. It owns
   // "is this room live" and the observability seam follows it.
@@ -520,6 +525,63 @@ function RoomInner({
   const [joinAttempt, setJoinAttempt] = useState(0);
   const [joinFailure, setJoinFailure] = useState<ClassifiedError | null>(null);
   const joinCompletedRef = useRef(false);
+  const currentAccountKeyRef = useRef(accountKey);
+  currentAccountKeyRef.current = accountKey;
+  const accountEpochRef = useRef(0);
+  const fullRoomStopRef = useRef<() => void>(() => {});
+  const roomMountedRef = useRef(true);
+  const [pageActive, setPageActive] = useState(() =>
+    typeof document === "undefined" || document.visibilityState !== "hidden",
+  );
+  useEffect(() => {
+    roomMountedRef.current = true;
+    const update = () => {
+      const visible = document.visibilityState !== "hidden";
+      // Revoke synchronously: hidden→visible in one React batch must not
+      // revive permission for an outstanding automatic admission.
+      if (!visible) fullRoomStopRef.current();
+      setPageActive(visible);
+    };
+    document.addEventListener("visibilitychange", update);
+    const unsubscribe = useAuthStore.subscribe((next, previous) => {
+      const owner = (user: typeof next.user) => user?.authId || user?.id || "";
+      if (owner(next.user) !== owner(previous.user)) {
+        accountEpochRef.current += 1;
+        currentAccountKeyRef.current = owner(next.user);
+        fullRoomStopRef.current();
+      }
+    });
+    return () => {
+      roomMountedRef.current = false;
+      unsubscribe();
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, []);
+  type RetryOutcome = "joined" | "full" | "stopped";
+  const pendingFullRetryRef = useRef<{
+    isCurrent: () => boolean;
+    resolve: (outcome: RetryOutcome) => void;
+  } | null>(null);
+  const fullRoomRetry = useFullRoomRetry({
+    roomKey: `${accountKey}:${id}`,
+    eligible: joinFailure?.reason === "room_full" && !admitted && !eject,
+    active: pageActive,
+    onCancelAttempt: () => {
+      if (roomMountedRef.current && !joinCompletedRef.current) setPhase("error");
+    },
+    onAttempt: ({ isCurrent }) => new Promise<RetryOutcome>((resolve) => {
+      if (!isCurrent() || pendingFullRetryRef.current || useRoomUIStore.getState().phase !== "error") {
+        resolve("stopped");
+        return;
+      }
+      pendingFullRetryRef.current = { isCurrent, resolve };
+      joinFiredRef.current = false;
+      joinCompletedRef.current = false;
+      setPhase("joining");
+      setJoinAttempt(value => value + 1);
+    }),
+  });
+  fullRoomStopRef.current = fullRoomRetry.stop;
 
   // Local identity projected as a SneakyUser for reactions/chat authorship.
   const currentUser: SneakyUser = admitted && admission ? admission.user : {
@@ -608,20 +670,43 @@ function RoomInner({
     joinFiredRef.current = true;
     setInitStarted(true);
     let cancelled = false;
-    setJoinFailure(null);
+    const ownerEpoch = accountEpochRef.current;
+    const isOwnerCurrent = () => roomMountedRef.current && accountEpochRef.current === ownerEpoch && currentAccountKeyRef.current === accountKey && (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === accountKey;
+    const fullAttempt = pendingFullRetryRef.current;
+    pendingFullRetryRef.current = null;
+    let fullAttemptSettled = false;
+    const finishFullAttempt = (outcome: RetryOutcome) => {
+      if (fullAttemptSettled) return;
+      fullAttemptSettled = true;
+      fullAttempt?.resolve(outcome);
+    };
+    const attemptCurrent = () => !cancelled && isOwnerCurrent() && (!fullAttempt || (fullAttempt.isCurrent() && document.visibilityState !== "hidden"));
+    if (!fullAttempt) setJoinFailure(null);
     // Own the timeout with this request. A late admission result must not turn
     // capture on after the person has already been shown a failed attempt.
     const timeout = setTimeout(() => {
       if (cancelled || joinCompletedRef.current) return;
       cancelled = true;
+      setJoinFailure(null);
       setErrorState("The join request timed out. Check your connection and try again.");
     }, 25000);
 
-    (async () => {
+    withRoomAdmissionLock(accountKey, id, async () => {
+      if (!attemptCurrent()) { finishFullAttempt("stopped"); return; }
       setPhase("joining");
-      const result = await sneakyLynkApi.joinRoom(id, joinAnonymous);
-      if (cancelled) return;
+      const result = await sneakyLynkApi.joinRoom(id, joinAnonymous, { isCurrent: attemptCurrent });
       clearTimeout(timeout);
+      if (!attemptCurrent()) {
+        // An opted-in attempt can finish after Stop or tab hiding. Never
+        // apply that admission or start media. Keep its retry lock until the
+        // abandoned seat is released, and never leave using a new account.
+        if (fullAttempt && result.ok && isOwnerCurrent() && !joinCompletedRef.current) {
+          await sneakyLynkApi.leaveRoom(id, { isCurrent: () => isOwnerCurrent() && !joinCompletedRef.current });
+        }
+        if (fullAttempt && isOwnerCurrent() && !joinCompletedRef.current) setPhase("error");
+        finishFullAttempt("stopped");
+        return;
+      }
 
       if (!result.ok || !result.data) {
         const msg = result.error?.message || "Failed to join Lynk";
@@ -645,6 +730,7 @@ function RoomInner({
           setJoinFailure(classified);
           setErrorState(classified.body);
         }
+        finishFullAttempt(classified.reason === "room_full" ? "full" : "stopped");
         return;
       }
 
@@ -685,11 +771,16 @@ function RoomInner({
       // keeps `canPublish` false and only ever subscribes.
       setLocalRole(peer.role);
       joinCompletedRef.current = true;
-    })().catch(() => {
-      if (cancelled) return;
+      finishFullAttempt("joined");
+    }).catch(() => {
       clearTimeout(timeout);
-      setJoinFailure(null);
-      setErrorState("Couldn't join this Lynk. Check your connection and try again.");
+      if (attemptCurrent()) {
+        setJoinFailure(null);
+        setErrorState("Couldn't join this Lynk. Check your connection and try again.");
+      } else if (fullAttempt && isOwnerCurrent() && !joinCompletedRef.current) {
+        setPhase("error");
+      }
+      finishFullAttempt("stopped");
     });
 
     return () => {
@@ -697,17 +788,13 @@ function RoomInner({
       clearTimeout(timeout);
       // A join that never resolved must not leave its guard standing.
       //
-      // `joinFiredRef` was set on entry and never cleared, so a teardown
-      // mid-flight cancelled the attempt AND blocked every retry: the room sat
-      // on "Connecting…" with no error, forever. `roomHasVideo` is in this
-      // effect's deps, so a re-run is not hypothetical — and React StrictMode
-      // does exactly this on every mount in development, which is how it was
-      // caught. `video_join_room` is idempotent for an existing member, so
-      // re-firing is safe.
+      // React StrictMode replays initial effects. Reset only the unfinished
+      // entry guard. Media metadata is deliberately not a dependency: a camera
+      // capability change must never replace an owned full-room admission.
       if (!joinCompletedRef.current) joinFiredRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, accountKey, joinAnonymous, roomHasVideo, joinAttempt]);
+  }, [id, accountKey, joinAnonymous, joinAttempt]);
 
   // Waiting room: heartbeat until the host starts, then run the join above
   // again so video_join_room still applies bans, capacity and verification.
@@ -931,6 +1018,21 @@ function RoomInner({
       leaveLifetimeRef.current = { active: false, epoch: leaveLifetimeRef.current.epoch + 1 };
     };
   }, []);
+  const queueGuestLeave = useCallback(() => {
+    const owner = useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "";
+    if (!owner || owner !== accountKey) return Promise.resolve();
+    let ownerUnchanged = true;
+    // This observer outlives navigation until the queued departure settles.
+    // New mounts share the lane, so an old leave cannot evict their admission.
+    const unsubscribe = useAuthStore.subscribe((next, previous) => {
+      const key = (user: typeof next.user) => user?.authId || user?.id || "";
+      if (key(next.user) !== key(previous.user)) ownerUnchanged = false;
+    });
+    const isOwnerCurrent = () => ownerUnchanged && (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === owner;
+    return withRoomAdmissionLock(owner, id, async () => {
+      if (isOwnerCurrent()) await sneakyLynkApi.leaveRoom(id, { isCurrent: isOwnerCurrent });
+    }).finally(unsubscribe);
+  }, [accountKey, id]);
   const doLeave = useCallback(() => {
     if (!leaveLifetimeRef.current.active || leavingRef.current) return;
     const epoch = leaveLifetimeRef.current.epoch;
@@ -941,7 +1043,7 @@ function RoomInner({
       isCurrent,
       isHost: isHostRef.current,
       endRoom: () => sneakyLynkApi.endRoom(id),
-      leaveRoom: () => sneakyLynkApi.leaveRoom(id),
+      leaveRoom: queueGuestLeave,
       onFailure: (message) => showToast("error", "Couldn't close Lynk", message),
       exit: () => {
         setAdmission(null);
@@ -951,7 +1053,7 @@ function RoomInner({
         router.push(LYNKS_LIST_ROUTE);
       },
     }).finally(() => { if (isCurrent()) { leavingRef.current = false; setIsLeaving(false); } });
-  }, [id, endRoomHistory, resetRoomStore, router, showToast]);
+  }, [id, queueGuestLeave, endRoomHistory, resetRoomStore, router, showToast]);
 
   // The leave buttons never end a room silently: a host confirming is a host
   // who meant it. Everyone else still leaves instantly.
@@ -1309,22 +1411,32 @@ function RoomInner({
     );
   }
 
-  if (phase === "error" && !admitted) {
+  if ((phase === "error" || fullRoomRetry.retrying) && !admitted) {
     const feedback = webJoinFeedback(joinFailure);
+    const full = joinFailure?.reason === "room_full";
+    const leaveEntry = () => { fullRoomRetry.stop(); router.push(LYNKS_LIST_ROUTE); };
     return (
-      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
+      <RoomShell title={roomTitle} onBack={leaveEntry}>
         <div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center px-6 py-10 text-center">
           <span className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-300/20 bg-amber-300/10"><Radio size={28} className="text-amber-200" aria-hidden="true" /></span>
           <h2 className="mb-3 text-2xl font-bold">{feedback.title}</h2>
           <p role="alert" className="mb-6 text-sm leading-6 text-white/70">{feedback.body}</p>
-          {feedback.retry ? <button type="button" onClick={() => {
+          {full ? <div className="mb-5 w-full rounded-xl border border-white/15 bg-white/5 p-4 text-left">
+            <p className="text-sm leading-6 text-white/80">Try automatically while this page stays open. You'll join with your reviewed camera, microphone and identity choices when an attempt succeeds.</p>
+            <p className="mt-2 text-xs leading-5 text-white/60">Retries slow to every 30 seconds. This isn't a queue or a reserved seat. Switching tabs stops automatic tries.</p>
+            <p role="status" className="mt-3 text-sm text-[#8DEAFF]">{fullRoomRetry.retrying ? (fullRoomRetry.enabled ? "Trying to join…" : "Finishing the current request. Your camera and microphone stay off.") : fullRoomRetry.enabled ? `Next attempt in ${fullRoomRetry.secondsUntilRetry}s` : "Automatic tries are off."}</p>
+            <button type="button" onClick={fullRoomRetry.enabled ? fullRoomRetry.stop : fullRoomRetry.start} disabled={!fullRoomRetry.enabled && fullRoomRetry.retrying} className="mt-3 min-h-11 w-full rounded-lg bg-white/10 px-3 text-sm font-semibold disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">{fullRoomRetry.enabled ? "Stop automatic tries" : "Try automatically"}</button>
+          </div> : null}
+          {!full && fullRoomRetry.retrying ? <p role="status" className="mb-4 text-sm leading-6 text-amber-200">The previous request is still settling. Your camera and microphone stay off. You can return to Lynks now.</p> : null}
+          {feedback.retry ? <button type="button" disabled={fullRoomRetry.retrying || (full && fullRoomRetry.cooldownSeconds > 0)} onClick={() => {
+            if (full) { void fullRoomRetry.retryNow(); return; }
             if (useRoomUIStore.getState().phase !== "error") return;
             joinFiredRef.current = false;
             joinCompletedRef.current = false;
             setPhase("joining");
             setJoinAttempt(value => value + 1);
-          }} className="min-h-12 w-full rounded-xl bg-[#3FDCFF] px-6 py-3 font-semibold text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Try again</button> : null}
-          <button type="button" onClick={() => router.push(LYNKS_LIST_ROUTE)} className="mt-3 min-h-11 w-full rounded-xl bg-white/8 px-6 py-3 font-semibold hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">Back to Lynks</button>
+          }} className="min-h-12 w-full rounded-xl bg-[#3FDCFF] px-6 py-3 font-semibold text-black disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">{fullRoomRetry.retrying ? "Trying again…" : full && fullRoomRetry.cooldownSeconds > 0 ? `Try again in ${fullRoomRetry.cooldownSeconds}s` : "Try again"}</button> : null}
+          <button type="button" onClick={leaveEntry} className="mt-3 min-h-11 w-full rounded-xl bg-white/8 px-6 py-3 font-semibold hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">Back to Lynks</button>
         </div>
       </RoomShell>
     );
@@ -1407,6 +1519,12 @@ function RoomInner({
           }}
         /> : null}
       />
+      {admitted && audioOutputState.message && !isDeviceSettingsOpen ? (
+        <div role={audioOutputState.phase === "error" ? "alert" : "status"} className="mx-4 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200/15 bg-amber-300/10 px-4 py-3 text-sm text-amber-100" data-audio-output-notice>
+          <p className="min-w-0 flex-1 leading-5">{audioOutputState.message}</p>
+          <button type="button" onClick={() => { closeChat(); closeHandQueue(); setParticipantsOpen(false); setDeviceSettingsOpen(true); }} className="min-h-11 rounded-lg bg-white/10 px-3 font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">Audio settings</button>
+        </div>
+      ) : null}
       {admitted && !rosterReady && (
         <div className="mx-4 mb-3 rounded-xl bg-amber-400/10 px-4 py-3 text-sm text-amber-100" role="status" aria-live="polite" data-testid="lynk-roster-pending">
           <p className="font-semibold">{rosterError ? "Couldn't load participants" : "Connecting participants…"}</p>
@@ -1557,7 +1675,7 @@ function RoomInner({
         </p>
       </footer>
 
-      <SidePanel open={isDeviceSettingsOpen} onClose={() => setDeviceSettingsOpen(false)} title="Camera & microphone">
+      <SidePanel open={isDeviceSettingsOpen} onClose={() => setDeviceSettingsOpen(false)} title="Audio & camera">
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5" style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
           <DeviceSelectors roomHasVideo={roomHasVideo} refreshKey={`${lynk.cameraActive}:${lynk.microphoneActive}`} />
           <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4 text-sm">

@@ -19,12 +19,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Moq from "@moq/net";
 import * as Watch from "@moq/watch";
-import { Signal, Computed } from "@moq/signals";
+import { Signal, Computed, Derived } from "@moq/signals";
 import { useMoqToken } from "./useMoqToken";
 import { useMoqRelayAuthorization } from "./useMoqRelayAuthorization";
 import { deriveLynkState } from "./lynkState";
 import { useSignalValue, useSignalSetKey } from "./moq-signals-react";
 import type { LynkPublisher, LynkViewerBase } from "./types";
+import type { AudioOutputRouter } from "./audio-output-router";
 
 export interface UseLynkViewerResult extends LynkViewerBase {
   /** Attach/detach a `<canvas>` for a publisher path. Pass `null` to detach. */
@@ -34,7 +35,7 @@ export interface UseLynkViewerResult extends LynkViewerBase {
 /** A single connection + its empty-Set fallback live outside React state. */
 const EMPTY_PATHS = new Set<Moq.Path.Valid>();
 
-export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
+export function useLynkViewer(roomId: string | undefined, audioOutput?: AudioOutputRouter): UseLynkViewerResult {
   const { token, error: tokenError, authorizationScope } = useMoqToken(roomId, "subscribe", !!roomId);
 
   // One URL signal feeds Connection; healthy same-scope renewal does not redial.
@@ -44,7 +45,14 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
     player: Watch.Player;
     canvas: Signal<HTMLCanvasElement | undefined>;
     disposeVideo: () => void;
+    bindAudioOutput: (output?: AudioOutputRouter) => void;
   }>());
+
+  const audioOutputRef = useRef(audioOutput);
+  useEffect(() => {
+    audioOutputRef.current = audioOutput;
+    for (const entry of backends.current.values()) entry.bindAudioOutput(audioOutput);
+  }, [audioOutput]);
 
   const [videoAvailability, setVideoAvailability] = useState<Record<string, boolean>>({});
   const [muted, setMutedState] = useState(false);
@@ -153,6 +161,8 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
       }
       if (!reload || reloadRef.current !== reload || ended) return;
       const target = new Signal<HTMLCanvasElement | undefined>(canvas);
+      const audioReady = new Signal(!audioOutputRef.current);
+      const outputVolume = new Derived([audioReady, volumeSignal.current], (ready, volume) => ready ? volume : 0);
       const player = new Watch.Player({
         origin: reload.origin,
         probe: reload.probe,
@@ -163,8 +173,26 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
         delay: Moq.Time.Milli.zero,
         paused: false,
         muted: mutedSignal.current,
-        volume: volumeSignal.current,
+        volume: outputVolume,
       });
+      // MoQ decodes to Web Audio, not an HTMLMediaElement. Follow the actual
+      // context signal through rendition changes; no player/decoder rebuild.
+      let disposeAudio = () => {};
+      const bindAudioOutput = (output?: AudioOutputRouter) => {
+        disposeAudio();
+        let unregister = () => {};
+        if (!output) { audioReady.set(true); disposeAudio = () => {}; return; }
+        const update = () => {
+          unregister();
+          audioReady.set(false);
+          const context = player.audio.out.context.peek();
+          unregister = context ? output.register(context, ready => audioReady.set(ready)) : () => {};
+        };
+        const unsubscribeAudio = player.audio.out.context.subscribe(update);
+        update();
+        disposeAudio = () => { unsubscribeAudio(); unregister(); };
+      };
+      bindAudioOutput(audioOutputRef.current);
       // Discovery also announces audio-only publishers. Wait for a usable
       // rendition and decoded frame; publisher capture suspension removes the
       // rendition without disconnecting the peer's audio.
@@ -186,7 +214,8 @@ export function useLynkViewer(roomId: string | undefined): UseLynkViewerResult {
       };
       const unsubscribe = available.subscribe(updateVideo);
       updateVideo();
-      backends.current.set(path, { player, canvas: target, disposeVideo: () => {
+      backends.current.set(path, { player, canvas: target, bindAudioOutput, disposeVideo: () => {
+        disposeAudio();
         unsubscribe();
         available.close();
         setVideoAvailability(current => {

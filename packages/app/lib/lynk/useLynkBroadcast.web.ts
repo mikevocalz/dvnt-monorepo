@@ -33,6 +33,7 @@ import { useLynkViewer } from "./useLynkViewer.web";
 import { deriveLynkState } from "./lynkState";
 import { useSignalValue } from "./moq-signals-react";
 import type { LynkBroadcastBase, LynkPublisher } from "./types";
+import type { AudioOutputRouter } from "./audio-output-router";
 
 export interface UseLynkBroadcastResult extends LynkBroadcastBase {
   /** Local camera preview for the broadcaster's own tile. */
@@ -54,7 +55,7 @@ export interface UseLynkBroadcastResult extends LynkBroadcastBase {
 export function useLynkBroadcast(
   roomId: string | undefined,
   canPublish = true,
-  devicePreferences: { cameraDeviceId?: string; microphoneDeviceId?: string } = {},
+  devicePreferences: { cameraDeviceId?: string; microphoneDeviceId?: string; audioOutput?: AudioOutputRouter } = {},
 ): UseLynkBroadcastResult {
   const { token, error: tokenError, authorizationScope } = useMoqToken(
     roomId,
@@ -62,7 +63,7 @@ export function useLynkBroadcast(
     !!roomId && canPublish,
   );
   // Compose the viewer for co-publisher discovery + canvas mounting.
-  const viewer = useLynkViewer(roomId);
+  const viewer = useLynkViewer(roomId, devicePreferences.audioOutput);
 
   const urlSignal = useRef(new Signal<URL | undefined>(undefined));
   const reloadRef = useRef<Moq.Connection | null>(null);

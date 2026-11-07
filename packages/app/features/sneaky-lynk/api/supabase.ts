@@ -15,6 +15,7 @@ import {
 } from "./room-stats";
 
 type ErrorCode =
+  | "cancelled"
   | "unauthorized"
   | "forbidden"
   | "not_found"
@@ -38,9 +39,15 @@ interface ApiResponse<T = unknown> {
 async function callEdgeFunction<T>(
   functionName: string,
   body: Record<string, unknown>,
+  options?: { isCurrent?: () => boolean },
 ): Promise<ApiResponse<T>> {
+  const cancelled = (): ApiResponse<T> => ({ ok: false, error: { code: "cancelled", message: "Request no longer belongs to this room entry" } });
   try {
+    if (options?.isCurrent && !options.isCurrent()) return cancelled();
     const token = await requireBetterAuthToken();
+    // Authentication can change while token refresh is pending. Never dispatch
+    // an old admission or its cleanup using a different account's credential.
+    if (options?.isCurrent && !options.isCurrent()) return cancelled();
 
     const { data, error } = await supabase.functions.invoke<ApiResponse<T>>(
       functionName,
@@ -142,12 +149,13 @@ export const sneakyLynkApi = {
   async joinRoom(
     roomId: string,
     anonymous = false,
+    options?: { isCurrent?: () => boolean },
   ): Promise<ApiResponse<JoinRoomResponse>> {
     return callEdgeFunction("video_join_room", {
       roomId,
       anonymous,
       platform: Platform.OS,
-    });
+    }, options);
   },
 
   /**
@@ -192,14 +200,14 @@ export const sneakyLynkApi = {
    * Leave a room (any participant)
    * Marks member as "left", decrements participant_count, auto-ends if empty
    */
-  async leaveRoom(roomId: string): Promise<
+  async leaveRoom(roomId: string, options?: { isCurrent?: () => boolean }): Promise<
     ApiResponse<{
       left: boolean;
       roomEnded: boolean;
       remainingParticipants: number;
     }>
   > {
-    return callEdgeFunction("video_leave_room", { roomId });
+    return callEdgeFunction("video_leave_room", { roomId }, options);
   },
 
   /**

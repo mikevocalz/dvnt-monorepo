@@ -255,6 +255,8 @@ const dependency = (name) => require(resolve(name));
       return new Function(...Object.keys(scope), `return ${expression}`)(...Object.values(scope));
     }
     const serverSource = server.getText(ast);
+    const lockModule = { exports: {} };
+    new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(__dirname, '../packages/app/features/sneaky-lynk/session/room-admission-lock.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(lockModule, lockModule.exports);
     assert.equal((serverSource.match(/videoRoom(?:Ref\.current)?\.join\(/g) || []).length, 1, 'all admission paths must use the consent wrapper');
     assert.match(serverSource, /onReconnect: joinWithReviewedMedia/);
     assert.match(serverSource, /onAdmitted:[\s\S]*?void joinWithReviewedMedia\(\)/);
@@ -270,6 +272,13 @@ const dependency = (name) => require(resolve(name));
     const scope = {
       leaveLifetimeRef: { current: { active: true, epoch: 1 } },
       deviceIntentEpochRef: { current: 0 },
+      authIntentEpochRef: { current: 0 },
+      withRoomAdmissionLock: lockModule.exports.withRoomAdmissionLock,
+      fullRoomRetry: { stop() {} },
+      useAuthStore: { getState: () => ({ user: { id: 'account' } }) },
+      id: 'room',
+      sneakyLynkApi: { leaveRoom: async () => ({ ok: true }) },
+      queueRoomDeparture: async () => {},
       leavingRef: { current: false },
       closedReasonRef: { current: null },
       admissionInFlightRef: { current: null },

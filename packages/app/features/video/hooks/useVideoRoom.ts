@@ -303,7 +303,11 @@ export function useVideoRoom({
     [handleEject, notifyEnded, getStore, setMicEnabled],
   );
 
-  const join = useCallback(async () => {
+  const join = useCallback(async (attempt?: {
+    isCurrent: () => boolean;
+    onAbandonedAdmission?: () => Promise<void>;
+  }) => {
+    if (attempt && !attempt.isCurrent()) return false;
     const epoch = ++joinEpoch.current;
     const key = admissionKeyRef.current;
     if (getStore().isEjected) {
@@ -315,8 +319,15 @@ export function useVideoRoom({
     setRosterState({ key, ready: false, error: false });
 
     try {
-      const result = await videoApi.joinRoom(roomId, anonymousRef.current);
+      const result = await videoApi.joinRoom(roomId, anonymousRef.current, attempt);
       if (epoch !== joinEpoch.current || key !== admissionKeyRef.current) return false;
+      // Stop/background can invalidate a full-room retry without unmounting.
+      // Never publish a late admission. Cleanup remains inside the caller's
+      // single-flight promise so it cannot remove a newer retry's membership.
+      if (attempt && !attempt.isCurrent()) {
+        if (result.ok) await attempt.onAbandonedAdmission?.();
+        return false;
+      }
 
       if (!result.ok) {
         getStore().setConnectionStatus("error", result.error?.message);
@@ -407,6 +418,7 @@ export function useVideoRoom({
       return true;
     } catch (err) {
       if (epoch !== joinEpoch.current || key !== admissionKeyRef.current) return false;
+      if (attempt && !attempt.isCurrent()) return false;
       console.error("[useVideoRoom] Join error:", err);
       getStore().setConnectionStatus("error", "Connection failed");
       onErrorRef.current?.("Failed to connect to room");

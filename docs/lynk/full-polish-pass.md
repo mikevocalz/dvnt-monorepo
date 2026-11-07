@@ -28,10 +28,15 @@ production deployment, credentials, payment behavior, or backend migration.
 - Native connection trouble no longer replaces the room with a trapping spinner.
   Connection guidance, local controls, leaving progress, and initial-join retry
   remain available. Controls are labeled; participant and queue sheets are clearer.
-- Native full-room entry is an explicit, single-flight retry through the actual
-  admission path. The old “Notify me” path performed named admission probes;
-  that misleading polling flow is no longer used. No waitlist, reservation, or
-  background notification is claimed.
+- Full-room entry supports a manual retry or explicit automatic retries through
+  the real admission path, preserving reviewed identity and media choices.
+  Automatic attempts back off from 5 to 30 seconds and stop on switching away,
+  leaving, or another admission error. No waitlist, reservation, or background
+  notification is claimed; the old unsafe named admission probe is removed.
+- Supported web browsers route room audio to selected speakers/headphones using
+  the actual MoQ decoder AudioContexts. Context replacements keep the selected
+  route; rapid switches remain gated until the latest serialized route settles.
+  Hotplug fallback and routing failures remain visible outside device settings.
 
 ## Verification boundaries
 
@@ -44,7 +49,8 @@ normal source/type/build/regression checks for the published commit.
 
 Physical camera/microphone selection, Bluetooth/audio routing, Safari permission
 and recovery behavior, native app/device rendering, and authenticated multi-device
-continuity remain acceptance gates. Speaker routing stays in system settings.
+continuity remain acceptance gates. Native and unsupported web browsers retain
+system sound settings for speaker routing.
 No measured comparison supports a claim that DVNT exceeds Batemates, Sniffies,
 Zoom, Teams or Meet. Batemates/Sniffies inform social-room behavior; meeting apps
 inform clarity and reliability, not an enterprise-meeting redesign.

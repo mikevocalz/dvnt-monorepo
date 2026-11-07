@@ -35,7 +35,7 @@ const root = path.resolve(__dirname, '..');
   button('Turn camera on').click();await wait(()=>requests.length===1);assert.equal(requests[0].constraints.video.deviceId.exact,'camera-b');const cam=media('video');requests[0].resolve(cam);await wait(()=>window.document.querySelector('video'));
   f.gate='defer';button('Join Lynk').click();await tick();select('videoinput','camera-a');await wait(()=>requests.length===2);assert.ok(cam.track.stops>0);const camA=media('video');requests[1].resolve(camA);await wait(()=>window.document.querySelector('video'));
   f.pending.shift()();await tick();assert.equal(f.joins.at(-1).joinCameraOn,false,'deferred old preview review cannot approve a new camera');
-  f.hide();await tick();f.store.getState().reset();f.store.getState().setJoinCameraOn(false);f.render(false);await wait(()=>button('Test microphone'));
+  f.hide();await tick();f.store.getState().reset();f.store.getState().setJoinCameraOn(false);f.render(false);await wait(()=>window.document.querySelector('select[id$="-audioinput"] option[value="mic-a"]'));
   assert.equal(window.document.querySelector('select[id$="-videoinput"]'),null,'audio-only settings have no camera');
   select('audioinput','mic-a');await tick();const beforeTest=requests.length;button('Test microphone').click();await wait(()=>requests.length===beforeTest+1);assert.equal(requests.at(-1).constraints.video,false);assert.equal(requests.at(-1).constraints.audio.deviceId.exact,'mic-a');
   const mic=media('audio');requests.at(-1).resolve(mic);await wait(()=>window.document.querySelector('meter')?.value>0);assert.equal(contexts.length,1);assert.match(body(),/Nothing is recorded or sent/);
