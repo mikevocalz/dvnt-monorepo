@@ -1500,8 +1500,8 @@ function RoomInner({
       <FloatingReactions reactions={reactions} />
 
       {/* Controls bar */}
-      <footer data-room-controls className="relative z-30 flex shrink-0 flex-col items-center gap-1 border-t border-white/8 bg-[#090b15]/95 pt-1 sm:gap-2" style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 8px)", paddingLeft: "max(8px, env(safe-area-inset-left))", paddingRight: "max(8px, env(safe-area-inset-right))" }}>
-        <div className="flex w-full items-center justify-center gap-1 min-[360px]:gap-2 sm:gap-4">
+      <footer data-room-controls className="relative z-30 flex shrink-0 flex-col items-center gap-1 [@media(max-height:500px)_and_(min-width:600px)]:flex-row border-t border-white/8 bg-[#090b15]/95 pt-1 sm:gap-2" style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 8px)", paddingLeft: "max(8px, env(safe-area-inset-left))", paddingRight: "max(8px, env(safe-area-inset-right))" }}>
+        <div className="flex w-full items-center justify-center gap-1 min-[360px]:gap-2 sm:gap-4 [@media(max-height:500px)_and_(min-width:600px)]:w-auto [@media(max-height:500px)_and_(min-width:600px)]:flex-1">
           <ControlButton
             onClick={toggleMic}
             active={isMicOn}
@@ -1551,7 +1551,7 @@ function RoomInner({
             <PhoneOff size={24} />
           </ControlButton>
         </div>
-        <p role="status" className="max-w-full px-2 text-center text-[11px] leading-4 text-white/60">
+        <p role="status" className="max-w-full px-2 text-center text-[11px] leading-4 text-white/60 [@media(max-height:500px)_and_(min-width:600px)]:max-w-[180px] [@media(max-height:500px)_and_(min-width:600px)]:text-left">
           {!canPublish ? "Listening · Raise your hand to speak" : hostMuteLocked ? "Microphone muted by host" : !lynk.micEnabled ? "Microphone muted" : lynk.microphoneError ? "Microphone unavailable" : isMicOn ? "Microphone on" : "Waiting for microphone"}
           {roomHasVideo && canPublish ? ` · ${!lynk.cameraEnabled ? "Camera off" : lynk.cameraError ? "Camera unavailable" : isCameraOn ? "Camera on" : "Waiting for camera"}` : ""}
         </p>
