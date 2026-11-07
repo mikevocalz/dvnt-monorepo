@@ -92,6 +92,7 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { sneakyLynkApi } from "../api/supabase";
 import { getRoomEntryStatus } from "../room-entry-status";
+import { eventWaitingCopy, roomUnavailableTitle } from "../ui/event-waiting-copy";
 import { useEventLynkWaitingRoom } from "../hooks/useEventLynkWaitingRoom";
 import { useFullRoomRetry } from "../hooks/useFullRoomRetry";
 import { getSneakyUserLabel } from "../ui/user-labels";
@@ -805,7 +806,7 @@ function RoomInner({
 
   // Waiting room: heartbeat until the host starts, then run the join above
   // again so video_join_room still applies bans, capacity and verification.
-  useEventLynkWaitingRoom({
+  const eventWaiting = useEventLynkWaitingRoom({
     roomId: id,
     enabled: phase === "waiting",
     onAdmitted: () => {
@@ -1316,29 +1317,22 @@ function RoomInner({
   // Sneaky Lynk protection is ENFORCED rather than deterred, so there is no
   // retry, no fallback view, and nothing to reveal.
   if (phase === "waiting") {
+    const copy = eventWaitingCopy(eventWaiting.status);
+    const leaveLobby = () => { eventWaiting.cancel(); router.push(LYNKS_LIST_ROUTE); };
     return (
-      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
-        <div
-          className="flex flex-1 flex-col items-center justify-center px-6 text-center"
-          role="status"
-          aria-live="polite"
-          data-testid="lynk-waiting-room"
-        >
-          <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-[#8A40CF]/20">
-            <Radio size={36} className="text-[#8A40CF]" />
-          </span>
-          <h2 className="mb-3 text-2xl font-bold">Waiting for the host to start</h2>
-          <p className="mb-8 max-w-md text-white/60">
-            You&apos;re in the waiting room. You&apos;ll join automatically when the host starts.
-          </p>
-          <div className="mb-8 h-6 w-6 rounded-full border-2 border-white/20 border-t-[#8A40CF] animate-spin motion-reduce:animate-none" />
-          <button
-            type="button"
-            onClick={() => router.push(LYNKS_LIST_ROUTE)}
-            className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
-          >
-            Leave
-          </button>
+      <RoomShell title="Event Lynk" onBack={leaveLobby}>
+        <div className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-5 py-10" data-testid="lynk-waiting-room">
+          <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#8A40CF]/15 via-[#10121d] to-[#3FDCFF]/5 p-6 sm:p-8">
+            <p className="mb-7 text-xs font-semibold tracking-[0.18em] text-[#9DEBFF]">{copy.eyebrow}</p>
+            <span className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#3FDCFF]/20 bg-[#3FDCFF]/10"><Radio size={28} className="text-[#3FDCFF]" aria-hidden="true" /></span>
+            <h2 className="mb-3 break-words text-3xl font-semibold tracking-tight">{copy.title}</h2>
+            <p className="text-sm leading-6 text-white/70">{copy.body}</p>
+            <p role="status" aria-live="polite" className="my-6 rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-[#9DEBFF]">{copy.status}</p>
+            <p className="text-sm leading-6 text-white/80">{copy.privacy}</p>
+            <p className="mt-2 text-xs leading-5 text-white/55">{copy.capacity}</p>
+            {eventWaiting.status === "reconnecting" ? <button type="button" onClick={eventWaiting.retry} className="mt-6 min-h-12 w-full rounded-xl bg-[#3FDCFF] px-4 font-semibold text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Check again</button> : null}
+            <button type="button" onClick={leaveLobby} className="mt-4 min-h-12 w-full rounded-xl border border-white/15 bg-white/5 px-6 py-3 font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">Leave lobby</button>
+          </div>
         </div>
       </RoomShell>
     );
@@ -1387,7 +1381,7 @@ function RoomInner({
           <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-white/8">
             <Radio size={36} className="text-white/40" />
           </span>
-          <h2 className="text-2xl font-bold mb-3">Lynk Closed</h2>
+          <h2 className="text-2xl font-bold mb-3">{roomUnavailableTitle(closedReason)}</h2>
           <p className="text-white/60 mb-8">{closedReason}</p>
           <button
             type="button"
@@ -1974,7 +1968,7 @@ export function SneakyLynkRoomScreen() {
           <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-white/8">
             <Radio size={36} className="text-white/40" />
           </span>
-          <h2 className="text-2xl font-bold mb-3">Lynk Closed</h2>
+          <h2 className="text-2xl font-bold mb-3">{roomUnavailableTitle(useRoomUIStore.getState().closedReason)}</h2>
           <p className="text-white/60 mb-8">{useRoomUIStore.getState().closedReason}</p>
           <button
             type="button"

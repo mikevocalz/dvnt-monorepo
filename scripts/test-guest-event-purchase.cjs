@@ -1,6 +1,6 @@
 // Synthetic ReactDOM regressions against the actual EventDetailScreen module.
 // No network, checkout requests, holds, orders, or browser credentials are used.
-// Dependencies: typescript, react, react-dom, zustand, jsdom (normal dev deps or NODE_PATH).
+// Dependencies: typescript, react, react-dom, zustand, jsdom, lucide-react (normal dev deps or NODE_PATH).
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -29,7 +29,7 @@ function load(file) {
   cache.set(file, exports);
   const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { fileName: file, compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, jsxImportSource: 'react', target: ts.ScriptTarget.ES2022 } });
   assert.equal((compiled.diagnostics || []).length, 0);
-  vm.runInNewContext(compiled.outputText, { exports, require: (name) => name.startsWith('.') ? load(path.resolve(path.dirname(file), name)) : require(name), console, Date, Set }, { filename: file });
+  vm.runInNewContext(compiled.outputText, { exports, require: (name) => name.startsWith('.') ? load(path.resolve(path.dirname(file), name)) : require(name), console, Date, Set, URL, URLSearchParams }, { filename: file });
   return exports;
 }
 const ui = load(path.join(ROOT, 'packages/app/lib/stores/event-detail-ui-store.ts')).useEventDetailUiStore;
@@ -47,6 +47,7 @@ for (const statement of ast.statements) {
   if (statement.importClause?.name) entry.default = Empty;
 }
 const app = (suffix, values) => Object.assign(mocks['@dvnt/app/' + suffix], values);
+mocks['./ui/EventLynkCard.web'] = load(path.join(ROOT, 'packages/app/features/events/ui/EventLynkCard.web.tsx'));
 mocks.react = React;
 mocks['react/jsx-runtime'] = require('react/jsx-runtime');
 mocks['solito/navigation'] = { useSearchParams: () => null, useParams: () => scenario.params, usePathname: () => '/public/events/42', useRouter: () => ({ push: (url) => scenario.navigation.push(url), back: noop }) };
@@ -468,15 +469,26 @@ test('event Lynk detail disables ended rooms and pending entry and exposes waiti
   scenario.lynkHost = {view:{state:'ended',count:0,waiting:[]},isTerminal:true};
   await render();
   assert.equal(document.querySelector('[data-lynk-room]').disabled,true);
-  assert.equal(button('Start Lynk'),undefined);
+  assert.equal(button('Start event Lynk'),undefined);
+  assert.match(document.querySelector('[data-lynk-room]').textContent,/This Lynk has ended/);
   scenario.lynkHost = {isError:true,refetch:()=>scenario.retries.push('lynk')};
   scenario.lynkEntry = {isOpening:true,open:noop};
   await render();
   assert.equal(document.querySelector('[data-lynk-room]').disabled,true);
-  const retry=[...document.querySelectorAll('button')].find(b=>b.textContent==='Try again');
+  const retry=button('Retry waiting room');
+  assert.ok(retry, 'real event card exposes waiting-room retry');
   await click(retry);assert.deepEqual(scenario.retries,['lynk']);
 });
 
+
+test('signed-out event Lynk CTA returns to the linked room without invoking entry', async () => {
+  scenario.eventQuery = query({...fixtureEvent,lynkRoomId:'fixture-room'});
+  scenario.lynkEntry = {isOpening:false,open:()=>{throw new Error('signed-out entry must not execute')}};
+  await render();
+  await click(button('Sign in to join'));
+  assert.equal(scenario.navigation.length,1);
+  assert.match(decodeURIComponent(scenario.navigation[0]),/\/feed\/sneaky-lynk\/room\/fixture-room/);
+});
 
 test('delayed admission and service tiers are absent, while sold-out and ended tiers remain', async () => {
   const later = { ...paid, id: 'later', name: 'Delayed admission', sale_start: '2099-01-01T00:00:00Z' };

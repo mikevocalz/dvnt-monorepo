@@ -1,3 +1,4 @@
+import { EventLynkSetup } from "./ui/EventLynkSetup.web";
 import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
 import { shouldDiscardPreparedRoom } from "@dvnt/app/lib/events/event-publish-error";
 import { prepareEventLynkRoom } from "@dvnt/app/lib/events/prepare-event-lynk-room";
@@ -1083,27 +1084,7 @@ export function CreateEventScreen() {
               </Field>
 
               <Field label="Sneaky Lynk room">
-                <label className="flex items-start gap-3 rounded-xl bg-white/[0.04] px-4 py-3">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-[#8A40CF]"
-                    checked={s.attachLynkRoom}
-                    onChange={(e) => s.setAttachLynkRoom(e.target.checked)}
-                  />
-                  <span className="flex-1">
-                    <span className="block text-sm font-medium text-white">
-                      Host this event in a Sneaky Lynk
-                    </span>
-                    {/* Says what it DOES, not what it is. A checkbox whose
-                        consequence is a second object being created has to
-                        name that consequence before the tap, not after. */}
-                    <span className="mt-0.5 block text-xs text-white/55">
-                      Creates a private video room. Guests RSVP and wait until you start
-                      it from the event page. Leave ticket sales off for free entry.
-                      Your Sneaky Lynk hosting plan’s time and capacity limits still apply.
-                    </span>
-                  </span>
-                </label>
+                <EventLynkSetup enabled={s.attachLynkRoom} onChange={s.setAttachLynkRoom} />
               </Field>
 
               <Field label="YouTube video (optional)">
@@ -1499,6 +1480,7 @@ export function CreateEventScreen() {
                 </div>
               </div>
             </div>
+            {s.attachLynkRoom ? <div className="mt-3"><EventLynkSetup enabled /></div> : null}
             {s.ticketingEnabled ? (
               <div className="mt-2 text-sm text-white/60">
                 {parseFloat(s.ticketPrice) > 0

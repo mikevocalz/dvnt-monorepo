@@ -1,4 +1,5 @@
 "use client";
+import { EventLynkSetup } from "./ui/EventLynkSetup.web";
 import { EventFollowupSettings } from "./ui/followup-settings.web";
 import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
 import { eventTypeOptions } from "@dvnt/app/lib/events/event-type";
@@ -983,6 +984,7 @@ export function EventEditScreen() {
               {eventVisibilityCopy(s.visibility).helper}
             </p>
           </FormField>
+          {s.lynkRoomId ? <div className="mb-4"><EventLynkSetup enabled linked /></div> : null}
           <EventAttendanceField
             eventType={s.category}
             lynkRoomId={s.lynkRoomId}

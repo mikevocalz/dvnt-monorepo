@@ -1,71 +1,74 @@
-/**
- * useEventLynkWaitingRoom
- *
- * Runs while a guest sits in an event Lynk's waiting room. Every
- * EVENT_LYNK_WAIT_POLL_MS it heartbeats event-lynk-room "wait", which keeps
- * the guest on the host's waiting list. When the host starts the room the
- * answer flips to admitted and `onAdmitted` fires once; the caller then runs
- * its normal join (video_join_room), so bans, capacity and verification
- * still apply.
- *
- * Callback held in a ref, interval owned
- * here, torn down on unmount or when `enabled` goes false.
- */
-import { useEffect, useRef } from "react";
+/** Event readiness is not admission: normal room access/capacity checks still run. */
+import { useCallback, useEffect, useRef, useState } from "react";
 import { eventLynkApi } from "@dvnt/app/lib/api/event-lynk";
 import { getSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
 import { EVENT_LYNK_WAIT_POLL_MS, isEventLynkWaitRefusal } from "@dvnt/app/lib/events/event-lynk";
 
+export type EventWaitingStatus = "checking" | "waiting" | "reconnecting" | "ready" | "stopped";
 interface Options {
   roomId: string | undefined;
   enabled: boolean;
   onAdmitted: () => void;
-  /** A refusal that is not "keep waiting" (ticket refunded, event cancelled). */
   onRefused?: (message: string) => void;
 }
 
 export function useEventLynkWaitingRoom({ roomId, enabled, onAdmitted, onRefused }: Options) {
+  const [status, setStatus] = useState<EventWaitingStatus>("checking");
   const current = useRef({ roomId, enabled });
   current.current = { roomId, enabled };
-  const onAdmittedRef = useRef(onAdmitted);
-  onAdmittedRef.current = onAdmitted;
-  const onRefusedRef = useRef(onRefused);
-  onRefusedRef.current = onRefused;
+  const callbacks = useRef({ onAdmitted, onRefused });
+  callbacks.current = { onAdmitted, onRefused };
+  const cancelRef = useRef<() => void>(() => {});
+  const retryRef = useRef<() => void>(() => {});
+  // Synchronous cancellation closes the response/navigation race, before unmount.
+  const cancel = useCallback(() => cancelRef.current(), []);
+  const retry = useCallback(() => retryRef.current(), []);
 
   useEffect(() => {
     if (!enabled || !roomId) return;
     let cancelled = false;
+    let pending = false;
     const epoch = getSessionLifecycle().epoch;
     const isCurrent = () => !cancelled && current.current.enabled &&
       current.current.roomId === roomId && getSessionLifecycle().epoch === epoch;
     let timer: ReturnType<typeof setTimeout> | null = null;
-
+    const stop = () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+    cancelRef.current = () => { stop(); setStatus("stopped"); };
+    setStatus("checking");
     const beat = async () => {
-      if (!isCurrent()) return;
+      if (!isCurrent() || pending) return;
+      if (timer) clearTimeout(timer);
+      pending = true;
       try {
         const res = await eventLynkApi.wait(roomId);
         if (!isCurrent()) return;
         if (res.admitted) {
-          onAdmittedRef.current();
+          stop();
+          setStatus("ready");
+          callbacks.current.onAdmitted();
           return;
         }
+        setStatus("waiting");
       } catch (err) {
         if (!isCurrent()) return;
-        // A network blip keeps the guest waiting; the next beat retries. A
-        // refusal from the server carries a message worth showing.
-        const message = err instanceof Error ? err.message : "";
         if (isEventLynkWaitRefusal(err)) {
-          onRefusedRef.current?.(message || "This event's Lynk is no longer available to your account.");
+          stop();
+          setStatus("stopped");
+          callbacks.current.onRefused?.(err instanceof Error && err.message || "This event's Lynk is no longer available to your account.");
           return;
         }
+        setStatus("reconnecting");
+      } finally {
+        pending = false;
       }
-      timer = setTimeout(beat, EVENT_LYNK_WAIT_POLL_MS);
+      if (isCurrent()) timer = setTimeout(beat, EVENT_LYNK_WAIT_POLL_MS);
     };
+    retryRef.current = () => { if (isCurrent() && !pending) { setStatus("checking"); void beat(); } };
     void beat();
-
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
+    return stop;
   }, [enabled, roomId]);
+  return { status, cancel, retry };
 }

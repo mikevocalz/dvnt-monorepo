@@ -38,11 +38,11 @@ const mocks = {
   '@dvnt/app/lib/api/organizer': `export const organizerApi={getStatus:async()=>({})};`,
   '@dvnt/app/features/sneaky-lynk/api/supabase': `export const sneakyLynkApi={};`,
   '@dvnt/app/lib/server-upload': `export const uploadToServer=()=>{throw Error('upload forbidden')};`,
-  '@dvnt/app/lib/api/privileged': `export const inviteEventGuests=()=>{};`,
+  '@dvnt/app/lib/api/privileged': `export const inviteEventGuests=()=>{}; export const syncAuthUser=()=>{throw Error('auth sync forbidden in editor layout test')};`,
   '@dvnt/app/lib/api/users': `export const usersApi={searchUsers:async()=>[]};`,
   '@dvnt/app/lib/api/events': `export const eventsApi={};`,
   '@dvnt/app/lib/api/event-drafts': `export const eventDraftsApi={saveCurrent:async()=>({revision:1})};`,
-  '@dvnt/app/lib/auth-client': `export const getAuthToken=async()=>{throw Error('network forbidden in layout test')};`,
+  '@dvnt/app/lib/auth-client': `export const getAuthToken=async()=>{throw Error('network forbidden in layout test')}; export const getSession=getAuthToken; export const resumeAuthSession=getAuthToken;`,
   '@dvnt/app/lib/auth/identity': `export const getAuthIdFromStore=()=> 'fixture-owner'; export const requireBetterAuthToken=()=> {throw Error('network forbidden')};`,
   '@dvnt/app/lib/stores/event-guest-store': `import {create} from 'zustand'; export const useEventGuestStore=create(()=>({guests:[],results:[],search:'',loading:false,load:async()=>{},reset:()=>{}}));`,
   '@dvnt/ui': `export {FormField} from '${root}/packages/ui/src/form/FormField.web'; export {StickySaveBar} from '${root}/packages/ui/src/form/StickySaveBar.web'; export const useDirtyGuard=()=>{}; export {VenueSearchInput} from '${root}/packages/ui/src/VenueSearchInput';`,
@@ -53,11 +53,16 @@ const mocks = {
 (async()=>{
   let browser, server, page;
   try {
-    await build({bundle:true,jsx:'automatic',tsconfigRaw:{},platform:'browser',format:'iife',outfile:path.join(dir,'app.js'),
+    const built=await build({metafile:true,bundle:true,jsx:'automatic',tsconfigRaw:{},platform:'browser',format:'iife',outfile:path.join(dir,'app.js'),
       nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),
+      // Match Next's platform resolution; web fixtures must never resolve native defaults.
+      resolveExtensions:['.web.ts','.web.tsx','.web.js','.tsx','.ts','.jsx','.js','.json'],
       alias:{'@dvnt/app':path.join(root,'packages/app'),'react-native':'react-native-web'},
       plugins:[{name:'editor-boundaries',setup(b){b.onResolve({filter:/.*/},args=>{
-        const key=mocks[args.path]?args.path:Object.keys(mocks).find(key=>key.startsWith('@dvnt/app/')&&args.path===path.join(root,'packages/app',key.slice('@dvnt/app/'.length)));
+        // Production helpers use relative imports too (e.g. continuation-guard ->
+        // auth-store). Route both spellings to the same auth/storage boundary.
+        const absolute=args.path.startsWith('.')?path.resolve(args.resolveDir,args.path):args.path;
+        const key=mocks[args.path]?args.path:Object.keys(mocks).find(key=>key.startsWith('@dvnt/app/')&&absolute===path.join(root,'packages/app',key.slice('@dvnt/app/'.length)));
         if(key)return {path:key,namespace:'mock'};
       });b.onLoad({filter:/.*/,namespace:'mock'},args=>({contents:mocks[args.path],loader:'tsx',resolveDir:root}));}}],
       stdin:{resolveDir:root,loader:'tsx',contents:`
@@ -72,11 +77,14 @@ const mocks = {
           useEffect(()=>{fixture.mounts++},[]);
           return <AppShell><WebAppShell>{path.includes('edit-event')?<EventEditScreen/>:path==='/feed/events/create'?<CreateEventScreen/>:<h1>Feed fixture</h1>}</WebAppShell></AppShell>;
         } createRoot(document.getElementById('root')).render(<React.StrictMode><App/></React.StrictMode>);`}});
+    const inputs=Object.keys(built.metafile.inputs);
+    assert.ok(inputs.some(file=>file.endsWith('/EventLynkSetup.web.tsx')), 'real web Lynk setup is mounted, not mocked');
+    assert.equal(inputs.some(file=>/features\/live-surface\/native\/|lib\/auth-client\.ts$|lib\/stores\/auth-store\.ts$/.test(file)),false,'native graph and live authentication must not escape the fixture boundaries');
     // Compile production Tailwind classes with the production theme/preflight.
     const tw=path.dirname(require.resolve('tailwindcss/package.json'));
     const globals=read('apps/web/src/app/(frontend)/globals.css');
     const plain=globals.slice(globals.indexOf('/* ── Deviant brand tokens'));
-    const sources=['packages/app/features/events/event-create.web.tsx','packages/app/features/events/event-edit.web.tsx','packages/app/features/events/create/addons-editor.web.tsx','packages/app/features/events/ui/event-publication-picker.web.tsx','packages/app/features/events/ui/event-zone-picker.web.tsx','packages/app/components/web-app-shell.web.tsx','packages/ui/src/form/StickySaveBar.web.tsx','packages/ui/src/form/FormField.web.tsx'];
+    const sources=['packages/app/features/events/ui/EventLynkSetup.web.tsx','packages/app/features/events/event-create.web.tsx','packages/app/features/events/event-edit.web.tsx','packages/app/features/events/create/addons-editor.web.tsx','packages/app/features/events/ui/event-publication-picker.web.tsx','packages/app/features/events/ui/event-zone-picker.web.tsx','packages/app/components/web-app-shell.web.tsx','packages/ui/src/form/StickySaveBar.web.tsx','packages/ui/src/form/FormField.web.tsx'];
     const candidates=sources.flatMap(p=>read(p).match(/[a-zA-Z0-9_!@#%./:[\](),+*=&<>-]+/g)||[]);
     const compiler=await compile(fs.readFileSync(path.join(tw,'theme.css'),'utf8')+'\n'+fs.readFileSync(path.join(tw,'preflight.css'),'utf8')+'\n@tailwind utilities important;\n'+plain);
     fs.writeFileSync(path.join(dir,'style.css'),compiler.build(candidates));

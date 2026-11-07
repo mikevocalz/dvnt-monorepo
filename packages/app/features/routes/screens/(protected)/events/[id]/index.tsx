@@ -47,7 +47,6 @@ import {
   MoreHorizontal,
   Send,
   Ticket,
-  Radio,
   EyeOff,
 } from "lucide-react-native";
 import { publicationBadge } from "@dvnt/app/lib/events/event-publication";
@@ -128,7 +127,7 @@ import {
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
 import { canHostEventLynk } from "@dvnt/app/lib/events/event-lynk";
-import { EventLynkHostPanel } from "@dvnt/app/features/events/ui/EventLynkHostPanel";
+import { EventLynkCard } from "@dvnt/app/features/events/ui/EventLynkCard";
 import { canScanTickets } from "@dvnt/app/lib/events/event-role";
 import { eventEnded, eventSalesClosed } from "@dvnt/app/lib/events/event-time";
 import type {
@@ -1265,7 +1264,6 @@ function EventDetailScreenContent() {
     onError: (message) => showToast("error", "Couldn't open the Lynk", message),
   });
   const openEventLynk = lynkEntry.open;
-  const startEventLynk = lynkEntry.open;
 
   // ── WS-9 safe destructive flows ──────────────────────────────────
   // Cancel (auto-refund) / Postpone (reversible, no refunds) / Delete
@@ -2607,54 +2605,12 @@ function EventDetailScreenContent() {
             </View>
           )}
 
-          {/* ── Sneaky Lynk — the room this event is hosted in.
-                 Above the details on purpose: when an event HAS a room,
-                 "where do I go" outranks "what's the dress code". The card
-                 says it is private and that entry follows the event's list,
-                 because a guest who taps into a refusal learns that too
-                 late. */}
-          {(event as any).lynkRoomId ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                lynkHost.isTerminal ? "This Lynk has ended" : lynkEntry.isOpening ? "Opening Lynk" : mayHostLynk ? "Open your event's Lynk" : "Join the event's Lynk"
-              }
-              testID="event-lynk-room"
-              disabled={lynkEntry.isOpening || lynkHost.isTerminal}
-              accessibilityState={{ busy: lynkEntry.isOpening, disabled: lynkEntry.isOpening || lynkHost.isTerminal }}
-              onPress={() => void openEventLynk()}
-              className="mx-4 mb-4 flex-row items-center gap-3 rounded-2xl bg-card px-4 py-3 active:opacity-80"
-            >
-              <View className="w-10 h-10 rounded-xl bg-primary/20 items-center justify-center">
-                <Radio size={18} color="#8A40CF" />
-              </View>
-              <View className="flex-1">
-                <Text
-                  className="text-foreground font-semibold"
-                  numberOfLines={1}
-                >
-                  {lynkHost.isTerminal ? "This Lynk has ended" : lynkEntry.isOpening ? "Opening Lynk…" : mayHostLynk ? "Open your event's Lynk" : "Join the event's Lynk"}
-                </Text>
-                <Text className="text-xs text-muted-foreground mt-0.5">
-                  Private video room · only people on this event&apos;s list get
-                  in
-                </Text>
-              </View>
-            </Pressable>
-          ) : null}
-          {(event as any).lynkRoomId && mayHostLynk && lynkHost.isError ? (
-            <Pressable accessibilityRole="button" onPress={() => void lynkHost.refetch()} className="mx-4 mb-4">
-              <Text className="text-sm text-muted-foreground">Couldn&apos;t load the waiting room. Tap to retry.</Text>
-            </Pressable>
-          ) : null}
-          {(event as any).lynkRoomId && mayHostLynk && lynkHost.view && !lynkHost.isTerminal ? (
-            <EventLynkHostPanel
-              waiting={lynkHost.view.waiting}
-              count={lynkHost.view.count}
-              isLive={lynkHost.isLive}
-              isStarting={lynkEntry.isOpening}
-              onStart={() => void startEventLynk()}
-            />
+          {event.lynkRoomId ? (
+            <EventLynkCard roomId={event.lynkRoomId} signedIn={!!user?.id}
+              mayHost={mayHostLynk} view={lynkHost.view} isLoading={lynkHost.isLoading}
+              isError={lynkHost.isError} isLive={lynkHost.isLive} isTerminal={lynkHost.isTerminal}
+              isOpening={lynkEntry.isOpening} onOpen={() => void openEventLynk()}
+              onRetry={() => void lynkHost.refetch()} />
           ) : null}
 
           {/* ── 4. COLLAPSIBLE EVENT DETAILS ─────────────────────── */}

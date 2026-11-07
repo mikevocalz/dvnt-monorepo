@@ -27,6 +27,8 @@ on:
       - 'scripts/test-event-lynk-terminal-start.cjs'
       - 'scripts/test-event-lynk-admission-window.cjs'
       - 'scripts/test-event-lynk-waiting-room.cjs'
+      - 'scripts/test-event-lynk-lobby-presentation.cjs'
+      - 'scripts/test-event-lynk-lobby-browser.cjs'
       - 'scripts/test-event-lynk-entry-hooks.cjs'
       - 'scripts/test-lynk-native-links.cjs'
       - 'scripts/test-lynk-native-auth-callbacks.cjs'
@@ -106,6 +108,8 @@ on:
       - 'scripts/test-event-lynk-terminal-start.cjs'
       - 'scripts/test-event-lynk-admission-window.cjs'
       - 'scripts/test-event-lynk-waiting-room.cjs'
+      - 'scripts/test-event-lynk-lobby-presentation.cjs'
+      - 'scripts/test-event-lynk-lobby-browser.cjs'
       - 'scripts/test-event-lynk-entry-hooks.cjs'
       - 'scripts/test-lynk-native-links.cjs'
       - 'scripts/test-lynk-native-auth-callbacks.cjs'
@@ -193,6 +197,7 @@ jobs:
           node --test scripts/test-event-lynk-terminal-start.cjs scripts/test-event-lynk-admission-window.cjs apps/mobile/supabase/functions/event-lynk-room/index.test.cjs apps/mobile/supabase/functions/video_join_room/event-host.test.cjs apps/mobile/supabase/functions/lynk-cohost-invite/event-access.test.cjs
           node scripts/test-event-lynk-entry-hooks.cjs
           node scripts/test-event-lynk-waiting-room.cjs
+          node scripts/test-event-lynk-lobby-presentation.cjs
           node scripts/test-lynk-entry-identity.cjs
           node scripts/test-lynk-cohost-invites.cjs
           node scripts/test-lynk-cohost-api.cjs

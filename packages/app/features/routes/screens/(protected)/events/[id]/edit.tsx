@@ -1,3 +1,4 @@
+import { EventLynkSetup } from "@dvnt/app/features/events/ui/EventLynkSetup";
 import { EventFollowupSettings } from "@dvnt/app/features/events/ui/followup-settings.native";
 import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
 import { eventTypeOptions } from "@dvnt/app/lib/events/event-type";
@@ -1403,6 +1404,7 @@ function EditEventScreenContent() {
               {eventVisibilityCopy(visibility).helper}
             </Text>
           </View>
+          {lynkRoomId ? <View className="mb-4"><EventLynkSetup enabled linked /></View> : null}
           <EventAttendanceField
             eventType={category}
             lynkRoomId={lynkRoomId}

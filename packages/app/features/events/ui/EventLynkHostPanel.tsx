@@ -1,14 +1,13 @@
 /**
  * Host-only panel on the event's Lynk card: who is in the waiting room, and
- * the Start button that opens the room for all of them.
+ * a bounded waiting roster. Admission remains server-authoritative.
  *
  * The room opens only when a host presses Start (event-lynk-room). Guests who
  * arrive earlier wait and join on their own once it starts.
  */
 import React, { memo } from "react";
-import { View, Text, Pressable, ActivityIndicator } from "react-native";
-import { Image } from "expo-image";
-import { LegendList } from "@dvnt/app/components/list";
+import { View, Text, Pressable, ActivityIndicator, ScrollView } from "react-native";
+import { eventLynkWaitingLabel } from "./event-lynk-card-model";
 import type { EventLynkWaiter } from "@dvnt/app/lib/api/event-lynk";
 import { waitingSinceLabel } from "@dvnt/app/lib/events/event-lynk";
 
@@ -17,26 +16,12 @@ const AVATAR = 32;
 const LIST_MAX_HEIGHT = 196;
 
 const WaiterRow = memo(function WaiterRow({ waiter }: { waiter: EventLynkWaiter }) {
-  const name = waiter.displayName || waiter.username || "Guest";
+  const name = "Member waiting";
   return (
     <View className="flex-row items-center gap-3 py-1.5">
-      {waiter.avatar ? (
-        <Image
-          source={{ uri: waiter.avatar }}
-          style={{ width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2 }}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-        />
-      ) : (
-        <View
-          className="bg-secondary items-center justify-center"
-          style={{ width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2 }}
-        >
-          <Text className="text-xs font-semibold text-muted-foreground">
-            {name.slice(0, 1).toUpperCase()}
-          </Text>
-        </View>
-      )}
+      <View accessible={false} className="bg-secondary items-center justify-center" style={{ width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2 }}>
+        <Text className="text-xs text-muted-foreground">•</Text>
+      </View>
       <Text className="flex-1 text-sm text-foreground" numberOfLines={1}>
         {name}
       </Text>
@@ -53,28 +38,27 @@ export function EventLynkHostPanel({
   isLive,
   isStarting,
   onStart,
+  showStart = true,
 }: {
   waiting: EventLynkWaiter[];
   count: number;
   isLive: boolean;
   isStarting: boolean;
   onStart: () => void;
+  showStart?: boolean;
 }) {
   if (isLive) return null;
   return (
-    <View className="mx-4 -mt-2 mb-4 rounded-2xl bg-card px-4 py-3" testID="event-lynk-host-panel">
-      <View className="flex-row items-center justify-between">
+    <View className="border-t border-border px-5 py-4" testID="event-lynk-host-panel">
+      <View className="flex-row flex-wrap items-center justify-between gap-3">
         <Text className="text-sm font-semibold text-foreground" accessibilityLiveRegion="polite">
-          {count === 0
-            ? "No one waiting yet"
-            : count === 1
-              ? "1 person waiting"
-              : `${count} people waiting`}
+          {eventLynkWaitingLabel(count)}
         </Text>
-        <Pressable
+        {showStart ? <Pressable
           accessibilityRole="button"
           accessibilityLabel="Start the Lynk"
           accessibilityState={{ busy: isStarting, disabled: isStarting }}
+          style={{ minHeight: 44 }}
           disabled={isStarting}
           onPress={onStart}
           testID="event-lynk-start"
@@ -84,22 +68,16 @@ export function EventLynkHostPanel({
           <Text className="text-sm font-semibold text-primary-foreground">
             {isStarting ? "Starting" : "Start Lynk"}
           </Text>
-        </Pressable>
+        </Pressable> : null}
       </View>
       <Text className="mt-1 text-xs text-muted-foreground">
-        Guests wait here until you start. Everyone waiting joins when you do.
+        Host-only waiting count. Identities stay private.
       </Text>
-      {count > 0 ? (
-        <View style={{ maxHeight: LIST_MAX_HEIGHT, marginTop: 8 }}>
-          <LegendList
-            data={waiting}
-            keyExtractor={(w) => w.userId}
-            renderItem={({ item }) => <WaiterRow waiter={item} />}
-            estimatedItemSize={44}
-            recycleItems
-          />
-        </View>
-      ) : null}
+      {waiting.length > 0 ? (
+        <ScrollView nestedScrollEnabled style={{ maxHeight: LIST_MAX_HEIGHT, marginTop: 12 }} accessibilityLabel="People waiting for this event Lynk">
+          {waiting.map(waiter => <WaiterRow key={waiter.userId} waiter={waiter} />)}
+        </ScrollView>
+      ) : <Text className="mt-4 text-sm leading-5 text-muted-foreground">You can start when you’re ready. Eligible guests will arrive here before the room opens.</Text>}
     </View>
   );
 }

@@ -1,6 +1,6 @@
 # Exact room links and event-linked rooms
 
-This increment extends the whole-experience work on draft PR #250. It is source-only until an approved rollout. It does not add public or signed-out Lynk participation.
+This increment shipped in PR #250 (merge `0cec75d3dcc3179b0afab86a8547ffa143dedde4`), with its backend migrations and functions deployed before the web release. It does not add public or signed-out Lynk participation. Follow-up event UX and waiting-response privacy work is documented separately in [event experience polish](event-experience-polish.md).
 
 ## Shared links and sign-in
 
@@ -20,9 +20,9 @@ This increment extends the whole-experience work on draft PR #250. It is source-
 - Waiting handles cancelled/ended events and lost session/access as terminal states. Transient failures remain retryable, and late room/account responses cannot navigate or update a newer wait.
 - Scheduled cohost invitation cards use the event-adjusted availability window. Guest participation still goes through authoritative ban, access and atomic capacity checks.
 
-## Required rollout order
+## PR #250 rollout order (completed)
 
-No migration or function has been applied by this work. Before deploying the updated callers:
+The approved rollout applied these migrations and deployed the updated functions before the web client:
 
 1. Confirm the existing lifecycle rollout prerequisite: `20261029145200_event_lynk_lifecycle_guards.sql`, then the updated lifecycle sweep verified, then `20261029145300_event_lynk_scheduled_expiry.sql`.
 2. Apply `20261107150000_event_lynk_atomic_admission_window.sql`.
@@ -35,6 +35,6 @@ A missing atomic-start RPC fails closed; there is no unsafe direct-write fallbac
 
 The regression workflow includes actual routing configuration, mounted auth screens, native link processing, current-room entry/capture guards, event handler fixtures, real SQL functions in isolated PGlite, and production entry/waiting hooks with service boundaries adapted. Focused Chromium coverage includes exact shared/clipboard URLs, signed-out/loading/invalid entry, cancellation and status-only auth revocation. Existing review links, live-photo handoff and signup entry are retained as compatibility checks. Final counts and exact-head CI results are recorded on the pull request.
 
-PGlite uses a single connection, so true multi-session PostgreSQL lock contention has not been stress-tested. Full native typecheck is blocked in this environment by missing Expo configuration/dependencies; focused type and syntax checks are not an installed-app build. WebKit is unavailable here. Physical iOS/Android universal links, Safari, OAuth provider interaction, Bluetooth, live audible calls, real multi-device reconnects and concurrent 10–30-person performance remain unverified/deferred.
+PGlite uses a single connection, so true multi-session PostgreSQL lock contention has not been stress-tested. Full native typecheck passed in PR #250 CI; the local environment lacks the complete Expo dependencies. Focused native fixtures are not an installed-app build. Physical Safari behavior remains unverified. Physical iOS/Android universal links, Safari, OAuth provider interaction, Bluetooth, live audible calls, real multi-device reconnects and concurrent 10–30-person performance remain unverified/deferred.
 
-The live Android association file still contains a placeholder signing fingerprint. A verified release signing fingerprint and approved deployment are required before claiming Android app-link verification. Existing live web aliases and iOS association paths do not all match this source update yet. No production parity or superiority claim is made.
+The live Android association file still contains a placeholder signing fingerprint. A verified release signing fingerprint and approved deployment are required before claiming Android app-link verification. The released web aliases and iOS association paths were verified; installed iOS opening remains unverified. No production parity or superiority claim is made.

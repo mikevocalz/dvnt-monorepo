@@ -16,7 +16,8 @@
  *   action "list"  (host only, body { event_id })
  *     Lifecycle state plus the guests seen in the last WAITING_FRESH_MS.
  *
- *   action "start" (host only, body { event_id })
+ *   action "start_bound" (host only, body { event_id, expected_room_id })
+ *   Legacy action "start" accepts body { event_id }.
  *     scheduled/ready -> live. Idempotent: a second start answers 200 with
  *     started: false. Refused for a cancelled or ended event and for a room
  *     that has ended. Marks every waiting guest admitted; it never writes
@@ -121,8 +122,10 @@ async function handleWait(req: Request, db: any, actor: string, body: any) {
 }
 
 async function loadHostedEvent(req: Request, db: any, actor: string, body: any) {
-  const eventId = Number(body.event_id);
-  if (!Number.isInteger(eventId) || eventId <= 0) return { res: fail(req, 400, "event_id required") };
+  const rawEventId = body.event_id;
+  const eventId = typeof rawEventId === "number" ||
+    (typeof rawEventId === "string" && /^[1-9]\d*$/.test(rawEventId)) ? Number(rawEventId) : NaN;
+  if (!Number.isSafeInteger(eventId) || eventId <= 0) return { res: fail(req, 400, "event_id required") };
   const { data: event, error } = await db.from("events").select(EVENT_COLUMNS)
     .eq("id", eventId).maybeSingle();
   if (error) throw new ReadError("event");
@@ -159,36 +162,36 @@ async function handleList(req: Request, db: any, actor: string, body: any) {
   }
   const since = new Date(Date.now() - WAITING_FRESH_MS).toISOString();
   const { data: rows, error } = await db.from("event_lynk_waiting")
-    .select("user_id,joined_at,last_seen_at").eq("event_id", event.id)
+    .select("joined_at,last_seen_at").eq("event_id", event.id)
     .is("admitted_at", null).gte("last_seen_at", since)
     .order("joined_at", { ascending: true }).limit(200);
   if (error) throw new ReadError("waiting list");
-  const ids = (rows || []).map((r: any) => String(r.user_id));
-  const profiles = new Map<string, any>();
-  if (ids.length) {
-    const { data: users, error: usersError } = await db.from("users")
-      .select("auth_id,username,first_name,last_name,avatar:avatar_id(url)")
-      .in("auth_id", ids);
-    if (usersError) throw new ReadError("users");
-    for (const u of users || []) profiles.set(String(u.auth_id), u);
-  }
-  const waiting = (rows || []).map((r: any) => {
-    const u = profiles.get(String(r.user_id));
-    const name = [u?.first_name, u?.last_name].filter(Boolean).join(" ").trim();
-    return {
-      userId: String(r.user_id),
-      username: u?.username ?? null,
-      displayName: name || u?.username || null,
-      avatar: u?.avatar?.url ?? null,
-      joinedAt: r.joined_at,
-    };
-  });
+  // Waiting happens before membership (and its anonymity choice) exists.
+  // Never resolve profiles or expose stable member identifiers in this roster.
+  const waiting = (rows || []).map((r: any, index: number) => ({
+    userId: `waiting-${index + 1}`,
+    username: null,
+    displayName: null,
+    avatar: null,
+    joinedAt: r.joined_at,
+  }));
   return json(req, { ok: true, state, count: waiting.length, waiting });
 }
 
 async function handleStart(req: Request, db: any, actor: string, body: any) {
   const { res, event } = await loadHostedEvent(req, db, actor, body);
   if (res) return res;
+  // Older clients omit this field. New clients bind their exact displayed room
+  // to the existing atomic RPC's expected-room check through this event snapshot.
+  if (body.action === "start_bound" || Object.prototype.hasOwnProperty.call(body, "expected_room_id")) {
+    if (typeof body.expected_room_id !== "string" ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(body.expected_room_id)) {
+      return fail(req, 400, "expected_room_id invalid", "invalid_room_id");
+    }
+    if (body.expected_room_id !== event.lynk_room_id) {
+      return fail(req, 409, "This event’s Lynk has changed. Refresh the event and try again.", "event_link_changed");
+    }
+  }
   // Starting opens the room to its guests, even before the host asks for media.
   // Apply the same current hosting policy as room creation and joining.
   const standing = await resolveCreatorStanding(db, actor);
@@ -205,7 +208,7 @@ async function handleStart(req: Request, db: any, actor: string, body: any) {
   if (!result.ok) {
     return fail(req, 409, result.message, result.reason, result.state ? { state: result.state } : {});
   }
-  return json(req, { ok: true, state: "live", started: result.started, admitted: result.admitted });
+  return json(req, { ok: true, state: "live", started: result.started, admitted: result.admitted, roomId: event.lynk_room_id });
 }
 
 Deno.serve(async (req: Request) => {
@@ -218,7 +221,7 @@ Deno.serve(async (req: Request) => {
   if (!actor) return fail(req, 401, "Unauthorized");
   const body = await req.json().catch(() => ({}));
   try {
-    if (body.action === "wait" || body.action === "start") {
+    if (body.action === "wait" || body.action === "start" || body.action === "start_bound") {
       const admission = await resolveVerifiedAdmission(db, actor);
       if (admission.state === "blocked") {
         const refusal = admissionRefusal(admission);
@@ -227,7 +230,7 @@ Deno.serve(async (req: Request) => {
     }
     if (body.action === "wait") return await handleWait(req, db, actor, body);
     if (body.action === "list") return await handleList(req, db, actor, body);
-    if (body.action === "start") return await handleStart(req, db, actor, body);
+    if (body.action === "start" || body.action === "start_bound") return await handleStart(req, db, actor, body);
     return fail(req, 400, "Unknown action");
   } catch (err) {
     console.error("[event-lynk-room] read failed:", (err as Error).message);
