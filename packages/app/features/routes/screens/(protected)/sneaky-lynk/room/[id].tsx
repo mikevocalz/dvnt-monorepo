@@ -1302,15 +1302,9 @@ function ServerRoom({
   });
   useSneakyLynkCaptureProtection(captureBroadcast.notifyLocalScreenshot);
   const connectionState =
-    videoRoom.connectionState.status === "idle"
-      ? "connecting"
-      : videoRoom.connectionState.status === "error"
+    videoRoom.connectionState.status === "error"
       ? "disconnected"
-      : (videoRoom.connectionState.status as
-          | "connecting"
-          | "connected"
-          | "reconnecting"
-          | "disconnected");
+      : videoRoom.connectionState.status;
   // The session machine owns "is this room live", and the observability seam
   // hangs off it — app-hang tracking and profiling are suppressed for exactly
   // as long as the session is up, rather than for as long as this component
