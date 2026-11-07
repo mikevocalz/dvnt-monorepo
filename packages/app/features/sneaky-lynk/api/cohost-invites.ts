@@ -14,7 +14,7 @@
  * can show a pending invite without a round trip through a function.
  */
 
-import { isOpenCohostInvitation } from "../cohost-invite-policy";
+import { isOpenCohostInvitation, type CohostEventWindow } from "../cohost-invite-policy";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { supabase, getBridgeRequestEpoch } from "@dvnt/app/lib/supabase/client";
 import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
@@ -81,7 +81,7 @@ export const lynkCohostInvites = {
     if (currentAuthId !== userId) throw new Error("Your account changed");
     const { data, error } = await supabase
       .from("lynk_cohost_invites")
-      .select("id, room_id, inviter_id, status, created_at, video_rooms(uuid, title, status, ends_at)")
+      .select("id, room_id, inviter_id, status, created_at, video_rooms(uuid, title, status, created_at, ends_at)")
       .eq("invitee_id", userId)
       .eq("status", "pending")
       .setHeader("x-dvnt-bridge-epoch", epoch)
@@ -93,10 +93,32 @@ export const lynkCohostInvites = {
       throw new Error("Couldn't load co-host invitations");
     }
 
+    // Event rooms may have an expired creation-time deadline but a current
+    // scheduled plan window. Use only event rows this account may already read;
+    // this presentation lookup grants no event admission or hosting authority.
+    const roomIds = [...new Set<string>((data ?? []).flatMap((row: any) =>
+      row.video_rooms?.status === "open" && row.video_rooms.uuid ? [String(row.video_rooms.uuid)] : []))];
+    const windows = new Map<string, CohostEventWindow>();
+    const ambiguous = new Set<string>();
+    if (roomIds.length) {
+      const { data: events, error: eventError } = await supabase.from("events")
+        .select("lynk_room_id, start_date, end_date, status")
+        .in("lynk_room_id", roomIds)
+        .setHeader("x-dvnt-bridge-epoch", epoch);
+      assertCurrent();
+      if (eventError) throw new Error("Couldn't load co-host invitations");
+      for (const event of events ?? []) {
+        const id = String(event.lynk_room_id);
+        if (windows.has(id)) ambiguous.add(id);
+        windows.set(id, event);
+      }
+    }
+
     return (data ?? [])
       // A room that ended takes its invites with it — showing "join" for a dead
       // room is the dead-end this flow exists to avoid.
-      .filter((r: any) => isOpenCohostInvitation(r.video_rooms))
+      .filter((r: any) => !ambiguous.has(r.video_rooms?.uuid) &&
+        isOpenCohostInvitation(r.video_rooms, Date.now(), windows.get(r.video_rooms?.uuid)))
       .map((r: any) => ({
         id: r.id,
         roomId: r.room_id,

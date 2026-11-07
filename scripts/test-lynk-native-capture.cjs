@@ -255,6 +255,9 @@ const dependency = (name) => require(resolve(name));
       return new Function(...Object.keys(scope), `return ${expression}`)(...Object.values(scope));
     }
     const serverSource = server.getText(ast);
+    const authModule = { exports: {} };
+    new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(__dirname, '../packages/app/features/sneaky-lynk/room-entry-auth.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(authModule, authModule.exports);
+    const consentAuthState = { user: { id: 'account' }, isAuthenticated: true, _hasHydrated: true, authStatus: 'authenticated' };
     const lockModule = { exports: {} };
     new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(__dirname, '../packages/app/features/sneaky-lynk/session/room-admission-lock.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(lockModule, lockModule.exports);
     assert.equal((serverSource.match(/videoRoom(?:Ref\.current)?\.join\(/g) || []).length, 1, 'all admission paths must use the consent wrapper');
@@ -275,7 +278,8 @@ const dependency = (name) => require(resolve(name));
       authIntentEpochRef: { current: 0 },
       withRoomAdmissionLock: lockModule.exports.withRoomAdmissionLock,
       fullRoomRetry: { stop() {} },
-      useAuthStore: { getState: () => ({ user: { id: 'account' } }) },
+      useAuthStore: { getState: () => consentAuthState },
+      authenticatedLynkAccount: authModule.exports.authenticatedLynkAccount,
       id: 'room',
       sneakyLynkApi: { leaveRoom: async () => ({ ok: true }) },
       queueRoomDeparture: async () => {},
@@ -330,6 +334,22 @@ const dependency = (name) => require(resolve(name));
       assert.equal(fixture.camera.starts, cameraBeforeAdmission);
       assert.equal(fixture.mic.starts, microphoneBeforeAdmission);
       assert.equal(cameraRequests + microphoneRequests, 0);
+
+      // A profile can stay cached when authentication is revoked. A late
+      // permission result cannot admit or enable media in that status-only gap.
+      let releasePermission;
+      const originalCameraRequest = scope.permissionsRef.current.requestCamPermission;
+      scope.permissionsRef.current.requestCamPermission = () => new Promise(resolve => { releasePermission = resolve; });
+      scope.desiredVideoEnabledRef.current = true;
+      let pendingAuthJoin;
+      await act(() => { pendingAuthJoin = joinReviewed(); });
+      consentAuthState.isAuthenticated = false;
+      await act(async () => { releasePermission(true); assert.equal(await pendingAuthJoin, false); });
+      assert.equal(admissionCalls, 2, 'status-only sign-out prevents dispatch after permission');
+      assert.equal(fixture.camera.starts, cameraBeforeAdmission);
+      consentAuthState.isAuthenticated = true;
+      scope.desiredVideoEnabledRef.current = false;
+      scope.permissionsRef.current.requestCamPermission = originalCameraRequest;
 
       scope.videoRoomRef.current.hostMuteLocked = true;
       await act(() => toggleMic());

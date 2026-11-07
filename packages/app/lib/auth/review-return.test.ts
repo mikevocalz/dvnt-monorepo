@@ -51,3 +51,36 @@ test('existing detail review sections survive setup without accepting query inst
     assert.equal(reviewReturnPath(raw), null);
   }
 });
+
+test('room intent survives required setup, newer links win, and cancellation/account changes discard it', () => {
+  const previous = globalThis.window;
+  const data = new Map<string, string>();
+  try {
+    globalThis.window = { sessionStorage: { getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => data.set(key, value), removeItem: (key: string) => data.delete(key) } } as any;
+    const first = '/feed/sneaky-lynk/room/first';
+    const latest = '/feed/sneaky-lynk/room/latest';
+    rememberReviewReturn('member-a', first + '?id=other&returnTo=%2Ffeed');
+    for (const path of ['/feed/onboarding/photo', '/feed/create', '/feed/camera', '/feed/crop-preview']) clearReviewReturnOutsideSetup(path);
+    assert.equal(consumeReviewReturn('member-a'), first);
+    assert.equal(consumeReviewReturn('member-a'), null, 'single-use');
+    rememberReviewReturn('member-a', first);
+    rememberReviewReturn('member-a', latest);
+    assert.equal(consumeReviewReturn('member-a'), latest);
+    rememberReviewReturn('member-a', first);
+    rememberReviewReturn('member-a', '/feed');
+    assert.equal(consumeReviewReturn('member-a'), null, 'a new unrelated setup entry cannot replay the old room');
+    rememberReviewReturn('member-a', first);
+    assert.equal(consumeReviewReturn('member-b'), null);
+    rememberReviewReturn('member-a', first);
+    clearReviewReturnOutsideSetup('/feed/events');
+    assert.equal(consumeReviewReturn('member-a'), null);
+    for (const savedAt of [Date.now() - 3600001, Date.now() + 60000]) {
+      data.set('dvnt:review-return', JSON.stringify({ userId: 'member-a', target: first, savedAt }));
+      assert.equal(consumeReviewReturn('member-a'), null);
+    }
+  } finally {
+    if (previous === undefined) delete (globalThis as any).window;
+    else globalThis.window = previous;
+  }
+});

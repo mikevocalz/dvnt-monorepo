@@ -85,7 +85,10 @@ export async function requestPasswordReset(email: string) {
   // function serves); fall back to the legacy alias for older servers.
   const fn = recoveryClient.requestPasswordReset ?? recoveryClient.forgetPassword;
   if (!fn) throw new Error("Password reset not available");
-  return fn({ email, redirectTo: AUTH_RECOVERY_REDIRECT });
+  const redirectTo = typeof window !== "undefined"
+    ? `${window.location.origin}${authPathWithReturn('/auth/reset-password', readReturnToFromUrl(''))}`
+    : AUTH_RECOVERY_REDIRECT;
+  return fn({ email, redirectTo });
 }
 
 export async function submitPasswordReset(newPassword: string, token?: string) {

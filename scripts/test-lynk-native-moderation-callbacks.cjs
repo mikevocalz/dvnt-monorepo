@@ -24,16 +24,17 @@ const deferred = () => { let resolve; const promise = new Promise((r) => { resol
   const accountBlock = extract('  useEffect(() => useAuthStore.subscribe((next, previous) => {', '\n\n  // Heartbeat the waiting room');
   assert.ok(screen.includes('onInviteToSpeak={handleInviteToSpeak}'), 'queue must await production confirmation instead of closing first');
   const f = global.__nativeModerationCallbacks = {
-    owner: 'account-a', roomId: 'room-a', alerts: [], toasts: [], cleared: [], calls: [], dispatched: [], listeners: new Set(), closes: 0,
+    owner: 'account-a', authenticated: true, roomId: 'room-a', alerts: [], toasts: [], cleared: [], calls: [], dispatched: [], listeners: new Set(), closes: 0,
   };
   const authStore = {
-    getState: () => ({ user: { id: f.owner, authId: f.owner } }),
+    getState: () => ({ user: { id: f.owner, authId: f.owner }, isAuthenticated: f.authenticated, _hasHydrated: true, authStatus: f.authenticated ? 'authenticated' : 'unauthenticated' }),
     subscribe: (listener) => { f.listeners.add(listener); return () => f.listeners.delete(listener); },
   };
   f.changeOwner = (owner) => {
     const previous = authStore.getState(); f.owner = owner;
     for (const listener of f.listeners) listener(authStore.getState(), previous);
   };
+  f.changeAuth = authenticated => {const previous=authStore.getState();f.authenticated=authenticated;for(const listener of f.listeners)listener(authStore.getState(),previous)};
   f.authStore = authStore;
   f.api = Object.fromEntries(['mutePeer', 'unmutePeer', 'kickUser', 'changeRole', 'muteAll', 'unmuteAll'].map((method) => [method, async (params, options) => {
     assert.equal(typeof options?.isCurrent, 'function', `${method} must guard token lookup`);
@@ -55,6 +56,7 @@ const deferred = () => { let resolve; const promise = new Promise((r) => { resol
     stdin: { resolveDir: rootDir, loader: 'tsx', contents: `
       import {useState, useRef, useCallback, useEffect} from 'react';
       import {participantModeration} from './packages/app/features/sneaky-lynk/ui/moderation-permissions';
+      import {authenticatedLynkAccount} from './packages/app/features/sneaky-lynk/room-entry-auth';
       const f=globalThis.__nativeModerationCallbacks;
       const useAuthStore=f.authStore, videoApi=f.api;
       const Alert={alert:(title,message,buttons,options)=>f.alerts.push({title,message,buttons,options})};
@@ -168,6 +170,7 @@ const deferred = () => { let resolve; const promise = new Promise((r) => { resol
       () => { f.room.isAdmitted = false; },
       () => { f.room.room.status = 'ended'; },
       () => { f.changeOwner('account-b'); f.changeOwner('account-a'); },
+      () => { f.changeAuth(false); f.changeAuth(true); },
     ]) {
       const savedParticipants = f.room.participants.map((member) => ({ ...member }));
       before = f.dispatched.length;
@@ -184,6 +187,7 @@ const deferred = () => { let resolve; const promise = new Promise((r) => { resol
       () => { target().role = 'host'; },
       () => setActor('participant'),
       () => { f.changeOwner('account-b'); f.changeOwner('account-a'); },
+      () => { f.changeAuth(false); f.changeAuth(true); },
     ]) {
       gate = deferred(); f.tokenGate = gate.promise; before = f.dispatched.length;
       await act(() => { pending = f.current.handleMutePeer('guest-0'); });
@@ -194,6 +198,7 @@ const deferred = () => { let resolve; const promise = new Promise((r) => { resol
 
     for (const invalidate of [
       () => { f.changeOwner('account-b'); f.changeOwner('account-a'); },
+      () => { f.changeAuth(false); f.changeAuth(true); },
       () => { f.refs.leavingRef.current = true; },
       () => { f.refs.closedReasonRef.current = 'closed'; },
       () => { f.room.isEjected = true; },

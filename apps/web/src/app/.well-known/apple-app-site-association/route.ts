@@ -30,6 +30,16 @@ export function GET() {
               { "/": "/e/*", comment: "Event share grammar (App Clip parity)" },
               { "/": "/events/*", comment: "Event pages" },
               { "/": "/u/*", comment: "Profile share grammar" },
+              // Room aliases must not intercept web creation/billing or Stripe
+              // callbacks that were not previously claimed as universal links.
+              ...["/sneaky-lynk/create", "/sneaky-lynk/billing", "/sneaky-lynk/room", "/sneaky/success", "/sneaky/cancel"].flatMap((path) => [
+                { "/": path, exclude: true, comment: "Keep non-room web flow" },
+                { "/": `${path}/`, exclude: true, comment: "Keep non-room web flow" },
+              ]),
+              { "/": "/sneaky-lynk/room/*", comment: "Exact Lynk room shares" },
+              { "/": "/sneaky-lynk/*", comment: "Lynk room web aliases" },
+              { "/": "/sl/*", comment: "Lynk short links" },
+              { "/": "/sneaky/*", comment: "Legacy Lynk links" },
               {
                 "/": "/tickets/guest/*",
                 comment: "Guest ticket links (share grammar)",

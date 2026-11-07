@@ -105,6 +105,8 @@ import { isActive } from "../session/machine";
 import { completePreJoin } from "../session/complete-prejoin";
 import { getRoomEntryIdentity, type RoomEntryIdentity } from "../api/room-entry-identity";
 import { roomShareCopy, shareRoomLink } from "../room-sharing";
+import { lynkRoomAppUrl, lynkRoomShareUrl, normalizeLynkRoomId } from "../room-links";
+import { authenticatedLynkAccount } from "../room-entry-auth";
 import { leaveRoomSafely } from "../session/leave-room";
 import { withRoomAdmissionLock } from "../session/room-admission-lock";
 import { useRoomHeartbeat } from "../hooks/useRoomHeartbeat";
@@ -407,7 +409,7 @@ function RoomInner({
   const router = useRouter();
   const authUser = useAuthStore((s) => s.user);
   const showToast = useUIStore((s) => s.showToast);
-  const accountKey = authUser?.authId || authUser?.id || "";
+  const accountKey = useAuthStore((state) => authenticatedLynkAccount(state) ?? "");
   const [admission, setAdmission] = useState<{ owner: string; user: SneakyUser } | null>(null);
   const admitted = admission?.owner === accountKey && !!accountKey;
   const endRoomHistory = useLynkHistoryStore((s) => s.endRoom);
@@ -550,10 +552,9 @@ function RoomInner({
     };
     document.addEventListener("visibilitychange", update);
     const unsubscribe = useAuthStore.subscribe((next, previous) => {
-      const owner = (user: typeof next.user) => user?.authId || user?.id || "";
-      if (owner(next.user) !== owner(previous.user)) {
+      if (authenticatedLynkAccount(next) !== authenticatedLynkAccount(previous)) {
         accountEpochRef.current += 1;
-        currentAccountKeyRef.current = owner(next.user);
+        currentAccountKeyRef.current = authenticatedLynkAccount(next) ?? "";
         fullRoomStopRef.current();
       }
     });
@@ -677,7 +678,7 @@ function RoomInner({
     setInitStarted(true);
     let cancelled = false;
     const ownerEpoch = accountEpochRef.current;
-    const isOwnerCurrent = () => roomMountedRef.current && accountEpochRef.current === ownerEpoch && currentAccountKeyRef.current === accountKey && (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === accountKey;
+    const isOwnerCurrent = () => roomMountedRef.current && accountEpochRef.current === ownerEpoch && currentAccountKeyRef.current === accountKey && authenticatedLynkAccount(useAuthStore.getState()) === accountKey;
     const fullAttempt = pendingFullRetryRef.current;
     pendingFullRetryRef.current = null;
     let fullAttemptSettled = false;
@@ -1031,10 +1032,9 @@ function RoomInner({
     // This observer outlives navigation until the queued departure settles.
     // New mounts share the lane, so an old leave cannot evict their admission.
     const unsubscribe = useAuthStore.subscribe((next, previous) => {
-      const key = (user: typeof next.user) => user?.authId || user?.id || "";
-      if (key(next.user) !== key(previous.user)) ownerUnchanged = false;
+      if (authenticatedLynkAccount(next) !== authenticatedLynkAccount(previous)) ownerUnchanged = false;
     });
-    const isOwnerCurrent = () => ownerUnchanged && (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === owner;
+    const isOwnerCurrent = () => ownerUnchanged && authenticatedLynkAccount(useAuthStore.getState()) === owner;
     return withRoomAdmissionLock(owner, id, async () => {
       if (isOwnerCurrent()) await sneakyLynkApi.leaveRoom(id, { isCurrent: isOwnerCurrent });
     }).finally(unsubscribe);
@@ -1085,8 +1085,12 @@ function RoomInner({
       currentAccountKeyRef.current === accountKey && shareContextRef.current.admitted && !shareContextRef.current.eject &&
       shareContextRef.current.status !== "ended";
     if (shareInFlightRef.current || !isCurrent()) return;
+    const url = lynkRoomShareUrl(id);
+    if (!url) {
+      showToast("info", "This space cannot be shared", "Create a Lynk to invite people into a shared room.");
+      return;
+    }
     shareInFlightRef.current = true;
-    const url = `https://dvntapp.live/sneaky-lynk/room/${encodeURIComponent(id)}`;
     const title = roomSnapshot?.title || paramTitle || getLynkDisplayName();
     const copy = roomShareCopy(title, roomSnapshot?.isPublic);
     try {
@@ -1355,7 +1359,7 @@ function RoomInner({
           </p>
 
           <a
-            href={`dvnt://sneaky-lynk/room/${id}`}
+            href={lynkRoomAppUrl(id) ?? undefined}
             className="w-full max-w-xs rounded-lg px-6 py-4 text-center font-bold text-black active:scale-95"
             style={{ backgroundColor: ACCENT }}
           >
@@ -1806,13 +1810,14 @@ function RoomShell({
 export function SneakyLynkRoomScreen() {
   const router = useRouter();
   const params = useParams();
-  const accountKey = useAuthStore((s) => s.user?.authId || s.user?.id || "");
+  const accountKey = useAuthStore((s) => authenticatedLynkAccount(s) ?? "");
+  const authSettled = useAuthStore((s) => s._hasHydrated && s.authStatus !== "loading");
   const [accountGeneration, setAccountGeneration] = useState(0);
   const entryAccountEpochRef = useRef(0);
   const entryExitedRef = useRef(false);
   const joinIntentRef = useRef(0);
   useEffect(() => useAuthStore.subscribe((next, previous) => {
-    if ((next.user?.authId || next.user?.id) === (previous.user?.authId || previous.user?.id)) return;
+    if (authenticatedLynkAccount(next) === authenticatedLynkAccount(previous)) return;
     entryAccountEpochRef.current += 1;
     joinIntentRef.current += 1;
     setAccountGeneration(value => value + 1);
@@ -1823,7 +1828,7 @@ export function SneakyLynkRoomScreen() {
       next.microphoneDeviceId !== previous.microphoneDeviceId) joinIntentRef.current += 1;
   }), []);
   const search = useSearchParams();
-  const id = String((params as any)?.id ?? "");
+  const id = normalizeLynkRoomId((params as any)?.id) ?? "";
   const paramTitle = search?.get("title") ?? undefined;
   const hasVideoParam = search?.get("hasVideo");
   const isHostParam = search?.get("isHost");
@@ -1844,7 +1849,7 @@ export function SneakyLynkRoomScreen() {
   const entryScope = useRoomEntryScope(scopeKey);
   const accountEpoch = entryAccountEpochRef.current;
   const isCurrentEntry = useCallback(() => !entryExitedRef.current && entryAccountEpochRef.current === accountEpoch &&
-    (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === accountKey && entryScope.isCurrent(),
+    authenticatedLynkAccount(useAuthStore.getState()) === accountKey && entryScope.isCurrent(),
   [accountKey, accountEpoch, entryScope.isCurrent]);
   const handleBack = useCallback(() => {
     entryExitedRef.current = true;
@@ -1874,8 +1879,12 @@ export function SneakyLynkRoomScreen() {
     setLookupFailed(false);
     setEntryIdentity({ kind: "choice" });
     const cleanup = () => { cancelled = true; clearTimeout(timeout); useRoomUIStore.getState().reset(); };
+    if (!accountKey) {
+      setPhase("looking-up");
+      return cleanup;
+    }
     if (!id) {
-      setClosed("This Lynk link is incomplete.");
+      setClosed("This Lynk link is incomplete or invalid. Ask the host for a new link.");
       return cleanup;
     }
     if (!shouldGateJoin) {
@@ -1932,6 +1941,17 @@ export function SneakyLynkRoomScreen() {
   );
 
   const roomTitle = roomSnapshot?.title || paramTitle || getLynkDisplayName();
+
+  if (!accountKey) {
+    return <RoomShell title={getLynkDisplayName()} onBack={handleBack}>
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+        <h1 className="text-xl font-semibold">{authSettled ? "Sign in to open this Lynk" : "Checking your account"}</h1>
+        <p role="status" className="max-w-sm text-sm leading-6 text-white/60">Sneaky Lynk is for signed-in members. Your camera and microphone stay off.</p>
+        {authSettled ? <button type="button" onClick={() => router.push(id ? `/auth/login?returnTo=${encodeURIComponent(`/feed/sneaky-lynk/room/${id}`)}` : "/auth/login")}
+          className="min-h-12 rounded-xl bg-[#3FDCFF] px-6 py-3 font-semibold text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Sign in</button> : null}
+      </div>
+    </RoomShell>;
+  }
 
   if (!entryScope.ready || phase === "looking-up") {
     return (

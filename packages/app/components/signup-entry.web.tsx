@@ -6,6 +6,7 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { getSession } from "@dvnt/app/lib/auth-client";
 import { authPathWithReturn, readReturnToFromUrl } from "@dvnt/app/lib/auth/return-to";
 import { hasSignupContinuation, clearSignupContinuation } from "@dvnt/app/lib/auth/signup-continuation";
+import { roomReturnPath } from "@dvnt/app/lib/auth/room-return";
 
 /** Decide once at entry, before mounting signup. Becoming authenticated during
  * account creation must not interrupt the existing ID/email verification flow. */
@@ -40,7 +41,8 @@ export function SignupEntry({ children }: { children: React.ReactNode }) {
         // Already-sent Join links are direct signup URLs. Only the explicit
         // login->signup handoff keeps a Rate action's destination on auth races.
         const fromLogin = new URLSearchParams(window.location.search).get("entry") === "login";
-        router.replace(fromLogin ? readReturnToFromUrl("/feed") : "/feed");
+        const destination = readReturnToFromUrl("/feed");
+        router.replace(fromLogin || roomReturnPath(destination) ? destination : "/feed");
       } else { clearSignupContinuation(); decided.current = true; setState("guest"); }
     }).catch(() => { if (active) setState("error"); });
     return () => { active = false; };

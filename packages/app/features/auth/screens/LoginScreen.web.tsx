@@ -15,6 +15,8 @@ import { syncAuthUser } from '../../../lib/api/privileged';
 import { auth } from '../../../lib/api/auth';
 import { isStaffReturnTo, loginPathWithReturn, readReturnToFromUrl, welcomePathWithReturn, authPathWithReturn } from '../../../lib/auth/return-to';
 import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
+import { captureAuthContinuation } from '../../../lib/auth/continuation-guard';
+import { getSessionLifecycle } from '../../../lib/auth/session-lifecycle';
 
 /**
  * Web login — mirrors the native sign-in screen (app/(auth)/login.tsx): the same
@@ -25,8 +27,18 @@ import { AUTH_PRIMARY_COLOR as P } from './AuthScreens.shared';
  */
 export function LoginScreen() {
   const { setUser } = useAuthStore();
-  const { isSubmitting, setSubmitting } = useLoginUiStore();
+  const { isSubmitting, beginSubmission, finishSubmission } = useLoginUiStore();
   const router = useRouter();
+  const active = useRef(true);
+  const submission = useRef<number | null>(null);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+      if (submission.current !== null) finishSubmission(submission.current);
+      submission.current = null;
+    };
+  }, [finishSubmission]);
 
   // Background video — the SAME live HLS stream as the landing hero
   // (HERO_VIDEO_PLAYLIST). Safari plays HLS natively; Chrome/Firefox via hls.js.
@@ -54,16 +66,28 @@ export function LoginScreen() {
   const form = useForm({
     defaultValues: { email: '', password: '' },
     onSubmit: async ({ value }) => {
-      setSubmitting(true);
+      const owner = beginSubmission();
+      if (owner === null) return;
+      submission.current = owner;
+      const entryPathname = window.location.pathname;
+      let continuation: ReturnType<typeof captureAuthContinuation> | undefined;
+      const stillCurrent = () => active.current && submission.current === owner &&
+        window.location.pathname === entryPathname &&
+        useLoginUiStore.getState().submission === owner && (!continuation || continuation.isCurrent());
       try {
         const { data, error } = await signIn.email({
           email: value.email,
           password: value.password,
         });
 
+        if (!stillCurrent()) return;
+
         if (error) throw new Error((error as any).message || 'Login failed');
 
         if (data?.user) {
+          const lifecycle = getSessionLifecycle();
+          if (!lifecycle.ready || (lifecycle.authId && lifecycle.authId !== data.user.id)) return;
+          continuation = captureAuthContinuation();
           // Sync user to the app's users table (creates row if needed), falling
           // back to a direct profile read — same as native.
           let profile: any;
@@ -75,6 +99,8 @@ export function LoginScreen() {
           }
 
           if (profile) {
+            if (!stillCurrent()) return;
+            continuation.release();
             setUser(hydrateAuthProfile(profile));
             // First login on this browser → welcome flow (identity + location
             // opt-in). The flow self-skips if the profile already has the data.
@@ -92,6 +118,7 @@ export function LoginScreen() {
           toast.error('Login Failed', { description: 'Could not load user profile' });
         }
       } catch (err: any) {
+        if (!stillCurrent()) return;
         console.error('[Login] Error:', err);
         if (err?.message?.includes('fetch') || err?.message?.includes('network')) {
           toast.error('Connection Error', {
@@ -102,8 +129,11 @@ export function LoginScreen() {
             description: err?.message || 'Something went wrong. Please try again.',
           });
         }
+      } finally {
+        continuation?.release();
+        finishSubmission(owner);
+        if (submission.current === owner) submission.current = null;
       }
-      setSubmitting(false);
     },
   });
 
@@ -165,7 +195,7 @@ export function LoginScreen() {
 
             <View style={styles.forgotRow}>
               <Pressable
-                onPress={() => router.push('/auth/forgot-password')}
+                onPress={() => router.push(authPathWithReturn('/auth/forgot-password', readReturnToFromUrl('')))}
                 accessibilityRole="link"
               >
                 <Text style={[styles.link, { color: P }]}>Forgot password?</Text>

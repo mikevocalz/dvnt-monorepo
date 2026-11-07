@@ -100,6 +100,9 @@ import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import { shareUrl } from "@dvnt/app/lib/deep-linking/share-link";
 import { roomShareCopy } from "@dvnt/app/features/sneaky-lynk/room-sharing";
+import { lynkRoomShareUrl, normalizeLynkRoomId } from "@dvnt/app/features/sneaky-lynk/room-links";
+import { authenticatedLynkAccount } from "@dvnt/app/features/sneaky-lynk/room-entry-auth";
+import { useDeepLinkStore } from "@dvnt/app/lib/stores/deep-link-store";
 import {
   DVNTLiquidGlass,
   DVNTLiquidGlassIconButton,
@@ -169,11 +172,6 @@ interface PresenceEvent {
   id: string;
   label: string;
   tone: PresenceTone;
-}
-
-function buildLynkShareUrl(roomId: string, hasVideo = false) {
-  const base = `https://dvntapp.live/sneaky-lynk/room/${roomId}`;
-  return hasVideo ? `${base}?hasVideo=1` : base;
 }
 
 function PresenceToast({ event }: { event: PresenceEvent }) {
@@ -499,11 +497,12 @@ function SneakyLynkRoomScreenContent({
 }) {
   // Capture protection lives inside the actual room. This entry screen never
   // joins or publishes until the person has reviewed their media choices.
-  const { id, title: paramTitle, hasVideo: hasVideoParam } = useLocalSearchParams<{
+  const { id: rawId, title: paramTitle, hasVideo: hasVideoParam } = useLocalSearchParams<{
     id: string;
     title?: string;
     hasVideo?: string;
   }>();
+  const id = normalizeLynkRoomId(rawId) ?? "";
   const router = useRouter();
   const navigation = useNavigation();
   const isFocused = useIsFocused();
@@ -512,7 +511,7 @@ function SneakyLynkRoomScreenContent({
   const [reviewGeneration, setReviewGeneration] = useState(0);
   const reviewEpochRef = useRef(0);
   const insets = useSafeAreaInsets();
-  const accountKey = useAuthStore((state) => state.user?.authId || state.user?.id || "");
+  const accountKey = useAuthStore((state) => authenticatedLynkAccount(state) ?? "");
   const [accountGeneration, setAccountGeneration] = useState(0);
   const accountEpochRef = useRef(0);
   const entryLifetimeRef = useRef(false);
@@ -533,7 +532,7 @@ function SneakyLynkRoomScreenContent({
   const renderedAccountEpoch = accountEpochRef.current;
   const isCurrentEntry = useCallback(() => entryLifetimeRef.current && !exitedRef.current &&
     entryKeyRef.current === entryKey && accountEpochRef.current === renderedAccountEpoch &&
-    (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === accountKey,
+    authenticatedLynkAccount(useAuthStore.getState()) === accountKey,
   [accountKey, entryKey, renderedAccountEpoch]);
 
   const renderedReviewEpoch = reviewEpochRef.current;
@@ -556,7 +555,7 @@ function SneakyLynkRoomScreenContent({
     return () => { entryLifetimeRef.current = false; joinIntentRef.current += 1; };
   }, []);
   useEffect(() => useAuthStore.subscribe((next, previous) => {
-    if ((next.user?.authId || next.user?.id) === (previous.user?.authId || previous.user?.id)) return;
+    if (authenticatedLynkAccount(next) === authenticatedLynkAccount(previous)) return;
     // A → B → A can happen before React renders. Never revive a lookup,
     // verification callback or media choice from the previous account session.
     accountEpochRef.current += 1;
@@ -585,7 +584,7 @@ function SneakyLynkRoomScreenContent({
   currentLookupRef.current = currentLookup;
 
   useEffect(() => {
-    if (!isServerRoom || !isCurrentEntry()) return;
+    if (!accountKey || !id || !isServerRoom || !isCurrentEntry()) return;
     let active = true;
     const isCurrent = () => active && isCurrentEntry();
     lookupBusyRef.current = true;
@@ -626,8 +625,12 @@ function SneakyLynkRoomScreenContent({
   const handleBack = useCallback(() => {
     exitedRef.current = true;
     joinIntentRef.current += 1;
+    const pending = useDeepLinkStore.getState().pendingLink;
+    if (pending?.params.id === id && pending.routerPath.includes("/sneaky-lynk/room/")) {
+      useDeepLinkStore.getState().setPendingLink(null);
+    }
     router.replace(LYNKS_LIST_ROUTE);
-  }, [router]);
+  }, [id, router]);
   const handleRetryLookup = useCallback(() => {
     if (!isCurrentEntry() || lookupBusyRef.current) return;
     lookupBusyRef.current = true;
@@ -651,6 +654,14 @@ function SneakyLynkRoomScreenContent({
     });
   }, [entryKey, guardVerified, isCurrentReview, roomHasVideo]);
 
+  if (!accountKey) {
+    return <ClosedRoomScreen roomTitle={getLynkDisplayName()}
+      message="Sign in to open this Lynk. Your camera and microphone stay off." onBack={handleBack} />;
+  }
+  if (!id) {
+    return <ClosedRoomScreen roomTitle={getLynkDisplayName()}
+      message="This Lynk link is incomplete or invalid. Ask the host for a new link." onBack={handleBack} />;
+  }
   if (isServerRoom && (!currentLookup || currentLookup.status !== "ready")) {
     const error = currentLookup?.status === "error" ? currentLookup.error : null;
     return (
@@ -882,28 +893,6 @@ function LocalRoom({
     setShowTimesUpPaywall(true);
   }, [isPaidHost]);
 
-  const handleShare = useCallback(async () => {
-    const shareTargetUrl = buildLynkShareUrl(id, roomHasVideo);
-    const shareResult = await shareUrl(shareTargetUrl, {
-      title: roomTitle,
-      message: `Join "${roomTitle}" on DVNT\n${shareTargetUrl}`,
-    });
-    if (shareResult === "shared") {
-      showToast("success", "Lynk link shared", "Room access rules still apply.");
-      return;
-    }
-
-    if (shareResult === "error") {
-      showToast(
-        "error",
-        "Share Failed",
-        "We couldn't open the share sheet right now.",
-      );
-      return;
-    }
-
-    showToast("info", "Share Cancelled", "Invite sharing was dismissed.");
-  }, [id, roomTitle, showToast]);
   const handleToggleMic = useCallback(async () => {
     if (!localMicEnabled && !hasMicPermission && !await requestMicPermission()) {
       showToast("info", "Microphone access is off", "Enable microphone access in device settings to use it here.");
@@ -1045,7 +1034,6 @@ function LocalRoom({
         onChat={handleChat}
         onCloseChat={handleCloseChat}
         onEjectDismiss={handleEjectDismiss}
-        onShare={handleShare}
         localRole="host"
         onTimeUp={handleTimeUp}
         hideTimer={isPaidHost}
@@ -1255,7 +1243,7 @@ function ServerRoom({
     const intentEpoch = deviceIntentEpochRef.current;
     const authEpoch = authIntentEpochRef.current;
     const owner = useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "";
-    const ownsIdentity = () => authIntentEpochRef.current === authEpoch && (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === owner;
+    const ownsIdentity = () => !!owner && authIntentEpochRef.current === authEpoch && authenticatedLynkAccount(useAuthStore.getState()) === owner;
     const isCurrent = () => ownsIdentity() && shouldContinue() && leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch && deviceIntentEpochRef.current === intentEpoch && !leavingRef.current && !closedReasonRef.current && !videoRoomRef.current.isEjected;
     if (!isCurrent()) return Promise.resolve(false);
     if (admissionInFlightRef.current?.epoch === epoch) return admissionInFlightRef.current.promise;
@@ -1360,8 +1348,8 @@ function ServerRoom({
   }, [navigation, fullRoomRetry.stop]);
 
   useEffect(() => useAuthStore.subscribe((next, previous) => {
-    const nextOwner = next.user?.authId || next.user?.id;
-    const previousOwner = previous.user?.authId || previous.user?.id;
+    const nextOwner = authenticatedLynkAccount(next);
+    const previousOwner = authenticatedLynkAccount(previous);
     if (nextOwner === previousOwner) return;
     // Render can coalesce A -> B -> A. Revoke synchronously so an old request
     // cannot gain admission, capture or clean up a new account's membership.
@@ -1862,9 +1850,9 @@ function ServerRoom({
     // Guest departure outlives its screen. Keep observing identity until the
     // queued leave settles; a logout/login cycle must not revive its dispatch.
     const unsubscribe = useAuthStore.subscribe((next, previous) => {
-      if ((next.user?.authId || next.user?.id) !== (previous.user?.authId || previous.user?.id)) identityChanged = true;
+      if (authenticatedLynkAccount(next) !== authenticatedLynkAccount(previous)) identityChanged = true;
     });
-    const isCurrent = () => !identityChanged && (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === owner;
+    const isCurrent = () => !identityChanged && authenticatedLynkAccount(useAuthStore.getState()) === owner;
     return withRoomAdmissionLock(owner, id, async () => {
       if (!isCurrent()) return;
       await sneakyLynkApi.leaveRoom(id, { isCurrent });
@@ -2068,19 +2056,20 @@ function ServerRoom({
     const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch &&
       authIntentEpochRef.current === authEpoch && !leavingRef.current && !closedReasonRef.current &&
       shareContextRef.current.status === "open" &&
-      (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === owner;
+      authenticatedLynkAccount(useAuthStore.getState()) === owner;
     if (shareInFlightRef.current || !isCurrent()) return;
+    const shareTargetUrl = lynkRoomShareUrl(id);
+    if (!shareTargetUrl) return;
     shareInFlightRef.current = true;
     const copy = roomShareCopy(roomTitle, roomSnapshot?.isPublic ?? videoRoom.room?.isPublic);
     try {
-      const shareTargetUrl = buildLynkShareUrl(id, roomHasVideo);
       const result = await shareUrl(shareTargetUrl, { title: roomTitle, message: `${copy.text}\n${shareTargetUrl}` });
       if (!isCurrent()) return;
       if (result === "shared") showToast("success", "Lynk link shared", copy.confirmation);
       if (result === "error") showToast("error", "Couldn't share this Lynk", "Try sharing again in a moment.");
       // Dismissing a system sheet is a normal choice, not an error toast.
     } finally { shareInFlightRef.current = false; }
-  }, [authUser?.authId, authUser?.id, id, roomHasVideo, roomSnapshot?.isPublic, roomTitle, showToast, videoRoom.room?.isPublic]);
+  }, [authUser?.authId, authUser?.id, id, roomSnapshot?.isPublic, roomTitle, showToast, videoRoom.room?.isPublic]);
 
   const handleReportRoom = useCallback(async () => {
     if (reportInFlightRef.current) {
@@ -2168,7 +2157,7 @@ function ServerRoom({
         leaveLifetimeRef.current.epoch === lifetime && authIntentEpochRef.current === authEpoch &&
         moderationIdentityRef.current.roomUuid === roomUuid &&
         moderationIdentityRef.current.owner === moderationOwner &&
-        (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === moderationOwner &&
+        authenticatedLynkAccount(useAuthStore.getState()) === moderationOwner &&
         !leavingRef.current && !closedReasonRef.current && current.isAdmitted &&
         !current.isEjected && current.room?.id === roomUuid && current.room.status !== "ended" &&
         current.localUser?.id === actorId && current.localUser?.role === actorRole;
@@ -2269,7 +2258,7 @@ function ServerRoom({
       !videoRoomRef.current.isAdmitted || videoRoomRef.current.isEjected ||
       videoRoomRef.current.room?.status === "ended" || videoRoomRef.current.localUser?.role !== "host" ||
       moderationIdentityRef.current.roomUuid !== roomUuid ||
-      (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") !== moderationOwner ||
+      authenticatedLynkAccount(useAuthStore.getState()) !== moderationOwner ||
       moderationPendingRef.current.has(targetUserId) || moderationPendingRef.current.has("*")) return;
     setRaisedHand(targetUserId, false);
   }, [moderationOwner, roomUuid, setRaisedHand]);
@@ -2279,7 +2268,7 @@ function ServerRoom({
       !videoRoomRef.current.isAdmitted || videoRoomRef.current.isEjected ||
       videoRoomRef.current.room?.status === "ended" || videoRoomRef.current.localUser?.role !== "host" ||
       moderationIdentityRef.current.roomUuid !== roomUuid ||
-      (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") !== moderationOwner ||
+      authenticatedLynkAccount(useAuthStore.getState()) !== moderationOwner ||
       moderationPendingRef.current.size > 0) return;
     clearRaisedHands();
     closeHandQueue();

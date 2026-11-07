@@ -31,6 +31,8 @@ import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-s
 import { eventRelationships, decideEventRoomAccess } from "../_shared/event-access.ts";
 import { isEventLynkHost } from "../_shared/event-lynk-host.ts";
 import { startEventLynk } from "../_shared/event-lynk-start.ts";
+import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
+import { resolveCreatorStanding, creatorStandingRefusal } from "../_shared/creator-standing.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -87,6 +89,11 @@ async function handleWait(req: Request, db: any, actor: string, body: any) {
         throw new ReadError("host");
       }
       if (host) {
+        const standing = await resolveCreatorStanding(db, actor);
+        if (standing.state === "refused") {
+          const refusal = creatorStandingRefusal(standing);
+          return fail(req, refusal.reason === "standing_unavailable" ? 503 : 403, refusal.message, refusal.reason);
+        }
         const result = await startEventLynk(db, event, actor);
         if (!result.ok) {
           return fail(req, 409, result.message, result.reason, result.state ? { state: result.state } : {});
@@ -182,6 +189,13 @@ async function handleList(req: Request, db: any, actor: string, body: any) {
 async function handleStart(req: Request, db: any, actor: string, body: any) {
   const { res, event } = await loadHostedEvent(req, db, actor, body);
   if (res) return res;
+  // Starting opens the room to its guests, even before the host asks for media.
+  // Apply the same current hosting policy as room creation and joining.
+  const standing = await resolveCreatorStanding(db, actor);
+  if (standing.state === "refused") {
+    const refusal = creatorStandingRefusal(standing);
+    return fail(req, refusal.reason === "standing_unavailable" ? 503 : 403, refusal.message, refusal.reason);
+  }
   let result;
   try {
     result = await startEventLynk(db, event, actor);
@@ -204,6 +218,13 @@ Deno.serve(async (req: Request) => {
   if (!actor) return fail(req, 401, "Unauthorized");
   const body = await req.json().catch(() => ({}));
   try {
+    if (body.action === "wait" || body.action === "start") {
+      const admission = await resolveVerifiedAdmission(db, actor);
+      if (admission.state === "blocked") {
+        const refusal = admissionRefusal(admission);
+        return fail(req, 403, refusal.message, refusal.reason);
+      }
+    }
     if (body.action === "wait") return await handleWait(req, db, actor, body);
     if (body.action === "list") return await handleList(req, db, actor, body);
     if (body.action === "start") return await handleStart(req, db, actor, body);

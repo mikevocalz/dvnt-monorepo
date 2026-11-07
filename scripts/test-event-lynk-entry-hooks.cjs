@@ -5,6 +5,9 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const paths = [...(process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean), ROOT];
 const load = n => require(require.resolve(n, {paths}));
+// Dependency fixtures may symlink React Query from another install. All hooks
+// and the renderer must resolve the same React instance.
+const reactAliases = Object.fromEntries(['react', 'react-dom'].map(name => [name, path.dirname(require.resolve(`${name}/package.json`, { paths }))]));
 (async () => {
  const boundaries = new Map([
   ['fixture', `import {useSyncExternalStore} from 'react';
@@ -28,7 +31,7 @@ const load = n => require(require.resolve(n, {paths}));
    f.open=entry.open;f.view=h.view;f.isOpening=entry.isOpening;
    return <button disabled={entry.isOpening} onClick={entry.open}>{h.view?.waiting[0]?.username||'no roster'}</button>;}
   const root=createRoot(document.getElementById('root'));const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});
-  f.render=()=>root.render(<QueryClientProvider client={client}><App/></QueryClientProvider>);f.unmount=()=>root.unmount();f.render();`},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',nodePaths:paths,define:{'process.env.NODE_ENV':'"test"'},plugins:[{name:'boundaries',setup(b){b.onResolve({filter:/.*/},a=>{if(boundaries.has(a.path))return{path:a.path,namespace:'fixture'};if(a.path.startsWith('@dvnt/app/'))return b.resolve(path.join(ROOT,'packages/app',a.path.slice(10)),{resolveDir:ROOT,kind:a.kind});});b.onLoad({filter:/.*/,namespace:'fixture'},a=>({contents:boundaries.get(a.path),loader:'tsx',resolveDir:ROOT}));}}]});
+  f.render=()=>root.render(<QueryClientProvider client={client}><App/></QueryClientProvider>);f.unmount=()=>root.unmount();f.render();`},bundle:true,write:false,alias:reactAliases,platform:'browser',format:'iife',jsx:'automatic',nodePaths:paths,define:{'process.env.NODE_ENV':'"test"'},plugins:[{name:'boundaries',setup(b){b.onResolve({filter:/.*/},a=>{if(boundaries.has(a.path))return{path:a.path,namespace:'fixture'};if(a.path.startsWith('@dvnt/app/'))return b.resolve(path.join(ROOT,'packages/app',a.path.slice(10)),{resolveDir:ROOT,kind:a.kind});});b.onLoad({filter:/.*/,namespace:'fixture'},a=>({contents:boundaries.get(a.path),loader:'tsx',resolveDir:ROOT}));}}]});
  if (process.argv.includes('--browser')) {
   const browserName=process.env.LYNK_BROWSER || 'chromium';
   const browser=await load('playwright')[browserName].launch({headless:true});

@@ -34,8 +34,8 @@ const asset = n => ({ type:'livePhoto', uri:`file:///original-${n}.heic`, mimeTy
  let active=true;
  await assert.rejects(uploadNativePairs([asset(3)],1,{assertActive(){if(!active)throw Error('owner changed');},async upload(){active=false;return{success:true,mediaId:9};}}),/owner changed/);
  await assert.rejects(uploadNativePairs([asset(4)],1,{assertActive(){},async upload(){return{success:true};}}),/could not be verified/);
- const registry=load('packages/app/lib/deep-linking/route-registry.ts', {zod:require('zod'),'@dvnt/app/lib/branding/lynk-branding':{getLynkDisplayName:()=> 'Lynk'}});
- const engine=load('packages/app/lib/deep-linking/link-engine.ts', {'expo-router':{router:{}},'@dvnt/app/lib/stores/auth-store':{useAuthStore:{}},'@dvnt/app/lib/stores/deep-link-store':{useDeepLinkStore:{}},'./route-registry':registry});
+ const registry=load('packages/app/lib/deep-linking/route-registry.ts', {zod:require('zod'),'@dvnt/app/lib/branding/lynk-branding':{getLynkDisplayName:()=> 'Lynk'},'@dvnt/app/features/sneaky-lynk/room-links':load('packages/app/features/sneaky-lynk/room-links.ts', {})});
+ const engine=load('packages/app/lib/deep-linking/link-engine.ts', {'expo-router':{router:{}},'@dvnt/app/lib/stores/auth-store':{useAuthStore:{}},'@dvnt/app/lib/stores/deep-link-store':{useDeepLinkStore:{}},'./route-registry':registry,'@dvnt/app/features/sneaky-lynk/room-links':load('packages/app/features/sneaky-lynk/room-links.ts', {})});
  const id='11111111-1111-4111-8111-111111111111',draft='22222222-2222-4222-8222-222222222222';
  const parsed=engine.parseIncomingUrl(`dvnt://live-photo-handoff?handoff=${id}&draft=${draft}`);
  assert.equal(parsed.requiresAuth,true);

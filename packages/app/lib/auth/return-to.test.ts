@@ -54,3 +54,22 @@ test('optional welcome preserves the validated rating destination across reloads
     assert.equal(welcomePathWithReturn(unsafe), '/auth/welcome');
   }
 });
+
+test('room return URLs keep path identity and cannot be replaced by redirect query data', () => {
+  const target = '/feed/sneaky-lynk/room/room_123';
+  for (const path of ['/sl/room_123', '/sneaky/room_123', '/sneaky-lynk/room/room_123', target]) {
+    assert.equal(safeReturnTo(path + '?id=other&returnTo=%2Ffeed&next=%2Ffeed#other'), target);
+  }
+  for (const bad of ['/\t/evil.invalid', '/%09/evil.invalid', '/feed/../auth/login', '/feed/%2e%2e/auth/login', '/%61uth/login', '/auth?next=/feed', '/%252f%252fevil.invalid', '/feed\n']) {
+    assert.equal(safeReturnTo(bad), '/feed', JSON.stringify(bad));
+  }
+  assert.equal(safeReturnTo('/admin/collections/posts?label=a%26b'), '/admin/collections/posts?label=a%26b');
+  const previous = globalThis.window;
+  try {
+    globalThis.window = { location: { href: `https://fixture.invalid/auth/login?returnTo=${encodeURIComponent(target)}&returnTo=%2Ffeed` } } as any;
+    assert.equal(readReturnToFromUrl(), '/feed', 'ambiguous duplicate return destinations are rejected');
+  } finally {
+    if (previous === undefined) delete (globalThis as any).window;
+    else globalThis.window = previous;
+  }
+});

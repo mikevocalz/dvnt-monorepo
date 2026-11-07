@@ -13,7 +13,8 @@
  */
 import { useEffect, useRef } from "react";
 import { eventLynkApi } from "@dvnt/app/lib/api/event-lynk";
-import { EVENT_LYNK_WAIT_POLL_MS } from "@dvnt/app/lib/events/event-lynk";
+import { getSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { EVENT_LYNK_WAIT_POLL_MS, isEventLynkWaitRefusal } from "@dvnt/app/lib/events/event-lynk";
 
 interface Options {
   roomId: string | undefined;
@@ -24,6 +25,8 @@ interface Options {
 }
 
 export function useEventLynkWaitingRoom({ roomId, enabled, onAdmitted, onRefused }: Options) {
+  const current = useRef({ roomId, enabled });
+  current.current = { roomId, enabled };
   const onAdmittedRef = useRef(onAdmitted);
   onAdmittedRef.current = onAdmitted;
   const onRefusedRef = useRef(onRefused);
@@ -32,23 +35,27 @@ export function useEventLynkWaitingRoom({ roomId, enabled, onAdmitted, onRefused
   useEffect(() => {
     if (!enabled || !roomId) return;
     let cancelled = false;
+    const epoch = getSessionLifecycle().epoch;
+    const isCurrent = () => !cancelled && current.current.enabled &&
+      current.current.roomId === roomId && getSessionLifecycle().epoch === epoch;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const beat = async () => {
+      if (!isCurrent()) return;
       try {
         const res = await eventLynkApi.wait(roomId);
-        if (cancelled) return;
+        if (!isCurrent()) return;
         if (res.admitted) {
           onAdmittedRef.current();
           return;
         }
       } catch (err) {
-        if (cancelled) return;
+        if (!isCurrent()) return;
         // A network blip keeps the guest waiting; the next beat retries. A
         // refusal from the server carries a message worth showing.
         const message = err instanceof Error ? err.message : "";
-        if (/ticket|invitation|cancel|ended|not found/i.test(message)) {
-          onRefusedRef.current?.(message);
+        if (isEventLynkWaitRefusal(err)) {
+          onRefusedRef.current?.(message || "This event's Lynk is no longer available to your account.");
           return;
         }
       }

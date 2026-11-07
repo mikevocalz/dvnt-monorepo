@@ -18,14 +18,14 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
   assert.ok(start >= 0 && end > start);
   const actual = source.slice(start, end);
   const f = global.__nativeEntry = {
-    params: { id: 'creator-room', isHost: '1', hasVideo: '1' }, state: { user: { id: 'account-a', authId: 'account-a' } },
+    params: { id: 'creator-room', isHost: '1', hasVideo: '1' }, state: { user: { id: 'account-a', authId: 'account-a' }, isAuthenticated: true, _hasHydrated: true, authStatus: 'authenticated' },
     subscribers: new Set(), timers: new Map(), timerId: 0, lookups: [], identities: [], pendingVerification: [], routes: [],
     focused: true, navigationListeners: { blur: new Set(), focus: new Set() },
     cameraPermission: true, micPermission: true, cameraStarts: 0, preview: false, serverMounts: 0,
     roomStatus: 'open', identity: { kind: 'choice' },
   };
   f.changeOwner = (owner) => {
-    const previous = f.state; f.state = { user: owner ? { id: owner, authId: owner } : null };
+    const previous = f.state; f.state = { user: owner ? { id: owner, authId: owner } : null, isAuthenticated: !!owner, _hasHydrated: true, authStatus: owner ? 'authenticated' : 'unauthenticated' };
     for (const subscriber of f.subscribers) subscriber(f.state, previous);
   };
   f.lookup = async (id, options) => {
@@ -45,6 +45,8 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
     stdin: { resolveDir: rootDir, loader: 'tsx', contents: `
       import React, {useState,useRef,useCallback,useEffect,useSyncExternalStore} from 'react';
       import {getRoomEntryStatus} from './packages/app/features/sneaky-lynk/room-entry-status';
+      import {normalizeLynkRoomId} from './packages/app/features/sneaky-lynk/room-links';
+      import {authenticatedLynkAccount} from './packages/app/features/sneaky-lynk/room-entry-auth';
       const f=globalThis.__nativeEntry;
       const useAuthStore=selector=>useSyncExternalStore(useAuthStore.subscribe,()=>selector(f.state),()=>selector(f.state));
       useAuthStore.getState=()=>f.state;useAuthStore.subscribe=listener=>{f.subscribers.add(listener);return()=>f.subscribers.delete(listener)};
@@ -66,6 +68,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
       const sneakyLynkApi={getRoomById:f.lookup},getRoomEntryIdentity=f.readIdentity;
       const guard=(_,run)=>{if(f.deferVerification){f.pendingVerification.push(run);return false}run();return true},useVerifiedGate=()=>guard;
       const LYNKS_LIST_ROUTE='/messages';
+      const useDeepLinkStore={getState:()=>({pendingLink:f.pendingDeepLink,setPendingLink:link=>{f.pendingDeepLink=link}})};
       const setTimeout=(run,ms)=>{const id=++f.timerId;f.timers.set(id,{run,ms});return id},clearTimeout=id=>f.timers.delete(id);
       const ClosedRoomScreen=({message,onBack})=><div data-closed>{message}<button onClick={onBack}>Back to Lynks</button></div>;
       function ServerRoom(props){useEffect(()=>{f.serverMounts++;return()=>{f.server=null}},[]);f.server=props;return <div data-server>{JSON.stringify(props)}</div>}
@@ -90,13 +93,30 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
   const confirmLatest = () => act(() => f.pendingVerification.at(-1)());
   const noServer = () => assert.equal(node.querySelector('[data-server]'), null);
   try {
-    await render();
+    const readyAuth = f.state;
+    for (const patch of [{_hasHydrated:false}, {authStatus:'loading'}, {isAuthenticated:false}, {user:null}]) {
+      f.state={...readyAuth,...patch};await render();
+      assert.match(node.textContent,/Sign in to open this Lynk/);
+      assert.equal(f.lookups.length,0,'unsettled or signed-out state never looks up a room');
+      assert.equal(f.cameraStarts,0);noServer();
+    }
+    f.state=readyAuth;
+    for (const malformed of [undefined, '', ['room-a', 'room-b'], '..', 'room/a', 'room?isHost=1', 'room%252fother', 'room\n']) {
+      await nextRoom(malformed);
+      assert.match(node.textContent, /incomplete or invalid/);
+      assert.equal(button('Try loading Lynk again'), null);
+      assert.equal(f.lookups.length, 0, 'invalid link cannot issue a lookup for another room');
+      assert.equal(f.cameraStarts, 0); noServer();
+    }
+    await nextRoom('creator-room');
     assert.ok(button('Join Lynk'), 'creator URL must not skip media review');
     assert.equal(f.serverMounts, 0); assert.equal(f.preview, false); assert.equal(f.cameraStarts, 0);
     assert.match(node.textContent, /Join muted/); assert.match(node.textContent, /Camera off/);
     await click(button('Join Lynk'));
     assert.equal(f.server.initialCameraOn, false); assert.equal(f.server.initialMicOn, false); assert.equal(f.server.anonymous, false);
     assert.equal('isHost' in f.server, false, 'URL never supplies room privilege');
+    assert.equal(f.lookups.at(-1).id, 'creator-room');
+    assert.equal(f.server.id, 'creator-room', 'the reviewed exact room reaches admission');
 
     await nextRoom('explicit-choice'); noServer();
     await click(button('Turn camera on')); assert.equal(f.preview, true);
@@ -134,7 +154,10 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
     noServer(); assert.ok(button('Join Lynk'), 'batched blur/focus keeps a fresh review instead of reviving verification');
     await click(button('Join Lynk')); await click(button('Turn camera on')); await confirmLatest(); noServer();
     await click(button('Join Lynk')); await click(button('Hide my profile with an anonymous label')); await confirmLatest(); noServer();
-    await click(button('Join Lynk anonymously')); await click(button('Back to Lynks')); await confirmLatest(); noServer();
+    await click(button('Join Lynk anonymously'));
+    f.pendingDeepLink={params:{id:f.params.id},routerPath:'/(protected)/sneaky-lynk/room/'+f.params.id};
+    await click(button('Back to Lynks')); await confirmLatest(); noServer();
+    assert.equal(f.pendingDeepLink,null,'Back cancels this room pending replay');
     assert.equal(f.routes.at(-1), '/messages');
     await nextRoom('after-back'); assert.ok(button('Join Lynk'), 'reusing the content for a new room clears exited ownership');
     f.deferVerification = false;
@@ -174,7 +197,8 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
     f.cameraPermission = false; gate = deferred(); f.cameraPending = gate.promise;
     await nextRoom('permission-pending'); const startsBefore = f.cameraStarts;
     await click(button('Turn camera on')); assert.equal(button('Join Lynk').disabled, true);
-    await click(button('Back to Lynks'));
+    const newerLink={params:{id:'newer-room'},routerPath:'/(protected)/sneaky-lynk/room/newer-room'};f.pendingDeepLink=newerLink;
+    await click(button('Back to Lynks'));assert.equal(f.pendingDeepLink,newerLink,'Back does not cancel a newer room destination');
     await act(() => gate.resolve(true)); assert.equal(f.cameraStarts, startsBefore, 'late permission after Back cannot start preview');
     f.cameraPending = null; f.cameraPermission = true;
     await nextRoom('blur-permission'); f.cameraPermission=false; gate=deferred(); f.cameraPending=gate.promise; await render();

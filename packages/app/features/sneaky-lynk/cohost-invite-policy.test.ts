@@ -41,3 +41,23 @@ test("verification, bans and hosting blocks never claim all forbidden errors nee
   for (const reason of ["verification_required","profile_photo_required","member_banned","suspended","operator_denied","unknown"])
     assert.doesNotMatch(classifySneakyLynkError("forbidden","",{reason}).body,/Only invited|Ask the host to invite/);
 });
+
+
+test('event invitation cards follow the scheduled plan window and never revive ended rooms', () => {
+  const room = { status: "open", created_at: "2026-11-05T12:00:00Z", ends_at: "2026-11-05T12:05:00Z" };
+  const event = { status: "active", start_date: "2026-11-07T12:00:00Z", end_date: "2026-11-07T15:00:00Z" };
+  assert.equal(isOpenCohostInvitation(room, now, event), true);
+  assert.equal(isOpenCohostInvitation(room, now + 5 * 60_000, event), false);
+  assert.equal(isOpenCohostInvitation({ ...room, status: "ended" }, now, event), false);
+  assert.equal(isOpenCohostInvitation(room, now, { ...event, status: "cancelled" }), false);
+  assert.equal(isOpenCohostInvitation(room, now, { ...event, start_date: null }), false);
+  assert.equal(isOpenCohostInvitation(room, now, { ...event, end_date: "2026-11-07T11:59:00Z" }), false);
+  assert.equal(isOpenCohostInvitation(room, now + 60 * 60_000, { ...event, end_date: null }), true,
+    'existing six-hour no-end policy remains consistent');
+});
+
+test('event cohost refusals explain ticket and host-start requirements without granting access', () => {
+  assert.match(cohostInviteErrorMessage(new Error("Waiting for the host to start")), /still pending/);
+  assert.match(cohostInviteErrorMessage(new Error("An active admission ticket is required for this event")), /active admission ticket/);
+  assert.match(cohostInviteErrorMessage(new Error("This event requires an invitation")), /invite your account to the event/);
+});

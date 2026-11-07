@@ -2,7 +2,7 @@
 export function roomShareCopy(title: string, isPublic?: boolean) {
   return {
     text: isPublic === false ? `Open "${title}" on DVNT. This private Lynk requires access.` : `Join "${title}" on DVNT`,
-    confirmation: isPublic === false ? "Only people with access can join this private Lynk." : "Guests review their camera and microphone before joining. Room access rules still apply.",
+    confirmation: isPublic === false ? "Only people with access can join this private Lynk." : "Signed-in members review their camera and microphone before joining. Room access rules still apply.",
   };
 }
 
