@@ -77,7 +77,7 @@ class Signal {
   constructor(value: any) { this.value = value; }
   peek() { return this.value; }
   set(value: any) { if (Object.is(value, this.value)) return; this.value = value; for (const callback of [...this.listeners]) callback(); }
-  subscribe(callback: () => void) { this.listeners.add(callback); return () => this.listeners.delete(callback); }
+  subscribe(callback: () => void) { this.listeners.add(callback); return () => { this.listeners.delete(callback); }; }
 }
 class Computed extends Signal {
   stops: (() => void)[] = [];

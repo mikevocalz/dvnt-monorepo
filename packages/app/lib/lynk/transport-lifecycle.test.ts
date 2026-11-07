@@ -72,7 +72,7 @@ class Signal {
   constructor(value: any) { this.value = value; }
   set(value: any) { if (Object.is(value, this.value)) return; this.value = value; for (const callback of [...this.listeners]) callback(value); }
   peek() { return this.value; }
-  subscribe(callback: (value: any) => void) { this.listeners.add(callback); return () => this.listeners.delete(callback); }
+  subscribe(callback: (value: any) => void) { this.listeners.add(callback); return () => { this.listeners.delete(callback); }; }
 }
 // Deterministic signal graph at the SDK boundary. Production still receives
 // Getter-only outputs: mutations have to use the explicitly wired input Signals.
