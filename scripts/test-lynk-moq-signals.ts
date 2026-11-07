@@ -15,7 +15,7 @@ const dependencyRequire = createRequire(process.env.LYNK_PROBE_DEPS
   : new URL("../packages/app/package.json", import.meta.url));
 const signalsPath = dependencyRequire.resolve("@moq/signals");
 assert.equal(JSON.parse(readFileSync(resolve(dirname(signalsPath), "package.json"), "utf8")).version, "0.2.5");
-const { Signal, Computed: SdkComputed, readonlys } = await import(pathToFileURL(signalsPath).href);
+const { Signal, Derived, Computed: SdkComputed, readonlys } = await import(pathToFileURL(signalsPath).href);
 // Node 24 runs these tests; the app's older @types/node predates registerHooks.
 const { registerHooks } = createRequire(import.meta.url)("node:module");
 
@@ -146,11 +146,12 @@ class Publication {
 }
 class Device {
   in: any;
+  device: any;
   media = new Signal(undefined);
   failure = new Signal(undefined);
   out = readonlys({ source: this.media, error: this.failure });
   closed = false;
-  constructor(props: any) { assert.ok(props.enabled instanceof Signal); this.in = props; resources.devices.push(this); }
+  constructor(props: any) { assert.equal(typeof props.enabled.peek, "function"); this.in = props; this.device = { preferred: props.device?.preferred ?? new Signal(undefined), out: { available: new Signal([]), requested: new Signal(undefined), active: new Signal(undefined) } }; resources.devices.push(this); }
   close() { this.closed = true; }
 }
 class Capture {
@@ -167,14 +168,14 @@ class Encoder {
 }
 const tokenState = { publish: true };
 const savedGlobals = { window: (globalThis as any).window, document: (globalThis as any).document, MediaStream: (globalThis as any).MediaStream };
-(globalThis as any).__lynkMocks = { Signal, Computed, Connection, Player, Publication, Device, Capture, Encoder, tokenState };
+(globalThis as any).__lynkMocks = { Signal, Computed, Derived, Connection, Player, Publication, Device, Capture, Encoder, tokenState };
 (globalThis as any).window = new EventTarget();
 (globalThis as any).document = Object.assign(new EventTarget(), { visibilityState: "visible" });
 (globalThis as any).MediaStream = class { tracks: any[]; constructor(tracks: any[]) { this.tracks = tracks; } };
 const moduleUrl = (source: string) => `data:text/javascript,${encodeURIComponent(source)}`;
 const stubs: Record<string, string> = {
   react: moduleUrl(["useState", "useRef", "useMemo", "useCallback", "useEffect", "useSyncExternalStore"].map((name) => `export const ${name} = (...args) => globalThis.__lynkHooks.${name}(...args);`).join("\n")),
-  "@moq/signals": moduleUrl("export const Signal = globalThis.__lynkMocks.Signal; export const Computed = globalThis.__lynkMocks.Computed;"),
+  "@moq/signals": moduleUrl("export const Signal = globalThis.__lynkMocks.Signal; export const Computed = globalThis.__lynkMocks.Computed; export const Derived = globalThis.__lynkMocks.Derived;"),
   "@moq/net": moduleUrl("export const Connection = globalThis.__lynkMocks.Connection; export const Path = { from: p => p }; export const Time = { Milli: { zero: 0 } };"),
   "@moq/watch": moduleUrl("export const Player = globalThis.__lynkMocks.Player;"),
   "@moq/publish": moduleUrl("export const Broadcast = globalThis.__lynkMocks.Publication; export const Source = { Camera: globalThis.__lynkMocks.Device, Microphone: globalThis.__lynkMocks.Device }; export const Video = { Capture: globalThis.__lynkMocks.Capture, Encoder: globalThis.__lynkMocks.Encoder }; export const Audio = Video;"),
