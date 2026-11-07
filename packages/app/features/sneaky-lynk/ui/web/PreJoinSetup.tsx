@@ -93,7 +93,7 @@ export function PreJoinSetup({ roomTitle, roomHasVideo, onJoin }: {
       <div className="flex min-w-0 flex-col gap-4">
         <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-5">
           <div className="flex items-center justify-between gap-4">
-            <span className="flex items-center gap-3"><EyeOff size={20} className="shrink-0 text-[#FC253A]" aria-hidden="true" /><span><span className="block font-semibold">Join Anonymously</span><span className="mt-1 block text-xs leading-5 text-white/60">You'll appear as &quot;Anon&quot; with no profile info</span></span></span>
+            <span className="flex items-center gap-3"><EyeOff size={20} className="shrink-0 text-[#FC253A]" aria-hidden="true" /><span><span className="block font-semibold">Join Anonymously</span><span className="mt-1 block text-xs leading-5 text-white/60">Your name and profile photo stay hidden in this room.</span></span></span>
             <button type="button" role="switch" aria-label="Join anonymously" aria-checked={anonymous}
               onClick={() => useRoomUIStore.getState().setJoinAnonymous(!anonymous)} className={`flex h-11 w-12 shrink-0 items-center rounded-xl ${focus}`}>
               <span aria-hidden="true" className={`relative h-7 w-12 rounded-full ${anonymous ? "bg-[#FC253A]" : "bg-white/20"}`}><span className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white transition-transform motion-reduce:transition-none ${anonymous ? "translate-x-5" : "translate-x-0"}`} /></span>
@@ -101,12 +101,15 @@ export function PreJoinSetup({ roomTitle, roomHasVideo, onJoin }: {
           </div>
         </div>
         <div className="rounded-2xl border border-white/10 p-5">
-          <p className="mb-2 font-semibold">Room Safety</p>
-          <p className="text-xs leading-5 text-white/60">By joining, you agree to DVNT community guidelines. Recording is prohibited, screenshots may notify the room, and participants can report unsafe behavior.</p>
+          <p className="mb-2 font-semibold">Your privacy, your choice</p>
+          <p className="text-xs leading-5 text-white/60">Anonymous mode hides your profile, not your voice, camera or what you share. Recording is prohibited, but no room can prevent someone using another device to capture it.</p>
+          <p className="mt-2 text-xs leading-5 text-white/60">By joining, you agree to DVNT community guidelines. Some screenshot attempts may notify the room.</p>
         </div>
-        <div aria-live="polite" className="text-sm text-white/70">
-          <p>{roomHasVideo ? cameraReady ? "Camera ready" : "You'll join with your camera off" : "Camera off for this audio room"}</p>
-          <p>{micOn ? "Microphone on when you join" : "Microphone muted"}{anonymous ? " · Anonymous" : " · Your profile"}</p>
+        <div aria-live="polite" className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white/70">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-white/50">Your arrival</p>
+          <p className="flex items-center gap-2">{cameraReady ? <Video size={16} aria-hidden="true" /> : <VideoOff size={16} aria-hidden="true" />}{roomHasVideo ? cameraReady ? "Camera ready" : "You'll join with your camera off" : "Camera off for this audio room"}</p>
+          <p className="mt-1 flex items-center gap-2">{micOn ? <Mic size={16} aria-hidden="true" /> : <MicOff size={16} aria-hidden="true" />}{micOn ? "Mic on if your room role allows it" : "Microphone muted"}</p>
+          <p className="mt-2 border-t border-white/8 pt-2 text-xs text-white/60">{anonymous ? "You'll appear as Anon" : "You'll join with your profile"}</p>
         </div>
         <button type="button" onClick={join} className={`min-h-12 w-full rounded-xl bg-[#FC253A] px-4 py-3 font-bold text-white hover:brightness-110 ${focus}`}>
           {anonymous ? "Join Anonymously" : "Join Lynk"}

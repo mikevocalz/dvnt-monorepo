@@ -20,7 +20,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { BackHandler, Pressable, StyleSheet, Text, View } from "react-native";
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetFlatList,
@@ -88,6 +88,12 @@ export function HandQueueSheet({
       sheetRef.current?.close();
     }
   }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const back = BackHandler.addEventListener("hardwareBackPress", () => { onDismiss(); return true; });
+    return () => back.remove();
+  }, [visible, onDismiss]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -198,6 +204,8 @@ export function HandQueueSheet({
           {participant ? (
             <View style={styles.actionRow}>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Make ${label} a co-host`}
                 onPress={() => onInviteToSpeak(id)}
                 style={({ pressed }) => [
                   styles.primaryAction,
@@ -214,10 +222,12 @@ export function HandQueueSheet({
                     { color: colors.primaryForeground },
                   ]}
                 >
-                  {HAND_QUEUE_COPY.invite}
+                  Make co-host
                 </Text>
               </Pressable>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Dismiss ${label} from your queue`}
                 onPress={() => onLowerHand(id)}
                 style={({ pressed }) => [
                   styles.secondaryAction,
@@ -234,7 +244,7 @@ export function HandQueueSheet({
                     { color: colors.destructive },
                   ]}
                 >
-                  {HAND_QUEUE_COPY.lower}
+                  Dismiss here
                 </Text>
               </Pressable>
             </View>
@@ -319,10 +329,12 @@ export function HandQueueSheet({
             </Text>
           </View>
           <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-            Oldest raise is first in line.
+            Oldest first. Co-hosts gain moderation controls. Dismissing only clears your view.
           </Text>
         </View>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close raised hands"
           onPress={onDismiss}
           hitSlop={12}
           style={[
@@ -373,6 +385,8 @@ export function HandQueueSheet({
         ListFooterComponent={
           queue.length > 1 ? (
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear raised hands from your view"
               onPress={onLowerAll}
               style={({ pressed }) => [
                 styles.lowerAllBtn,
@@ -386,7 +400,7 @@ export function HandQueueSheet({
               <Text
                 style={[styles.lowerAllLabel, { color: colors.mutedForeground }]}
               >
-                {HAND_QUEUE_COPY.lowerAll}
+                Clear my queue
               </Text>
             </Pressable>
           ) : null
@@ -435,8 +449,8 @@ const styles = StyleSheet.create({
     marginLeft: 42,
   },
   closeBtn: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
@@ -497,6 +511,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   primaryAction: {
+    minHeight: 44,
     flex: 2,
     flexDirection: "row",
     alignItems: "center",
@@ -511,6 +526,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   secondaryAction: {
+    minHeight: 44,
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -524,6 +540,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   ghostAction: {
+    minHeight: 44,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 10,
@@ -562,6 +579,7 @@ const styles = StyleSheet.create({
   },
 
   lowerAllBtn: {
+    minHeight: 44,
     marginTop: 4,
     paddingVertical: 12,
     borderRadius: 12,

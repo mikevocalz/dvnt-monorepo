@@ -128,7 +128,8 @@ import {
 } from "@dvnt/app/lib/video/host-mute";
 import { EjectModal } from "../ui/EjectModal";
 import type { EjectKind } from "../ui/EjectModal.types";
-import { classifySneakyLynkError } from "../errors";
+import { classifySneakyLynkError, type ClassifiedError } from "../errors";
+import { webJoinFeedback, webConnectionFeedback } from "../ui/web/room-status";
 import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 import { videoApi } from "@dvnt/app/features/video/api";
 import { useSneakyLynkCaptureBroadcast } from "../hooks/useSneakyLynkCaptureBroadcast";
@@ -464,7 +465,6 @@ function RoomInner({
   const phase = useRoomUIStore((s) => s.phase);
   const joinAnonymous = useRoomUIStore((s) => s.joinAnonymous);
   const closedReason = useRoomUIStore((s) => s.closedReason);
-  const errorMessage = useRoomUIStore((s) => s.errorMessage);
   const isMicOn = useRoomUIStore((s) => s.isMicOn);
   const isCameraOn = useRoomUIStore((s) => s.isCameraOn);
   const roomSnapshot = useRoomUIStore((s) => s.roomSnapshot);
@@ -518,6 +518,7 @@ function RoomInner({
   const joinFiredRef = useRef(false);
   // Bumped by the waiting room to re-run the join effect after a host starts.
   const [joinAttempt, setJoinAttempt] = useState(0);
+  const [joinFailure, setJoinFailure] = useState<ClassifiedError | null>(null);
   const joinCompletedRef = useRef(false);
 
   // Local identity projected as a SneakyUser for reactions/chat authorship.
@@ -607,11 +608,20 @@ function RoomInner({
     joinFiredRef.current = true;
     setInitStarted(true);
     let cancelled = false;
+    setJoinFailure(null);
+    // Own the timeout with this request. A late admission result must not turn
+    // capture on after the person has already been shown a failed attempt.
+    const timeout = setTimeout(() => {
+      if (cancelled || joinCompletedRef.current) return;
+      cancelled = true;
+      setErrorState("The join request timed out. Check your connection and try again.");
+    }, 25000);
 
     (async () => {
       setPhase("joining");
       const result = await sneakyLynkApi.joinRoom(id, joinAnonymous);
       if (cancelled) return;
+      clearTimeout(timeout);
 
       if (!result.ok || !result.data) {
         const msg = result.error?.message || "Failed to join Lynk";
@@ -632,7 +642,8 @@ function RoomInner({
         } else if (isClosedRoomError(msg)) {
           setClosed("This Lynk has ended and can't be reopened.");
         } else {
-          setErrorState(msg);
+          setJoinFailure(classified);
+          setErrorState(classified.body);
         }
         return;
       }
@@ -674,10 +685,16 @@ function RoomInner({
       // keeps `canPublish` false and only ever subscribes.
       setLocalRole(peer.role);
       joinCompletedRef.current = true;
-    })();
+    })().catch(() => {
+      if (cancelled) return;
+      clearTimeout(timeout);
+      setJoinFailure(null);
+      setErrorState("Couldn't join this Lynk. Check your connection and try again.");
+    });
 
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
       // A join that never resolved must not leave its guard standing.
       //
       // `joinFiredRef` was set on entry and never cleared, so a teardown
@@ -746,8 +763,7 @@ function RoomInner({
   // health is what `ConnectionBanner` (fed by the session machine) is for.
   useEffect(() => {
     if (phase === "closed" || phase === "prejoin" || (!admitted && phase === "error")) return;
-    if (lynk.state === "error") setErrorState(lynk.error || "Connection failed");
-    else if (admitted && localRole) setPhase("connected");
+    if (admitted && localRole) setPhase("connected");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lynk.state, lynk.error, localRole, admitted]);
 
@@ -796,22 +812,6 @@ function RoomInner({
     return () => clearInterval(tick);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eject?.kind]);
-
-  // ── Connection watchdog: never leave the user on an infinite spinner ───────
-  // Purely additive — only fires if we're still joining/connecting after 25s.
-  // Turns a silent "won't connect" into a visible, retryable error.
-  useEffect(() => {
-    if (phase !== "joining" && phase !== "connecting") return;
-    const timer = setTimeout(() => {
-      const p = useRoomUIStore.getState().phase;
-      if (p === "joining" || p === "connecting") {
-        setErrorState(
-          "Couldn't connect to the Lynk. Check your connection (camera/mic permissions, VPN, or ad-blockers can block WebRTC) and try again.",
-        );
-      }
-    }, 25000);
-    return () => clearTimeout(timer);
-  }, [phase, setErrorState]);
 
   // ── Cleanup on unmount (mirrors native leave/reset) ───────────────────────
   // `useLynkBroadcast` tears its own transport down on unmount; this is belt
@@ -923,6 +923,7 @@ function RoomInner({
   }, [id, isHandRaised, setIsHandRaised, showToast]);
 
   const leavingRef = useRef(false);
+  const [isLeaving, setIsLeaving] = useState(false);
   const leaveLifetimeRef = useRef({ active: false, epoch: 0 });
   useEffect(() => {
     leaveLifetimeRef.current = { active: true, epoch: leaveLifetimeRef.current.epoch + 1 };
@@ -935,6 +936,7 @@ function RoomInner({
     const epoch = leaveLifetimeRef.current.epoch;
     const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch;
     leavingRef.current = true;
+    setIsLeaving(true);
     void leaveRoomSafely({
       isCurrent,
       isHost: isHostRef.current,
@@ -948,12 +950,13 @@ function RoomInner({
         endRoomHistory(id);
         router.push(LYNKS_LIST_ROUTE);
       },
-    }).finally(() => { if (isCurrent()) leavingRef.current = false; });
+    }).finally(() => { if (isCurrent()) { leavingRef.current = false; setIsLeaving(false); } });
   }, [id, endRoomHistory, resetRoomStore, router, showToast]);
 
   // The leave buttons never end a room silently: a host confirming is a host
   // who meant it. Everyone else still leaves instantly.
   const requestLeave = useCallback(() => {
+    if (leavingRef.current) return;
     if (isHostRef.current) {
       setShowEndConfirm(true);
       return;
@@ -1150,7 +1153,7 @@ function RoomInner({
       return {
         key: member.userId,
         name: getSneakyUserLabel(member),
-        avatar: member.avatar,
+        avatar: member.isAnonymous ? undefined : member.avatar,
         isLocal: false,
         isHost: member.role === "host",
         isCoHost: member.role === "co-host",
@@ -1222,7 +1225,7 @@ function RoomInner({
   // retry, no fallback view, and nothing to reveal.
   if (phase === "waiting") {
     return (
-      <RoomShell title={roomTitle} onBack={() => router.back()}>
+      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
         <div
           className="flex flex-1 flex-col items-center justify-center px-6 text-center"
           role="status"
@@ -1239,7 +1242,7 @@ function RoomInner({
           <div className="mb-8 h-6 w-6 rounded-full border-2 border-white/20 border-t-[#8A40CF] animate-spin motion-reduce:animate-none" />
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={() => router.push(LYNKS_LIST_ROUTE)}
             className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
           >
             Leave
@@ -1251,17 +1254,16 @@ function RoomInner({
 
   if (phase === "app-only") {
     return (
-      <RoomShell title={roomTitle} onBack={() => router.back()}>
+      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
           <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-[#3FDCFF]/12 text-[#3FDCFF]">
             <Smartphone size={36} />
           </span>
           <h2 className="mb-3 text-2xl font-bold">This Lynk is app-only</h2>
           <p className="mb-8 max-w-md text-white/60">
-            The host made this room app-only, so it can&apos;t be opened in a
-            browser. In the DVNT app the OS blacks out screenshots and screen
-            recordings at the system level — browsers have no equivalent, which
-            is the whole point of the setting.
+            The host has limited this room to the DVNT app. Open the app to join
+            with its additional screen-capture protections. No app can prevent
+            someone recording with another device.
           </p>
 
           <a
@@ -1272,25 +1274,14 @@ function RoomInner({
             Open in the DVNT app
           </a>
 
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
-            <img
-              src="https://images.squarespace-cdn.com/content/v1/6970176c1abbac076dce861e/984f791e-38da-4c97-bd3d-257a488a1f30/Download_on_the_App_Store_Badge_US-UK_RGB_blk_092917.png?format=500w"
-              alt="Download on the App Store"
-              className="h-11 w-auto"
-            />
-            <img
-              src="https://images.squarespace-cdn.com/content/v1/6970176c1abbac076dce861e/f87f69fd-f310-43b4-a8e7-7ba38246bee0/GetItOnGooglePlay_Badge_Web_color_English.png?format=500w"
-              alt="Get it on Google Play"
-              className="h-11 w-auto"
-            />
-          </div>
+          <p className="mt-4 max-w-xs text-xs leading-5 text-white/60">If the app doesn&apos;t open, install DVNT from your device&apos;s app store and reopen this invite.</p>
 
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={() => router.push(LYNKS_LIST_ROUTE)}
             className="mt-8 rounded-lg bg-white/8 px-6 py-3 text-sm font-semibold active:scale-95"
           >
-            Back
+            Back to Lynks
           </button>
         </div>
       </RoomShell>
@@ -1299,7 +1290,7 @@ function RoomInner({
 
   if (phase === "closed") {
     return (
-      <RoomShell title={roomTitle} onBack={() => router.back()}>
+      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
           <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-white/8">
             <Radio size={36} className="text-white/40" />
@@ -1308,35 +1299,40 @@ function RoomInner({
           <p className="text-white/60 mb-8">{closedReason}</p>
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={() => router.push(LYNKS_LIST_ROUTE)}
             className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
           >
-            Back
+            Back to Lynks
           </button>
         </div>
       </RoomShell>
     );
   }
 
-  if (phase === "error") {
+  if (phase === "error" && !admitted) {
+    const feedback = webJoinFeedback(joinFailure);
     return (
-      <RoomShell title={roomTitle} onBack={() => router.back()}>
-        <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-          <h2 className="text-xl font-bold mb-3 text-[#FC253A]">Couldn&apos;t join</h2>
-          <p className="text-white/60 mb-8">{errorMessage}</p>
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
-          >
-            Back
-          </button>
+      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
+        <div className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center justify-center px-6 py-10 text-center">
+          <span className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-300/20 bg-amber-300/10"><Radio size={28} className="text-amber-200" aria-hidden="true" /></span>
+          <h2 className="mb-3 text-2xl font-bold">{feedback.title}</h2>
+          <p role="alert" className="mb-6 text-sm leading-6 text-white/70">{feedback.body}</p>
+          {feedback.retry ? <button type="button" onClick={() => {
+            if (useRoomUIStore.getState().phase !== "error") return;
+            joinFiredRef.current = false;
+            joinCompletedRef.current = false;
+            setPhase("joining");
+            setJoinAttempt(value => value + 1);
+          }} className="min-h-12 w-full rounded-xl bg-[#3FDCFF] px-6 py-3 font-semibold text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Try again</button> : null}
+          <button type="button" onClick={() => router.push(LYNKS_LIST_ROUTE)} className="mt-3 min-h-11 w-full rounded-xl bg-white/8 px-6 py-3 font-semibold hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">Back to Lynks</button>
         </div>
       </RoomShell>
     );
   }
 
   const connecting = phase === "joining" || phase === "connecting";
+  const connectionFeedback = webConnectionFeedback(lynk.state);
+  const connectionPhase = lynk.state === "error" || lynk.state === "ended" ? "disconnected" : bannerPhaseFor(session);
   const isHost = isHostRef.current;
   const raisedHandCount = raisedHandOrder.length;
   // The server decides whether this session is limited; the client displays it.
@@ -1375,7 +1371,7 @@ function RoomInner({
       >
       {/* The session machine is the single source now — it is what knows a
           first join from a reconnect, and what is driving the retries. */}
-      <ConnectionBanner phase={bannerPhaseFor(session)} />
+      <ConnectionBanner phase={connectionPhase} detail={connectionFeedback.detail} />
       <CaptureNotificationBannerWeb />
 
       {/* Only room content scrolls. The dock never competes with a tall header,
@@ -1384,7 +1380,9 @@ function RoomInner({
       <CaptureErrorBanner error={lynk.captureError} onRetry={lynk.retryCapture} />
       <RoomHeader
         title={roomTitle}
-        connecting={connecting}
+        connecting={connectionFeedback.attention}
+        connectionLabel={connectionFeedback.label}
+        anonymous={joinAnonymous}
         isHost={isHost}
         participantCount={participantCount}
         raisedHandCount={raisedHandCount}
@@ -1429,8 +1427,9 @@ function RoomInner({
 
       {connecting ? (
         <div className="flex min-h-32 flex-1 flex-col items-center justify-center gap-4">
-          <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
-          <p className="text-white/60">Connecting…</p>
+          <div aria-hidden="true" className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin motion-reduce:animate-none" />
+          <p role="status" className="font-semibold">Joining your Lynk…</p>
+          <p className="max-w-sm px-5 text-center text-sm text-white/60">Checking your place in the room. Camera and microphone controls remain available below.</p>
         </div>
       ) : (
         <>
@@ -1547,11 +1546,12 @@ function RoomInner({
           </ControlButton>
 
           <ReactionsPicker onSend={sendReaction} overlayOpen={isChatOpen || isHandQueueOpen || isParticipantsOpen || isDeviceSettingsOpen || showEndConfirm || showTimeUp} />
-          <ControlButton onClick={requestLeave} danger label="Leave Lynk">
+          <ControlButton onClick={requestLeave} danger disabled={isLeaving} label={isLeaving ? "Leaving Lynk" : "Leave Lynk"}>
             <PhoneOff size={24} />
           </ControlButton>
         </div>
         <p role="status" className="max-w-full px-2 text-center text-[11px] leading-4 text-white/60 [@media(max-height:500px)_and_(min-width:600px)]:max-w-[180px] [@media(max-height:500px)_and_(min-width:600px)]:text-left">
+          {isLeaving ? "Leaving · " : ""}
           {!canPublish ? "Listening · Raise your hand to speak" : hostMuteLocked ? "Microphone muted by host" : !lynk.micEnabled ? "Microphone muted" : lynk.microphoneError ? "Microphone unavailable" : isMicOn ? "Microphone on" : "Waiting for microphone"}
           {roomHasVideo && canPublish ? ` · ${!lynk.cameraEnabled ? "Camera off" : lynk.cameraError ? "Camera unavailable" : isCameraOn ? "Camera on" : "Waiting for camera"}` : ""}
         </p>
@@ -1572,6 +1572,7 @@ function RoomInner({
 
       {/* Chat (side-panel) */}
       <ChatPanel
+        roomId={id}
         open={isChatOpen}
         onClose={closeChat}
         comments={comments}
@@ -1687,12 +1688,12 @@ function RoomShell({
           type="button"
           onClick={onBack}
           aria-label="Back"
-          className="w-9 h-9 rounded-xl bg-white/8 flex items-center justify-center active:scale-95"
+          className="h-11 w-11 shrink-0 rounded-xl bg-white/8 flex items-center justify-center hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
         >
           <ArrowLeft size={20} color="#fff" />
         </button>
         <span className="flex-1 mx-4 truncate text-center text-[15px] font-semibold">{title}</span>
-        <span className="w-9" />
+        <span className="w-11 shrink-0" />
       </div>
       {children}
     </div>
@@ -1725,6 +1726,8 @@ export function SneakyLynkRoomScreen() {
   const viaInvite = search?.get("viaInvite") === "1";
   const shouldGateJoin = isServerRoom && !isCreator && !viaInvite;
   const entryScope = useRoomEntryScope(JSON.stringify([id, accountKey, shouldGateJoin]));
+  const [lookupAttempt, setLookupAttempt] = useState(0);
+  const [lookupFailed, setLookupFailed] = useState(false);
 
   const phase = useRoomUIStore((s) => s.phase);
   const roomSnapshot = useRoomUIStore((s) => s.roomSnapshot);
@@ -1740,15 +1743,23 @@ export function SneakyLynkRoomScreen() {
     useRoomUIStore.getState().reset();
     entryScope.initialize();
     let cancelled = false;
-    const cleanup = () => { cancelled = true; useRoomUIStore.getState().reset(); };
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    setLookupFailed(false);
+    const cleanup = () => { cancelled = true; clearTimeout(timeout); useRoomUIStore.getState().reset(); };
     if (!shouldGateJoin || !id) {
       setPhase("connecting"); // creators / local rooms skip pre-join
       return cleanup;
     }
     setPhase("looking-up");
+    timeout = setTimeout(() => {
+      if (cancelled) return;
+      cancelled = true;
+      setLookupFailed(true);
+    }, 20000);
     (async () => {
       const room = await sneakyLynkApi.getRoomById(id);
       if (cancelled) return;
+      clearTimeout(timeout);
       if (!room) {
         setClosed("This Lynk is unavailable.");
       } else if (getRoomEntryStatus(room) === "ended") {
@@ -1759,10 +1770,14 @@ export function SneakyLynkRoomScreen() {
         setRoomSnapshot(room);
         setPhase("prejoin");
       }
-    })();
+    })().catch(() => {
+      if (cancelled) return;
+      clearTimeout(timeout);
+      setLookupFailed(true);
+    });
     return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, shouldGateJoin, accountKey, entryScope.initialize]);
+  }, [id, shouldGateJoin, accountKey, entryScope.initialize, lookupAttempt]);
 
   // Verified-only: joining a Lynk needs a verified account. The pre-join
   // screen stays up behind the popup.
@@ -1780,16 +1795,21 @@ export function SneakyLynkRoomScreen() {
 
   if (!entryScope.ready || phase === "looking-up") {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[#06070d] text-white">
-        <div className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
-        <p className="text-white/60">Loading Lynk…</p>
-      </div>
+      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
+        <div className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-6 py-10 text-center">
+          {!lookupFailed ? <div aria-hidden="true" className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin motion-reduce:animate-none" /> : <Radio size={32} className="text-amber-200" aria-hidden="true" />}
+          <h1 className="text-xl font-semibold">{lookupFailed ? "Couldn't load this Lynk" : "Getting your Lynk ready"}</h1>
+          <p role="status" className="text-sm leading-6 text-white/60">{lookupFailed ? "Check your connection and try again. Your camera and microphone haven't been opened." : "Checking the room before you choose how to join."}</p>
+          {lookupFailed ? <button type="button" onClick={() => { setLookupFailed(false); setLookupAttempt(value => value + 1); }} className="min-h-12 w-full rounded-xl bg-[#3FDCFF] px-5 py-3 font-semibold text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Try again</button> : null}
+          <button type="button" onClick={() => router.push(LYNKS_LIST_ROUTE)} className="min-h-11 rounded-xl bg-white/8 px-5 py-3 text-sm font-semibold hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">Back to Lynks</button>
+        </div>
+      </RoomShell>
     );
   }
 
   if (phase === "closed") {
     return (
-      <RoomShell title={roomTitle} onBack={() => router.back()}>
+      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
           <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-white/8">
             <Radio size={36} className="text-white/40" />
@@ -1798,10 +1818,10 @@ export function SneakyLynkRoomScreen() {
           <p className="text-white/60 mb-8">{useRoomUIStore.getState().closedReason}</p>
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={() => router.push(LYNKS_LIST_ROUTE)}
             className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
           >
-            Back
+            Back to Lynks
           </button>
         </div>
       </RoomShell>
@@ -1811,7 +1831,7 @@ export function SneakyLynkRoomScreen() {
   // Gated server rooms wait for the user to tap "Join" before connecting.
   if (shouldGateJoin && phase === "prejoin") {
     return (
-      <RoomShell title={roomTitle} onBack={() => router.back()}>
+      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
         <PreJoinSetup roomTitle={roomTitle} roomHasVideo={roomHasVideo} onJoin={handleJoin} />
       </RoomShell>
     );

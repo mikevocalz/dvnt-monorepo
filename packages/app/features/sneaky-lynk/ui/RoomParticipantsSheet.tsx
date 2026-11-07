@@ -16,8 +16,9 @@
  *   - Stagger-fade entering animation on first 8 rows (50ms stride)
  */
 
-import React, { useCallback, useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useMemo, useEffect, useState } from "react";
+import { Alert, BackHandler, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useRouter } from "expo-router";
 import {
@@ -116,7 +117,7 @@ function ParticipantRow({
 }) {
   const isSelf = item.id === localUserId;
   const isAnon = item.user.isAnonymous;
-  const displayLabel = isAnon ? "Anonymous" : getSneakyUserLabel(item.user);
+  const displayLabel = getSneakyUserLabel(item.user);
   const roleMeta = getRoleMeta(item.role);
   const permissions = participantModeration(
     actorRole,
@@ -157,6 +158,8 @@ function ParticipantRow({
           <View style={styles.avatarSlot}>{avatarEl}</View>
         ) : (
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`View ${displayLabel} profile`}
             onPress={() => onProfilePress(item.user.username)}
             hitSlop={6}
             style={({ pressed }) => [
@@ -245,7 +248,7 @@ function ParticipantRow({
         {/* Right-side actions: mic status + optional mod buttons */}
         <View style={styles.rightActions}>
           {/* Muted badge — only shown when muted */}
-          {!item.isMicOn ? (
+          {!item.isMicOn && !permissions.mute ? (
             <View
               style={[
                 styles.micBadge,
@@ -293,7 +296,7 @@ function ParticipantRow({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Remove ${displayLabel} from the room`}
-                  onPress={() => onRemove(item.id)}
+                  onPress={() => Alert.alert(`Remove ${displayLabel}?`, "They will be removed from this Lynk.", [{ text: "Cancel", style: "cancel" }, { text: "Remove", style: "destructive", onPress: () => onRemove(item.id) }])}
                   hitSlop={8}
                   style={({ pressed }) => [
                     styles.modIcon,
@@ -329,6 +332,14 @@ export function RoomParticipantsSheet({
 }: RoomParticipantsSheetProps) {
   const { colors } = useColorScheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    if (!visible) { setQuery(""); return; }
+    const back = BackHandler.addEventListener("hardwareBackPress", () => { onDismiss(); return true; });
+    return () => back.remove();
+  }, [visible, onDismiss]);
 
   const sortedParticipants = useMemo(
     () =>
@@ -383,15 +394,17 @@ export function RoomParticipantsSheet({
     ],
   );
 
+  const filteredParticipants = sortedParticipants.filter((participant) => getSneakyUserLabel(participant.user).toLowerCase().includes(query.trim().toLowerCase()));
+
   if (!visible) return null;
 
   return (
-    <View style={styles.overlay} pointerEvents="auto">
-      <Pressable style={styles.backdrop} onPress={onDismiss} />
+    <View style={styles.overlay} pointerEvents="auto" accessibilityViewIsModal onAccessibilityEscape={onDismiss}>
+      <Pressable accessible={false} style={styles.backdrop} onPress={onDismiss} />
       <View
         style={[
           styles.sheet,
-          { backgroundColor: colors.secondary, borderColor: colors.border },
+          { backgroundColor: "#0D1019", borderColor: colors.border, maxHeight: height - insets.top - 16, minHeight: Math.min(340, height * 0.7) },
         ]}
       >
         {/* Hero header */}
@@ -415,14 +428,16 @@ export function RoomParticipantsSheet({
                 <Text
                   style={[styles.hostHint, { color: colors.mutedForeground }]}
                 >
-                  · tap icons to mute or remove
+                  · moderation controls available
                 </Text>
               ) : null}
             </View>
           </View>
           <Pressable
             onPress={onDismiss}
-            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Close participants"
+            hitSlop={4}
             style={[
               styles.closeBtn,
               {
@@ -431,12 +446,23 @@ export function RoomParticipantsSheet({
               },
             ]}
           >
-            <X size={18} color="rgb(255, 109, 193)" />
+            <X size={20} color="#C5C7D1" />
           </Pressable>
         </View>
 
+        <TextInput
+          accessibilityLabel="Search people in this Lynk"
+          placeholder="Find someone in the room"
+          placeholderTextColor="#9BA1B2"
+          value={query}
+          onChangeText={setQuery}
+          autoCorrect={false}
+          autoCapitalize="none"
+          clearButtonMode="while-editing"
+          style={{ minHeight: 48, marginHorizontal: 20, marginBottom: 12, paddingHorizontal: 14, color: "#fff", fontSize: 14, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)" }}
+        />
         {/* Participant list */}
-        {participants.length === 0 ? (
+        {filteredParticipants.length === 0 ? (
           <View style={styles.emptyWrap}>
             <View
               style={[styles.emptyRing, { borderColor: `${colors.primary}66` }]}
@@ -449,24 +475,26 @@ export function RoomParticipantsSheet({
               />
             </View>
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-              No one here yet
+              {query.trim() ? "No matches" : "No one here yet"}
             </Text>
             <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>
-              Participants will show up as they join.
+              {query.trim() ? "Try a different name or anonymous label." : "Participants will show up as they join."}
             </Text>
           </View>
         ) : (
           <LegendList
-            data={sortedParticipants}
+            data={filteredParticipants}
             keyExtractor={keyExtractor}
             renderItem={renderItem}
             estimatedItemSize={64}
             recycleItems
             contentContainerStyle={{
               paddingHorizontal: 16,
-              paddingBottom: 32,
+              paddingBottom: insets.bottom + 24,
               paddingTop: 4,
             }}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
           />
         )}
@@ -505,10 +533,10 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   heroCount: {
-    fontSize: 52,
+    fontSize: 40,
     fontWeight: "800",
     letterSpacing: -2,
-    lineHeight: 56,
+    lineHeight: 46,
   },
   heroLabelRow: {
     flexDirection: "row",
@@ -528,9 +556,9 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
     justifyContent: "center",
@@ -580,7 +608,7 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: 7,
     paddingVertical: 3,
-    borderRadius: 100,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
   },
   chipLabel: {
@@ -606,9 +634,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   modIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 9,
+    width: 44,
+    height: 44,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
     justifyContent: "center",

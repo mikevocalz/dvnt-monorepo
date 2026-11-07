@@ -19,6 +19,8 @@ import {
   Switch,
   AppState,
   Alert,
+  Linking,
+  BackHandler,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -27,7 +29,6 @@ import { readAdmissionRefusal } from "@dvnt/app/lib/auth/verified-only-prompt";
 import { ErrorBoundary as GlobalErrorBoundary } from "@dvnt/app/components/error-boundary";
 import {
   ArrowLeft,
-  ChevronUp,
   Users,
   EyeOff,
   Radio,
@@ -44,6 +45,7 @@ import {
   useMicrophonePermission,
 } from "react-native-vision-camera";
 import { useCamera, useMicrophone } from "react-native-moq";
+import { RoomConnectionNotice } from "@dvnt/app/features/sneaky-lynk/ui/RoomConnectionNotice";
 import { CaptureErrorBanner } from "@dvnt/app/features/sneaky-lynk/ui/CaptureErrorBanner";
 import { RoomVideo } from "@dvnt/app/features/sneaky-lynk/ui/RoomVideo";
 import { useVideoRoom } from "@dvnt/app/features/video";
@@ -101,9 +103,9 @@ import {
   useRoomReactions,
   GPU_REACTION_CAP,
 } from "@dvnt/app/features/sneaky-lynk";
-import { ConnectionBanner, RoomTimer, type ConnectionPhase } from "@dvnt/ui";
+import { RoomTimer } from "@dvnt/ui";
 import { HOST_MUTE_COPY } from "@dvnt/app/lib/video/host-mute";
-import { bannerPhaseFor, useRoomSession } from "@dvnt/app/features/sneaky-lynk/session/useRoomSession";
+import { useRoomSession } from "@dvnt/app/features/sneaky-lynk/session/useRoomSession";
 import { isActive } from "@dvnt/app/features/sneaky-lynk/session/machine";
 import { leaveRoomSafely } from "@dvnt/app/features/sneaky-lynk/session/leave-room";
 import { useRoomHeartbeat } from "@dvnt/app/features/sneaky-lynk/hooks/useRoomHeartbeat";
@@ -116,7 +118,7 @@ import { isFeatureEnabled } from "@dvnt/app/lib/feature-flags";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
 
-// ── Error Boundary (per-route) — surfaces real crash message ────────
+// ── Error Boundary (per-route) — safe, actionable recovery ────────
 
 function parseRoomStartedAt(createdAt?: string | null): number | undefined {
   if (!createdAt) return undefined;
@@ -124,61 +126,15 @@ function parseRoomStartedAt(createdAt?: string | null): number | undefined {
   return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
-export function ErrorBoundary({
-  error,
-  retry,
-}: {
-  error: Error;
-  retry: () => void;
-}) {
+export function ErrorBoundary({ retry }: { error: Error; retry: () => void }) {
+  const router = useRouter();
   return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: "#000",
-        justifyContent: "center",
-        alignItems: "center",
-        padding: 24,
-      }}
-    >
-      <Text
-        style={{
-          color: "#EF4444",
-          fontSize: 18,
-          fontWeight: "700",
-          marginBottom: 12,
-        }}
-      >
-        Room Error
-      </Text>
-      <Text
-        style={{
-          color: "#9CA3AF",
-          fontSize: 13,
-          textAlign: "center",
-          marginBottom: 8,
-        }}
-      >
-        {error.message}
-      </Text>
-      <ScrollView style={{ maxHeight: 200, width: "100%", marginBottom: 16 }}>
-        <Text
-          style={{ color: "#6B7280", fontSize: 10, fontFamily: "monospace" }}
-        >
-          {error.stack}
-        </Text>
-      </ScrollView>
-      <Pressable
-        onPress={retry}
-        style={{
-          backgroundColor: "#FC253A",
-          paddingHorizontal: 24,
-          paddingVertical: 12,
-          borderRadius: 24,
-        }}
-      >
-        <Text style={{ color: "#fff", fontWeight: "600" }}>Retry</Text>
-      </Pressable>
+    <View style={{ flex: 1, backgroundColor: "#06070D", justifyContent: "center", alignItems: "center", padding: 24, gap: 16 }}>
+      <Radio size={36} color="#3FDCFF" />
+      <Text accessibilityRole="header" style={{ color: "#fff", fontSize: 24, fontWeight: "700", textAlign: "center" }}>This Lynk couldn't load</Text>
+      <Text style={{ color: "#B7B9C5", fontSize: 15, lineHeight: 22, textAlign: "center", maxWidth: 360 }}>Try opening the room again. If the problem continues, return to your Lynks.</Text>
+      <Pressable accessibilityRole="button" onPress={retry} style={{ minHeight: 52, width: "100%", maxWidth: 360, backgroundColor: "#3FDCFF", alignItems: "center", justifyContent: "center", borderRadius: 8 }}><Text style={{ color: "#06070D", fontSize: 15, fontWeight: "700" }}>Try again</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => router.replace(LYNKS_LIST_ROUTE)} style={{ minHeight: 48, alignItems: "center", justifyContent: "center" }}><Text style={{ color: "#C5C7D1", fontSize: 14, fontWeight: "600" }}>Back to Lynks</Text></Pressable>
     </View>
   );
 }
@@ -387,185 +343,127 @@ const LYNKS_LIST_ROUTE = "/messages";
 
 function PreJoinScreen({
   roomTitle,
+  hasVideo,
   onJoin,
   onBack,
 }: {
   roomTitle: string;
+  hasVideo: boolean;
   onJoin: (anonymous: boolean, cameraOn: boolean, micOn: boolean) => void;
   onBack: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const [anonymous, setAnonymous] = React.useState(false);
-  const [cameraOn, setCameraOn] = React.useState(true);
-  const [micOn, setMicOn] = React.useState(true);
+  // Nothing captures until the user chooses it. A preview is local, never a
+  // promise that the room can already see or hear this device.
+  const [anonymous, setAnonymous] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [micOn, setMicOn] = useState(false);
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  const permissionBusyRef = useRef(false);
+  const previewLifetimeRef = useRef(false);
+  useEffect(() => {
+    previewLifetimeRef.current = true;
+    return () => { previewLifetimeRef.current = false; };
+  }, []);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const { hasPermission: cameraPermission, requestPermission: requestCamera } = useCameraPermission();
+  const { hasPermission: micPermission, requestPermission: requestMic } = useMicrophonePermission();
+  const previewEnabled = hasVideo && cameraOn && cameraPermission;
+  const previewCamera = useCamera({ enabled: previewEnabled });
 
-  /**
-   * Self-preview, same as the web pre-join.
-   *
-   * This screen asked "how do you want to appear" and showed you nothing — you
-   * found out what the room could see AFTER it could see it. Its own camera,
-   * released when this screen unmounts, so the room's capture starts clean.
-   */
-  const previewCamera = useCamera({ enabled: cameraOn });
+  const toggleDevice = async (device: "camera" | "microphone") => {
+    if (permissionBusyRef.current) return;
+    const isCamera = device === "camera";
+    const enabled = isCamera ? cameraOn : micOn;
+    const setEnabled = isCamera ? setCameraOn : setMicOn;
+    if (enabled) { setEnabled(false); return; }
+    permissionBusyRef.current = true;
+    setPermissionBusy(true);
+    setPermissionError(null);
+    try {
+      const granted = isCamera
+        ? cameraPermission || await requestCamera()
+        : micPermission || await requestMic();
+      if (!previewLifetimeRef.current) return;
+      setEnabled(granted);
+      if (!granted) setPermissionError(`${isCamera ? "Camera" : "Microphone"} access is off. You can join without it, or enable access in device settings.`);
+    } catch {
+      if (!previewLifetimeRef.current) return;
+      setEnabled(false);
+      setPermissionError(`Couldn't access your ${device}. You can still join with it off.`);
+    } finally {
+      permissionBusyRef.current = false;
+      if (previewLifetimeRef.current) setPermissionBusy(false);
+    }
+  };
 
   return (
-    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      {/* Header */}
-      <View className="flex-row items-center px-4 py-3 border-b border-border">
-        <Pressable onPress={onBack} hitSlop={12}>
-          <ArrowLeft size={24} color="#fff" />
+    <View style={{ flex: 1, backgroundColor: "#06070D", paddingTop: insets.top }}>
+      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 8 }}>
+        <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Back to Lynks" style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: "rgba(255,255,255,0.04)" }}>
+          <ArrowLeft size={22} color="#fff" />
         </Pressable>
-        <View className="flex-1 mx-4">
-          <Text
-            className="text-foreground font-semibold text-center"
-            numberOfLines={1}
-          >
-            {roomTitle || "Join Lynk"}
-          </Text>
-        </View>
-        <View className="w-6" />
+        <Text style={{ flex: 1, color: "#AEB3C2", fontSize: 11, fontWeight: "700", letterSpacing: 2, textAlign: "center" }}>BEFORE YOU LYNK</Text>
+        <View style={{ width: 44 }} />
       </View>
-
-      {/* Content.
-          `max-w-md self-center` is the whole iPad fix: every card here was
-          `w-full` inside a full-bleed padding box, so on a 1024pt iPad the
-          safety copy and the toggles stretched the entire width and the screen
-          read as a settings page rather than a door. Phones are unchanged —
-          the cap is wider than they are. Same column width as the web
-          pre-join, so the two rails describe the same screen. */}
-      <ScrollView
-        // contentContainerSTYLE, not className: NativeWind does not map
-        // `contentContainerClassName` in this setup, so the class version
-        // silently applies nothing — the same trap already documented at
-        // (tabs)/profile.tsx:619. The centring and padding here are the whole
-        // layout, so losing them would undo the fix this screen exists for.
-        contentContainerStyle={{
-          flexGrow: 1,
-          alignItems: "center",
-          justifyContent: "center",
-          paddingHorizontal: 24,
-          paddingVertical: 24,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
-       <View className="w-full max-w-md self-center items-center">
-        <View className="w-20 h-20 rounded-full bg-primary/20 items-center justify-center mb-6">
-          <Radio size={40} color="#FC253A" />
-        </View>
-
-        <Text className="text-2xl font-bold text-foreground text-center mb-2">
-          {roomTitle || getLynkDisplayName()}
-        </Text>
-        <Text className="text-muted-foreground text-center mb-6">
-          Choose how you want to appear in this room
-        </Text>
-
-        {/* Self-preview + the two decisions that matter at a door. Mirrored,
-            because an unmirrored preview reads as someone else. */}
-        <View className="w-full rounded-2xl overflow-hidden bg-black border border-border mb-4">
-          <View className="w-full aspect-video">
-            {cameraOn && previewCamera ? (
-              <RoomVideo camera={previewCamera} mirror />
-            ) : (
-              <View className="flex-1 items-center justify-center gap-2">
-                <VideoOff size={26} color="#ffffff73" />
-                <Text className="text-xs text-muted-foreground">
-                  Camera off — you&apos;ll join as your avatar
-                </Text>
-              </View>
-            )}
+      <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: "center", paddingHorizontal: 20, paddingTop: 20, paddingBottom: insets.bottom + 24 }} showsVerticalScrollIndicator={false}>
+        <View style={{ width: "100%", maxWidth: 460, gap: 16 }}>
+          <View style={{ gap: 8 }}>
+            <Text style={{ color: "#fff", fontFamily: "SpaceGrotesk-Bold", fontSize: 28, fontWeight: "700", letterSpacing: -0.6 }}>{roomTitle || getLynkDisplayName()}</Text>
+            <Text style={{ color: "#B7B9C5", fontSize: 15, lineHeight: 22 }}>Your space. Your choice of what to share.</Text>
           </View>
-          <View className="flex-row items-center justify-center gap-3 px-4 py-3 border-t border-border">
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected: cameraOn }}
-              accessibilityLabel={cameraOn ? "Turn camera off" : "Turn camera on"}
-              onPress={() => setCameraOn((v) => !v)}
-              hitSlop={8}
-              className={`w-11 h-11 rounded-full items-center justify-center ${
-                cameraOn ? "bg-secondary" : "bg-primary"
-              }`}
-            >
-              {cameraOn ? (
-                <Video size={18} color="#fff" />
-              ) : (
-                <VideoOff size={18} color="#fff" />
+          <View style={{ borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "#0D1019" }}>
+            <View style={{ width: "100%", aspectRatio: 16 / 10 }}>
+              {previewEnabled && previewCamera ? <RoomVideo camera={previewCamera} mirror /> : (
+                <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24 }}>
+                  <View style={{ width: 64, height: 64, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.04)", alignItems: "center", justifyContent: "center" }}>
+                    <VideoOff size={28} color="#B7B9C5" />
+                  </View>
+                  <Text style={{ color: "#fff", fontSize: 17, fontWeight: "600" }}>{hasVideo ? "Camera off" : "An audio-only Lynk"}</Text>
+                  <Text style={{ color: "#AEB3C2", fontSize: 13, textAlign: "center", lineHeight: 19 }}>{hasVideo ? "Turn it on to check your preview." : "No camera is shared in this room."}</Text>
+                </View>
               )}
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected: micOn }}
-              accessibilityLabel={micOn ? "Mute microphone" : "Unmute microphone"}
-              onPress={() => setMicOn((v) => !v)}
-              hitSlop={8}
-              className={`w-11 h-11 rounded-full items-center justify-center ${
-                micOn ? "bg-secondary" : "bg-primary"
-              }`}
-            >
-              {micOn ? (
-                <Mic size={18} color="#fff" />
-              ) : (
-                <MicOff size={18} color="#fff" />
-              )}
-            </Pressable>
-          </View>
-        </View>
-
-        <View className="w-full rounded-2xl bg-secondary px-5 py-4 mb-4">
-          <Text className="text-foreground font-semibold mb-2">
-            Room Safety
-          </Text>
-          <Text className="text-xs text-muted-foreground leading-5">
-            By joining, you agree to DVNT community guidelines. Recording is
-            prohibited, screenshots may notify the room, and participants can
-            report unsafe behavior.
-          </Text>
-        </View>
-
-        {/* Anonymous Toggle */}
-        <View className="w-full bg-secondary rounded-2xl px-5 py-4 mb-8">
-          <View className="flex-row items-center justify-between">
-            <View className="flex-row items-center gap-3 flex-1">
-              <View className="w-10 h-10 rounded-full bg-primary/20 items-center justify-center">
-                <EyeOff size={20} color="#FC253A" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-foreground font-semibold">
-                  Join Anonymously
-                </Text>
-                <Text className="text-xs text-muted-foreground mt-0.5">
-                  You&apos;ll appear as &quot;Anon 1&quot; with no profile info
-                </Text>
+              <View style={{ position: "absolute", top: 12, left: 12, borderRadius: 8, backgroundColor: "rgba(2,3,10,0.8)", paddingHorizontal: 10, paddingVertical: 6 }}>
+                <Text style={{ color: "#fff", fontSize: 11, fontWeight: "600" }}>Only you can see this preview</Text>
               </View>
             </View>
-            <Switch
-              value={anonymous}
-              onValueChange={setAnonymous}
-              trackColor={{ false: "#374151", true: "#FC253A" }}
-              thumbColor="#fff"
-            />
-          </View>
-
-          {anonymous && (
-            <View className="mt-3 pt-3 border-t border-border/50">
-              <Text className="text-xs text-muted-foreground">
-                Your identity will be hidden from other participants. The host
-                and moderators cannot see who you are.
-              </Text>
+            <View style={{ flexDirection: "row", gap: 10, padding: 12, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.10)" }}>
+              {hasVideo ? <Pressable accessibilityRole="button" accessibilityLabel={previewEnabled ? "Turn camera off" : "Turn camera on"} accessibilityState={{ selected: previewEnabled, disabled: permissionBusy }} disabled={permissionBusy} onPress={() => void toggleDevice("camera")} style={{ flex: 1, minHeight: 52, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: "rgba(255,255,255,0.08)", opacity: permissionBusy ? 0.5 : 1 }}>
+                {previewEnabled ? <Video size={18} color="#3FDCFF" /> : <VideoOff size={18} color="#B7B9C5" />}
+                <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>Camera {previewEnabled ? "on" : "off"}</Text>
+              </Pressable> : null}
+              <Pressable accessibilityRole="button" accessibilityLabel={micOn && micPermission ? "Join with microphone muted" : "Join with microphone on"} accessibilityState={{ selected: micOn && micPermission, disabled: permissionBusy }} disabled={permissionBusy} onPress={() => void toggleDevice("microphone")} style={{ flex: 1, minHeight: 52, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: "rgba(255,255,255,0.08)", opacity: permissionBusy ? 0.5 : 1 }}>
+                {micOn && micPermission ? <Mic size={18} color="#3FDCFF" /> : <MicOff size={18} color="#B7B9C5" />}
+                <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>{micOn && micPermission ? "Join mic on" : "Join muted"}</Text>
+              </Pressable>
             </View>
-          )}
+          </View>
+          {permissionError ? <View accessibilityRole="alert" style={{ padding: 14, gap: 8, backgroundColor: "rgba(245,197,24,0.08)", borderRadius: 12 }}>
+            <Text style={{ color: "#FDE68A", fontSize: 13, lineHeight: 19 }}>{permissionError}</Text>
+            <Pressable onPress={() => void Linking.openSettings().catch(() => setPermissionError("Open your device settings to allow camera or microphone access for DVNT."))} accessibilityRole="button" style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: "#3FDCFF", fontWeight: "600" }}>Open device settings</Text></Pressable>
+          </View> : null}
+          <View style={{ borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", padding: 16, gap: 12 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <EyeOff size={22} color="#B7B9C5" />
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>Hide my profile</Text>
+                <Text style={{ color: "#AEB3C2", fontSize: 13, lineHeight: 18 }}>Use an anonymous label in the room.</Text>
+              </View>
+              <Switch accessibilityLabel="Hide my profile with an anonymous label" value={anonymous} onValueChange={setAnonymous} trackColor={{ false: "#343744", true: "#8A40CF" }} thumbColor="#fff" />
+            </View>
+            {anonymous ? <Text style={{ color: "#D3D5DE", fontSize: 13, lineHeight: 20 }}>Your profile is hidden, but your camera and voice can identify you. Detected screenshots may identify your account to the host.</Text> : null}
+          </View>
+          <View style={{ gap: 6 }}>
+            <Text style={{ color: "#D3D5DE", fontSize: 13, fontWeight: "600" }}>Be present. Respect privacy.</Text>
+            <Text style={{ color: "#AEB3C2", fontSize: 13, lineHeight: 20 }}>Recording is prohibited. Screenshots may notify the room. Capture protection varies by device and cannot prevent someone recording with another device.</Text>
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel={anonymous ? "Join Lynk anonymously" : "Join Lynk"} accessibilityState={{ disabled: permissionBusy }} disabled={permissionBusy} onPress={() => onJoin(anonymous, previewEnabled, micOn && micPermission)} style={({ pressed }) => ({ borderRadius: 8, overflow: "hidden", opacity: permissionBusy ? 0.5 : pressed ? 0.85 : 1 })}>
+            <LinearGradient colors={["#3FDCFF", "#8A40CF", "#FF5BFC"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ minHeight: 56, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>{anonymous ? "Join anonymously" : "Join Lynk"}</Text>
+            </LinearGradient>
+          </Pressable>
+          <Text style={{ color: "#AEB3C2", fontSize: 12, textAlign: "center", lineHeight: 18 }}>By joining, you agree to DVNT community guidelines.</Text>
         </View>
-
-        {/* Join Button */}
-        <Pressable
-          onPress={() => onJoin(anonymous, cameraOn, micOn)}
-          className="w-full py-4 rounded-full bg-primary items-center active:bg-primary/80"
-        >
-          <Text className="text-white font-bold text-base">
-            {anonymous ? "Join Anonymously" : "Join Lynk"}
-          </Text>
-        </Pressable>
-       </View>
       </ScrollView>
     </View>
   );
@@ -674,7 +572,7 @@ function SneakyLynkRoomScreenContent({
             ? "This Lynk has ended and can't be reopened."
             : "This Lynk is unavailable."
         }
-        onBack={() => router.back()}
+        onBack={() => router.replace(LYNKS_LIST_ROUTE)}
       />
     );
   }
@@ -683,9 +581,10 @@ function SneakyLynkRoomScreenContent({
   if (isServerRoom && !hasJoined) {
     return (
       <PreJoinScreen
+        hasVideo={roomLookup.room?.hasVideo ?? roomHasVideo}
         roomTitle={roomLookup.room?.title || paramTitle || getLynkDisplayName()}
         onJoin={handleJoin}
-        onBack={() => router.back()}
+        onBack={() => router.replace(LYNKS_LIST_ROUTE)}
       />
     );
   }
@@ -696,7 +595,7 @@ function SneakyLynkRoomScreenContent({
         key={id}
         id={id}
         paramTitle={paramTitle}
-        roomHasVideo={roomHasVideo}
+        roomHasVideo={roomLookup.room?.hasVideo ?? roomHasVideo}
         anonymous={joinAnonymous}
         initialCameraOn={joinCameraOn}
         initialMicOn={joinMicOn}
@@ -768,7 +667,7 @@ function LocalRoom({
   const handToggleInFlightRef = useRef(false);
 
   const localUser = buildLocalUser(authUser);
-  const effectiveMuted = !localMicEnabled;
+  const effectiveMuted = !localMicEnabled || !hasMicPermission;
   const effectiveVideoOn = localVideoOn && hasCamPermission;
 
   // LocalRoom is the self-hosted "practice" space (id starts with
@@ -823,7 +722,7 @@ function LocalRoom({
     enabled: effectiveVideoOn,
     videoCodec: "h264",
   });
-  const mic = useMicrophone({ enabled: localMicEnabled });
+  const mic = useMicrophone({ enabled: localMicEnabled && hasMicPermission });
 
   // Audio session for the room (no CallKit for Lynk rooms — they are social
   // rooms, not private calls, so audio always routes to the speaker).
@@ -870,7 +769,7 @@ function LocalRoom({
 
     reset();
     endRoom(id, storeListeners.length);
-    router.back();
+    router.replace(LYNKS_LIST_ROUTE);
   }, [router, id, endRoom, reset, storeListeners.length, showToast]);
 
   // LocalRoom is always host — leaving ends it, so the tap asks first.
@@ -932,16 +831,22 @@ function LocalRoom({
 
     showToast("info", "Share Cancelled", "Invite sharing was dismissed.");
   }, [id, roomTitle, showToast]);
-  const handleToggleMic = useCallback(() => {
-    // Capture follows the flag (see `useMicrophone` above) — there is no async
-    // toggle that can fail, so there is nothing to catch or roll back.
+  const handleToggleMic = useCallback(async () => {
+    if (!localMicEnabled && !hasMicPermission && !await requestMicPermission()) {
+      showToast("info", "Microphone access is off", "Enable microphone access in device settings to use it here.");
+      return;
+    }
     const wantEnabled = !localMicEnabled;
     audioSession.setMicMuted(!wantEnabled);
     setLocalMicEnabled(wantEnabled);
-  }, [localMicEnabled]);
-  const handleToggleVideo = useCallback(() => {
+  }, [localMicEnabled, hasMicPermission, requestMicPermission, showToast]);
+  const handleToggleVideo = useCallback(async () => {
+    if (!localVideoOn && !hasCamPermission && !await requestCamPermission()) {
+      showToast("info", "Camera access is off", "Enable camera access in device settings to use it here.");
+      return;
+    }
     setLocalVideoOn((prev) => !prev);
-  }, []);
+  }, [localVideoOn, hasCamPermission, requestCamPermission, showToast]);
   const handleSwitchCamera = useCallback(async () => {
     // `flip()` swaps capture position natively — no device enumeration, and no
     // deprecated _switchCamera() facingMode trap. See useVideoRoom.switchCamera.
@@ -1119,8 +1024,10 @@ function ServerRoom({
   const endRoomHistory = useLynkHistoryStore((s) => s.endRoom);
 
   // VisionCamera permissions for native camera fallback
-  const { requestPermission: requestCamPermission } = useCameraPermission();
-  const { requestPermission: requestMicPermission } = useMicrophonePermission();
+  const { hasPermission: hasCamPermission, requestPermission: requestCamPermission } = useCameraPermission();
+  const { hasPermission: hasMicPermission, requestPermission: requestMicPermission } = useMicrophonePermission();
+  const permissionsRef = useRef({ hasCamPermission, hasMicPermission, requestCamPermission, requestMicPermission });
+  permissionsRef.current = { hasCamPermission, hasMicPermission, requestCamPermission, requestMicPermission };
 
   const {
     isHandRaised,
@@ -1153,12 +1060,6 @@ function ServerRoom({
   // error. The ref lets the mount effect see it without re-running.
   const [waitingForHost, setWaitingForHost] = useState(false);
   const waitingForHostRef = useRef(false);
-  // Capacity flow phase — "idle" (sheet just opened, showing Notify me),
-  // "waiting" (polling for a seat), "seat-open" (poll detected room
-  // has space, waiting for user to tap-to-join).
-  const [capacityPhase, setCapacityPhase] = useState<
-    "idle" | "waiting" | "seat-open"
-  >("idle");
   const [roomSnapshot, setRoomSnapshot] = useState<SneakyRoom | null>(
     initialRoom,
   );
@@ -1177,13 +1078,34 @@ function ServerRoom({
   // reconnect does not quietly turn your camera back on.
   const desiredMicEnabledRef = useRef(initialMicOn);
   const desiredVideoEnabledRef = useRef(roomHasVideo && initialCameraOn);
+  const leavingRef = useRef(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+  const leaveLifetimeRef = useRef({ active: false, epoch: 0 });
+  useEffect(() => {
+    leaveLifetimeRef.current = { active: true, epoch: leaveLifetimeRef.current.epoch + 1 };
+    return () => {
+      leaveLifetimeRef.current = { active: false, epoch: leaveLifetimeRef.current.epoch + 1 };
+    };
+  }, []);
+  const deviceIntentEpochRef = useRef(0);
+  const closedReasonRef = useRef(closedReason);
+  closedReasonRef.current = closedReason;
+  const micChangeInFlightRef = useRef(false);
+  const cameraChangeInFlightRef = useRef(false);
   const handToggleInFlightRef = useRef(false);
   const shareInFlightRef = useRef(false);
   const reportInFlightRef = useRef(false);
   const markRoomClosed = useCallback(
     (room?: SneakyRoom | null, reason?: string) => {
+      // Close the permission/admission gate synchronously; React may batch
+      // the terminal screen update behind an already-resolving OS prompt.
+      deviceIntentEpochRef.current += 1;
+      const closedMessage = reason || "This Lynk has ended and can't be reopened.";
+      closedReasonRef.current = closedMessage;
+      desiredVideoEnabledRef.current = false;
+      desiredMicEnabledRef.current = false;
       if (room) setRoomSnapshot(room);
-      setClosedReason(reason || "This Lynk has ended and can't be reopened.");
+      setClosedReason(closedMessage);
       endRoomHistory(id, room?.listeners ?? useRoomStore.getState().listeners.length);
     },
     [endRoomHistory, id],
@@ -1192,7 +1114,12 @@ function ServerRoom({
   const videoRoom = useVideoRoom({
     roomId: id || "",
     anonymous,
-    onEjected: (reason) => showEject(reason),
+    onEjected: (reason) => {
+      deviceIntentEpochRef.current += 1;
+      desiredVideoEnabledRef.current = false;
+      desiredMicEnabledRef.current = false;
+      showEject(reason);
+    },
     onRoomEnded: () => {
       showToast("info", "Room Ended", "The host has ended this room");
       markRoomClosed(roomSnapshot);
@@ -1235,9 +1162,68 @@ function ServerRoom({
       }
     },
   });
-  // Stable ref so callbacks never capture a stale videoRoom object
+  // Stable ref so callbacks never capture a stale videoRoom object.
   const videoRoomRef = useRef(videoRoom);
   videoRoomRef.current = videoRoom;
+  const admissionInFlightRef = useRef<{ epoch: number; promise: Promise<boolean> } | null>(null);
+  const joinWithReviewedMedia = useCallback((): Promise<boolean> => {
+    const epoch = leaveLifetimeRef.current.epoch;
+    const intentEpoch = deviceIntentEpochRef.current;
+    const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch && deviceIntentEpochRef.current === intentEpoch && !leavingRef.current && !closedReasonRef.current && !videoRoomRef.current.isEjected;
+    if (!isCurrent()) return Promise.resolve(false);
+    if (admissionInFlightRef.current?.epoch === epoch) return admissionInFlightRef.current.promise;
+    const attempt = (async () => {
+      try {
+        // Native capture defaults on. Commit safe flags BEFORE admission can
+        // grant canPublish, including when permissions were previously granted.
+        await videoRoomRef.current.setCameraEnabled(false);
+        if (!isCurrent()) return false;
+        await videoRoomRef.current.setMicEnabled(false);
+        if (!isCurrent()) return false;
+        const permissions = permissionsRef.current;
+        const cameraGranted = !roomHasVideo || !desiredVideoEnabledRef.current || permissions.hasCamPermission || await permissions.requestCamPermission();
+        if (!isCurrent()) return false;
+        const microphoneGranted = !desiredMicEnabledRef.current || permissions.hasMicPermission || await permissions.requestMicPermission();
+        if (!isCurrent()) return false;
+        desiredVideoEnabledRef.current = roomHasVideo && desiredVideoEnabledRef.current && cameraGranted;
+        desiredMicEnabledRef.current = desiredMicEnabledRef.current && microphoneGranted;
+        await videoRoomRef.current.setCameraEnabled(desiredVideoEnabledRef.current);
+        if (!isCurrent()) return false;
+        const micAllowed = await videoRoomRef.current.setMicEnabled(desiredMicEnabledRef.current);
+        if (!isCurrent()) return false;
+        if (!micAllowed) desiredMicEnabledRef.current = false;
+        // This is the only admission call: retries, waiting-host admission and
+        // reconnects all pass through the same reviewed choices and mute lock.
+        return await videoRoomRef.current.join();
+      } catch {
+        if (isCurrent()) showToast("error", "Couldn't join", "Check your device permissions and connection, then try again.");
+        return false;
+      }
+    })();
+    admissionInFlightRef.current = { epoch, promise: attempt };
+    void attempt.finally(() => {
+      if (admissionInFlightRef.current?.promise === attempt) admissionInFlightRef.current = null;
+    });
+    return attempt;
+  }, [roomHasVideo, showToast]);
+  const joinRetryRef = useRef(false);
+  const [isJoinRetrying, setIsJoinRetrying] = useState(false);
+  const handleRetryJoin = useCallback(async () => {
+    if (joinRetryRef.current) return false;
+    joinRetryRef.current = true;
+    setIsJoinRetrying(true);
+    try {
+      // The actual native join carries the selected anonymous identity.
+      const joined = await joinWithReviewedMedia();
+      if (joined) setJoinError(null);
+      return joined;
+    } catch {
+      return false;
+    } finally {
+      joinRetryRef.current = false;
+      if (leaveLifetimeRef.current.active) setIsJoinRetrying(false);
+    }
+  }, [joinWithReviewedMedia]);
 
   // Heartbeat the waiting room; when the host starts, run the normal join so
   // video_join_room still applies bans, capacity and verification.
@@ -1247,7 +1233,7 @@ function ServerRoom({
     onAdmitted: () => {
       waitingForHostRef.current = false;
       setWaitingForHost(false);
-      void videoRoomRef.current.join();
+      void joinWithReviewedMedia();
     },
     onRefused: (message) => {
       waitingForHostRef.current = false;
@@ -1316,7 +1302,9 @@ function ServerRoom({
   });
   useSneakyLynkCaptureProtection(captureBroadcast.notifyLocalScreenshot);
   const connectionState =
-    videoRoom.connectionState.status === "error"
+    videoRoom.connectionState.status === "idle"
+      ? "connecting"
+      : videoRoom.connectionState.status === "error"
       ? "disconnected"
       : (videoRoom.connectionState.status as
           | "connecting"
@@ -1334,7 +1322,7 @@ function ServerRoom({
   // machine's budget expects. Held in a ref inside the hook, so its identity
   // changing between renders does not restart the retry loop.
   const session = useRoomSession(videoRoom.connectionState.status, {
-    onReconnect: videoRoom.join,
+    onReconnect: joinWithReviewedMedia,
   });
   // See the web leg: without this every member reports no last_seen_at and
   // video_list_rooms keeps the room "Live" for twelve hours.
@@ -1363,6 +1351,7 @@ function ServerRoom({
   const reconcileDesiredMedia = useCallback(
     async (reason: "join" | "reconnect" | "foreground") => {
       try {
+        if (!leaveLifetimeRef.current.active || leavingRef.current || closedReasonRef.current) return;
         console.log("[SneakyLynk:Server] Reconciling media after", reason);
         // On reconnect or foreground resume the audio session may have been
         // interrupted — restart it. On initial join the session is already
@@ -1375,6 +1364,7 @@ function ServerRoom({
         await videoRoomRef.current.setCameraEnabled(
           roomHasVideo && desiredVideoEnabledRef.current,
         );
+        if (!leaveLifetimeRef.current.active || leavingRef.current || closedReasonRef.current) return;
         await videoRoomRef.current.setMicEnabled(desiredMicEnabledRef.current);
       } catch (error) {
         console.warn("[SneakyLynk:Server] Failed to reconcile media:", error);
@@ -1400,40 +1390,10 @@ function ServerRoom({
     }, 2200);
   }, []);
 
-  // Reset store on mount, request permissions
   useEffect(() => {
-    let cancelled = false;
-
     reset();
-
-    (async () => {
-      const [cameraGranted, microphoneGranted] = await Promise.all([
-        roomHasVideo ? requestCamPermission() : Promise.resolve(true),
-        requestMicPermission(),
-      ]);
-
-      if (cancelled) return;
-
-      // Capture starts from `useLynkBroadcast`'s enabled flags once the role
-      // is known; there is no device-init step to await. Permissions stay ours.
-      if (roomHasVideo && !cameraGranted) {
-        console.warn("[SneakyLynk:Server] Camera permission denied");
-      }
-      if (!microphoneGranted) {
-        console.warn("[SneakyLynk:Server] Microphone permission denied");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      reset();
-    };
-  }, [
-    requestCamPermission,
-    requestMicPermission,
-    reset,
-    roomHasVideo,
-  ]);
+    return () => reset();
+  }, [reset]);
 
   // Join Fishjam room on mount (media starts in separate effect below)
   useEffect(() => {
@@ -1441,7 +1401,7 @@ function ServerRoom({
     (async () => {
       audioSession.startForLynk(true);
       console.log("[SneakyLynk:Server] Joining room...", id);
-      const joined = await videoRoom.join();
+      const joined = await joinWithReviewedMedia();
       if (!cancelled) {
         console.log("[SneakyLynk:Server] Join result:", joined);
         if (!joined) {
@@ -1628,6 +1588,7 @@ function ServerRoom({
     if (videoRoom.isMicOn && videoRoom.isLive) return;
 
     const timer = setTimeout(async () => {
+      if (!desiredMicEnabledRef.current || !leaveLifetimeRef.current.active || leavingRef.current || closedReasonRef.current) return;
       if (videoRoomRef.current.isMicOn && videoRoomRef.current.isLive) return;
       console.warn(
         "[SneakyLynk:Server] MIC_SAFETY: remote peers present but mic is still off, force-starting",
@@ -1757,21 +1718,23 @@ function ServerRoom({
   const roomTitle =
     videoRoom.room?.title || roomSnapshot?.title || paramTitle || "Room";
 
-  const leavingRef = useRef(false);
-  const leaveLifetimeRef = useRef({ active: false, epoch: 0 });
-  useEffect(() => {
-    leaveLifetimeRef.current = { active: true, epoch: leaveLifetimeRef.current.epoch + 1 };
-    return () => {
-      leaveLifetimeRef.current = { active: false, epoch: leaveLifetimeRef.current.epoch + 1 };
-    };
-  }, []);
 
   const doLeave = useCallback(async () => {
     if (!leaveLifetimeRef.current.active || leavingRef.current) return;
     const epoch = leaveLifetimeRef.current.epoch;
     const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch;
     leavingRef.current = true;
+    deviceIntentEpochRef.current += 1;
+    setIsLeaving(true);
+    // Confirmed Leave immediately revokes local capture intent, even if the
+    // server takes time or refuses the end. A failed end never restores media.
+    desiredVideoEnabledRef.current = false;
+    desiredMicEnabledRef.current = false;
     try {
+      await Promise.allSettled([
+        videoRoomRef.current.setCameraEnabled(false),
+        videoRoomRef.current.setMicEnabled(false),
+      ]);
       // Hosts confirm the server end before leaving. Guest teardown is local
       // and immediate; an old room's completion cannot navigate a new account.
       await leaveRoomSafely({
@@ -1785,17 +1748,18 @@ function ServerRoom({
           void videoRoomRef.current.leave();
           reset();
           endRoomHistory(id, listenerCount);
-          router.push(LYNKS_LIST_ROUTE);
+          router.replace(LYNKS_LIST_ROUTE);
         },
       });
     } finally {
-      if (isCurrent()) leavingRef.current = false;
+      if (isCurrent()) { leavingRef.current = false; setIsLeaving(false); }
     }
   }, [router, id, endRoomHistory, reset, isHost, showToast]);
 
   // A host leaving ends the room for everyone, so the tap asks first —
   // one stray press used to kill a live Lynk (and every invite sent from it).
   const handleLeave = useCallback(() => {
+    if (leavingRef.current) return;
     if (isHost) {
       Alert.alert(
         "End this Lynk?",
@@ -1830,23 +1794,59 @@ function ServerRoom({
   }, [id, markRoomClosed]);
 
   const handleToggleMic = useCallback(async () => {
-    const actuallyOn = videoRoomRef.current.isMicOn;
-    const nextEnabled = !actuallyOn;
-    const allowed = await videoRoomRef.current.setMicEnabled(nextEnabled);
-    if (!allowed) {
-      // Host is holding the mute. Say so — a control that silently does
-      // nothing reads as the app being broken.
+    if (micChangeInFlightRef.current) return;
+    const nextEnabled = !videoRoomRef.current.isMicOn;
+    const epoch = leaveLifetimeRef.current.epoch;
+    const intentEpoch = deviceIntentEpochRef.current;
+    const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch && deviceIntentEpochRef.current === intentEpoch && !closedReasonRef.current && !videoRoomRef.current.isEjected && (!nextEnabled || !leavingRef.current);
+    if (!isCurrent()) return;
+    if (nextEnabled && videoRoomRef.current.hostMuteLocked) {
       showToast("info", "Muted by host", HOST_MUTE_COPY.blocked);
       return;
     }
-    desiredMicEnabledRef.current = nextEnabled;
+    micChangeInFlightRef.current = true;
+    try {
+      if (nextEnabled) {
+        const permissions = permissionsRef.current;
+        const granted = permissions.hasMicPermission || await permissions.requestMicPermission();
+        if (!isCurrent()) return;
+        if (!granted) { showToast("info", "Microphone access is off", "Enable microphone access in device settings to use it here."); return; }
+      }
+      if (!isCurrent()) return;
+      const allowed = await videoRoomRef.current.setMicEnabled(nextEnabled);
+      if (!isCurrent()) return;
+      if (!allowed) { showToast("info", "Muted by host", HOST_MUTE_COPY.blocked); return; }
+      desiredMicEnabledRef.current = nextEnabled;
+    } catch {
+      if (isCurrent()) showToast("error", "Microphone unavailable", "Check device permissions and try again.");
+    } finally {
+      micChangeInFlightRef.current = false;
+    }
   }, [showToast]);
   const handleToggleVideo = useCallback(async () => {
-    const actuallyOn = videoRoomRef.current.isCameraOn;
-    const nextEnabled = !actuallyOn;
-    desiredVideoEnabledRef.current = nextEnabled;
-    await videoRoomRef.current.setCameraEnabled(nextEnabled);
-  }, []);
+    if (cameraChangeInFlightRef.current) return;
+    const nextEnabled = !videoRoomRef.current.isCameraOn;
+    const epoch = leaveLifetimeRef.current.epoch;
+    const intentEpoch = deviceIntentEpochRef.current;
+    const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch && deviceIntentEpochRef.current === intentEpoch && !closedReasonRef.current && !videoRoomRef.current.isEjected && (!nextEnabled || !leavingRef.current);
+    if (!isCurrent() || (nextEnabled && !roomHasVideo)) return;
+    cameraChangeInFlightRef.current = true;
+    try {
+      if (nextEnabled) {
+        const permissions = permissionsRef.current;
+        const granted = permissions.hasCamPermission || await permissions.requestCamPermission();
+        if (!isCurrent()) return;
+        if (!granted) { showToast("info", "Camera access is off", "Enable camera access in device settings to use it here."); return; }
+      }
+      if (!isCurrent()) return;
+      await videoRoomRef.current.setCameraEnabled(nextEnabled);
+      if (isCurrent()) desiredVideoEnabledRef.current = nextEnabled;
+    } catch {
+      if (isCurrent()) showToast("error", "Camera unavailable", "Check device permissions and try again.");
+    } finally {
+      cameraChangeInFlightRef.current = false;
+    }
+  }, [roomHasVideo, showToast]);
   const handleSwitchCamera = useCallback(async () => {
     if (!videoRoomRef.current.isCameraOn) {
       showToast(
@@ -2118,9 +2118,8 @@ function ServerRoom({
   // the visual queue entry so the host sees the moderation complete
   // instantly — the server broadcasts the real role change, so any
   // drift self-heals on the next members-refresh tick.
-  const handleInviteToSpeak = useCallback(
+  const promoteRaisedHand = useCallback(
     async (targetUserId: string) => {
-      setRaisedHand(targetUserId, false);
       // Backend role enum is "co-host" | "participant" — "speaker" isn't
       // a server-side role, so we use co-host as the promotion target.
       // From the listener's POV this grants mic + participant controls,
@@ -2131,7 +2130,8 @@ function ServerRoom({
         newRole: "co-host",
       });
       if (res.ok) {
-        showToast("success", "Invited", "User can now speak");
+        setRaisedHand(targetUserId, false);
+        showToast("success", "Co-host added", "This participant now has co-host controls.");
       } else {
         showToast(
           "error",
@@ -2142,6 +2142,13 @@ function ServerRoom({
     },
     [roomUuid, showToast, setRaisedHand],
   );
+
+  const handleInviteToSpeak = useCallback((targetUserId: string) => {
+    Alert.alert("Make this participant a co-host?", "This grants co-host controls, not just permission to speak.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Make co-host", onPress: () => void promoteRaisedHand(targetUserId) },
+    ]);
+  }, [promoteRaisedHand]);
 
   // Host lowers a raised hand without promotion. Server-side we don't
   // currently have a "host lowers peer hand" endpoint (toggle_hand is
@@ -2175,24 +2182,13 @@ function ServerRoom({
       <ClosedRoomScreen
         roomTitle={roomSnapshot?.title || paramTitle || getLynkDisplayName()}
         message={closedReason}
-        onBack={() => router.back()}
+        onBack={() => router.replace(LYNKS_LIST_ROUTE)}
       />
     );
   }
 
-  // ── EARLY RETURN: Only after ALL hooks have been called ───────────
-  if (connectionState === "connecting" || connectionState === "disconnected") {
-    return (
-      <View className="flex-1 bg-background items-center justify-center">
-        <ActivityIndicator size="large" color="#FC253A" />
-        <Text className="text-foreground mt-4">
-          {connectionState === "connecting"
-            ? "Joining room..."
-            : "Preparing room..."}
-        </Text>
-      </View>
-    );
-  }
+  // Keep room controls and admission/error sheets mounted during connection
+  // trouble. Replacing this tree with a spinner hid both retry and leave.
 
   // Build SneakyUser from a Fishjam participant
   const peerToUser = (p: any): SneakyUser => {
@@ -2277,6 +2273,9 @@ function ServerRoom({
     <View style={{ flex: 1 }}>
       <RoomLayout
         admitted={videoRoom.isAdmitted}
+        isLeaving={isLeaving}
+        recoveryExhausted={session.endReason === "reconnect_exhausted"}
+        onRetryJoin={handleRetryJoin}
         captureError={videoRoom.captureError}
         onRetryCapture={videoRoom.retryCapture}
         rosterStatus={videoRoom.isAdmitted && !videoRoom.rosterReady
@@ -2287,7 +2286,6 @@ function ServerRoom({
         insets={insets}
         connectionState={connectionState}
         hostMuteLocked={videoRoom.hostMuteLocked}
-        bannerPhase={bannerPhaseFor(session)}
         isHost={!!isHost}
         roomTitle={roomTitle}
         participantCount={totalParticipants}
@@ -2373,7 +2371,7 @@ function ServerRoom({
         onAccessGranted={() => {
           setShowViewerPaywall(false);
           setJoinError(null);
-          setCapacityPhase("idle");
+          void handleRetryJoin();
         }}
       />
 
@@ -2420,32 +2418,16 @@ function ServerRoom({
           onRemove={handleRemoveUser}
         />
 
-        {/* Capacity flow — host upgrade vs viewer waitlist. Branched off
-          the generic error sheet because the UX is fundamentally
-          different (upsell for host, live-watch for viewer). */}
+        {/* Manual capacity retry uses the real join and preserves anonymity. */}
         <RoomFullSheet
           visible={joinError?.reason === "room_full"}
           capacity={joinError?.capacity ?? null}
-          roomId={id}
-          phase={capacityPhase}
+          retrying={isJoinRetrying}
           onClose={() => {
             setJoinError(null);
-            setCapacityPhase("idle");
             handleLeave();
           }}
-          onStartWaiting={() => setCapacityPhase("waiting")}
-          onSeatOpen={() => {
-            // Seat detected. Two possible UX paths:
-            //   a) Auto-join immediately — cleanest, zero friction.
-            //   b) Flip to "seat-open" and let the user tap to confirm.
-            // Going with (a) — the user already opted in with "Notify me",
-            // making them tap again would feel like friction theater.
-            setJoinError(null);
-            setCapacityPhase("idle");
-            // useVideoRoom joins automatically on roomId prop; nothing
-            // else to do — the polling hook's final probe IS effectively
-            // the retry since it hits the real join endpoint.
-          }}
+          onSeatOpen={() => void handleRetryJoin()}
           onUpgrade={() => {
             // Hand off to the app's upgrade surface. The room's in-room
             // paywall modal targets a different feature (Sneaky Link
@@ -2453,7 +2435,6 @@ function ServerRoom({
             // the account settings path — route there for now. When a
             // dedicated "room cap" upgrade sheet ships, swap this to it.
             setJoinError(null);
-            setCapacityPhase("idle");
             router.push("/settings/order" as any);
           }}
           onPayToJoin={
@@ -2461,7 +2442,6 @@ function ServerRoom({
             !joinError?.capacity?.isHost
               ? () => {
                   setJoinError(null);
-                  setCapacityPhase("idle");
                   setShowViewerPaywall(true);
                 }
               : undefined
@@ -2473,10 +2453,8 @@ function ServerRoom({
         <RoomJoinErrorSheet
           error={joinError?.reason === "room_full" ? null : joinError}
           onDismiss={() => setJoinError(null)}
-          onRetry={() => {
-            setJoinError(null);
-            handleLeave();
-          }}
+          retrying={isJoinRetrying}
+          onRetry={() => void handleRetryJoin()}
           onSignIn={() => {
             setJoinError(null);
             router.replace("/(auth)/login" as any);
@@ -2518,7 +2496,6 @@ function RoomLayout({
   insets,
   connectionState,
   hostMuteLocked,
-  bannerPhase,
   isHost,
   roomTitle,
   participantCount,
@@ -2557,7 +2534,13 @@ function RoomLayout({
   hideTimer,
   timerEndsAt,
   timerStartedAt,
+  isLeaving = false,
+  recoveryExhausted = false,
+  onRetryJoin,
 }: {
+  isLeaving?: boolean;
+  recoveryExhausted?: boolean;
+  onRetryJoin?: () => Promise<boolean>;
   admitted?: boolean;
   captureError?: string | null;
   onRetryCapture?: () => void;
@@ -2566,10 +2549,6 @@ function RoomLayout({
   /** Host is holding the local participant muted — the mic control says so
    *  rather than silently refusing (lib/video/host-mute). */
   hostMuteLocked?: boolean;
-  /** Banner phase from the session machine. `connectionState` above still
-   *  drives this screen's media/teardown effects; only the banner moves, since
-   *  the machine is what can tell a first join from a reconnect. */
-  bannerPhase?: ConnectionPhase;
   rosterStatus?: string;
   isHost: boolean;
   localRole:
@@ -2629,283 +2608,58 @@ function RoomLayout({
   // The dock participates in flex layout, so the stage receives exactly the
   // remaining height on phones, landscape and devices with home indicators.
   const [stageContentHeight, setStageContentHeight] = useState(0);
+  const isPractice = roomId.startsWith("space-") || roomId === "my-room";
+  const connected = connectionState === "connected" && admitted;
+  const statusLabel = isLeaving ? "LEAVING" : isPractice ? "PREVIEW" : recoveryExhausted ? "DISCONNECTED" : connected ? "LIVE" : admitted ? "RECONNECTING" : connectionState === "disconnected" ? "NOT CONNECTED" : "CONNECTING";
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (isChatOpen) onCloseChat();
+      else if (!isLeaving) onLeave();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [isChatOpen, isLeaving, onCloseChat, onLeave]);
 
   return (
-    <View className="flex-1 bg-background">
+    <View style={{ flex: 1, backgroundColor: "#06070D" }}>
       {/* Single instance — serves both LocalRoom + ServerRoom. Absolute-
           positioned via its own styles + zIndex, so this mount location
           just needs to live inside the RoomLayout tree to receive the
           store updates. */}
       <CaptureNotificationBanner />
-      <LinearGradient
-        colors={["#090B10", "#0C1118", "#05070B"]}
-        start={{ x: 0.05, y: 0 }}
-        end={{ x: 0.95, y: 1 }}
-        style={{ position: "absolute", inset: 0 }}
-      />
-      <LinearGradient
-        colors={[
-          "rgba(56, 189, 248, 0.12)",
-          "rgba(14, 165, 233, 0.02)",
-          "transparent",
-        ]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0.8 }}
-        style={{
-          position: "absolute",
-          top: -80,
-          left: -30,
-          width: 280,
-          height: 240,
-          borderRadius: 180,
-        }}
-      />
-
-      <ConnectionBanner phase={bannerPhase ?? connectionState} />
       {presenceEvent ? <PresenceToast event={presenceEvent} /> : null}
 
       <View className="flex-1" style={{ paddingTop: insets.top }}>
         <CaptureErrorBanner error={captureError} onRetry={onRetryCapture} />
-        <View
-          style={{ paddingLeft: insets.left + 12, paddingRight: insets.right + 12, paddingTop: 8, paddingBottom: 10 }}
-        >
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-            }}
-          >
-            <Pressable onPress={onLeave} hitSlop={12}>
-              <DVNTLiquidGlassIconButton
-                size={42}
-                interactive={false}
-                style={{
-                  borderWidth: 1,
-                  borderColor: "rgba(255,255,255,0.16)",
-                }}
-              >
-                <ArrowLeft size={20} color="#F8FAFC" />
-              </DVNTLiquidGlassIconButton>
+        <View style={{ paddingLeft: insets.left + 16, paddingRight: insets.right + 16, paddingTop: 8, paddingBottom: 12, gap: 10 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Pressable onPress={onLeave} disabled={isLeaving} accessibilityRole="button" accessibilityLabel={isHost ? "End Lynk options" : "Leave Lynk"} accessibilityState={{ disabled: isLeaving }} style={({ pressed }) => ({ width: 44, height: 44, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)", opacity: pressed || isLeaving ? 0.5 : 1 })}>
+              <ArrowLeft size={22} color="#fff" />
             </Pressable>
-
-            <DVNTLiquidGlass
-              radius={20}
-              paddingH={12}
-              paddingV={10}
-              interactive={false}
-              style={{
-                flex: 1,
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.16)",
-                backgroundColor: "rgba(5, 10, 22, 0.22)",
-              }}
-            >
-              <View style={{ flex: 1 }}>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    marginBottom: 6,
-                  }}
-                >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 5,
-                        paddingHorizontal: 9,
-                        paddingVertical: 5,
-                        borderRadius: 12,
-                        backgroundColor: "rgba(239, 68, 68, 0.18)",
-                      }}
-                    >
-                      <View
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: 999,
-                          backgroundColor: "#FB7185",
-                        }}
-                      />
-                      <Text
-                        style={{
-                          color: "#FCA5A5",
-                          fontSize: 10,
-                          fontWeight: "800",
-                          letterSpacing: 0.4,
-                        }}
-                      >
-                        LIVE
-                      </Text>
-                    </View>
-                    {isHost ? (
-                      <View
-                        style={{
-                          paddingHorizontal: 9,
-                          paddingVertical: 5,
-                          borderRadius: 12,
-                          backgroundColor: "rgba(59, 130, 246, 0.18)",
-                        }}
-                      >
-                        <Text
-                          style={{
-                            color: "#BFDBFE",
-                            fontSize: 10,
-                            fontWeight: "800",
-                          }}
-                        >
-                          HOST
-                        </Text>
-                      </View>
-                    ) : null}
-                    {isHost &&
-                    onOpenHandQueue &&
-                    raisedHandCount !== undefined &&
-                    raisedHandCount > 0 ? (
-                      <Pressable
-                        onPress={onOpenHandQueue}
-                        hitSlop={8}
-                        style={({ pressed }) => ({
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                          paddingHorizontal: 9,
-                          paddingVertical: 5,
-                          borderRadius: 12,
-                          backgroundColor: "rgba(255, 109, 193, 0.18)",
-                          borderWidth: 1,
-                          borderColor: "rgba(255, 109, 193, 0.4)",
-                          opacity: pressed ? 0.75 : 1,
-                        })}
-                      >
-                        <Hand size={12} color="#FFC2E2" />
-                        <Text
-                          style={{
-                            color: "#FFD5EA",
-                            fontSize: 10,
-                            fontWeight: "800",
-                            letterSpacing: 0.3,
-                            fontVariant: ["tabular-nums"],
-                          }}
-                        >
-                          {raisedHandCount}
-                        </Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-
-                  {canOpenParticipants && onOpenParticipants ? (
-                    <Pressable onPress={onOpenParticipants}>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 5,
-                          paddingHorizontal: 9,
-                          paddingVertical: 5,
-                          borderRadius: 12,
-                          backgroundColor: "rgba(255,255,255,0.07)",
-                          borderWidth: 1,
-                          borderColor: "rgba(255,255,255,0.1)",
-                        }}
-                      >
-                        <Users size={13} color="#CBD5E1" />
-                        <Text
-                          style={{
-                            color: "#E2E8F0",
-                            fontSize: 11,
-                            fontWeight: "700",
-                          }}
-                        >
-                          {participantCount}
-                        </Text>
-                        <ChevronUp size={11} color="#94A3B8" />
-                      </View>
-                    </Pressable>
-                  ) : (
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 6,
-                      }}
-                    >
-                      <Users size={13} color="#94A3B8" />
-                      <Text
-                        style={{
-                          color: "#CBD5E1",
-                          fontSize: 11,
-                          fontWeight: "700",
-                        }}
-                      >
-                        {participantCount}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-
-                <Text
-                  style={{
-                    color: "#F8FAFC",
-                    fontSize: 16,
-                    fontWeight: "800",
-                  }}
-                  numberOfLines={1}
-                >
-                  {roomTitle}
-                </Text>
-                {!hideTimer && (timerEndsAt != null || timerStartedAt != null) ? (
-                  <RoomTimer
-                    compact
-                    endsAt={timerEndsAt}
-                    startedAt={timerStartedAt}
-                    onTimeUp={onTimeUp ?? onLeave}
-                  />
-                ) : null}
+            <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: connected && !isPractice ? "#FC253A" : "#F5C518" }} />
+                <Text style={{ color: connected && !isPractice ? "#FF8895" : "#FDE68A", fontSize: 10, fontWeight: "700", letterSpacing: 1 }}>{statusLabel}</Text>
+                <Text style={{ color: "#AEB3C2", fontSize: 10, fontWeight: "600", letterSpacing: 0.6 }}>{isHost ? "· HOST" : localRole === "co-host" ? "· CO-HOST" : localUser.isAnonymous ? "· ANONYMOUS" : ""}</Text>
               </View>
-            </DVNTLiquidGlass>
-
-            {isHost && onMuteAll ? (
-              <Pressable onPress={onMuteAll} hitSlop={10}>
-                <DVNTLiquidGlassIconButton
-                  size={42}
-                  interactive={false}
-                  style={{
-                    backgroundColor: "rgba(5, 10, 22, 0.22)",
-                    borderWidth: 1,
-                    borderColor: allMuted
-                      ? "rgba(45, 212, 191, 0.24)"
-                      : "rgba(248, 113, 113, 0.24)",
-                  }}
-                >
-                  {allMuted ? (
-                    <Mic size={17} color="#5EEAD4" />
-                  ) : (
-                    <MicOff size={17} color="#FCA5A5" />
-                  )}
-                </DVNTLiquidGlassIconButton>
-              </Pressable>
-            ) : (
-              <View style={{ width: 42 }} />
-            )}
+              <Text style={{ color: "#fff", fontFamily: "SpaceGrotesk-Bold", fontSize: 20, fontWeight: "700", letterSpacing: -0.4 }} numberOfLines={1}>{roomTitle}</Text>
+            </View>
+            {canOpenParticipants && onOpenParticipants ? <Pressable onPress={onOpenParticipants} accessibilityRole="button" accessibilityLabel={`View ${participantCount} ${participantCount === 1 ? "person" : "people"} in the room`} style={({ pressed }) => ({ minWidth: 52, minHeight: 44, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.06)", opacity: pressed ? 0.6 : 1 })}>
+              <Users size={18} color="#C5C7D1" /><Text style={{ color: "#fff", fontSize: 13, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{participantCount}</Text>
+            </Pressable> : null}
           </View>
-
-          {/* Standing disclosure — renders only while a web viewer is in the
-              room. Web protection is deterrence + attribution; native runs
-              under FLAG_SECURE / the iOS blackout. Everyone gets told. */}
+          {(isHost && (onMuteAll || (onOpenHandQueue && !!raisedHandCount))) || (!hideTimer && (timerEndsAt != null || timerStartedAt != null)) ? <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+            {!hideTimer && (timerEndsAt != null || timerStartedAt != null) ? <RoomTimer compact endsAt={timerEndsAt} startedAt={timerStartedAt} onTimeUp={onTimeUp ?? onLeave} /> : null}
+            {isHost && onOpenHandQueue && !!raisedHandCount ? <Pressable accessibilityRole="button" accessibilityLabel={`Open hand queue, ${raisedHandCount} waiting`} onPress={onOpenHandQueue} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: "rgba(245,197,24,0.08)" }}>
+              <Hand size={16} color="#F5C518" /><Text style={{ color: "#FDE68A", fontSize: 12, fontWeight: "600" }}>{raisedHandCount} waiting</Text>
+            </Pressable> : null}
+            {isHost && onMuteAll ? <Pressable accessibilityRole="button" accessibilityLabel={allMuted ? "Allow participants to unmute themselves" : "Mute all participants"} onPress={onMuteAll} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.04)" }}>
+              <MicOff size={16} color="#C5C7D1" /><Text style={{ color: "#C5C7D1", fontSize: 12, fontWeight: "600" }}>{allMuted ? "Allow unmute" : "Mute all"}</Text>
+            </Pressable> : null}
+          </View> : null}
           <CaptureDisclosureChip />
         </View>
+        {!isPractice ? <RoomConnectionNotice status={connectionState} admitted={admitted} exhausted={recoveryExhausted} onRetry={onRetryJoin} /> : null}
 
         {rosterStatus ? (
           <View accessibilityLiveRegion="polite" className="mx-3 mb-3 rounded-xl bg-amber-400/10 px-4 py-3">
@@ -2937,6 +2691,8 @@ function RoomLayout({
 
 
         <ControlsBar
+          isLeaving={isLeaving}
+          disabled={!admitted}
           isMuted={effectiveMuted}
           hostMuteLocked={hostMuteLocked}
           isVideoEnabled={effectiveVideoOn}

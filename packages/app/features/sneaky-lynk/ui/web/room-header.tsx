@@ -6,6 +6,8 @@ import { ArrowLeft, Hand, MoreHorizontal, Settings2, Share2, Users, Volume2, Vol
 type RoomHeaderProps = {
   title: string;
   connecting: boolean;
+  connectionLabel?: string;
+  anonymous?: boolean;
   isHost: boolean;
   participantCount: number;
   raisedHandCount: number;
@@ -97,14 +99,15 @@ export function RoomHeader(props: RoomHeaderProps) {
   return (
     <header data-room-header className="relative z-40 grid shrink-0 grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-1.5 pb-2 sm:gap-2 [@media(max-height:500px)_and_(min-width:600px)]:pb-1"
       style={{ paddingTop: "calc(var(--lynk-safe-top, env(safe-area-inset-top)) + 8px)", paddingLeft: "max(12px, env(safe-area-inset-left))", paddingRight: "max(12px, env(safe-area-inset-right))" }}>
-      <button type="button" onClick={props.onBack} aria-label="Back" className={buttonStyle}><ArrowLeft size={20} /></button>
+      <button type="button" onClick={props.onBack} aria-label="Leave Lynk" title="Leave Lynk" className={buttonStyle}><ArrowLeft size={20} /></button>
       <div data-room-header-title className="flex min-w-0 flex-col items-start gap-0.5">
         <span className="flex w-full min-w-0 items-center gap-1.5">
           <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: connecting ? "#facc15" : "#3FDCFF" }} />
           <span title={title} className="min-w-0 truncate text-[15px] font-semibold">{title}</span>
           {isHost ? <span className="hidden shrink-0 rounded-md bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-extrabold text-blue-200 sm:inline">HOST</span> : null}
         </span>
-        <span className="flex w-full min-w-0 items-center gap-1 text-xs text-white/50">
+        <span className="flex w-full min-w-0 items-center gap-1 text-xs text-white/60">
+          <span className={`${event ? "sr-only sm:not-sr-only" : ""} shrink-0 text-[10px]`}>{props.connectionLabel ?? (connecting ? "Connecting" : "Connected")}{props.anonymous ? " · Anon" : ""}</span>
           {isHost ? <span className="shrink-0 text-[9px] font-extrabold text-blue-200 sm:hidden">HOST</span> : null}
           {event ? <button type="button" data-lynk-event={event.id} onClick={props.onEvent} title={`Go to ${event.title}`}
             className="min-w-0 max-w-[32vw] truncate rounded-md bg-[#8A40CF]/25 px-1 py-0.5 text-[10px] font-semibold text-[#D9B8FF] hover:bg-[#8A40CF]/40">{event.title}</button> : null}
