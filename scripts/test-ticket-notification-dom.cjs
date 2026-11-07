@@ -66,7 +66,10 @@ const boundaries = {
   '@dvnt/app/lib/stores/auth-store': 'export const useAuthStore=()=>({});',
   '@dvnt/app/lib/hooks/use-follow': 'export const useFollow=()=>({});',
   '@dvnt/app/lib/hooks/use-bootstrap-notifications': 'export const useBootstrapNotifications=()=>({});',
+  // Invite cards are screen-level dependencies, outside these ticket-row assertions.
+  // Their real web/native flows are exercised by test-lynk-cohost-invites.cjs.
   '@dvnt/app/features/sneaky-lynk/ui/web/CohostInvites': 'export const PendingCohostInvites=()=>null;',
+  '@dvnt/app/features/sneaky-lynk/ui/PendingCohostInvites': 'export const PendingCohostInvites=()=>null;',
   '@dvnt/app/lib/api/notifications': 'export const notificationsApiClient={formatTimeAgo:()=>"3m ago"};',
   '@dvnt/app/lib/hooks/use-notifications-query': 'export const notificationKeys={};export const useBadges=()=>({});',
   '@dvnt/app/lib/stores/unread-counts-store': 'export const useUnreadCountsStore=()=>({});',

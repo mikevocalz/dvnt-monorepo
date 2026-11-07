@@ -1,5 +1,5 @@
-import { cohostActivityRoute } from "@dvnt/app/features/sneaky-lynk/cohost-invite-policy";
 "use client";
+import { cohostActivityRoute } from "@dvnt/app/features/sneaky-lynk/cohost-invite-policy";
 import { markActivityRead, markAllActivityRead } from "@dvnt/app/lib/activity/mark-activity-read";
 import { webEventDetailRoute } from "@dvnt/app/lib/events/event-detail-route";
 
