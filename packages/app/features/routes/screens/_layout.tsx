@@ -511,7 +511,9 @@ function RootLayout() {
   // unauthenticated user lands on a (protected) route — including via deep
   // link — bounce to login. If an authenticated user lands on (auth), forward
   // to the tabs root. (public) is intentionally accessible in both states.
-  const segments = useSegments();
+  // Expo's generated fallback can be a one-segment tuple; the runtime
+  // route may contain auth screen segments, so inspect it as a string array.
+  const segments: readonly string[] = useSegments();
   useEffect(() => {
     if (!authSettled) return;
     const top = segments[0] as string | undefined;
