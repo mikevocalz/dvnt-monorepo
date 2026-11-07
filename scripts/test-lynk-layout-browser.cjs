@@ -570,7 +570,7 @@ async function moderationCases(browser,url) {
           await page.waitForFunction(action=>window.fixture.actions.includes(action+':publisher-03'),action);
           await page.evaluate(action=>window.fixture.failActions=[action],action);
           await button.click();
-          await page.waitForFunction(()=>window.fixture.toasts.some(t=>t[0]==='error'&&t[2]==='Fixture permission changed'));
+          await page.waitForFunction(()=>window.fixture.toasts.some(t=>t[0]==='error'&&t[1]==='Change not saved'));
           await page.evaluate(()=>{window.fixture.failActions=[];window.fixture.toasts=[]});
         }
       }
@@ -592,6 +592,16 @@ async function moderationCases(browser,url) {
       await page.getByRole('button',{name:'Participants',exact:true}).click();
       await panel.waitFor();
       assert.equal(await panel.getByRole('button',{name:'Mute '+guest,exact:true}).count(),1,'reopen preserves current role');
+      if(role==='host') {
+        await panel.getByRole('button',{name:'Close',exact:true}).click();
+        await page.locator('[data-room-controls]').getByRole('button',{name:'Leave Lynk',exact:true}).click();
+        await page.waitForFunction(()=>window.fixture.routes.includes('/feed/messages'));
+        assert.equal(await page.evaluate(()=>window.fixture.actions.includes('endRoom')),false,'a demoted host exits as co-host without ending everyone’s room');
+        assert.equal(await page.getByRole('dialog',{name:'End this Lynk?',exact:true}).count(),0,'former host must not keep host-end confirmation');
+        assert.deepEqual(errors,[]);assert.deepEqual(unexpectedRequests,[]);
+        console.log('PASS production moderation '+c.name+' '+role+': 12 members, guarded callbacks, role changes and co-host-only departure');
+        continue;
+      }
       await page.evaluate(()=>{const f=window.fixture;f.roster[0].status='left';f.deliverRoster()});await tick(page);
       assert.equal(await page.getByRole('button',{name:'Mute '+guest,exact:true}).count(),0,'inactive actor has no controls');
       assert.deepEqual(errors,[],role+' moderation runtime errors');
@@ -910,10 +920,10 @@ async function groupStageCase(browser,url) {
   const c={...viewport,name:'large-room-'+viewport.name};
   const {page,context,errors}=await createPage(browser,url,c,'host');
   try {
-    await page.evaluate(()=>window.fixture.configure({publishers:20,listeners:12}));await tick(page);
-    assert.equal(await page.locator('[data-tile]').count(),20,'every publisher must have one tile');
+    await page.evaluate(()=>window.fixture.configure({publishers:30,listeners:0}));await tick(page);
+    assert.equal(await page.locator('[data-tile]').count(),30,'every publisher must have one tile');
     await assertWebGeometry(page,c);
-    assert.match(await page.locator('[data-room-listeners] > p').textContent(),/^Listeners · 12/,'audience row must be labelled as listeners');
+    assert.equal(await page.locator('[data-room-listeners]').count(),0,'all30 guests are publishers in this stage fixture');
     if(c.width>=600&&c.height<=500) {
       const initialFocus=page.locator('[data-stage-card][data-focused="true"]');
       await assertFullyVisibleCard(initialFocus,c.name+' initial landscape focus without scrolling');
@@ -926,7 +936,7 @@ async function groupStageCase(browser,url) {
     }
     await evidence(page,'web-'+c.name+'-initial');
     const count=await page.evaluate(()=>window.fixture.attachments.length);
-    assert.ok(count>=19,'real remote canvas refs must be mounted before checking media stability');
+    assert.ok(count>=29,'real remote canvas refs must be mounted before checking media stability');
     const gallery=page.locator('[data-stage-scroll]');
     const pageCount=Number(await gallery.getAttribute('data-stage-pages'));
     assert.ok(pageCount>1,'large rooms use multiple guest pages');
@@ -943,39 +953,39 @@ async function groupStageCase(browser,url) {
     await gallery.focus();await page.keyboard.press('ArrowLeft');await tick(page);
     assert.equal(await gallery.getAttribute('data-stage-page'),'0','keyboard can return to the first guest page');
     assert.equal(await page.evaluate(()=>window.fixture.attachments.length),count,'guest paging keeps every media canvas mounted');
-    const lastCard=page.locator('[data-stage-card="publisher-19"]');
-    const last=page.getByRole('button',{name:'Focus Participant 19',exact:true});
+    const lastCard=page.locator('[data-stage-card="publisher-29"]');
+    const last=page.getByRole('button',{name:'Focus Participant 29',exact:true});
     await lastCard.scrollIntoViewIfNeeded();await tick(page);
     await assertFullyVisibleCard(lastCard,c.name+' last participant');
     await evidence(page,'web-'+c.name+'-last-participant');
     await assertReachable(last,c.name+' last participant');await last.click();await tick(page);
     assert.equal(await page.evaluate(()=>window.fixture.attachments.length),count,'scrolling/focusing cannot detach or recreate video canvases');
     await assertWebGeometry(page,c,{top:0,height:c.height},false);
-    const focused=page.locator('[data-stage-card="publisher-19"][data-focused="true"]');
+    const focused=page.locator('[data-stage-card="publisher-29"][data-focused="true"]');
     assert.equal(await focused.count(),1,'clicked participant becomes focused');
     await assertFullyVisibleCard(focused,c.name+' newly focused participant');
     await evidence(page,'web-'+c.name+'-focused-participant');
     // Pinning exposes Reset focus, which must not steal enough height to trap
     // another thumbnail underneath the sticky featured participant.
-    const nextCard=page.locator('[data-stage-card="publisher-18"]');
+    const nextCard=page.locator('[data-stage-card="publisher-28"]');
     await nextCard.scrollIntoViewIfNeeded();await tick(page);
     await assertFullyVisibleCard(nextCard,c.name+' participant after pinning');
-    await assertReachable(page.getByRole('button',{name:'Focus Participant 18',exact:true}),c.name+' focus after pinning');
+    await assertReachable(page.getByRole('button',{name:'Focus Participant 28',exact:true}),c.name+' focus after pinning');
     assert.equal(await page.evaluate(()=>window.fixture.attachments.length),count,'browsing after pinning must preserve media mounts');
     // A pinned card has an explicit Unpin action. Toggling it and pinning
     // again changes the view without changing any media ownership.
-    await page.getByRole('button',{name:'Unpin Participant 19',exact:true}).click();await tick(page);
+    await page.getByRole('button',{name:'Unpin Participant 29',exact:true}).click();await tick(page);
     assert.equal(await page.locator('[data-stage-card="local"][data-focused="true"]').count(),1,'unpin restores host view');
     await lastCard.scrollIntoViewIfNeeded();await tick(page);await last.click();await tick(page);
     await assertFullyVisibleCard(focused,c.name+' repinned participant');
     assert.equal(await page.evaluate(()=>window.fixture.attachments.length),count,'unpin/repin preserves media mounts');
     await nextCard.scrollIntoViewIfNeeded();await tick(page);
-    await page.evaluate(()=>window.fixture.configure({publishers:19}));await tick(page);
-    assert.equal(await page.locator('[data-tile]').count(),19,'departed publisher is removed');
+    await page.evaluate(()=>window.fixture.configure({publishers:29}));await tick(page);
+    assert.equal(await page.locator('[data-tile]').count(),29,'departed publisher is removed');
     assert.equal(await page.locator('[data-stage-card="local"][data-focused="true"]').count(),1,'departed focus falls back to the host');
     await assertFullyVisibleCard(page.locator('[data-stage-card="local"][data-focused="true"]'),c.name+' fallback focus after departure');
-    await page.evaluate(()=>window.fixture.configure({publishers:20}));await tick(page);
-    assert.equal(await page.locator('[data-tile]').count(),20,'new participant joins without duplicates');
+    await page.evaluate(()=>window.fixture.configure({publishers:30}));await tick(page);
+    assert.equal(await page.locator('[data-tile]').count(),30,'new participant joins without duplicates');
     // Leave from the last guest page all the way back to a two-person call.
     // The survivor remains mounted and the gallery must not retain blank pages.
     await gallery.evaluate(el=>{el.scrollLeft=el.scrollWidth;el.dispatchEvent(new Event('scroll'))});await tick(page);
@@ -985,14 +995,14 @@ async function groupStageCase(browser,url) {
     assert.equal(await gallery.evaluate(el=>el.scrollLeft),0,'departed final pages reset the scroll offset');
     const duo=await dimensions(page.locator('[data-stage-card]'));
     assert.ok(duo[0].bottom<=duo[1].y,'group-to-duo transition restores the vertical stack');
-    await page.evaluate(()=>window.fixture.configure({publishers:20,listeners:12}));await tick(page);
+    await page.evaluate(()=>window.fixture.configure({publishers:30,listeners:0}));await tick(page);
     // A separate default-view capture avoids presenting the intentional
     // roster-browsing scroll position as the room's initial composition.
     await page.locator('[data-room-content]').evaluate(el=>{el.scrollTop=0});await tick(page);
     await assertWebGeometry(page,c,{top:0,height:c.height},false);
     assert.deepEqual(errors,[]);
     await evidence(page,'web-'+c.name);
-    console.log('PASS 20-person rendered stage '+c.name+': full last tile visible, focus, stable canvas mounts, leave fallback, rejoin');
+    console.log('PASS 30-person rendered stage '+c.name+': full last tile visible, focus, stable canvas mounts, leave fallback, rejoin');
   } catch(error) {await evidence(page,'FAIL-'+c.name,error);recordFailure(c.name,error)} finally {await context.close()}
   }
 }
@@ -1001,7 +1011,7 @@ async function nativeCases(browser,url) {
   for(const c of cases) {
     const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'participant','native');
     try {
-      for(const publishers of [1,2,12,20]) {
+      for(const publishers of [1,2,10,20,30]) {
         await page.evaluate(publishers=>window.fixture.configure({publishers}),publishers);await tick(page);
         assert.equal(await page.locator('[data-testid^="native-tile-"]').count(),publishers,c.name+' real native stage count');
       }
@@ -1010,7 +1020,7 @@ async function nativeCases(browser,url) {
       const [stageRect]=await dimensions(stage),[dockRect]=await dimensions(dock);
       assert.ok(stageRect.height>0&&stageRect.bottom<=dockRect.y+1,c.name+': measured native stage stays above dock');
       const nativeMounts=await page.evaluate(()=>window.fixture.nativeMounts.length);
-      assert.ok(nativeMounts>=20,'real native stage must mount every media boundary');
+      assert.ok(nativeMounts>=30,'real native stage must mount every media boundary');
       const last=page.getByTestId('native-tile-publisher-19');
       await last.scrollIntoViewIfNeeded();await tick(page);
       await assertFullyVisibleCard(last,c.name+' native last participant');
@@ -1040,7 +1050,7 @@ async function nativeCases(browser,url) {
       assert.deepEqual(errors,[],c.name+' native runtime errors');
       assert.deepEqual(unexpectedRequests,[],c.name+' native must not access live endpoints');
       await evidence(page,'native-'+c.name);
-      console.log('PASS actual native stage+dock via RNW '+c.name+': 1/2/12/20 participants, last tile, stable mounts, video/audio, safe areas, reactions, overlay restore');
+      console.log('PASS actual native stage+dock via RNW '+c.name+': 1/2/10/20/30 participants, last tile, stable mounts, video/audio, safe areas, reactions, overlay restore');
     } catch(error) {await evidence(page,'FAIL-native-'+c.name,error);recordFailure('native-'+c.name,error)} finally {await context.close()}
   }
 }
@@ -1151,7 +1161,7 @@ async function main() {
         assert.ok(window.fixture,rail+' fixture mounted');
         assert.ok(window.document.querySelector(rail==='web'?'main[data-room-phase="connected"]':'[data-native-room] [role="button"]'),rail+' actual component mounted: '+window.document.body.innerHTML.slice(0,1200));
         if(rail==='web')assert.ok(window.document.querySelector('[role="timer"]'),'host fixture must exercise the real always-visible timer badge');
-        for(const publishers of [1,2,12,20]) {
+        for(const publishers of [1,2,10,20,30]) {
           window.fixture.configure({publishers});await new Promise(resolve=>setTimeout(resolve,30));
           assert.equal(window.document.querySelectorAll(rail==='web'?'[data-tile]':'[data-testid^="native-tile-"]').length,publishers,rail+' rendered participant count');
         }
@@ -1170,7 +1180,7 @@ async function main() {
         assert.deepEqual(errors,[],rail+' runtime errors');
       } finally {await window.happyDOM.close()}
     }
-    console.log('PASS actual React web/native stage+dock DOM smoke, 1/2/12/20 rosters and time-limit handlers; browser geometry was not run');return;
+    console.log('PASS actual React web/native stage+dock DOM smoke, 1/2/10/20/30 rosters and time-limit handlers; browser geometry was not run');return;
   }
   const server=http.createServer((req,res)=>{
     if(req.url==='/bundle.js'){res.setHeader('Content-Type','text/javascript');res.end(assets.js)}

@@ -22,7 +22,7 @@ const resolve = (n) => require.resolve(n, { paths: deps });
     stdin: {
       resolveDir: rootPath,
       loader: "tsx",
-      contents: `export {RoomStage} from './${ui}RoomStage';export {ParticipantActions} from './${ui}ParticipantActions';export {RoomParticipantsSheet} from './${ui}RoomParticipantsSheet';`,
+      contents: `export {RoomStage} from './${ui}RoomStage';export {ParticipantActions} from './${ui}ParticipantActions';export {RoomParticipantsSheet} from './${ui}RoomParticipantsSheet';export {HandQueueSheet} from './${ui}HandQueueSheet';`,
     },
     bundle: true,
     write: false,
@@ -41,7 +41,7 @@ const resolve = (n) => require.resolve(n, { paths: deps });
           build.onResolve(
             {
               filter:
-                /^(react-native|react-native-reanimated|react-native-safe-area-context|react-native-moq|lucide-react-native|expo-router|@dvnt\/app\/components\/ui\/avatar|@dvnt\/app\/components\/list|@dvnt\/app\/lib\/hooks|\.\/VideoGrid)$/,
+                /^(react-native|react-native-reanimated|react-native-safe-area-context|react-native-moq|lucide-react-native|@gorhom\/bottom-sheet|expo-router|@dvnt\/app\/components\/ui\/avatar|@dvnt\/app\/components\/list|@dvnt\/app\/lib\/hooks|\.\/VideoGrid)$/,
             },
             ({ path: n }) => ({ path: n, namespace: "boundary" }),
           );
@@ -54,8 +54,8 @@ const resolve = (n) => require.resolve(n, { paths: deps });
                   ? `
         import React from 'react';
         const f=globalThis.__nativeModeration;
-        export const View=({children,testID,accessibilityViewIsModal})=><div data-testid={testID} data-native-roster={accessibilityViewIsModal||undefined}>{children}</div>; export const Text=View,ScrollView=View;
-        export const Pressable=({children,onPress,accessibilityLabel})=><div role="button" aria-label={accessibilityLabel} onClick={onPress}>{children}</div>;
+        export const View=({children,testID,accessibilityViewIsModal,accessibilityRole})=><div role={accessibilityRole} data-testid={testID} data-native-roster={accessibilityViewIsModal||undefined}>{children}</div>; export const Text=View,ScrollView=View;
+        export const Pressable=({children,onPress,accessibilityLabel,disabled,accessibilityState})=><div role="button" aria-label={accessibilityLabel} aria-disabled={disabled||undefined} aria-busy={accessibilityState?.busy} onClick={disabled?undefined:onPress}>{children}</div>;
         export const TextInput=({value,onChangeText,accessibilityLabel,placeholder})=><input aria-label={accessibilityLabel} placeholder={placeholder} value={value} onInput={event=>onChangeText(event.currentTarget.value)}/>;
         export const Alert={alert:(title,message,buttons)=>f.alerts.push({title,message,buttons})};
         export const BackHandler={addEventListener:(_,listener)=>{f.backListeners.add(listener);return {remove:()=>f.backListeners.delete(listener)}}};
@@ -69,11 +69,13 @@ const resolve = (n) => require.resolve(n, { paths: deps });
                       : n === "react-native-moq"
                         ? `export const useVideoPlayer=()=>{throw new Error('No live broadcast is allowed in moderation geometry fixture')};`
                         : n === "lucide-react-native"
-                          ? `export const Users=()=>null,Mic=Users,MicOff=Users,Crown=Users,UserMinus=Users,X=Users,EyeOff=Users,Shield=Users;`
+                          ? `export const Users=()=>null,Mic=Users,MicOff=Users,Crown=Users,Hand=Users,UserMinus=Users,X=Users,EyeOff=Users,Shield=Users;`
                           : n === "expo-router"
                             ? `export const useRouter=()=>({push:()=>{}});`
+                            : n === "@gorhom/bottom-sheet"
+                              ? `import React,{forwardRef,useImperativeHandle} from 'react';export default forwardRef(function Sheet({children,index},ref){useImperativeHandle(ref,()=>({snapToIndex(){},close(){}}),[]);return index<0?null:<div data-hand-queue>{children}</div>});export const BottomSheetBackdrop=()=>null;export const BottomSheetFlatList=({data,renderItem,keyExtractor,ListEmptyComponent,ListFooterComponent})=><div>{data.length?data.map(item=><div key={keyExtractor(item)} data-queue-id={keyExtractor(item)}>{renderItem({item})}</div>):ListEmptyComponent}{ListFooterComponent}</div>;`
                             : n.includes("/ui/avatar")
-                              ? `export const Avatar=()=>null;`
+                              ? `import React from 'react';export const Avatar=({uri})=><div data-avatar-uri={uri}/>;`
                               : n.includes("/components/list")
                                 ? `import React from 'react';export function LegendList({data,renderItem}){return data.map((item,index)=><div key={item.id} data-roster-row={item.id}>{renderItem({item,index})}</div>);}`
                                 : n.includes("/lib/hooks")
@@ -91,7 +93,7 @@ const resolve = (n) => require.resolve(n, { paths: deps });
     module,
     module.exports,
   );
-  const { RoomStage, ParticipantActions, RoomParticipantsSheet } =
+  const { RoomStage, ParticipantActions, RoomParticipantsSheet, HandQueueSheet } =
     module.exports;
   const node = document.createElement("div");
   document.body.append(node);
@@ -107,7 +109,7 @@ const resolve = (n) => require.resolve(n, { paths: deps });
       const on = (name) => (id) => events.push([name, id]);
       root.render(
         React.createElement(
-          React.Fragment,
+          React.StrictMode,
           null,
           React.createElement(RoomStage, {
             participants,
@@ -128,6 +130,7 @@ const resolve = (n) => require.resolve(n, { paths: deps });
             onMute: on("mute"),
             onUnmute: on("unmute"),
             onRemove: on("remove"),
+            onManageParticipant: (participant) => { selected = participant.id; rosterVisible = false; events.push(["manage", participant.id]); },
           }),
           React.createElement(ParticipantActions, {
             visible: !!target,
@@ -162,7 +165,7 @@ const resolve = (n) => require.resolve(n, { paths: deps });
     await React.act(async () => element.click());
   };
   for (const role of ["host", "co-host", "moderator", "participant"]) {
-    participants = Array.from({ length: 12 }, (_, i) => ({
+    participants = Array.from({ length: 30 }, (_, i) => ({
       id: i === 0 ? "me" : "guest-" + i,
       user: { id: i === 0 ? "me" : "guest-" + i, username: "Person " + i },
       role:
@@ -182,7 +185,7 @@ const resolve = (n) => require.resolve(n, { paths: deps });
     selected = null;
     events = [];
     await render();
-    assert.equal(node.querySelectorAll("[data-tile]").length, 12);
+    assert.equal(node.querySelectorAll("[data-tile]").length, 30);
     assert.equal(
       node.querySelector('[data-tile="me"]').disabled,
       true,
@@ -260,6 +263,12 @@ const resolve = (n) => require.resolve(n, { paths: deps });
       selected = "guest-3";
       await render();
       await click(button("Remove Person 3 from the room", dialog()));
+      assert.equal(events.some((e) => e[0] === "remove"), false, "action sheet opens confirmation rather than removing immediately");
+      await React.act(async () => nativeEvents.alerts.at(-1).buttons.find(action => action.style === "cancel").onPress?.());
+      await React.act(async () => nativeEvents.alerts.at(-1).buttons.find(action => action.style === "destructive").onPress());
+      assert.equal(events.some((e) => e[0] === "remove"), false, "cancel invalidates the previous action-sheet confirmation");
+      await click(button("Remove Person 3 from the room", dialog()));
+      await React.act(async () => nativeEvents.alerts.at(-1).buttons.find(action => action.style === "destructive").onPress());
       assert.ok(events.some((e) => e[0] === "remove"));
       selected = "guest-3";
       participants[0].role = "participant";
@@ -346,6 +355,7 @@ const resolve = (n) => require.resolve(n, { paths: deps });
   assert.equal(button("View Anon 7 profile", roster()), null, "anonymous result never opens its real profile");
   await search("River");
 
+  nativeEvents.alerts.length = 0;
   // The roster now asks before removal. Cancelling and confirming exercise
   // the real Alert callbacks instead of bypassing the confirmation boundary.
   await click(button("Remove River from the room", roster()));
@@ -355,11 +365,12 @@ const resolve = (n) => require.resolve(n, { paths: deps });
   const cancel = nativeEvents.alerts[0].buttons.find(action => action.style === "cancel");
   assert.ok(cancel);
   await React.act(async () => cancel.onPress?.());
-  assert.equal(events.some(event => event[0] === "remove"), false, "cancel keeps participant in the room");
+  await React.act(async () => nativeEvents.alerts[0].buttons.find(action => action.style === "destructive").onPress());
+  assert.equal(events.some(event => event[0] === "remove"), false, "cancel invalidates even a stored confirmation callback");
   await click(button("Remove River from the room", roster()));
   const confirm = nativeEvents.alerts[1].buttons.find(action => action.style === "destructive");
   assert.ok(confirm);
-  await React.act(async () => confirm.onPress());
+  await React.act(async () => { confirm.onPress(); confirm.onPress(); });
   assert.deepEqual(events.filter(event => event[0] === "remove"), [["remove", "search-guest"]], "confirmation targets exactly the selected participant once");
 
   assert.equal(nativeEvents.backListeners.size, 1, "visible roster owns one Android Back listener");
@@ -374,12 +385,126 @@ const resolve = (n) => require.resolve(n, { paths: deps });
   await render();
   assert.equal(button("Search people in this Lynk").value, "", "reopening clears the previous search");
   assert.equal(roster().querySelectorAll("[data-roster-row]").length, 3);
+  // The searchable roster exposes role options without a hidden tile gesture.
+  await click(button("Co-host options for River", roster()));
+  await render();
+  assert.equal(roster(), null);
+  assert.ok(button("Make River a co-host", dialog()));
+  assert.deepEqual(events.at(-1), ["manage", "search-guest"]);
+  selected = null; rosterVisible = true; participants[0].role = "co-host";
+  await render();
+  assert.equal(button("Co-host options for River", roster()), null, "co-host cannot grant roles");
+  participants[0].role = "host";
+  await render();
+
+  // A deferred confirmation cannot act on a changed account, authority,
+  // departed target, promoted host, or a dismissed/reopened action sheet.
+  for (const change of ["role", "target-host", "left", "account", "dismissed"]) {
+    const original = participants.map(participant => ({ ...participant }));
+    selected = "search-guest"; events = [];
+    await render();
+    await click(button("Remove River from the room", dialog()));
+    const confirm = nativeEvents.alerts.at(-1).buttons.find(action => action.style === "destructive");
+    if (change === "role") participants[0].role = "participant";
+    if (change === "target-host") participants.find(participant => participant.id === "search-guest").role = "host";
+    if (change === "left") participants = participants.filter(participant => participant.id !== "search-guest");
+    if (change === "account") participants[0].id = "different-account";
+    if (change === "dismissed") selected = null;
+    await render();
+    if (change === "dismissed") { selected = "search-guest"; await render(); }
+    await React.act(async () => confirm.onPress());
+    assert.equal(events.some(event => event[0] === "remove"), false, `stale action-sheet confirmation blocked after ${change}`);
+    participants = original;
+  }
+  selected = null; events = [];
+  await render();
+  await click(button("Remove River from the room", roster()));
+  const staleRosterConfirm = nativeEvents.alerts.at(-1).buttons.find(action => action.style === "destructive");
+  participants[0].role = "participant";
+  await render();
+  await React.act(async () => staleRosterConfirm.onPress());
+  assert.equal(events.some(event => event[0] === "remove"), false, "roster confirmation revalidates current authority");
+
+  for (const transition of ["reopen", "leave-rejoin", "target-role-roundtrip", "actor-leave-rejoin"]) {
+    participants[0].role = "host";
+    rosterVisible = true; selected = null; events = [];
+    await render();
+    await click(button("Remove River from the room", roster()));
+    const delayed = nativeEvents.alerts.at(-1).buttons.find(action => action.style === "destructive");
+    const original = participants.map(participant => ({ ...participant }));
+    if (transition === "reopen") rosterVisible = false;
+    if (transition === "leave-rejoin") participants = participants.filter(participant => participant.id !== "search-guest");
+    if (transition === "target-role-roundtrip") participants.find(participant => participant.id === "search-guest").role = "co-host";
+    if (transition === "actor-leave-rejoin") participants = participants.filter(participant => !participant.isLocal);
+    await render();
+    participants = original; rosterVisible = true;
+    await render();
+    await React.act(async () => delayed.onPress());
+    assert.equal(events.some(event => event[0] === "remove"), false, `old roster confirmation cannot survive ${transition}`);
+  }
+
+  const queueMembers = Array.from({ length: 30 }, (_, index) => ({
+    id: "queue-" + index, isLocal: index === 0, role: index === 0 ? "host" : index === 1 ? "co-host" : "participant",
+    user: { id: "queue-" + index, username: "private-user-" + index, displayName: "Private Name " + index, avatar: "/private-" + index + ".png", isAnonymous: index > 1, anonLabel: "Anon " + index },
+    isMicOn: false, isCameraOn: false,
+  }));
+  let queueEvents = [];
+  const queueProps = { visible: true, participants: queueMembers, raisedHandOrder: ["departed", ...queueMembers.map(participant => participant.id), "queue-29"], onDismiss: () => queueEvents.push(["close"]), onInviteToSpeak: id => queueEvents.push(["promote", id]), onLowerHand: id => queueEvents.push(["dismiss", id]), onLowerAll: () => queueEvents.push(["clear"]) };
+  const renderQueue = props => React.act(async () => root.render(React.createElement(HandQueueSheet, props)));
+  await renderQueue(queueProps);
+  assert.equal(node.querySelectorAll("[data-queue-id]").length, 31, "native FIFO queue deduplicates repeated IDs without removing departed position");
+  assert.match(node.textContent, /30 hands raised/);
+  assert.match(node.textContent, /Anon 29/);
+  assert.doesNotMatch(node.textContent, /Private Name 29|private-user-29/);
+  assert.equal(node.querySelector('[data-avatar-uri="/private-29.png"]'), null, "anonymous queue avatars stay private");
+  assert.equal(button("Make Private Name 0 a co-host"), null, "cannot promote self");
+  assert.equal(button("Make Private Name 1 a co-host"), null, "cannot promote current co-host again");
+  await click(button("Make Anon 29 a co-host"));
+  assert.deepEqual(queueEvents.at(-1), ["promote", "queue-29"]);
+  await click(button("Dismiss Anon 28 from your queue"));
+  assert.deepEqual(queueEvents.at(-1), ["dismiss", "queue-28"]);
+  await click(button("Clear position 1 from your queue"));
+  assert.deepEqual(queueEvents.at(-1), ["dismiss", "departed"]);
+  await renderQueue({ ...queueProps, participants: queueMembers.map(participant => participant.isLocal ? { ...participant, role: "co-host" } : participant) });
+  assert.equal(button("Make Anon 29 a co-host"), null, "live loss of host authority removes queue promotion");
+  let finishQueue, queueAttempts = 0;
+  await renderQueue({ ...queueProps, onInviteToSpeak: () => { queueAttempts++; return new Promise(resolve => { finishQueue = resolve; }); } });
+  await click(button("Make Anon 29 a co-host"));
+  await click(button("Make Anon 29 a co-host"));
+  assert.equal(queueAttempts, 1, "queue confirmation is not duplicated");
+  assert.equal(button("Make Anon 29 a co-host").getAttribute("aria-disabled"), "true");
+  assert.equal(button("Dismiss Anon 29 from your queue").getAttribute("aria-disabled"), "true");
+  assert.equal(button("Clear raised hands from your view").getAttribute("aria-disabled"), "true");
+  assert.equal(button("Make Anon 28 a co-host").getAttribute("aria-disabled"), null, "unrelated guests stay manageable");
+  await React.act(async () => finishQueue(false));
+  assert.ok(button("Make Anon 29 a co-host"), "cancel/failure retains queue entry");
+  assert.equal(button("Make Anon 29 a co-host").getAttribute("aria-disabled"), null);
+  await renderQueue({ ...queueProps, onInviteToSpeak: async () => { throw new Error("offline"); } });
+  await click(button("Make Anon 29 a co-host"));
+  assert.match(node.querySelector('[role="alert"]').textContent, /Check your connection/);
+
+  let finishAction, actionAttempts = 0, actionCloses = 0;
+  const actionProps = { visible: true, actorRole: "host", actorId: "host", participant: { userId: "guest", user: { id: "guest", username: "River" }, role: "participant", isMicOn: true }, onMute: () => { actionAttempts++; return new Promise(resolve => { finishAction = resolve; }); }, onMakeCoHost() {}, onDemote() {}, onRemove() {}, onClose: () => actionCloses++ };
+  await React.act(async () => root.render(React.createElement(ParticipantActions, actionProps)));
+  await click(button("Mute River", dialog()));
+  await click(button("Mute River", dialog()));
+  assert.equal(actionAttempts, 1, "participant action cannot duplicate pending request");
+  assert.equal(button("Make River a co-host", dialog()).getAttribute("aria-disabled"), "true");
+  assert.equal(actionCloses, 0, "action sheet stays open until server confirms");
+  await React.act(async () => finishAction(false));
+  assert.equal(actionCloses, 0, "failed action stays open for retry");
+  await click(button("Mute River", dialog()));
+  await React.act(async () => finishAction(true));
+  assert.equal(actionCloses, 1, "successful action closes once");
+  await React.act(async () => root.render(React.createElement(ParticipantActions, { ...actionProps, onMute: async () => { throw new Error("offline"); } })));
+  await click(button("Mute River", dialog()));
+  assert.match(node.querySelector('[role="alert"]').textContent, /Check your connection/);
   await React.act(async () => root.unmount());
   assert.equal(nativeEvents.backListeners.size, 0, "unmount removes the Back listener");
   delete global.__nativeModeration;
   await window.happyDOM.close();
   console.log(
-    "PASS native production stage/roster/action sheets: 12 members, 4 actor roles, target hierarchy, co-host actions, consent copy, realtime role changes, stale target cleanup, anonymous-safe search, removal cancel/confirm, Android Back and listener cleanup. Native UI/SDK boundaries adapted.",
+    "PASS native production stage/roster/action sheets: 30-member fixtures, native FIFO/anonymity, deferred confirmation guards, discoverable co-host options, 4 actor roles, target hierarchy, co-host actions, consent copy, realtime role changes, stale target cleanup, anonymous-safe search, removal cancel/confirm, Android Back and listener cleanup. Native UI/SDK boundaries adapted.",
   );
 })().then(
   () => process.exit(0),

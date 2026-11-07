@@ -1,37 +1,18 @@
-/**
- * HandQueueSheet
- *
- * Host-only moderation surface for raised hands. Zoom-parity: the
- * host sees a FIFO queue of participants who have raised their hand
- * (oldest at top), can invite a user to speak (promotes role), or
- * lower a hand without promotion.
- *
- * Design decisions (via the frontend-design skill):
- *   - Sheet, not inline rail — long queues would drown the room UI.
- *   - Primary "Invite to speak" CTA in DVNT cyan: the positive
- *     outcome of a raised hand. Secondary "Lower" in hairline
- *     destructive red.
- *   - Avatar + username + "Raised Xs ago" so the host has context.
- *   - "Dismiss all" host action at the bottom for drive-by queue
- *     clearing when you're not taking more questions.
- *   - Anonymous raisers show as "Anonymous" (italic) and the Invite
- *     CTA is still available (promotion is by userId, not by
- *     username).
- */
+/** Host queue: oldest first, privacy-safe aliases, and local-only dismissal. */
 
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, Pressable, StyleSheet, Text, View } from "react-native";
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetFlatList,
 } from "@gorhom/bottom-sheet";
 import type { BottomSheetBackdropProps } from "@gorhom/bottom-sheet";
-import { Hand, Mic, X } from "lucide-react-native";
+import { Crown, Hand, X } from "lucide-react-native";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import type { VideoParticipant } from "./VideoGrid";
-import { getSneakyUserLabel } from "./user-labels";
-import { HAND_QUEUE_COPY } from "./hand-queue";
+import { buildHandQueue, HAND_QUEUE_COPY, type HandQueueEntry } from "./hand-queue";
+import { participantModeration } from "./moderation-permissions";
 
 interface HandQueueSheetProps {
   visible: boolean;
@@ -40,18 +21,12 @@ interface HandQueueSheetProps {
   /** FIFO ordered userIds whose hands are raised. */
   raisedHandOrder: string[];
   onDismiss: () => void;
-  /** Called when host taps "Invite to speak" on a raised hand. */
-  onInviteToSpeak: (userId: string) => void;
-  /** Called when host taps "Lower" without promoting. */
+  /** Grants co-host moderation, not only permission to speak. */
+  onInviteToSpeak: (userId: string) => void | boolean | Promise<void | boolean>;
+  /** Dismisses this entry locally, without changing the guest's hand. */
   onLowerHand: (userId: string) => void;
-  /** Called when host taps "Dismiss all" — lowers every raised hand. */
+  /** Clears only this host's local queue view. */
   onLowerAll: () => void;
-}
-
-interface QueueRow {
-  id: string;
-  participant: VideoParticipant | null;
-  queueIndex: number;
 }
 
 export function HandQueueSheet({
@@ -66,20 +41,32 @@ export function HandQueueSheet({
   const { colors } = useColorScheme();
   const sheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ["72%"], []);
+  const inFlight = useRef(new Set<string>());
+  const [pending, setPending] = useState<Set<string>>(() => new Set());
+  const [actionError, setActionError] = useState<string | null>(null);
+  const invite = useCallback(async (userId: string) => {
+    if (inFlight.current.has(userId)) return;
+    inFlight.current.add(userId);
+    setPending(new Set(inFlight.current));
+    setActionError(null);
+    try {
+      // A cancellation or server denial retains the FIFO entry for retry.
+      // The room callback owns success state and server-error feedback.
+      await onInviteToSpeak(userId);
+    } catch {
+      setActionError("Couldn't update this Lynk. Check your connection and try again.");
+    } finally {
+      inFlight.current.delete(userId);
+      setPending(new Set(inFlight.current));
+    }
+  }, [onInviteToSpeak]);
 
-  // Join the ordered id list against the participants map. Keep
-  // insertion order (oldest first), drop any ids for users who left
-  // the room while queued.
-  const queue = useMemo<QueueRow[]>(() => {
-    const byId = new Map<string, VideoParticipant>();
-    for (const p of participants) byId.set(p.id, p);
-    const rows: QueueRow[] = [];
-    raisedHandOrder.forEach((id, idx) => {
-      const participant = byId.get(id) ?? null;
-      rows.push({ id, participant, queueIndex: idx + 1 });
-    });
-    return rows;
-  }, [participants, raisedHandOrder]);
+  const actor = participants.find((participant) => participant.isLocal);
+  const queue = useMemo(() => buildHandQueue(
+    raisedHandOrder,
+    participants.map((participant) => ({ ...participant.user, userId: participant.id })),
+  ), [participants, raisedHandOrder]);
+  const waiting = queue.filter((entry) => !entry.departed).length;
 
   useEffect(() => {
     if (visible) {
@@ -109,14 +96,12 @@ export function HandQueueSheet({
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: QueueRow }) => {
-      const { participant, queueIndex, id } = item;
-      const isAnon = participant?.user.isAnonymous;
-      const label = participant
-        ? isAnon
-          ? "Anonymous"
-          : getSneakyUserLabel(participant.user)
-        : HAND_QUEUE_COPY.departed;
+    ({ item }: { item: HandQueueEntry }) => {
+      const { userId: id, position: queueIndex, label, isAnonymous: isAnon } = item;
+      const participant = participants.find((participant) => participant.id === id);
+      const busy = pending.has(id);
+      const canPromote = !!participant && participant.role !== "co-host" &&
+        participantModeration(actor?.role, actor?.id, id, participant.role).changeRole;
 
       return (
         <View
@@ -203,38 +188,42 @@ export function HandQueueSheet({
 
           {participant ? (
             <View style={styles.actionRow}>
-              <Pressable
+              {canPromote ? <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Make ${label} a co-host`}
-                onPress={() => onInviteToSpeak(id)}
+                disabled={busy}
+                accessibilityState={{ disabled: busy, busy }}
+                onPress={() => void invite(id)}
                 style={({ pressed }) => [
                   styles.primaryAction,
                   {
                     backgroundColor: colors.primary,
-                    opacity: pressed ? 0.85 : 1,
+                    opacity: busy ? 0.4 : pressed ? 0.85 : 1,
                   },
                 ]}
               >
-                <Mic size={14} color={colors.primaryForeground} />
+                <Crown size={14} color={colors.primaryForeground} />
                 <Text
                   style={[
                     styles.primaryActionLabel,
                     { color: colors.primaryForeground },
                   ]}
                 >
-                  Make co-host
+                  {busy ? "Please wait…" : HAND_QUEUE_COPY.invite}
                 </Text>
-              </Pressable>
+              </Pressable> : null}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Dismiss ${label} from your queue`}
+                disabled={busy}
+                accessibilityState={{ disabled: busy }}
                 onPress={() => onLowerHand(id)}
                 style={({ pressed }) => [
                   styles.secondaryAction,
                   {
                     borderColor: `${colors.destructive}40`,
                     backgroundColor: `${colors.destructive}10`,
-                    opacity: pressed ? 0.8 : 1,
+                    opacity: busy ? 0.4 : pressed ? 0.8 : 1,
                   },
                 ]}
               >
@@ -244,12 +233,14 @@ export function HandQueueSheet({
                     { color: colors.destructive },
                   ]}
                 >
-                  Dismiss here
+                  {HAND_QUEUE_COPY.lower}
                 </Text>
               </Pressable>
             </View>
           ) : (
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Clear position ${queueIndex} from your queue`}
               onPress={() => onLowerHand(id)}
               style={({ pressed }) => [
                 styles.ghostAction,
@@ -272,10 +263,10 @@ export function HandQueueSheet({
         </View>
       );
     },
-    [colors, onInviteToSpeak, onLowerHand],
+    [colors, invite, onLowerHand, participants, actor?.role, actor?.id, pending],
   );
 
-  const keyExtractor = useCallback((item: QueueRow) => item.id, []);
+  const keyExtractor = useCallback((item: HandQueueEntry) => item.userId, []);
 
   return (
     <BottomSheet
@@ -322,14 +313,14 @@ export function HandQueueSheet({
                 },
               ]}
             >
-              {queue.length}{" "}
+              {waiting}{" "}
               <Text style={[styles.titleSuffix, { color: colors.foreground }]}>
-                {queue.length === 1 ? "hand raised" : "hands raised"}
+                {waiting === 1 ? "hand raised" : "hands raised"}
               </Text>
             </Text>
           </View>
           <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-            Oldest first. Co-hosts gain moderation controls. Dismissing only clears your view.
+            Oldest first. Co-hosts gain moderation controls. {HAND_QUEUE_COPY.dismissalHint}
           </Text>
         </View>
         <Pressable
@@ -349,6 +340,7 @@ export function HandQueueSheet({
         </Pressable>
       </View>
 
+      {actionError ? <Text accessibilityRole="alert" style={{ color: colors.destructive, paddingHorizontal: 20, paddingBottom: 12 }}>{actionError}</Text> : null}
       <BottomSheetFlatList
         data={queue}
         keyExtractor={keyExtractor}
@@ -383,10 +375,12 @@ export function HandQueueSheet({
           </View>
         }
         ListFooterComponent={
-          queue.length > 1 ? (
+          queue.length > 0 ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Clear raised hands from your view"
+              disabled={pending.size > 0}
+              accessibilityState={{ disabled: pending.size > 0 }}
               onPress={onLowerAll}
               style={({ pressed }) => [
                 styles.lowerAllBtn,
@@ -400,7 +394,7 @@ export function HandQueueSheet({
               <Text
                 style={[styles.lowerAllLabel, { color: colors.mutedForeground }]}
               >
-                Clear my queue
+                {HAND_QUEUE_COPY.lowerAll}
               </Text>
             </Pressable>
           ) : null

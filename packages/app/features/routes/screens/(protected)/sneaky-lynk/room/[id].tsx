@@ -9,7 +9,7 @@
  * - ServerRoom: uses useVideoRoom for full Fishjam room management
  */
 
-import { isRoomModerator } from "@dvnt/app/features/sneaky-lynk/ui/moderation-permissions";
+import { isRoomModerator, participantModeration } from "@dvnt/app/features/sneaky-lynk/ui/moderation-permissions";
 import {
   View,
   Text,
@@ -1848,7 +1848,7 @@ function ServerRoom({
     if (isHost) {
       Alert.alert(
         "End this Lynk?",
-        "You're hosting. Leaving ends the Lynk for everyone in it — share the invite link instead of leaving to send it.",
+        "You're hosting. Leaving ends the Lynk for everyone, including co-hosts. Hosting does not transfer automatically. Use Share to invite people without leaving.",
         [
           { text: "Stay", style: "cancel" },
           {
@@ -2099,160 +2099,152 @@ function ServerRoom({
   // ── Derived values that depend on videoRoom (also before early return) ─
   const roomUuid = videoRoom.room?.id || id;
 
-  // ── CRITICAL: All useCallback handlers BEFORE early return ────────
-  const handleMutePeer = useCallback(
-    async (targetUserId: string) => {
-      const res = await videoApi.mutePeer({ roomId: roomUuid, targetUserId });
-      if (res.ok) {
-        showToast("info", "Muted", "Participant has been muted");
-      } else {
-        showToast("error", "Error", res.error?.message || "Failed to mute");
-      }
-    },
-    [roomUuid, showToast],
-  );
+  // ── Native moderation callbacks: one operation per target across panels ──
+  const moderationOwner = authUser?.authId || authUser?.id || "";
+  const moderationIdentityRef = useRef({ roomUuid, owner: moderationOwner });
+  moderationIdentityRef.current = { roomUuid, owner: moderationOwner };
+  const moderationPendingRef = useRef(new Set<string>());
+  const allMutedRef = useRef(allMuted);
+  allMutedRef.current = allMuted;
+  type ModerationAction = "promote" | "demote" | "remove" | "mute" | "unmute" | "muteAll" | "unmuteAll";
 
-  const handleToggleMuteAll = useCallback(async () => {
-    if (allMuted) {
-      const res = await videoApi.unmuteAll(roomUuid);
-      if (res.ok) {
-        setAllMuted(false);
-        showToast("info", "Unmuted All", "All participants have been unmuted");
-      } else {
-        showToast(
-          "error",
-          "Error",
-          res.error?.message || "Failed to unmute all",
-        );
+  const runModeration = useCallback(async (
+    action: ModerationAction,
+    targetUserId?: string,
+    confirm?: () => Promise<boolean>,
+  ): Promise<boolean> => {
+    const lifetime = leaveLifetimeRef.current.epoch;
+    const authEpoch = authIntentEpochRef.current;
+    const actorId = videoRoomRef.current.localUser?.id;
+    const actorRole = videoRoomRef.current.localUser?.role;
+    const targetRole = videoRoomRef.current.participants.find(
+      (member) => (member.userId || member.oderId || member.odId) === targetUserId,
+    )?.role;
+    const bulk = action === "muteAll" || action === "unmuteAll";
+    const lock = bulk ? "*" : targetUserId!;
+    const ownsAction = () => {
+      const current = videoRoomRef.current;
+      return !!moderationOwner && leaveLifetimeRef.current.active &&
+        leaveLifetimeRef.current.epoch === lifetime && authIntentEpochRef.current === authEpoch &&
+        moderationIdentityRef.current.roomUuid === roomUuid &&
+        moderationIdentityRef.current.owner === moderationOwner &&
+        (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === moderationOwner &&
+        !leavingRef.current && !closedReasonRef.current && current.isAdmitted &&
+        !current.isEjected && current.room?.id === roomUuid && current.room.status !== "ended" &&
+        current.localUser?.id === actorId && current.localUser?.role === actorRole;
+    };
+    const allowed = () => {
+      if (!ownsAction()) return false;
+      const currentActor = videoRoomRef.current.localUser;
+      if (bulk) return currentActor?.role === "host";
+      const currentTarget = videoRoomRef.current.participants.find(
+        (member) => (member.userId || member.oderId || member.odId) === targetUserId,
+      );
+      // Recheck after confirmation and again after async token lookup. A
+      // departed person or a changed role invalidates the original action.
+      if (!currentActor || !currentTarget || currentTarget.role !== targetRole) return false;
+      const capabilities = participantModeration(
+        currentActor.role, currentActor.id, targetUserId!, currentTarget.role,
+      );
+      if (action === "promote") return capabilities.changeRole && currentTarget.role !== "co-host";
+      if (action === "demote") return capabilities.changeRole && currentTarget.role === "co-host";
+      return action === "remove" ? capabilities.remove : capabilities.mute;
+    };
+    if (!allowed() || moderationPendingRef.current.has(lock) ||
+      moderationPendingRef.current.has("*") || (bulk && moderationPendingRef.current.size > 0)) return false;
+    // Lock before opening a confirmation, not just before dispatching. Roster,
+    // action sheet and queue all share this lock, including bulk operations.
+    moderationPendingRef.current.add(lock);
+    try {
+      if (confirm && !await confirm()) return false;
+      if (!allowed()) return false;
+      const options = { isCurrent: allowed };
+      const result = action === "promote" || action === "demote"
+        ? await videoApi.changeRole({ roomId: roomUuid, targetUserId: targetUserId!, newRole: action === "promote" ? "co-host" : "participant" }, options)
+        : action === "remove" ? await videoApi.kickUser({ roomId: roomUuid, targetUserId: targetUserId!, reason: "Removed by host" }, options)
+        : action === "mute" ? await videoApi.mutePeer({ roomId: roomUuid, targetUserId: targetUserId! }, options)
+        : action === "unmute" ? await videoApi.unmutePeer({ roomId: roomUuid, targetUserId: targetUserId! }, options)
+        : action === "muteAll" ? await videoApi.muteAll(roomUuid, options)
+        : await videoApi.unmuteAll(roomUuid, options);
+      if (!ownsAction()) return false;
+      if (!result.ok) {
+        showToast("error", "Change not saved", "The room or your permissions may have changed. Try again.");
+        return false;
       }
-    } else {
-      const res = await videoApi.muteAll(roomUuid);
-      if (res.ok) {
-        setAllMuted(true);
-        showToast("info", "Muted All", "All participants have been muted");
+      // Roles/badges remain server-authoritative. Only dismiss a hand after
+      // successful promotion; failure and cancellation keep it in the queue.
+      if (action === "promote") {
+        setRaisedHand(targetUserId!, false);
+        showToast("success", "Co-host added", "This participant now has co-host controls.");
+      } else if (action === "demote") {
+        showToast("info", "Co-host removed", "This person is now a participant.");
+      } else if (action === "remove") {
+        showToast("info", "Participant removed", "This person has been removed from the room.");
+      } else if (action === "mute") {
+        showToast("info", "Muted", "This participant has been muted.");
+      } else if (action === "unmute") {
+        showToast("info", "Mute lifted", "This participant can choose to unmute.");
       } else {
-        showToast("error", "Error", res.error?.message || "Failed to mute all");
+        allMutedRef.current = action === "muteAll";
+        setAllMuted(allMutedRef.current);
+        if (allMutedRef.current) {
+          showToast("info", "Muted everyone", "Participants have been muted.");
+        } else {
+          showToast("info", "Microphone controls restored", "Participants can choose to unmute themselves.");
+        }
       }
+      return true;
+    } catch {
+      if (ownsAction()) showToast("error", "Change not saved", "Check your connection and try again.");
+      return false;
+    } finally {
+      moderationPendingRef.current.delete(lock);
     }
-  }, [roomUuid, allMuted, showToast]);
+  }, [moderationOwner, roomUuid, setRaisedHand, showToast]);
 
-  const handleUnmutePeer = useCallback(
-    async (targetUserId: string) => {
-      const res = await videoApi.unmutePeer({ roomId: roomUuid, targetUserId });
-      if (res.ok) {
-        showToast("info", "Mute lifted", "Participant can choose to unmute.");
-      } else {
-        showToast("error", "Error", res.error?.message || "Failed to unmute");
-      }
-    },
-    [roomUuid, showToast],
-  );
+  const handleMutePeer = useCallback((targetUserId: string) => runModeration("mute", targetUserId), [runModeration]);
+  const handleUnmutePeer = useCallback((targetUserId: string) => runModeration("unmute", targetUserId), [runModeration]);
+  const handleMakeCoHost = useCallback((targetUserId: string) => runModeration("promote", targetUserId), [runModeration]);
+  const handleDemote = useCallback((targetUserId: string) => runModeration("demote", targetUserId), [runModeration]);
+  const handleRemoveUser = useCallback((targetUserId: string) => runModeration("remove", targetUserId), [runModeration]);
+  const handleToggleMuteAll = useCallback(() => runModeration(allMutedRef.current ? "unmuteAll" : "muteAll"), [runModeration]);
 
-  const handleMakeCoHost = useCallback(
-    async (targetUserId: string) => {
-      const res = await videoApi.changeRole({
-        roomId: roomUuid,
-        targetUserId,
-        newRole: "co-host",
-      });
-      if (res.ok) {
-        showToast("info", "Promoted", "User is now a co-host");
-      } else {
-        showToast("error", "Error", res.error?.message || "Failed to promote");
-      }
-    },
-    [roomUuid, showToast],
-  );
-
-  const handleDemote = useCallback(
-    async (targetUserId: string) => {
-      const res = await videoApi.changeRole({
-        roomId: roomUuid,
-        targetUserId,
-        newRole: "participant",
-      });
-      if (res.ok) {
-        showToast("info", "Demoted", "User is now a participant");
-      } else {
-        showToast("error", "Error", res.error?.message || "Failed to demote");
-      }
-    },
-    [roomUuid, showToast],
-  );
-
-  const handleRemoveUser = useCallback(
-    async (targetUserId: string) => {
-      const res = await videoApi.kickUser({
-        roomId: roomUuid,
-        targetUserId,
-        reason: "Removed by host",
-      });
-      if (res.ok) {
-        showToast("info", "Removed", "User has been removed from the room");
-      } else {
-        showToast("error", "Error", res.error?.message || "Failed to remove");
-      }
-    },
-    [roomUuid, showToast],
-  );
-
-  const handleParticipantPress = useCallback((p: VideoParticipant) => {
-    setActionTarget(p);
+  const handleParticipantPress = useCallback((participant: VideoParticipant) => {
+    setActionTarget(participant);
   }, []);
 
-  // Host promotes a raised hand to "speaker". We optimistically lower
-  // the visual queue entry so the host sees the moderation complete
-  // instantly — the server broadcasts the real role change, so any
-  // drift self-heals on the next members-refresh tick.
-  const promoteRaisedHand = useCallback(
-    async (targetUserId: string) => {
-      // Backend role enum is "co-host" | "participant" — "speaker" isn't
-      // a server-side role, so we use co-host as the promotion target.
-      // From the listener's POV this grants mic + participant controls,
-      // which is the real meaning of "invited to speak".
-      const res = await videoApi.changeRole({
-        roomId: roomUuid,
-        targetUserId,
-        newRole: "co-host",
-      });
-      if (res.ok) {
-        setRaisedHand(targetUserId, false);
-        showToast("success", "Co-host added", "This participant now has co-host controls.");
-      } else {
-        showToast(
-          "error",
-          "Error",
-          res.error?.message || "Couldn't invite to speak",
-        );
-      }
-    },
-    [roomUuid, showToast, setRaisedHand],
-  );
+  const handleInviteToSpeak = useCallback((targetUserId: string) => runModeration("promote", targetUserId,
+    () => new Promise<boolean>((resolve) => {
+      Alert.alert("Make this participant a co-host?", "This grants co-host controls, not just permission to speak.", [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        { text: "Make co-host", onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    }),
+  ), [runModeration]);
 
-  const handleInviteToSpeak = useCallback((targetUserId: string) => {
-    Alert.alert("Make this participant a co-host?", "This grants co-host controls, not just permission to speak.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Make co-host", onPress: () => void promoteRaisedHand(targetUserId) },
-    ]);
-  }, [promoteRaisedHand]);
-
-  // Host lowers a raised hand without promotion. Server-side we don't
-  // currently have a "host lowers peer hand" endpoint (toggle_hand is
-  // caller-scoped), so this is a local-only dismissal for now — the
-  // participant's own client still thinks they're raised until they
-  // toggle back. Tracked for follow-up; local clear is Zoom-parity for
-  // hosts who just want to clear the queue visually.
-  const handleLowerHand = useCallback(
-    (targetUserId: string) => {
-      setRaisedHand(targetUserId, false);
-    },
-    [setRaisedHand],
-  );
+  // Queue dismissal is local-only. It does not lower the guest's hand on
+  // their device, and it cannot hide an in-flight promotion that might fail.
+  const handleLowerHand = useCallback((targetUserId: string) => {
+    if (!leaveLifetimeRef.current.active || leavingRef.current || closedReasonRef.current ||
+      !videoRoomRef.current.isAdmitted || videoRoomRef.current.isEjected ||
+      videoRoomRef.current.room?.status === "ended" || videoRoomRef.current.localUser?.role !== "host" ||
+      moderationIdentityRef.current.roomUuid !== roomUuid ||
+      (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") !== moderationOwner ||
+      moderationPendingRef.current.has(targetUserId) || moderationPendingRef.current.has("*")) return;
+    setRaisedHand(targetUserId, false);
+  }, [moderationOwner, roomUuid, setRaisedHand]);
 
   const handleLowerAll = useCallback(() => {
+    if (!leaveLifetimeRef.current.active || leavingRef.current || closedReasonRef.current ||
+      !videoRoomRef.current.isAdmitted || videoRoomRef.current.isEjected ||
+      videoRoomRef.current.room?.status === "ended" || videoRoomRef.current.localUser?.role !== "host" ||
+      moderationIdentityRef.current.roomUuid !== roomUuid ||
+      (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") !== moderationOwner ||
+      moderationPendingRef.current.size > 0) return;
     clearRaisedHands();
     closeHandQueue();
-  }, [clearRaisedHands, closeHandQueue]);
+  }, [clearRaisedHands, closeHandQueue, moderationOwner, roomUuid]);
+  // ── End native moderation callbacks ────────────────────────────────────
 
   if (waitingForHost && !closedReason) {
     return (
@@ -2485,10 +2477,7 @@ function ServerRoom({
           participants={allParticipants}
           raisedHandOrder={raisedHandOrder}
           onDismiss={closeHandQueue}
-          onInviteToSpeak={(userId) => {
-            closeHandQueue();
-            void handleInviteToSpeak(userId);
-          }}
+          onInviteToSpeak={handleInviteToSpeak}
           onLowerHand={handleLowerHand}
           onLowerAll={handleLowerAll}
         />
@@ -2502,6 +2491,10 @@ function ServerRoom({
           onMute={handleMutePeer}
           onUnmute={handleUnmutePeer}
           onRemove={handleRemoveUser}
+          onManageParticipant={(participant) => {
+            setShowParticipantsSheet(false);
+            setActionTarget(participant);
+          }}
         />
 
         {/* Explicit retries use the real join and preserve reviewed choices. */}

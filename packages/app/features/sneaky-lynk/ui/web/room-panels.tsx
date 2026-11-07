@@ -39,6 +39,7 @@ import {
 
 import { getSneakyUserLabel } from "@dvnt/app/lib/user-label";
 import { buildHandQueue, HAND_QUEUE_COPY } from "../hand-queue";
+import { participantModeration } from "../moderation-permissions";
 import type { RoomComment } from "../../api/comments";
 
 /** DVNT tokens — docs/dvnt-design-system.md §1. */
@@ -50,6 +51,40 @@ const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:
 // either order without unlocking the room beneath the remaining dialog.
 const isolatedBranches = new WeakMap<HTMLElement, { count: number; wasInert: boolean }>();
 const panelStack: Array<{ root: HTMLElement; panel: HTMLElement }> = [];
+
+type RoomActionResult = void | boolean | Promise<void | boolean>;
+
+/** Lock by member, including repeated clicks before React commits busy state. */
+function useParticipantActions(externalPending?: ReadonlySet<string>) {
+  const inFlight = useRef(new Set<string>());
+  const externalPendingRef = useRef(externalPending);
+  externalPendingRef.current = externalPending;
+  const [localPending, setPending] = useState<Set<string>>(() => new Set());
+  // The room owns shared requests across panel dismissal/reopening. Local
+  // state also locks repeated clicks before the parent's update commits.
+  const pending = new Set([...localPending, ...(externalPending ?? [])]);
+  const [error, setError] = useState<string | null>(null);
+  const run = async (id: string, action: () => RoomActionResult) => {
+    const shared = externalPendingRef.current;
+    if (inFlight.current.has(id) || inFlight.current.has("*") || shared?.has(id) || shared?.has("*") ||
+      (id === "*" && (inFlight.current.size || shared?.size))) return false;
+    inFlight.current.add(id);
+    setPending(new Set(inFlight.current));
+    setError(null);
+    try {
+      const result = await action();
+      if (result === false) setError("The change wasn't saved. You can try again.");
+      return result !== false;
+    } catch {
+      setError("Couldn't update this Lynk. Check your connection and try again.");
+      return false;
+    } finally {
+      inFlight.current.delete(id);
+      setPending(new Set(inFlight.current));
+    }
+  };
+  return { run, pending, error, isPending: (id: string) => pending.has(id) || pending.has("*") };
+}
 
 export interface WebMember {
   userId: string;
@@ -487,6 +522,8 @@ export function HandQueuePanel({
   onClose,
   order,
   members,
+  localUserId,
+  externalPending,
   onInviteToSpeak,
   onLowerHand,
   onLowerAll,
@@ -495,11 +532,16 @@ export function HandQueuePanel({
   onClose: () => void;
   order: string[];
   members: WebMember[];
+  localUserId?: string;
+  /** Room-wide in-flight targets, retained across panel switches. "*" is bulk. */
+  externalPending?: ReadonlySet<string>;
   /** Existing room callback grants co-host; the action names that authority. */
-  onInviteToSpeak: (userId: string) => void;
+  onInviteToSpeak: (userId: string) => RoomActionResult;
   onLowerHand: (userId: string) => void;
   onLowerAll: () => void;
 }) {
+  const actions = useParticipantActions(externalPending);
+  const actorRole = members.find((member) => member.userId === localUserId && member.status === "active")?.role;
   // Queue semantics, labels and copy are shared with native — see ui/hand-queue.
   const queue = buildHandQueue(
     order,
@@ -519,13 +561,13 @@ export function HandQueuePanel({
     <SidePanel
       open={open}
       onClose={onClose}
-      title={`${HAND_QUEUE_COPY.title} · ${queue.length}`}
+      title={`${HAND_QUEUE_COPY.title} · ${waiting}`}
       icon={<Hand size={18} color={MAGENTA} />}
     >
       {queue.length > 0 ? (
         <div className="shrink-0 border-b border-white/[0.06] px-4 py-3">
           <p className="text-sm font-medium text-white/80">{waiting} {waiting === 1 ? "person" : "people"} waiting to speak</p>
-          <p className="mt-1 text-xs leading-5 text-white/60">Oldest hand first. Making someone a co-host lets them speak and help moderate this Lynk.</p>
+          <p className="mt-1 text-xs leading-5 text-white/60">Oldest hand first. Co-hosts help moderate this Lynk. {HAND_QUEUE_COPY.dismissalHint}</p>
         </div>
       ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
@@ -535,45 +577,57 @@ export function HandQueuePanel({
           </PanelEmptyState>
         ) : (
           <ol className="space-y-3" aria-label="Raised hands, oldest first">
-            {queue.map((entry) => (
-              <li key={entry.userId} className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-                <div className="flex items-center gap-3">
-                  <span aria-label={`Position ${entry.position}`} className="w-5 shrink-0 text-center font-mono text-xs text-white/60">{entry.position}</span>
-                  <span aria-hidden="true"><SquareAvatar uri={entry.avatar} name={entry.label} size={36} /></span>
-                  <div className="min-w-0 flex-1">
-                    <p className={`truncate text-sm font-medium ${entry.departed ? "text-white/50" : "text-white"}`}>{entry.label}</p>
-                    <p className="mt-0.5 text-xs text-white/50">{entry.departed ? "No longer waiting" : "Wants to speak"}</p>
+            {queue.map((entry) => {
+              const member = members.find((member) => member.userId === entry.userId && member.status === "active");
+              const canPromote = !!member && member.role !== "co-host" && participantModeration(actorRole, localUserId, member.userId, member.role).changeRole;
+              const busy = actions.isPending(entry.userId);
+              return (
+                <li key={entry.userId} aria-busy={busy} className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                  <div className="flex items-center gap-3">
+                    <span aria-label={`Position ${entry.position}`} className="w-5 shrink-0 text-center font-mono text-xs text-white/60">{entry.position}</span>
+                    <span aria-hidden="true"><SquareAvatar uri={entry.avatar} name={entry.label} size={36} /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className={`truncate text-sm font-medium ${entry.departed ? "text-white/50" : "text-white"}`}>{entry.label}</p>
+                      <p className="mt-0.5 text-xs text-white/50">{entry.departed ? "No longer waiting" : "Wants to speak"}</p>
+                    </div>
+                    {!entry.departed ? <Hand size={16} color={MAGENTA} aria-hidden="true" /> : null}
                   </div>
-                  {!entry.departed ? <Hand size={16} color={MAGENTA} aria-hidden="true" /> : null}
-                </div>
-                {entry.departed ? null : (
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onInviteToSpeak(entry.userId)}
-                      aria-label={`Make ${entry.label} a co-host`}
-                      className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg bg-[#3FDCFF]/10 px-3 py-2 text-xs font-semibold text-[#3FDCFF] hover:bg-[#3FDCFF]/20 ${FOCUS_RING}`}
-                    >
-                      <Crown size={15} aria-hidden="true" /> Make co-host
+                  {entry.departed ? (
+                    <button type="button" disabled={busy} onClick={() => onLowerHand(entry.userId)} aria-label={`Clear position ${entry.position} from your queue`} className={`mt-3 min-h-11 rounded-lg border border-white/10 px-4 text-xs font-semibold text-white/70 hover:bg-white/[0.08] ${FOCUS_RING}`}>
+                      Clear from queue
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => onLowerHand(entry.userId)}
-                      aria-label={`${HAND_QUEUE_COPY.lower} ${entry.label}`}
-                      className={`min-h-11 rounded-lg border border-white/10 px-4 py-2 text-xs font-semibold text-white/70 hover:bg-white/[0.08] hover:text-white ${FOCUS_RING}`}
-                    >
-                      {HAND_QUEUE_COPY.lower}
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
+                  ) : (
+                    <div className="mt-3 flex gap-2">
+                      {canPromote ? <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void actions.run(entry.userId, () => onInviteToSpeak(entry.userId))}
+                        aria-label={`Make ${entry.label} a co-host`}
+                        className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg bg-[#3FDCFF]/10 px-3 py-2 text-xs font-semibold text-[#3FDCFF] hover:bg-[#3FDCFF]/20 disabled:cursor-wait disabled:opacity-40 ${FOCUS_RING}`}
+                      >
+                        {busy ? <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Crown size={15} aria-hidden="true" />} {busy ? "Updating…" : HAND_QUEUE_COPY.invite}
+                      </button> : null}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onLowerHand(entry.userId)}
+                        aria-label={`Dismiss ${entry.label} from your queue`}
+                        className={`min-h-11 rounded-lg border border-white/10 px-4 py-2 text-xs font-semibold text-white/70 hover:bg-white/[0.08] hover:text-white ${FOCUS_RING}`}
+                      >
+                        {HAND_QUEUE_COPY.lower}
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ol>
         )}
       </div>
+      {actions.error ? <p role="alert" className="shrink-0 px-4 py-2 text-sm text-red-300">{actions.error}</p> : null}
       {queue.length > 0 ? (
         <footer className="shrink-0 border-t border-white/10 px-4 pt-3" style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 12px)" }}>
-          <button type="button" onClick={onLowerAll} className={`min-h-11 w-full rounded-lg bg-white/[0.08] px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/15 ${FOCUS_RING}`}>
+          <button type="button" disabled={actions.pending.size > 0} onClick={onLowerAll} aria-label="Clear raised hands from your view" className={`min-h-11 w-full disabled:opacity-40 rounded-lg bg-white/[0.08] px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/15 ${FOCUS_RING}`}>
             {HAND_QUEUE_COPY.lowerAll}
           </button>
         </footer>
@@ -601,6 +655,7 @@ export function ParticipantsPanel({
   onClose,
   members,
   localUserId,
+  externalPending,
   onPromote,
   onDemote,
   onKick,
@@ -613,16 +668,19 @@ export function ParticipantsPanel({
   onClose: () => void;
   members: WebMember[];
   localUserId: string | undefined;
-  onPromote: (userId: string) => void;
-  onDemote: (userId: string) => void;
-  onKick: (userId: string) => void;
-  onMute: (userId: string) => void;
-  onUnmute: (userId: string) => void;
-  onMuteAll?: () => void;
+  /** Room-wide in-flight targets, retained across panel switches. "*" is bulk. */
+  externalPending?: ReadonlySet<string>;
+  onPromote: (userId: string) => RoomActionResult;
+  onDemote: (userId: string) => RoomActionResult;
+  onKick: (userId: string) => RoomActionResult;
+  onMute: (userId: string) => RoomActionResult;
+  onUnmute: (userId: string) => RoomActionResult;
+  onMuteAll?: () => RoomActionResult;
   /** Live voice activity, so a row can say "speaking" rather than just showing a mic. */
   speakingByUserId?: Record<string, boolean>;
 }) {
   const [search, setSearch] = useState("");
+  const actions = useParticipantActions(externalPending);
   const active = members.filter((m) => m.status === "active");
   // Use the authoritative active roster, not the initial join role: promotion,
   // demotion and removal must update controls without leaving the room.
@@ -635,16 +693,17 @@ export function ParticipantsPanel({
   const onStage = active.filter((member) => member.role !== "listener" && matches(member)).sort((a, b) => roleRank(a.role) - roleRank(b.role));
   const listening = active.filter((member) => member.role === "listener" && matches(member));
   const matchCount = onStage.length + listening.length;
-  const controlClass = `flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-lg bg-white/[0.06] px-1 py-2 text-[10px] font-medium text-white/80 hover:bg-white/10 hover:text-white ${FOCUS_RING}`;
+  const controlClass = `flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-lg bg-white/[0.06] px-1 py-2 text-[10px] font-medium text-white/80 hover:bg-white/10 hover:text-white disabled:cursor-wait disabled:opacity-40 ${FOCUS_RING}`;
 
   const row = (member: WebMember) => {
+    const busy = actions.isPending(member.userId);
     const isSelf = member.userId === localUserId;
     const isRoomHost = member.role === "host";
     const name = getSneakyUserLabel(member);
     const speaking = member.role !== "listener" && !!speakingByUserId?.[member.userId];
     const roleLabel = isRoomHost ? "Host" : member.role === "co-host" ? "Co-host" : member.role === "moderator" ? "Moderator" : member.role === "listener" ? "Listening" : "On stage";
     return (
-      <li key={member.userId} className={`rounded-xl border p-3 ${speaking ? "border-[#3FDCFF]/30 bg-[#3FDCFF]/[0.04]" : "border-white/10 bg-white/[0.04]"}`}>
+      <li key={member.userId} aria-busy={busy} className={`rounded-xl border p-3 ${speaking ? "border-[#3FDCFF]/30 bg-[#3FDCFF]/[0.04]" : "border-white/10 bg-white/[0.04]"}`}>
         <div className="flex items-center gap-3">
           <span aria-hidden="true"><SquareAvatar uri={member.isAnonymous ? undefined : member.avatar} name={name} size={40} /></span>
           <div className="min-w-0 flex-1">
@@ -655,30 +714,31 @@ export function ParticipantsPanel({
               <span className={isRoomHost || member.role === "co-host" ? "text-[#3FDCFF]" : undefined}>{roleLabel}</span>
               {speaking ? <span className="flex items-center gap-1 text-[#3FDCFF]"><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[#3FDCFF]" /> Speaking</span> : null}
               {member.handRaised ? <span className="flex items-center gap-1 text-[#FF5BFC]"><Hand size={12} aria-hidden="true" /> Hand raised</span> : null}
+              {busy ? <span role="status">Updating…</span> : null}
             </div>
           </div>
           {isRoomHost ? <Crown size={16} color={ACCENT} aria-hidden="true" /> : null}
         </div>
         {canModerate && !isSelf && !isRoomHost ? (
           <div role="group" aria-label={`Manage ${name}`} className="mt-3 grid grid-flow-col auto-cols-fr gap-1.5 border-t border-white/[0.06] pt-3">
-            <button type="button" onClick={() => onUnmute(member.userId)} aria-label={`Let ${name} unmute`} title="Allow them to unmute their own microphone" className={controlClass}>
+            <button type="button" disabled={busy} onClick={() => void actions.run(member.userId, () => onUnmute(member.userId))} aria-label={`Let ${name} unmute`} title="Allow them to unmute their own microphone" className={controlClass}>
               <Mic size={16} aria-hidden="true" /> Allow mic
             </button>
-            <button type="button" onClick={() => onMute(member.userId)} aria-label={`Mute ${name}`} title={`Mute ${name}`} className={controlClass}>
+            <button type="button" disabled={busy} onClick={() => void actions.run(member.userId, () => onMute(member.userId))} aria-label={`Mute ${name}`} title={`Mute ${name}`} className={controlClass}>
               <MicOff size={16} aria-hidden="true" /> Mute
             </button>
             {isHost && member.role === "co-host" ? (
-              <button type="button" onClick={() => onDemote(member.userId)} aria-label={`Remove co-host from ${name}`} title="Remove co-host role; keep them on stage" className={controlClass}>
+              <button type="button" disabled={busy} onClick={() => void actions.run(member.userId, () => onDemote(member.userId))} aria-label={`Remove co-host from ${name}`} title="Remove co-host role; keep them on stage" className={controlClass}>
                 <UserMinus size={16} aria-hidden="true" /> Remove role
               </button>
             ) : null}
             {isHost && member.role !== "co-host" ? (
-              <button type="button" onClick={() => onPromote(member.userId)} aria-label={`Make ${name} a co-host`} title="Give co-host moderation controls" className={`${controlClass} !bg-[#3FDCFF]/10 !text-[#3FDCFF] hover:!bg-[#3FDCFF]/20`}>
+              <button type="button" disabled={busy} onClick={() => void actions.run(member.userId, () => onPromote(member.userId))} aria-label={`Make ${name} a co-host`} title="Give co-host moderation controls" className={`${controlClass} !bg-[#3FDCFF]/10 !text-[#3FDCFF] hover:!bg-[#3FDCFF]/20`}>
                 <Crown size={16} aria-hidden="true" /> Co-host
               </button>
             ) : null}
             {!(actorRole === "moderator" && member.role === "moderator") ? (
-              <button type="button" onClick={() => onKick(member.userId)} aria-label={`Remove ${name} from the room`} title={`Remove ${name} from the room`} className={`${controlClass} !bg-[#FC253A]/10 !text-red-300 hover:!bg-[#FC253A]/20`}>
+              <button type="button" disabled={busy} onClick={() => void actions.run(member.userId, () => onKick(member.userId))} aria-label={`Remove ${name} from the room`} title={`Remove ${name} from the room`} className={`${controlClass} !bg-[#FC253A]/10 !text-red-300 hover:!bg-[#FC253A]/20`}>
                 <UserX size={16} aria-hidden="true" /> Remove
               </button>
             ) : null}
@@ -720,11 +780,12 @@ export function ParticipantsPanel({
           </div>
         ) : <>{section("On stage", onStage)}{section("Listening", listening)}</>}
       </div>
+      {actions.error ? <p role="alert" className="shrink-0 px-4 py-2 text-sm text-red-300">{actions.error}</p> : null}
       {canModerate ? (
         <footer className="shrink-0 space-y-3 border-t border-white/10 px-4 pt-3" style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 12px)" }}>
           <p className="text-xs leading-5 text-white/60">Allow mic lifts a host mute. Each person chooses when to turn their microphone on.</p>
           {isHost && onMuteAll && active.length > 1 ? (
-            <button type="button" onClick={onMuteAll} className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-white/[0.08] px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/15 ${FOCUS_RING}`}>
+            <button type="button" disabled={actions.pending.size > 0} onClick={() => void actions.run("*", onMuteAll)} className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-white/[0.08] px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/15 ${FOCUS_RING}`}>
               <MicOff size={16} aria-hidden="true" /> Mute everyone
             </button>
           ) : null}

@@ -14,7 +14,7 @@ const stages = [
   { name: "tablet landscape", width: 1024, height: 480 },
 ];
 for (const stage of stages) {
-  for (const count of [1, 2, 12, 20]) {
+  for (const count of [1, 2, 10, 20, 30]) {
     for (const hostCount of [1, 2].filter((n) => n <= count)) {
       test(`${stage.name}: ${count} participants, ${hostCount} hosts fit measured stage`, () => {
         const result = nativeRoomStageLayout(stage.width, stage.height, hostCount, count - hostCount);

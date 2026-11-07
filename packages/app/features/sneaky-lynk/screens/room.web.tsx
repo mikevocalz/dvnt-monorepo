@@ -95,6 +95,7 @@ import { getRoomEntryStatus } from "../room-entry-status";
 import { useEventLynkWaitingRoom } from "../hooks/useEventLynkWaitingRoom";
 import { useFullRoomRetry } from "../hooks/useFullRoomRetry";
 import { getSneakyUserLabel } from "../ui/user-labels";
+import { participantModeration } from "../ui/moderation-permissions";
 import {
   bannerPhaseFor,
   useRoomSession,
@@ -463,8 +464,6 @@ function RoomInner({
   // (handleLowerHand / handleLowerAll) — no server round-trip.
   const setRaisedHand = useRoomStore((s) => s.setRaisedHand);
   const clearRaisedHands = useRoomStore((s) => s.clearRaisedHands);
-  const promoteListener = useRoomStore((s) => s.promoteListener);
-  const removeCoHost = useRoomStore((s) => s.removeCoHost);
 
   // Web UI/connection phase store (no useState).
   const phase = useRoomUIStore((s) => s.phase);
@@ -514,6 +513,11 @@ function RoomInner({
    */
   const localUserId = admitted ? admission?.user.id : undefined;
   const isHostRef = useRef(isCreator);
+  // Host exit, bulk controls and queue visibility follow current server role,
+  // not only the first admission response. An inactive actor has no authority.
+  isHostRef.current = admitted && (rosterReady
+    ? members.some(member => member.userId === localUserId && member.status === "active" && member.role === "host")
+    : localRole === "host");
   // Per-MOUNT join guard. Must be a local ref, NOT the global store's
   // `initStarted`: RoomInner is a child of SneakyLynkRoomScreen, and React runs
   // child effects before parent effects, so this effect would read a STALE
@@ -1035,7 +1039,7 @@ function RoomInner({
   }, [accountKey, id]);
   const doLeave = useCallback(() => {
     if (!leaveLifetimeRef.current.active || leavingRef.current) return;
-    const epoch = leaveLifetimeRef.current.epoch;
+    const epoch = ++leaveLifetimeRef.current.epoch;
     const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch;
     leavingRef.current = true;
     setIsLeaving(true);
@@ -1120,98 +1124,80 @@ function RoomInner({
     setIsPaidHost(resolvedIsPaidHost);
   }, [phase, resolvedIsPaidHost, isPaidHost, timerStartedAt, setIsPaidHost, setTimerStartedAt]);
 
-  // ── Host moderation (same edge fns as the native ParticipantActions) ───────
-  const promote = useCallback(
-    (userId: string) => {
-      promoteListener(userId);
-      void (async () => {
-        const res = await videoApi.changeRole({
-          roomId: id,
-          targetUserId: userId,
-          newRole: "co-host",
-        });
-        if (!res.ok) {
-          showToast("error", "Couldn't promote", res.error?.message || "Try again.");
-        }
-      })();
-    },
-    [id, promoteListener, showToast],
-  );
-
-  // Demote a co-host back to listener — the inverse of promote.
-  const demote = useCallback(
-    (userId: string) => {
-      removeCoHost();
-      void (async () => {
-        const res = await videoApi.changeRole({
-          roomId: id,
-          targetUserId: userId,
-          newRole: "participant",
-        });
-        if (!res.ok) {
-          showToast("error", "Couldn't demote", res.error?.message || "Try again.");
-        }
-      })();
-    },
-    [id, removeCoHost, showToast],
-  );
-
-  const kick = useCallback(
-    (userId: string) => {
-      void (async () => {
-        const res = await videoApi.kickUser({ roomId: id, targetUserId: userId });
-        if (!res.ok) {
-          showToast("error", "Couldn't remove", res.error?.message || "Try again.");
-        }
-      })();
-    },
-    [id, showToast],
-  );
-
-  const muteOne = useCallback(
-    (userId: string) => {
-      void (async () => {
-        const res = await videoApi.mutePeer({ roomId: id, targetUserId: userId });
-        if (!res.ok) {
-          showToast("error", "Couldn't mute", res.error?.message || "Try again.");
-        }
-      })();
-    },
-    [id, showToast],
-  );
-
-  /** Releases the host mute. Does NOT turn the participant's microphone on —
-   *  it hands the control back and they decide (lib/video/host-mute). */
-  const unmuteOne = useCallback(
-    (userId: string) => {
-      void (async () => {
-        const res = await videoApi.unmutePeer({ roomId: id, targetUserId: userId });
-        if (!res.ok) {
-          showToast("error", "Couldn't unmute", res.error?.message || "Try again.");
-        }
-      })();
-    },
-    [id, showToast],
-  );
-
-  const unmuteAll = useCallback(() => {
-    void (async () => {
-      const res = await videoApi.unmuteAll(id);
-      if (res.ok) {
-        showToast("success", "Unmuted everyone", "Participants can unmute themselves again.");
-      } else {
-        showToast("error", "Couldn't unmute all", res.error?.message || "Try again.");
+  // ── Host moderation: authoritative roles, shared target locks ────────────
+  const moderationContextRef = useRef({ members, localUserId, admitted, eject });
+  moderationContextRef.current = { members, localUserId, admitted, eject };
+  const moderationPendingRef = useRef(new Set<string>());
+  const [moderationPending, setModerationPending] = useState<ReadonlySet<string>>(() => new Set());
+  type ModerationAction = "promote" | "demote" | "remove" | "mute" | "unmute" | "muteAll" | "unmuteAll";
+  const runModeration = useCallback(async (action: ModerationAction, targetId?: string): Promise<boolean> => {
+    const ownerEpoch = accountEpochRef.current;
+    const leaveEpoch = leaveLifetimeRef.current.epoch;
+    const owner = accountKey;
+    const bulk = action === "muteAll" || action === "unmuteAll";
+    const lock = bulk ? "*" : targetId!;
+    const ownsAction = () => roomMountedRef.current && !leavingRef.current && leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === leaveEpoch && accountEpochRef.current === ownerEpoch &&
+      (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === owner &&
+      moderationContextRef.current.admitted && !moderationContextRef.current.eject;
+    const allowed = () => {
+      if (!ownsAction()) return false;
+      const current = moderationContextRef.current;
+      const actor = current.members.find(member => member.userId === current.localUserId && member.status === "active");
+      if (bulk) return actor?.role === "host";
+      const target = current.members.find(member => member.userId === targetId && member.status === "active");
+      if (!actor || !target) return false;
+      const capabilities = participantModeration(actor.role, actor.userId, target.userId, target.role);
+      if (action === "promote") return capabilities.changeRole && target.role !== "co-host";
+      if (action === "demote") return capabilities.changeRole && target.role === "co-host";
+      return action === "remove" ? capabilities.remove : capabilities.mute;
+    };
+    if (!allowed() || moderationPendingRef.current.has(lock) || moderationPendingRef.current.has("*") || (bulk && moderationPendingRef.current.size > 0)) return false;
+    moderationPendingRef.current.add(lock);
+    setModerationPending(new Set(moderationPendingRef.current));
+    const options = { isCurrent: allowed };
+    try {
+      const result = action === "promote" || action === "demote"
+        ? await videoApi.changeRole({ roomId: id, targetUserId: targetId!, newRole: action === "promote" ? "co-host" : "participant" }, options)
+        : action === "remove" ? await videoApi.kickUser({ roomId: id, targetUserId: targetId! }, options)
+        : action === "mute" ? await videoApi.mutePeer({ roomId: id, targetUserId: targetId! }, options)
+        : action === "unmute" ? await videoApi.unmutePeer({ roomId: id, targetUserId: targetId! }, options)
+        : action === "muteAll" ? await videoApi.muteAll(id, options)
+        : await videoApi.unmuteAll(id, options);
+      if (!ownsAction()) return false;
+      if (!result.ok) {
+        showToast("error", "Change not saved", "The room or your permissions may have changed. Try again.");
+        return false;
       }
-    })();
-  }, [id, showToast]);
-
-  const muteAll = useCallback(() => {
-    void (async () => {
-      const res = await videoApi.muteAll(id);
-      if (res.ok) showToast("success", "Muted everyone", "All participants are muted.");
-      else showToast("error", "Couldn't mute all", res.error?.message || "Try again.");
-    })();
-  }, [id, showToast]);
+      // No guessed co-host state. The authoritative roster updates the badge
+      // and permissions. A failed promotion leaves its raised-hand entry intact.
+      if (action === "promote" && targetId) setRaisedHand(targetId, false);
+      if (action === "muteAll") showToast("success", "Muted everyone", "Participants are muted. They can turn their microphones off at any time.");
+      if (action === "unmuteAll") showToast("success", "Microphone controls restored", "Participants can choose to unmute themselves.");
+      return true;
+    } catch {
+      if (ownsAction()) showToast("error", "Change not saved", "Check your connection and try again.");
+      return false;
+    } finally {
+      moderationPendingRef.current.delete(lock);
+      if (roomMountedRef.current) setModerationPending(new Set(moderationPendingRef.current));
+    }
+  }, [accountKey, id, setRaisedHand, showToast]);
+  const promote = useCallback((userId: string) => runModeration("promote", userId), [runModeration]);
+  const demote = useCallback((userId: string) => runModeration("demote", userId), [runModeration]);
+  const kick = useCallback((userId: string) => runModeration("remove", userId), [runModeration]);
+  const muteOne = useCallback((userId: string) => runModeration("mute", userId), [runModeration]);
+  const unmuteOne = useCallback((userId: string) => runModeration("unmute", userId), [runModeration]);
+  const muteAll = useCallback(() => runModeration("muteAll"), [runModeration]);
+  const unmuteAll = useCallback(() => runModeration("unmuteAll"), [runModeration]);
+  const dismissHand = useCallback((userId: string) => {
+    if (!isHostRef.current || leavingRef.current || moderationPendingRef.current.has("*") || moderationPendingRef.current.has(userId)) return;
+    setRaisedHand(userId, false);
+  }, [setRaisedHand]);
+  const dismissAllHands = useCallback(() => {
+    if (!isHostRef.current || leavingRef.current || moderationPendingRef.current.size > 0) return;
+    clearRaisedHands();
+    closeHandQueue();
+  }, [clearRaisedHands, closeHandQueue]);
 
   const onUpgrade = useCallback(() => {
     setShowTimeUp(false);
@@ -1703,23 +1689,20 @@ function RoomInner({
 
       {/* Hand-queue moderation (host) */}
       <HandQueuePanel
-        open={isHandQueueOpen}
+        open={isHandQueueOpen && isHost}
         onClose={closeHandQueue}
         order={raisedHandOrder}
+        externalPending={moderationPending}
+        localUserId={localUserId}
         members={members}
-        onInviteToSpeak={(uid) => {
-          promote(uid);
-          closeHandQueue();
-        }}
-        onLowerHand={(uid) => setRaisedHand(uid, false)}
-        onLowerAll={() => {
-          clearRaisedHands();
-          closeHandQueue();
-        }}
+        onInviteToSpeak={promote}
+        onLowerHand={dismissHand}
+        onLowerAll={dismissAllHands}
       />
 
       {/* Participants list + moderation */}
       <ParticipantsPanel
+        externalPending={moderationPending}
         open={isParticipantsOpen}
         onClose={() => setParticipantsOpen(false)}
         members={members}
@@ -1765,8 +1748,9 @@ function RoomInner({
         }
       >
         <p className="text-sm text-white/70">
-          You&apos;re hosting. Leaving ends the Lynk for everyone in it — to
-          bring more people in, use the share button instead.
+          You&apos;re hosting. Leaving ends the Lynk for everyone, including
+          co-hosts. Hosting does not transfer automatically. To invite more
+          people without leaving, use Share.
         </p>
       </Dialog>
 

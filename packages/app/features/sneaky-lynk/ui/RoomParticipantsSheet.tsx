@@ -16,7 +16,7 @@
  *   - Stagger-fade entering animation on first 8 rows (50ms stride)
  */
 
-import React, { useCallback, useMemo, useEffect, useState } from "react";
+import React, { useCallback, useMemo, useEffect, useState, useRef } from "react";
 import { Alert, BackHandler, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -50,6 +50,8 @@ interface RoomParticipantsSheetProps {
   onMute: (userId: string) => void;
   onUnmute: (userId: string) => void;
   onRemove: (userId: string) => void;
+  /** Opens the existing role controls without relying on a hidden long press. */
+  onManageParticipant?: (participant: VideoParticipant) => void;
 }
 
 const ROLE_ORDER: Record<string, number> = {
@@ -104,6 +106,7 @@ function ParticipantRow({
   onMute,
   onUnmute,
   onRemove,
+  onManageParticipant,
 }: {
   item: VideoParticipant;
   index: number;
@@ -114,6 +117,7 @@ function ParticipantRow({
   onMute: (userId: string) => void;
   onUnmute: (userId: string) => void;
   onRemove: (userId: string) => void;
+  onManageParticipant?: (participant: VideoParticipant) => void;
 }) {
   const isSelf = item.id === localUserId;
   const isAnon = item.user.isAnonymous;
@@ -296,7 +300,7 @@ function ParticipantRow({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Remove ${displayLabel} from the room`}
-                  onPress={() => Alert.alert(`Remove ${displayLabel}?`, "They will be removed from this Lynk.", [{ text: "Cancel", style: "cancel" }, { text: "Remove", style: "destructive", onPress: () => onRemove(item.id) }])}
+                  onPress={() => onRemove(item.id)}
                   hitSlop={8}
                   style={({ pressed }) => [
                     styles.modIcon,
@@ -314,6 +318,18 @@ function ParticipantRow({
           ) : null}
         </View>
       </View>
+      {permissions.changeRole && onManageParticipant ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Co-host options for ${displayLabel}`}
+          accessibilityHint="Choose whether to grant or remove co-host moderation controls"
+          onPress={() => onManageParticipant(item)}
+          style={({ pressed }) => ({ minHeight: 44, marginLeft: 60, marginBottom: 8, paddingHorizontal: 12, borderRadius: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: `${colors.primary}14`, opacity: pressed ? 0.7 : 1 })}
+        >
+          <Crown size={14} color={colors.primary} />
+          <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>Co-host options</Text>
+        </Pressable>
+      ) : null}
     </Animated.View>
   );
 }
@@ -329,12 +345,63 @@ export function RoomParticipantsSheet({
   onMute,
   onUnmute,
   onRemove,
+  onManageParticipant,
 }: RoomParticipantsSheetProps) {
   const { colors } = useColorScheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const [query, setQuery] = useState("");
+  const latest = useRef({ visible, participants, localUserId, actorRole, onRemove, onManageParticipant });
+  latest.current = { visible, participants, localUserId, actorRole, onRemove, onManageParticipant };
+  const presentationKey = JSON.stringify([visible, localUserId, actorRole]);
+  const presentation = useRef({ key: presentationKey, version: 0 });
+  if (presentation.current.key !== presentationKey) {
+    presentation.current = { key: presentationKey, version: presentation.current.version + 1 };
+  }
+  // Stable tokens identify each continuously present role. A departed guest
+  // rejoining with the same user ID receives a new token, as does a role change.
+  const membershipTokens = useRef(new Map<string, { role: string }>());
+  membershipTokens.current = new Map(participants.map((participant): [string, { role: string }] => {
+    const previous = membershipTokens.current.get(participant.id);
+    return [participant.id, previous?.role === participant.role ? previous : { role: participant.role }];
+  }));
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; presentation.current.version += 1; };
+  }, []);
+  const removeCurrentParticipant = useCallback((userId: string) => {
+    const current = latest.current;
+    const target = current.participants.find((participant) => participant.id === userId);
+    const actor = current.participants.find((participant) => participant.id === current.localUserId);
+    if (!mounted.current || !current.visible || current.localUserId !== localUserId || !target || !actor || actor.role !== current.actorRole ||
+      !participantModeration(current.actorRole, current.localUserId, userId, target.role).remove) return;
+    const version = presentation.current.version;
+    const targetToken = membershipTokens.current.get(userId);
+    const actorToken = membershipTokens.current.get(localUserId);
+    let consumed = false;
+    Alert.alert(`Remove ${getSneakyUserLabel(target.user)}?`, "They will be removed from this Lynk.", [
+      { text: "Cancel", style: "cancel", onPress: () => { consumed = true; } },
+      { text: "Remove", style: "destructive", onPress: () => {
+        const latestState = latest.current;
+        const latestTarget = latestState.participants.find((participant) => participant.id === userId);
+        if (consumed || !mounted.current || !latestState.visible || presentation.current.version !== version ||
+          latestState.localUserId !== localUserId || !latestTarget ||
+          membershipTokens.current.get(userId) !== targetToken || membershipTokens.current.get(localUserId) !== actorToken ||
+          !participantModeration(latestState.actorRole, localUserId, userId, latestTarget.role).remove) return;
+        consumed = true;
+        latestState.onRemove(userId);
+      } },
+    ], { cancelable: true, onDismiss: () => { consumed = true; } });
+  }, [localUserId]);
+  const manageCurrentParticipant = useCallback((participant: VideoParticipant) => {
+    const current = latest.current;
+    const target = current.participants.find((candidate) => candidate.id === participant.id);
+    if (!mounted.current || !current.visible || current.localUserId !== localUserId || !target ||
+      !participantModeration(current.actorRole, current.localUserId, target.id, target.role).changeRole) return;
+    current.onManageParticipant?.(target);
+  }, [localUserId]);
   useEffect(() => {
     if (!visible) { setQuery(""); return; }
     const back = BackHandler.addEventListener("hardwareBackPress", () => { onDismiss(); return true; });
@@ -380,7 +447,8 @@ export function RoomParticipantsSheet({
         onProfilePress={handleProfilePress}
         onMute={onMute}
         onUnmute={onUnmute}
-        onRemove={onRemove}
+        onRemove={removeCurrentParticipant}
+        onManageParticipant={onManageParticipant ? manageCurrentParticipant : undefined}
       />
     ),
     [
@@ -389,7 +457,9 @@ export function RoomParticipantsSheet({
       actorRole,
       localUserId,
       onMute,
-      onRemove,
+      removeCurrentParticipant,
+      manageCurrentParticipant,
+      onManageParticipant,
       onUnmute,
     ],
   );
@@ -486,7 +556,7 @@ export function RoomParticipantsSheet({
             data={filteredParticipants}
             keyExtractor={keyExtractor}
             renderItem={renderItem}
-            estimatedItemSize={64}
+            estimatedItemSize={actorRole === "host" && onManageParticipant ? 116 : 64}
             recycleItems
             contentContainerStyle={{
               paddingHorizontal: 16,

@@ -35,6 +35,8 @@ on:
       - 'scripts/test-lynk-native-admission-cancel.cjs'
       - 'scripts/test-lynk-admission-dispatch.cjs'
       - 'scripts/test-lynk-speaker-settings-dom.cjs'
+      - 'scripts/test-lynk-host-actions.cjs'
+      - 'scripts/test-lynk-native-moderation-callbacks.cjs'
       - 'scripts/test-lynk-room-panels.cjs'
       - 'scripts/test-lynk-stage-polish-dom.cjs'
       - 'scripts/test-lynk-device-settings-dom.cjs'
@@ -73,6 +75,8 @@ on:
       - 'scripts/test-lynk-native-admission-cancel.cjs'
       - 'scripts/test-lynk-admission-dispatch.cjs'
       - 'scripts/test-lynk-speaker-settings-dom.cjs'
+      - 'scripts/test-lynk-host-actions.cjs'
+      - 'scripts/test-lynk-native-moderation-callbacks.cjs'
       - 'scripts/test-lynk-room-panels.cjs'
       - 'scripts/test-lynk-stage-polish-dom.cjs'
       - 'scripts/test-lynk-device-settings-dom.cjs'
@@ -108,6 +112,8 @@ jobs:
           node scripts/test-lynk-native-admission-cancel.cjs
           node scripts/test-lynk-admission-dispatch.cjs
           node scripts/test-lynk-speaker-settings-dom.cjs
+          node scripts/test-lynk-host-actions.cjs
+          node scripts/test-lynk-native-moderation-callbacks.cjs
           node scripts/test-lynk-room-panels.cjs
           node scripts/test-lynk-stage-polish-dom.cjs
           node scripts/test-lynk-device-settings-dom.cjs
