@@ -1,7 +1,7 @@
 'use client';
 import { hydrateAuthProfile } from "@dvnt/app/lib/auth/hydrate-auth-profile";
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { syncAuthUser } from '@dvnt/app/lib/api/privileged';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
@@ -14,7 +14,7 @@ import { captureAuthContinuation } from '@dvnt/app/lib/auth/continuation-guard';
  * set by the /api/auth proxy; this page mirrors the email-login tail:
  * syncAuthUser → setUser → welcome flow (first time) or feed.
  */
-export default function SocialCallbackPage() {
+function SocialCallbackContent() {
   const router = useRouter();
   const search = useSearchParams()?.toString() ?? '';
 
@@ -52,9 +52,20 @@ export default function SocialCallbackPage() {
     return () => { active = false; continuation?.release(); };
   }, [router, search]);
 
+  return <SigningIn />;
+}
+
+function SigningIn() {
   return (
     <main className="min-h-[100dvh] bg-[#02030A] flex items-center justify-center">
       <span className="text-white/50">Signing you in…</span>
     </main>
   );
+}
+
+export default function SocialCallbackPage() {
+  // Next prerenders the route without request search parameters. Keep the
+  // search-dependent callback below Suspense so that static rendering can
+  // emit its loading state while the browser resumes the exact auth intent.
+  return <Suspense fallback={<SigningIn />}><SocialCallbackContent /></Suspense>;
 }

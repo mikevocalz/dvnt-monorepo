@@ -46,10 +46,10 @@ function load(relative) {
     if (match) return load(`packages/app/${match}.ts`);
     if (name.startsWith('.') && /(?:return-to|room-return|room-links|session-lifecycle|continuation-guard)(?:\.ts)?$/.test(name)) return load(path.relative(ROOT, path.resolve(path.dirname(file), name.replace(/\.ts$/, '')+'.ts')));
     if (name === 'react-native') return { View: box, Text: box, ScrollView: box, Pressable: button, StyleSheet: { create: x => x } };
-    if (name.endsWith('/navigation')) return { useRouter: () => router, usePathname: () => state.pathname, useSearchParams: () => new URLSearchParams(window.location.search) };
+    if (name.endsWith('/navigation')) return { useRouter: () => router, usePathname: () => state.pathname, useSearchParams: () => { if (state.suspendSearch) throw state.searchPromise; return new URLSearchParams(window.location.search); } };
     if (name.includes('auth-store')) return { useAuthStore: auth };
     if (name.includes('hydrate-auth-profile')) return { hydrateAuthProfile: x => x };
-    if (name.includes('auth-client')) return { getSession:async()=>{state.sessionCalls=(state.sessionCalls||0)+1;return state.sessionPromise || state.session || ({data:{session:{},user:{id:'auth-a'}}});}, authClient: {getSession:async()=>state.legacySession || ({data:{user:{email:'member@example.invalid',emailVerified:!state.verifyFailure}}})}, resendVerificationEmail:async()=>({}), submitEmailVerification:async()=>state.verifyPromise || (state.verifyFailure ? {error:{message:'expired'}} : {}), signUp: {email: async args => {state.signup=args; return {data:{user:{id:'auth-a'}}};}}, signIn: { email: async () => { state.passwordCalls=(state.passwordCalls||0)+1; return state.passwordPromise || ({data:{user:{id:'auth-a'}}}); }, social: async args => { state.social = args; return {}; }, magicLink: async args => { state.magic = args; return {}; } }, resumeAuthSession: async () => state.resumePromise || !state.failSession, requestPasswordReset: async () => ({}), submitPasswordReset: async () => state.resetPromise || ({}) };
+    if (name.includes('auth-client')) return { getSession:async()=>{state.sessionCalls=(state.sessionCalls||0)+1;return state.sessionPromise || state.session || ({data:{session:{},user:{id:'auth-a'}}});}, authClient: {getSession:async()=>state.legacySession || ({data:{user:{email:'member@example.invalid',emailVerified:!state.verifyFailure}}})}, resendVerificationEmail:async()=>({}), submitEmailVerification:async()=>state.verifyPromise || (state.verifyFailure ? {error:{message:'expired'}} : {}), signUp: {email: async args => {state.signup=args; return {data:{user:{id:'auth-a'}}};}}, signIn: { email: async () => { state.passwordCalls=(state.passwordCalls||0)+1; return state.passwordPromise || ({data:{user:{id:'auth-a'}}}); }, social: async args => { state.social = args; return {}; }, magicLink: async args => { state.magic = args; return {}; } }, resumeAuthSession: async () => {state.resumeCalls=(state.resumeCalls||0)+1;return state.resumePromise || !state.failSession;}, requestPasswordReset: async () => ({}), submitPasswordReset: async () => state.resetPromise || ({}) };
     if (name.includes('api/privileged')) return { syncAuthUser: async () => {state.profileCalls=(state.profileCalls||0)+1;return state.profilePromise || ({id:'member-a',authId:'auth-a'});}, updateProfile: async () => {} };
     if (name.includes('use-age-verification')) return {useRefreshVerificationStatus:()=>async()=>{state.refreshCalls=(state.refreshCalls||0)+1;},useVerificationState:()=>({data:{state:'not_started'},refetch:async()=>state.refetchPromise || ({data:{state:'approved'}})}),useStartVerification:()=>({isPending:false,mutateAsync:async args=>{state.didit=args;state.diditCalls=(state.diditCalls||0)+1;return state.diditPromise || {status:'passed'};}})};
     if (name.includes('use-media-upload')) return {useMediaUpload:()=>({uploadSingle:async()=>({success:true,url:'https://fixture.invalid/avatar.jpg'})})};
@@ -208,6 +208,16 @@ async function mount(file, exportName, pathname, options={}) {
     assert.deepEqual(state.navigation,[loginUrl],'retry can settle a guest instead of reusing the timed-out flight');
     await React.act(async()=>releaseSession(liveSession('auth-a')));
     assert.equal(state.auth.isAuthenticated,false,'late timed-out session cannot restore stale authentication');
+    let releaseSearch;
+    localStorage.setItem('dvnt-welcome-member-a','1');
+    await mount('apps/web/src/app/(frontend)/auth/social-callback/page.tsx','default','/auth/social-callback?returnTo='+encodeURIComponent(target),
+      {suspendSearch:true,searchPromise:new Promise(r=>{releaseSearch=r;})});
+    assert.match(document.body.textContent,/Signing you in/,'callback renders its Suspense fallback while search parameters are unavailable');
+    assert.equal(state.resumeCalls||0,0,'suspended callback cannot start auth effects');
+    assert.deepEqual(state.navigation,[]);
+    await React.act(async()=>{state.suspendSearch=false;releaseSearch();});
+    assert.deepEqual(state.navigation,[target],'resolved callback preserves the exact room below the Suspense boundary');
+    assert.equal(state.resumeCalls,1);
     const loginFile = 'packages/app/features/auth/screens/LoginScreen.web.tsx';
     await mount(loginFile, 'LoginScreen', loginUrl);
     for (const label of ['Continue with Google', 'Email me a sign-in link']) {
