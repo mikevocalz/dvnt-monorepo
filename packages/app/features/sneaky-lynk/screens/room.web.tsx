@@ -66,7 +66,6 @@ import {
   Video,
   VideoOff,
   Hand,
-  EyeOff,
   Camera as CameraIcon,
   CircleDot,
   PhoneOff,
@@ -78,6 +77,7 @@ import { RoomHeader } from "../ui/web/room-header";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ConnectionBanner, Dialog, RoomTimer } from "@dvnt/ui";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.web";
+import { PreJoinSetup } from "../ui/web/PreJoinSetup";
 import { CaptureErrorBanner } from "../ui/web/CaptureErrorBanner";
 import { useSpeakingDetection } from "@dvnt/app/lib/lynk/useSpeakingDetection.web";
 import { useSpeakingPresence } from "@dvnt/app/lib/lynk/useSpeakingPresence";
@@ -98,6 +98,7 @@ import {
   type RoomTransportStatus,
 } from "../session/useRoomSession";
 import { isActive } from "../session/machine";
+import { completePreJoin } from "../session/complete-prejoin";
 import { leaveRoomSafely } from "../session/leave-room";
 import { useRoomHeartbeat } from "../hooks/useRoomHeartbeat";
 import { useRoomReactions } from "../hooks/useRoomReactions";
@@ -1677,216 +1678,6 @@ function RoomShell({
   );
 }
 
-// ── Pre-join screen (server rooms, non-creators) ──────────────────────────────
-function PreJoinScreen({
-  roomTitle,
-  onJoin,
-  onBack,
-}: {
-  roomTitle: string;
-  onJoin: (anonymous: boolean) => void;
-  onBack: () => void;
-}) {
-  const joinAnonymous = useRoomUIStore((s) => s.joinAnonymous);
-  const setJoinAnonymous = useRoomUIStore((s) => s.setJoinAnonymous);
-  const joinCameraOn = useRoomUIStore((s) => s.joinCameraOn);
-  const setJoinCameraOn = useRoomUIStore((s) => s.setJoinCameraOn);
-  const joinMicOn = useRoomUIStore((s) => s.joinMicOn);
-  const setJoinMicOn = useRoomUIStore((s) => s.setJoinMicOn);
-
-  /**
-   * Self-preview.
-   *
-   * This screen asked "how do you want to appear" and then showed you
-   * nothing — you found out what the room could see AFTER it could see it.
-   * Zoom, Meet and Teams all answer that question before the door, and for a
-   * room called Sneaky Lynk it is the one place it really has to be answered.
-   *
-   * Its own `getUserMedia`, not the room's transport: the room's hook is not
-   * mounted yet, and this stream is torn down on join so the two never hold
-   * the camera at once.
-   */
-  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
-  const [previewDenied, setPreviewDenied] = useState(false);
-  const previewRef = useRef<MediaStream | null>(null);
-
-  const stopPreview = useCallback(() => {
-    previewRef.current?.getTracks().forEach((t) => t.stop());
-    previewRef.current = null;
-    setPreviewStream(null);
-  }, []);
-
-  useEffect(() => {
-    if (!joinCameraOn) {
-      stopPreview();
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        previewRef.current = stream;
-        setPreviewStream(stream);
-        setPreviewDenied(false);
-      } catch {
-        // Denied or no device. Not an error state to argue with — you can
-        // still join, camera off, which is what the copy then says.
-        if (!cancelled) setPreviewDenied(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [joinCameraOn, stopPreview]);
-
-  // Never leave the camera light on behind a screen you have left.
-  useEffect(() => stopPreview, [stopPreview]);
-
-  const bindPreview = useCallback(
-    (el: HTMLVideoElement | null) => {
-      if (el && el.srcObject !== previewStream) el.srcObject = previewStream;
-    },
-    [previewStream],
-  );
-
-  const join = (anonymous: boolean) => {
-    stopPreview();
-    onJoin(anonymous);
-  };
-  return (
-    <RoomShell title={roomTitle || "Join Lynk"} onBack={onBack}>
-      <div className="flex flex-1 flex-col items-center justify-center px-6">
-        <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-[#FC253A]/20">
-          <Radio size={40} color={ROSE} />
-        </span>
-        <h2 className="mb-2 text-2xl font-bold text-center">{roomTitle || getLynkDisplayName()}</h2>
-        <p className="mb-6 text-center text-white/60">Choose how you want to appear in this room</p>
-
-        {/* Self-preview + the two decisions that matter at a door: is my
-            camera on, is my mic on. Mirrored, because a preview that is not
-            mirrored reads as someone else. */}
-        <div className="mb-4 w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-black">
-          <div className="relative aspect-video w-full">
-            {joinCameraOn && previewStream ? (
-              <video
-                ref={bindPreview}
-                autoPlay
-                playsInline
-                muted
-                className="absolute inset-0 h-full w-full object-cover"
-                style={{ transform: "scaleX(-1)" }}
-              />
-            ) : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/45">
-                <VideoOff size={26} />
-                <span className="text-xs">
-                  {previewDenied
-                    ? "No camera access — you can still join"
-                    : "Camera off — you'll join as your avatar"}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="flex items-center justify-center gap-3 border-t border-white/10 px-4 py-3">
-            <button
-              type="button"
-              aria-pressed={joinCameraOn}
-              onClick={() => setJoinCameraOn(!joinCameraOn)}
-              className={`flex h-11 w-11 items-center justify-center rounded-full ${
-                joinCameraOn ? "bg-white/15 hover:bg-white/25" : "bg-[#FC253A]"
-              }`}
-              aria-label={joinCameraOn ? "Turn camera off" : "Turn camera on"}
-            >
-              {joinCameraOn ? <Video size={18} /> : <VideoOff size={18} />}
-            </button>
-            <button
-              type="button"
-              aria-pressed={joinMicOn}
-              onClick={() => setJoinMicOn(!joinMicOn)}
-              className={`flex h-11 w-11 items-center justify-center rounded-full ${
-                joinMicOn ? "bg-white/15 hover:bg-white/25" : "bg-[#FC253A]"
-              }`}
-              aria-label={joinMicOn ? "Mute microphone" : "Unmute microphone"}
-            >
-              {joinMicOn ? <Mic size={18} /> : <MicOff size={18} />}
-            </button>
-          </div>
-        </div>
-
-        <div className="w-full max-w-md rounded-2xl bg-white/[0.06] px-5 py-4 mb-4">
-          <p className="font-semibold mb-2">Room Safety</p>
-          <p className="text-xs text-white/60 leading-5">
-            By joining, you agree to DVNT community guidelines. Recording is prohibited,
-            screenshots may notify the room, and participants can report unsafe behavior.
-          </p>
-        </div>
-
-        <div className="w-full max-w-md rounded-2xl bg-white/[0.06] px-5 py-4 mb-8">
-          <div className="flex items-center justify-between gap-3">
-            <span className="flex items-center gap-3 flex-1">
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FC253A]/20 shrink-0">
-                <EyeOff size={20} color={ROSE} />
-              </span>
-              <span className="flex-1">
-                <span className="block font-semibold">Join Anonymously</span>
-                <span className="block text-xs text-white/60 mt-0.5">
-                  You&apos;ll appear as &quot;Anon&quot; with no profile info
-                </span>
-              </span>
-            </span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={joinAnonymous}
-              onClick={() => setJoinAnonymous(!joinAnonymous)}
-              style={{
-                position: "relative",
-                width: 48,
-                height: 28,
-                flexShrink: 0,
-                padding: 0,
-                border: "none",
-                borderRadius: 9999,
-                cursor: "pointer",
-                backgroundColor: joinAnonymous ? ROSE : "#374151",
-                transition: "background-color 140ms ease",
-              }}
-            >
-              <span
-                style={{
-                  position: "absolute",
-                  top: 4,
-                  left: 4,
-                  width: 20,
-                  height: 20,
-                  borderRadius: 9999,
-                  backgroundColor: "#fff",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.35)",
-                  transition: "transform 140ms ease",
-                  transform: joinAnonymous ? "translateX(20px)" : "translateX(0px)",
-                }}
-              />
-            </button>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => join(joinAnonymous)}
-          className="w-full max-w-md rounded-lg py-4 text-center font-bold text-white active:scale-[0.99]"
-          style={{ backgroundColor: ROSE }}
-        >
-          {joinAnonymous ? "Join Anonymously" : "Join Lynk"}
-        </button>
-      </div>
-    </RoomShell>
-  );
-}
-
 // ── Public entry: pre-join gate → the room ───────────────────────────────────
 export function SneakyLynkRoomScreen() {
   const router = useRouter();
@@ -1899,7 +1690,6 @@ export function SneakyLynkRoomScreen() {
   const isHostParam = search?.get("isHost");
 
   // Default true unless explicitly "0" (deep-link recipients omit it).
-  const roomHasVideo = hasVideoParam !== "0";
   const isServerRoom = !id.startsWith("space-") && id !== "my-room";
   const isCreator = isHostParam === "1";
   /**
@@ -1917,10 +1707,10 @@ export function SneakyLynkRoomScreen() {
 
   const phase = useRoomUIStore((s) => s.phase);
   const roomSnapshot = useRoomUIStore((s) => s.roomSnapshot);
+  const roomHasVideo = roomSnapshot?.hasVideo ?? (hasVideoParam !== "0");
   const setPhase = useRoomUIStore((s) => s.setPhase);
   const setRoomSnapshot = useRoomUIStore((s) => s.setRoomSnapshot);
   const setClosed = useRoomUIStore((s) => s.setClosed);
-  const setJoinAnonymous = useRoomUIStore((s) => s.setJoinAnonymous);
 
   // Pre-join lookup for gated (server, non-creator) rooms.
   useEffect(() => {
@@ -1958,14 +1748,12 @@ export function SneakyLynkRoomScreen() {
   // screen stays up behind the popup.
   const guardVerified = useVerifiedGate();
   const handleJoin = useCallback(
-    (anonymous: boolean) => {
+    (anonymous: boolean, prepareJoin: () => void) => {
       guardVerified("sneaky_lynk", () => {
-        if (!entryScope.isCurrent()) return;
-        setJoinAnonymous(anonymous);
-        setPhase("joining");
+        completePreJoin({ anonymous, isCurrent: entryScope.isCurrent, prepareJoin });
       });
     },
-    [setJoinAnonymous, setPhase, guardVerified, entryScope.isCurrent],
+    [guardVerified, entryScope.isCurrent],
   );
 
   const roomTitle = roomSnapshot?.title || paramTitle || getLynkDisplayName();
@@ -2002,7 +1790,11 @@ export function SneakyLynkRoomScreen() {
 
   // Gated server rooms wait for the user to tap "Join" before connecting.
   if (shouldGateJoin && phase === "prejoin") {
-    return <PreJoinScreen roomTitle={roomTitle} onJoin={handleJoin} onBack={() => router.back()} />;
+    return (
+      <RoomShell title={roomTitle} onBack={() => router.back()}>
+        <PreJoinSetup roomTitle={roomTitle} roomHasVideo={roomHasVideo} onJoin={handleJoin} />
+      </RoomShell>
+    );
   }
 
   // No provider: the MoQ hooks own their own connection and token, so the room

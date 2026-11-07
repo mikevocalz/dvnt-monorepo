@@ -29,6 +29,7 @@ on:
       - 'scripts/test-lynk-web-viewer-sdk.cjs'
       - 'scripts/test-lynk-relay-authorization-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
+      - 'scripts/test-lynk-prejoin-dom.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   push:
     branches: [master]
@@ -57,6 +58,7 @@ on:
       - 'scripts/test-lynk-web-viewer-sdk.cjs'
       - 'scripts/test-lynk-relay-authorization-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
+      - 'scripts/test-lynk-prejoin-dom.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   workflow_dispatch:
 permissions:
@@ -83,6 +85,7 @@ jobs:
           node --test apps/mobile/supabase/functions/lynk-livestream-token/index.test.cjs
           node scripts/test-lynk-room-browser.cjs --dom
           node scripts/test-lynk-web-capture-ui.cjs
+          node scripts/test-lynk-prejoin-dom.cjs
           node scripts/test-lynk-native-capture.cjs
           node scripts/test-lynk-native-session.cjs
           node scripts/test-lynk-web-capture-sdk.cjs

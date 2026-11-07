@@ -123,13 +123,20 @@ async function buildFixture() {
   const bundle = await esbuild.build({
     stdin: { resolveDir:ROOT, loader:'tsx', contents:`
       import React from 'react';import {createRoot} from 'react-dom/client';
-      import {RoomInner} from './${lynk}screens/room.web';
+      import {RoomInner,RoomShell} from './${lynk}screens/room.web';
+      import {PreJoinSetup} from './${lynk}ui/web/PreJoinSetup';
+      import {completePreJoin} from './${lynk}session/complete-prejoin';
       import {StageTile} from './${lynk}ui/web/room-stage';
       import {ControlsBar} from './${lynk}ui/ControlsBar';
       import {RoomStage as NativeRoomStage} from './${lynk}ui/RoomStage';
       import {useSneakyLynkCaptureStore} from '@dvnt/app/lib/stores/sneaky-lynk-capture-store';
       import {useRoomUIStore} from './${lynk}stores/room-ui-store';
       import {useFixture,f,localUser} from 'fixture';
+      if(location.search.includes('rail=prejoin')) {
+        useRoomUIStore.getState().setJoinCameraOn(false);
+        f.previewRequests=0;
+        Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:()=>{f.previewRequests++;return Promise.reject(Object.assign(new Error('synthetic denied camera'),{name:'NotAllowedError'}));}}});
+      }
       f.expireSession=()=>useRoomUIStore.getState().setShowTimeUp(true);
       useSneakyLynkCaptureStore.getState().setWebPeerPresent(true);
       const portrait=document.createElement('canvas');portrait.width=180;portrait.height=320;
@@ -138,6 +145,7 @@ async function buildFixture() {
       const attachFill=(_path,canvas)=>{if(canvas){canvas.width=180;canvas.height=320;canvas.getContext('2d').drawImage(portrait,0,0);f.attachments.push({peer:'fill',attached:true});}};
       const fillTile={key:'remote',name:'Portrait caller',isHost:false,isCoHost:false,isLocal:false,isCameraOn:true,isMicOn:true,canvasPath:'fill/portrait',attachCanvas:attachFill};
       function App(){const c=useFixture();const action=name=>()=>f.actions.push(name);
+        if(location.search.includes('rail=prejoin'))return <RoomShell title="A room for friends" onBack={action('prejoinBack')}><PreJoinSetup roomTitle="A long room title for friends joining from their phones tonight" roomHasVideo={c.hasVideo} onJoin={(anonymous,prepareJoin)=>{if(completePreJoin({anonymous,isCurrent:()=>true,prepareJoin}))f.actions.push('prejoinAccepted:'+useRoomUIStore.getState().joinCameraOn)}}/></RoomShell>;
         if(location.search.includes('rail=fill'))return <div style={{height:'100dvh',display:'grid',gridTemplateRows:'1fr 1fr',gap:8,padding:8,background:'#06070d'}}><StageTile tile={{...fillTile,key:'local',isLocal:true,canvasPath:undefined,videoStream:preview}}/><StageTile tile={{...fillTile,isCameraOn:c.hasVideo}}/></div>;
         return location.search.includes('rail=native') ? <div data-native-room style={{position:'fixed',inset:0,background:'#06070d',display:'flex',flexDirection:'column'}}>
           <div data-native-header style={{height:96+c.insets.top,paddingTop:c.insets.top,flexShrink:0,color:'white'}}>Native room header</div>
@@ -166,7 +174,7 @@ async function buildFixture() {
         if(args.path.startsWith('@dvnt/app/'))return build.resolve(source('packages/app/'+args.path.slice('@dvnt/app/'.length)),{resolveDir:ROOT,kind:args.kind});
       });
       build.onLoad({filter:/.*/,namespace:'fixture'},args=>({loader:'tsx',resolveDir:ROOT,contents:boundaries.get(args.path)}));
-      build.onLoad({filter:/screens\/room\.web\.tsx$/},args=>({loader:'tsx',resolveDir:path.dirname(args.path),contents:fs.readFileSync(args.path,'utf8')+'\nexport { RoomInner };\n'}));
+      build.onLoad({filter:/screens\/room\.web\.tsx$/},args=>({loader:'tsx',resolveDir:path.dirname(args.path),contents:fs.readFileSync(args.path,'utf8')+'\nexport { RoomInner, RoomShell };\n'}));
     }}],
   });
   // Match the production layered theme/preflight and important utilities.
@@ -327,6 +335,41 @@ async function createPage(browser,url,c,role,rail='web',rosterState='ready',dead
   await page.evaluate(insets=>window.fixture.configure({insets}),{...zeroInsets,...c.insets});
   await tick(page);
   return {page,context,errors,unexpectedRequests};
+}
+
+async function prejoinCases(browser,url) {
+  for(const c of cases.filter(c=>['small-phone','notched-phone','landscape-667','tablet-landscape','desktop'].includes(c.name))) {
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'participant','prejoin');
+    try {
+      const setup=page.getByRole('region',{name:'Set up your Lynk'});
+      await setup.waitFor();
+      assert.equal(await page.evaluate(()=>window.fixture.previewRequests),0,'camera-off entry never requests capture');
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,c.name+' prejoin horizontal overflow');
+      const targets=await dimensions(setup.locator('button'));
+      for(const target of targets)assert.ok(target.width>=44&&target.height>=44,c.name+' minimum setup control target: '+target.label);
+      assertNoOverlap(targets,c.name+' prejoin controls');
+      const join=setup.getByRole('button',{name:'Join Lynk',exact:true});
+      await join.scrollIntoViewIfNeeded();await assertReachable(join,c.name+' prejoin Join');
+      const camera=setup.getByRole('button',{name:'Turn camera on',exact:true});
+      await camera.click();await setup.getByRole('alert').waitFor();
+      assert.match(await setup.getByRole('alert').textContent(),/Camera access is blocked/);
+      await setup.getByRole('button',{name:'Retry camera',exact:true}).click();
+      await page.waitForFunction(()=>window.fixture.previewRequests===2);
+      const anonymous=setup.getByRole('switch',{name:'Join anonymously'});
+      await anonymous.click();assert.equal(await anonymous.getAttribute('aria-checked'),'true');
+      await page.evaluate(()=>window.fixture.configure({hasVideo:false}));await tick(page);
+      assert.equal(await setup.getByRole('button',{name:'Turn camera off',exact:true}).count(),0);
+      assert.equal(await page.evaluate(()=>window.fixture.previewRequests),2,'audio-only mode adds no camera requests');
+      const joinAnonymous=setup.getByRole('button',{name:'Join Anonymously',exact:true});
+      await joinAnonymous.scrollIntoViewIfNeeded();await assertReachable(joinAnonymous,c.name+' anonymous Join');
+      await evidence(page,'prejoin-audio-'+c.name);
+      await page.evaluate(()=>window.fixture.configure({hasVideo:true}));await tick(page);
+      if(process.env.LYNK_LAYOUT_OUTPUT)await page.screenshot({path:path.join(path.resolve(process.env.LYNK_LAYOUT_OUTPUT),'prejoin-video-'+c.name+'.png'),fullPage:true});
+      await joinAnonymous.click();await page.waitForFunction(()=>window.fixture.actions.includes('prejoinAccepted:false'));
+      assert.deepEqual(errors,[],c.name+' prejoin runtime errors');assert.deepEqual(unexpectedRequests,[],c.name+' prejoin live request guard');
+      console.log('PASS actual prejoin '+c.name+': no overflow, 44px targets, reachable Join, permissions/retry, anonymity, audio-only no capture');
+    } catch(error) {await evidence(page,'FAIL-prejoin-'+c.name,error);recordFailure('prejoin-'+c.name,error)} finally {await context.close()}
+  }
 }
 
 async function webCases(browser,url) {
@@ -1014,7 +1057,7 @@ async function main() {
     // system executable or change sandbox settings to circumvent a denied run.
     browser=await load('@playwright/test').chromium.launch({headless:true});
     const url='http://127.0.0.1:'+server.address().port;
-    const suites={consent:consentCases,countdown:countdownCases,fill:fillCases,moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
+    const suites={prejoin:prejoinCases,consent:consentCases,countdown:countdownCases,fill:fillCases,moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
     for(const name of (process.env.LYNK_LAYOUT_SUITES||Object.keys(suites).join(',')).split(','))await suites[name](browser,url);
     assert.equal(failures.length,0,'Rendered regression failures:\n'+JSON.stringify(failures,null,2));
     console.log('PASS all rendered Lynk viewport, room and control layout regressions');
