@@ -57,3 +57,9 @@ export {
   getSneakyUserLabel,
   normalizeSneakyAnonLabel,
 } from "./ui/user-labels";
+
+export { resolveCreatedRoomId, roomInviteeIds } from "./create-room-policy";
+export { useLynkInviteSearch } from "./hooks/useLynkInviteSearch";
+export { useLynkDiscovery } from "./hooks/useLynkDiscovery";
+export { useLynkCreateScope } from "./hooks/useLynkCreateScope";
+export { discoveryRoomState } from "./discovery-room-state";

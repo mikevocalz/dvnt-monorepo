@@ -79,20 +79,21 @@ const fixture = `
 
 const boundaries = new Map([
   ['fixture', fixture],
-  ['solito/navigation', `import {f} from 'fixture';const router={push:path=>f.routes.push(path),back:()=>{}};export const useRouter=()=>router;export const useParams=()=>({id:'fixture-room'});export const useSearchParams=()=>new URLSearchParams();`],
+  ['solito/navigation', `import {f} from 'fixture';const router={push:path=>f.routes.push(path),back:()=>{}};export const useRouter=()=>router;export const useParams=()=>({id:'fixture-room'});export const useSearchParams=()=>new URLSearchParams(location.search);`],
   ['@dvnt/app/lib/stores/auth-store', `import {create} from 'zustand';import {f,localUser} from 'fixture';export const useAuthStore=create(()=>({user:localUser}));f.switchAccount=user=>useAuthStore.setState({user});f.originalUser=localUser;`],
   ['@dvnt/app/lib/stores/ui-store', `import {create} from 'zustand';import {f} from 'fixture';export const useUIStore=create(()=>({showToast:(...args)=>f.toasts.push(args)}));`],
   ['@dvnt/app/lib/lynk/useLynkBroadcast.web', `export {useLynkBroadcast} from 'fixture';`],
   ['@dvnt/app/lib/lynk/useSpeakingDetection.web', `export const useSpeakingDetection=()=>false;`],
   ['@dvnt/app/lib/lynk/useSpeakingPresence', `const empty={};export const useSpeakingPresence=()=>empty;`],
   ['@dvnt/app/lib/subscription/use-entitlements', `export const useEntitlements=()=>({entitlements:{sessionMinutes:5},isLoading:false});`],
-  ['@dvnt/app/lib/hooks/use-verified-gate', `export const useVerifiedGate=()=>(_reason,callback)=>callback();`],
+  ['@dvnt/app/lib/hooks/use-verified-gate', `import {f} from 'fixture';export const useVerifiedGate=()=>(_reason,callback)=>{if(f.deferVerify)f.pendingVerify=callback;else callback()};`],
   ['@dvnt/app/features/video/api', `export {videoApi} from 'fixture';`],
   ['@dvnt/app/lib/api/events', `export const eventsApi={getEventByLynkRoom:async()=>({id:'fixture-event',title:'A long linked event title',slug:null})};`],
   ['@dvnt/observability', `export const addSentryBreadcrumb=()=>{};`],
   ['@dvnt/ui', `export {ConnectionBanner} from '${source('packages/ui/src/video/ConnectionBanner.web.tsx')}';export {RoomTimer} from '${source('packages/ui/src/video/RoomTimer.web.tsx')}';export {Dialog} from '${source('packages/ui/src/form/Dialog.web.tsx')}';`],
   ['@dvnt/app/lib/secure-capture', `export {SecureCaptureBoundary} from '${source('packages/app/lib/secure-capture/SecureCaptureBoundary.tsx')}';`],
   [source(lynk+'api/supabase'), `export {sneakyLynkApi} from 'fixture';`],
+  [source(lynk+'api/room-entry-identity'), `import {f} from 'fixture';export const getRoomEntryIdentity=async()=>{const kind=new URLSearchParams(location.search).get('identity');if(kind==='error'&&!f.identityRecovered)throw Error('SECRET identity failure');return kind==='named'?{kind:'active',anonymous:false,anonLabel:null}:kind==='anonymous'?{kind:'active',anonymous:true,anonLabel:'Anon 07'}:{kind:'choice'}};`],
   [source(lynk+'api/comments'), `export {subscribeToRoomComments,postRoomComment} from 'fixture';`],
   [source('packages/app/features/video/api'), `export {videoApi} from 'fixture';`],
   [source(lynk+'hooks/useRoomHeartbeat'), `export const useRoomHeartbeat=()=>{};`],
@@ -143,6 +144,7 @@ async function buildFixture() {
       Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:fixtureDevices});
       if(location.search.includes('rail=prejoin'))useRoomUIStore.getState().setJoinCameraOn(false);
       if(location.search.includes('rail=recovery-auto')){useRoomUIStore.getState().setJoinCameraOn(false);useRoomUIStore.getState().setJoinMicOn(false);useRoomUIStore.getState().setJoinAnonymous(true);}
+      f.setRoomSnapshot=room=>useRoomUIStore.getState().setRoomSnapshot(room);
       f.expireSession=()=>useRoomUIStore.getState().setShowTimeUp(true);
       f.outputNotice=message=>useRoomUIStore.setState({audioOutputState:{...useRoomUIStore.getState().audioOutputState,message,phase:message?'error':'default'}});
       useSneakyLynkCaptureStore.getState().setWebPeerPresent(true);
@@ -1143,6 +1145,95 @@ async function recoveryCases(browser,url) {
   }
 }
 
+async function entryIdentityCases(browser,url) {
+  const c=cases.find(c=>c.name==='small-phone')||cases[0];
+  for(const hint of ['isHost=1','viaInvite=1','identity=named','identity=anonymous','identity=error']) {
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'participant','entry&'+hint);
+    try {
+      if(hint==='identity=error') {
+        await page.getByRole('button',{name:'Try again',exact:true}).waitFor();
+        assert.equal(await page.evaluate(()=>window.fixture.joinCalls),0);
+        assert.doesNotMatch(await page.locator('body').innerText(),/SECRET/);
+        await page.evaluate(()=>window.fixture.identityRecovered=true);
+        await page.getByRole('button',{name:'Try again',exact:true}).click();
+      }
+      await page.getByRole('region',{name:'Set up your Lynk'}).waitFor();
+      assert.equal(await page.evaluate(()=>window.fixture.joinCalls),0,'hints never admit or grant media consent');
+      assert.equal(await page.evaluate(()=>window.fixture.previewRequests),0,'authoritative audio-only mode suppresses camera preview');
+      if(hint==='identity=named'||hint==='identity=anonymous') {
+        assert.equal(await page.getByRole('switch',{name:'Join anonymously'}).count(),0,'active identity cannot be deceptively changed');
+        assert.match(await page.locator('body').innerText(),hint==='identity=anonymous'?/Rejoining as Anon 07/:/Rejoining with your profile/);
+      } else {
+        await page.evaluate(()=>window.fixture.deferVerify=true);
+        await page.getByRole('button',{name:'Join Lynk',exact:true}).click();
+        await page.getByRole('switch',{name:'Join anonymously'}).click();
+        await page.evaluate(()=>window.fixture.pendingVerify());
+        await tick(page);
+        assert.equal(await page.evaluate(()=>window.fixture.joinCalls),0,'changed identity cancels earlier verification acceptance');
+        await page.evaluate(()=>window.fixture.deferVerify=false);
+      }
+      await page.getByRole('button',{name:hint==='identity=named'?'Join Lynk':'Join Anonymously',exact:true}).click();
+      await page.waitForFunction(()=>window.fixture.joinCalls===1);
+      assert.equal(await page.evaluate(()=>window.fixture.joinArgs[0][1]),hint==='identity=named'?false:true);
+      assert.deepEqual(errors,[]);assert.deepEqual(unexpectedRequests,[]);
+      console.log('PASS actual web entry '+hint+': explicit media review, authoritative membership identity, guarded deferred verification');
+    }catch(error){recordFailure('entry-identity-'+hint,error)}finally{await context.close()}
+  }
+}
+
+async function entryCancellationCases(browser,url) {
+  const c=cases.find(c=>c.name==='small-phone')||cases[0];
+  for(const cancel of ['back','account-roundtrip','identity-roundtrip','microphone-roundtrip']) {
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'participant','entry');
+    try {
+      await page.getByRole('region',{name:'Set up your Lynk'}).waitFor();
+      await page.evaluate(()=>window.fixture.deferVerify=true);
+      await page.getByRole('button',{name:'Join Lynk',exact:true}).click();
+      if(cancel==='back')await page.getByRole('button',{name:'Back',exact:true}).click();
+      if(cancel==='account-roundtrip')await page.evaluate(()=>{const f=window.fixture;f.switchAccount({id:'other',authId:'other'});f.switchAccount(f.originalUser);f.pendingVerify();});
+      if(cancel==='identity-roundtrip'){await page.getByRole('switch',{name:'Join anonymously'}).click();await page.getByRole('switch',{name:'Join anonymously'}).click();}
+      if(cancel==='microphone-roundtrip'){await page.getByRole('button',{name:'Mute microphone',exact:true}).click();await page.getByRole('button',{name:'Unmute microphone',exact:true}).click();}
+      await page.evaluate(()=>window.fixture.pendingVerify());await tick(page);
+      assert.equal(await page.evaluate(()=>window.fixture.joinCalls),0,'cancelled verification must not admit');
+      assert.equal(await page.evaluate(()=>window.fixture.previewRequests),0);
+      assert.deepEqual(errors,[]);assert.deepEqual(unexpectedRequests,[]);
+      console.log('PASS actual web entry '+cancel+': synchronous stale-consent revocation');
+    }catch(error){recordFailure('entry-cancel-'+cancel,error)}finally{await context.close()}
+  }
+}
+
+async function roomShareCases(browser,url) {
+  const c=cases.find(c=>c.name==='small-phone')||cases[0];
+  for(const cancel of ['leave','dismiss','private-copy']) {
+    const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'participant');
+    try {
+      await page.keyboard.press('Enter');
+      await page.locator('main[data-room-phase="connected"]').waitFor();
+      await page.evaluate(cancel=>{
+        const f=window.fixture;f.shareCalls=[];f.copies=[];
+        Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>f.copies.push(text)}});
+        Object.defineProperty(navigator,'share',{configurable:true,value:cancel==='private-copy'?undefined:data=>new Promise((resolve,reject)=>{f.shareCalls.push(data);f.rejectShare=reject;f.resolveShare=resolve;})});
+        if(cancel==='private-copy')f.setRoomSnapshot({id:'fixture-room',title:'Private friends',status:'open',isPublic:false,hasVideo:true});
+      },cancel);
+      const share=page.getByRole('button',{name:'Share invite link',exact:true});
+      await share.click();
+      if(cancel==='private-copy'){
+        await page.waitForFunction(()=>window.fixture.copies.length===1);
+        assert.match(await page.evaluate(()=>window.fixture.copies[0]),/requires access/);
+        assert.match(await page.evaluate(()=>window.fixture.toasts.at(-1)[2]),/Only people with access/);
+      }else{
+        await share.click();assert.equal(await page.evaluate(()=>window.fixture.shareCalls.length),1,'repeat taps do not stack share sheets');
+        if(cancel==='leave')await page.locator('header').getByRole('button',{name:'Leave Lynk',exact:true}).click();
+        await page.evaluate(cancel=>window.fixture.rejectShare(Object.assign(Error('sheet closed'),{name:cancel==='dismiss'?'AbortError':'UnknownError'})),cancel);await tick(page);
+        assert.equal(await page.evaluate(()=>window.fixture.copies.length),0,'dismissed/abandoned sharing never falls back to clipboard');
+        assert.equal(await page.evaluate(()=>window.fixture.toasts.some(t=>String(t[1]).includes("Couldn't share"))),false);
+      }
+      assert.deepEqual(errors,[]);assert.deepEqual(unexpectedRequests,[]);
+      console.log('PASS actual web sharing '+cancel+': single flight, private access copy, interruption-safe fallback');
+    }catch(error){recordFailure('sharing-'+cancel,error)}finally{await context.close()}
+  }
+}
+
 async function main() {
   const assets=await buildFixture();
   if(process.argv.includes('--build-only')) {
@@ -1194,7 +1285,7 @@ async function main() {
     // system executable or change sandbox settings to circumvent a denied run.
     browser=await load('@playwright/test').chromium.launch({headless:true});
     const url='http://127.0.0.1:'+server.address().port;
-    const suites={recovery:recoveryCases,prejoin:prejoinCases,consent:consentCases,countdown:countdownCases,fill:fillCases,moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
+    const suites={entry:entryIdentityCases,entryCancel:entryCancellationCases,sharing:roomShareCases,recovery:recoveryCases,prejoin:prejoinCases,consent:consentCases,countdown:countdownCases,fill:fillCases,moderation:moderationCases,web:webCases,roster:rosterNoticeCases,keyboard:keyboardCase,chrome:browserChromeCase,group:groupStageCase,time:timeUpCases,native:nativeCases};
     for(const name of (process.env.LYNK_LAYOUT_SUITES||Object.keys(suites).join(',')).split(','))await suites[name](browser,url);
     assert.equal(failures.length,0,'Rendered regression failures:\n'+JSON.stringify(failures,null,2));
     console.log('PASS all rendered Lynk viewport, room and control layout regressions');

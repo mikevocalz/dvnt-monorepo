@@ -15,7 +15,7 @@ const deferred = () => { let resolve; const promise = new Promise((r) => { resol
   const rootDir = path.resolve(__dirname, '..');
   const screen = fs.readFileSync(path.join(rootDir, 'packages/app/features/routes/screens/(protected)/sneaky-lynk/room/[id].tsx'), 'utf8');
   const extract = (start, end) => {
-    const from = screen.indexOf(start), to = screen.indexOf(end, from);
+    const from = screen.indexOf(start, screen.indexOf('function ServerRoom(')), to = screen.indexOf(end, from);
     assert.ok(from >= 0 && to > from, `production block is present: ${start}`);
     return screen.slice(from, to);
   };

@@ -68,7 +68,6 @@ const ROOM_ENDED_MATCHERS = [
   /no longer open/i,
   /already ended/i,
   /has ended/i,
-  /room not found/i,
   /session ended/i,
 ];
 
@@ -133,11 +132,21 @@ export function classifySneakyLynkError(
     };
   }
 
-  if (code === "not_found" || ROOM_ENDED_MATCHERS.some((re) => re.test(raw))) {
+  if (detailReason === "session_expired" || detailReason === "room_ended" || ROOM_ENDED_MATCHERS.some((re) => re.test(raw))) {
     return {
       reason: "room_ended",
       title: "This room has ended",
-      body: "The host wrapped up. Check the host's profile for their next one.",
+      body: "This Lynk is no longer open. Ask the host for their next room.",
+      ctaLabel: null,
+      rawMessage: raw,
+    };
+  }
+
+  if (code === "not_found" || detailReason === "event_unavailable") {
+    return {
+      reason: "not_found",
+      title: "This Lynk isn't available",
+      body: "This link may be out of date, or this room may not be available to your account. Check the link with the host.",
       ctaLabel: null,
       rawMessage: raw,
     };
@@ -154,13 +163,34 @@ export function classifySneakyLynkError(
   }
 
   if (code === "forbidden") {
-    return {
-      reason: "forbidden",
-      title: "You can't join this room",
-      body: "Only invited participants can join. Reach out to the host for access.",
-      ctaLabel: null,
-      rawMessage: raw,
-    };
+    let title = "You can't join this room";
+    let body = "Your account doesn't have access to this Lynk right now. Check your account status or contact the host.";
+    if (detailReason === "invite_only") {
+      title = "This Lynk is invite-only";
+      body = "A shared link doesn't grant access to a private room. Ask the host to invite your account.";
+    } else if (detailReason === "event_ticket_required") {
+      title = "An event ticket is required";
+      body = "You need an active admission ticket for this event. A room link or invitation doesn't replace a ticket.";
+    } else if (detailReason === "event_invite_required") {
+      title = "This event is invite-only";
+      body = "Ask the event host to invite your account before joining its Lynk.";
+    } else if (detailReason === "member_banned" || /banned from this room/i.test(raw)) {
+      title = "Room access removed";
+      body = "Your account can't rejoin this Lynk. You can return to Messages to find another room.";
+    } else if (["verification_required", "verification_incomplete", "age_evidence_missing"].includes(detailReason ?? "")) {
+      title = "Verification needed";
+      body = "Complete your account verification before joining this Lynk. An invitation doesn't skip this requirement.";
+    } else if (detailReason === "profile_photo_required" || detailReason === "first_post_required") {
+      title = "Finish your account setup";
+      body = "Complete the required steps in your account before joining this Lynk.";
+    } else if (detailReason === "underage") {
+      title = "This Lynk is for adults";
+      body = "You must meet DVNT's age requirements to join.";
+    } else if (["suspended", "paused", "rejected", "standing_unavailable"].includes(detailReason ?? "")) {
+      title = "Hosting isn't available";
+      body = "Your account can't host or co-host this Lynk right now. Check your creator account status before trying again.";
+    }
+    return { reason: "forbidden", title, body, ctaLabel: null, rawMessage: raw };
   }
 
   if (code === "unauthorized") {

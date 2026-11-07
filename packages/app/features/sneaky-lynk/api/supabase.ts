@@ -122,6 +122,7 @@ export const sneakyLynkApi = {
    */
   async createRoom(
     params: CreateRoomParams,
+    options?: { isCurrent?: () => boolean },
   ): Promise<ApiResponse<{ room: SneakyRoom }>> {
     return callEdgeFunction("video_create_room", {
       title: params.title,
@@ -132,7 +133,7 @@ export const sneakyLynkApi = {
       invitedUserIds: params.invitedUserIds ?? [],
       appOnly: params.appOnly ?? false,
       maxParticipants: 50,
-    });
+    }, options);
   },
 
   /**
@@ -240,13 +241,19 @@ export const sneakyLynkApi = {
    * Get recent rooms list.
    * Includes public rooms plus invite-only rooms available to the current user.
    */
-  async getLiveRooms(): Promise<SneakyRoom[]> {
+  async getLiveRooms(options?: { isCurrent?: () => boolean }): Promise<SneakyRoom[]> {
+    const checkOwner = () => {
+      if (options?.isCurrent && !options.isCurrent()) throw new Error("Discovery account changed");
+    };
     try {
+      checkOwner();
       const response = await callEdgeFunction<{ rooms: SneakyRoom[] }>(
         "video_list_rooms",
         {},
+        options,
       );
 
+      checkOwner();
       if (response.ok && response.data?.rooms) {
         return response.data.rooms;
       }
@@ -274,10 +281,10 @@ export const sneakyLynkApi = {
         .limit(50);
 
       if (error) {
-        console.error("[SneakyLynk] getLiveRooms error:", error.message);
-        return [];
+        throw error;
       }
 
+      checkOwner();
       // Batch-lookup creators by auth_id
       const creatorIds = [
         ...new Set((data || []).map((r: any) => r.created_by).filter(Boolean)),
@@ -297,6 +304,7 @@ export const sneakyLynkApi = {
         }
       }
 
+      checkOwner();
       // Derive audience counts from room-membership rows so ended Lynks can
       // still show who was actually there after participant_count is zeroed.
       const roomIds = (data || []).map((r: any) => r.id).filter(Boolean);
@@ -317,6 +325,7 @@ export const sneakyLynkApi = {
         }
       }
 
+      checkOwner();
       return (data || []).map((r: any) => {
         const creator = creatorsMap[r.created_by] || null;
         const audience = resolveRoomAudience(
@@ -337,6 +346,9 @@ export const sneakyLynkApi = {
           description: r.description || "",
           sweetSpicyMode: r.sweet_spicy_mode || "sweet",
           isLive: audience.isLive,
+          // RLS may hide the host, and a failed stats read is not an ended room.
+          presenceKnown: (roomStats[r.id]?.activeHostCount ?? 0) > 0,
+          endsAt: r.ends_at ?? null,
           hasVideo: r.has_video ?? false,
           isPublic: r.is_public ?? true,
           status: r.status as "open" | "ended",
@@ -357,14 +369,17 @@ export const sneakyLynkApi = {
       });
     } catch (error) {
       console.error("[SneakyLynk] getLiveRooms error:", error);
-      return [];
+      throw new Error("Lynks could not be loaded. Please try again.");
     }
   },
 
   /**
    * Get room by ID
    */
-  async getRoomById(roomId: string): Promise<SneakyRoom | null> {
+  async getRoomById(
+    roomId: string,
+    options?: { throwOnError?: boolean },
+  ): Promise<SneakyRoom | null> {
     try {
       // Try uuid first (new rooms), fall back to integer id (legacy)
       const isUuid =
@@ -378,7 +393,11 @@ export const sneakyLynkApi = {
         .eq(lookupColumn, roomId)
         .single();
 
-      if (error || !data) return null;
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+      if (!data) return null;
 
       // Lookup creator by auth_id (no FK on created_by)
       let creator: any = null;
@@ -443,6 +462,7 @@ export const sneakyLynkApi = {
       };
     } catch (error) {
       console.error("[SneakyLynk] getRoomById error:", error);
+      if (options?.throwOnError) throw new Error("Couldn't load this Lynk. Please try again.");
       return null;
     }
   },

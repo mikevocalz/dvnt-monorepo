@@ -36,6 +36,12 @@ on:
       - 'scripts/test-lynk-admission-dispatch.cjs'
       - 'scripts/test-lynk-speaker-settings-dom.cjs'
       - 'scripts/test-lynk-host-actions.cjs'
+      - 'scripts/test-lynk-native-entry.cjs'
+      - 'scripts/test-lynk-entry-identity.cjs'
+      - 'scripts/test-lynk-cohost-invites.cjs'
+      - 'scripts/test-lynk-cohost-api.cjs'
+      - 'scripts/test-lynk-creation-discovery.cjs'
+      - 'scripts/test-lynk-create-callbacks.cjs'
       - 'scripts/test-lynk-native-moderation-callbacks.cjs'
       - 'scripts/test-lynk-room-panels.cjs'
       - 'scripts/test-lynk-stage-polish-dom.cjs'
@@ -76,6 +82,12 @@ on:
       - 'scripts/test-lynk-admission-dispatch.cjs'
       - 'scripts/test-lynk-speaker-settings-dom.cjs'
       - 'scripts/test-lynk-host-actions.cjs'
+      - 'scripts/test-lynk-native-entry.cjs'
+      - 'scripts/test-lynk-entry-identity.cjs'
+      - 'scripts/test-lynk-cohost-invites.cjs'
+      - 'scripts/test-lynk-cohost-api.cjs'
+      - 'scripts/test-lynk-creation-discovery.cjs'
+      - 'scripts/test-lynk-create-callbacks.cjs'
       - 'scripts/test-lynk-native-moderation-callbacks.cjs'
       - 'scripts/test-lynk-room-panels.cjs'
       - 'scripts/test-lynk-stage-polish-dom.cjs'
@@ -94,7 +106,7 @@ jobs:
         with:
           node-version: 24
       - name: Install isolated fixture tools
-        run: npm install --prefix "$RUNNER_TEMP/lynk-tests" --no-package-lock --no-save typescript@5.9.3 esbuild@0.25.11 jsdom@26.1.0 happy-dom@20.10.3 lucide-react@0.468.0 react@19.2.3 react-dom@19.2.3 zod@3.22.4 @electric-sql/pglite@0.3.14 zustand@5.0.14
+        run: npm install --prefix "$RUNNER_TEMP/lynk-tests" --no-package-lock --no-save typescript@5.9.3 esbuild@0.25.11 jsdom@26.1.0 happy-dom@20.10.3 lucide-react@0.468.0 react@19.2.3 react-dom@19.2.3 zod@3.22.4 @electric-sql/pglite@0.3.14 zustand@5.0.14 @tanstack/react-query@5.99.0
       - name: Install isolated released MoQ SDK (separate Zod 4 peer graph)
         run: npm install --legacy-peer-deps --prefix "$RUNNER_TEMP/lynk-sdk" --no-package-lock --no-save @moq/net@0.4.3 @moq/publish@0.5.2 @moq/signals@0.2.5 @zod/mini@4.5.0 zod@4.5.0 react@19.2.3
       - name: Test multi-user chat, media, room end and subscriptions
@@ -102,7 +114,7 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/lynk-tests/node_modules
           LYNK_SDK_DEPS: ${{ runner.temp }}/lynk-sdk/node_modules
         run: |
-          node --test packages/app/features/sneaky-lynk/publish-roles.test.ts packages/app/features/sneaky-lynk/room-entry-status.test.ts packages/app/features/sneaky-lynk/api/*.test.ts packages/app/features/sneaky-lynk/hooks/*.test.ts packages/app/features/sneaky-lynk/session/*.test.ts packages/app/features/sneaky-lynk/ui/*.test.ts packages/app/features/sneaky-lynk/ui/web/*.test.ts packages/app/lib/video/*.test.ts packages/app/lib/events/event-lynk.test.ts packages/app/features/video/room-lifecycle.test.ts packages/app/features/video/stores/*.test.ts packages/app/lib/lynk/*.test.ts packages/ui/src/video/moqPlayerHtml.test.ts packages/app/lib/lynk/genesis-room-admission.fixture.ts packages/app/lib/subscription/*.test.ts apps/mobile/supabase/functions/video_create_room/subscription.test.cjs apps/mobile/supabase/functions/video_end_room/index.test.cjs apps/mobile/supabase/functions/_shared/lynk-moq-access.test.cjs apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs
+          node --test packages/app/features/sneaky-lynk/*.test.ts packages/app/features/sneaky-lynk/api/*.test.ts packages/app/features/sneaky-lynk/hooks/*.test.ts packages/app/features/sneaky-lynk/session/*.test.ts packages/app/features/sneaky-lynk/ui/*.test.ts packages/app/features/sneaky-lynk/ui/web/*.test.ts packages/app/lib/video/*.test.ts packages/app/lib/events/event-lynk.test.ts packages/app/features/video/room-lifecycle.test.ts packages/app/features/video/stores/*.test.ts packages/app/lib/lynk/*.test.ts packages/ui/src/video/moqPlayerHtml.test.ts packages/app/lib/lynk/genesis-room-admission.fixture.ts packages/app/lib/subscription/*.test.ts apps/mobile/supabase/functions/video_create_room/subscription.test.cjs apps/mobile/supabase/functions/video_end_room/index.test.cjs apps/mobile/supabase/functions/_shared/lynk-moq-access.test.cjs apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs
           node --test scripts/test-subscription-owner-rls.cjs scripts/test-lynk-atomic-admission.cjs
           node --test apps/mobile/supabase/functions/lynk-livestream-token/index.test.cjs
           node scripts/test-lynk-room-browser.cjs --dom
@@ -113,6 +125,12 @@ jobs:
           node scripts/test-lynk-admission-dispatch.cjs
           node scripts/test-lynk-speaker-settings-dom.cjs
           node scripts/test-lynk-host-actions.cjs
+          node scripts/test-lynk-native-entry.cjs
+          node scripts/test-lynk-entry-identity.cjs
+          node scripts/test-lynk-cohost-invites.cjs
+          node scripts/test-lynk-cohost-api.cjs
+          node scripts/test-lynk-creation-discovery.cjs
+          node scripts/test-lynk-create-callbacks.cjs
           node scripts/test-lynk-native-moderation-callbacks.cjs
           node scripts/test-lynk-room-panels.cjs
           node scripts/test-lynk-stage-polish-dom.cjs

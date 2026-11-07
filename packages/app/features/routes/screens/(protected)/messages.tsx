@@ -5,6 +5,7 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  ActivityIndicator,
   StyleSheet,
   Alert,
   useWindowDimensions,
@@ -50,11 +51,11 @@ import { usePresenceStore } from "@dvnt/app/lib/stores/presence-store";
 import { useUserPresence } from "@dvnt/app/lib/hooks/use-presence";
 import PagerView from "react-native-pager-view";
 import {
-  useLynkHistoryStore,
+  useLynkDiscovery,
+  discoveryRoomState,
   type LynkRecord,
 } from "@dvnt/app/features/sneaky-lynk";
 import { LiveRoomCard } from "@dvnt/app/features/sneaky-lynk";
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { useSneakyLynkCaptureProtection } from "@dvnt/app/features/sneaky-lynk";
 import { useFocusEffect } from "expo-router";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
@@ -509,89 +510,10 @@ function SneakyLynkContent({
   // every screenshot the user takes.
   useSneakyLynkCaptureProtection({ enabled: isActive });
 
-  const localRooms = useLynkHistoryStore((s) => s.rooms);
-  const endRoom = useLynkHistoryStore((s) => s.endRoom);
-  const [dbRooms, setDbRooms] = useState<LynkRecord[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const fetchRooms = useCallback(async () => {
-    try {
-      const liveRooms = await sneakyLynkApi.getLiveRooms();
-      const mapped: LynkRecord[] = liveRooms.map((r) => ({
-        id: r.id,
-        title: r.title,
-        topic: r.topic,
-        description: r.description,
-        isLive: r.isLive,
-        hasVideo: r.hasVideo,
-        isPublic: r.isPublic,
-        status: r.status,
-        host: r.host,
-        speakers: r.speakers || [],
-        listeners: r.listeners || 0,
-        maxParticipants: r.maxParticipants || 50,
-        createdAt: r.createdAt,
-        endedAt: r.endedAt,
-      }));
-      setDbRooms(mapped);
-
-      // Sync: mark local rooms as ended if they're not actually live in DB
-      const actuallyLiveIds = new Set(
-        liveRooms.filter((r) => r.isLive).map((r) => r.id),
-      );
-      for (const local of localRooms) {
-        if (local.isLive && !actuallyLiveIds.has(local.id)) {
-          endRoom(local.id);
-        }
-      }
-    } catch (err) {
-      console.error("[SneakyLynk] Failed to fetch live rooms:", err);
-    }
-  }, [localRooms, endRoom]);
-
-  // Fetch live rooms on focus
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      (async () => {
-        await fetchRooms();
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }, [fetchRooms]),
-  );
-
-  useEffect(() => {
-    if (!isActive) return;
-
-    void fetchRooms();
-
-    const interval = setInterval(() => {
-      void fetchRooms();
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [isActive, fetchRooms]);
-
-  // Pull-to-refresh
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await fetchRooms();
-    setRefreshing(false);
-  }, [fetchRooms]);
-
-  // Merge: DB rooms take priority, then any local-only rooms for immediate
-  // host visibility before the live room fetch catches up.
-  // Lynks should surface in this tab only, so this tab must include the
-  // public DB rooms that other users rely on to see who's live.
-  const allRooms = useCallback(() => {
-    const dbIds = new Set(dbRooms.map((r) => r.id));
-    const localOnly = localRooms.filter(
-      (r) => !dbIds.has(r.id) && r.source === "sneaky_lynk",
-    );
-    return [...dbRooms, ...localOnly];
-  }, [dbRooms, localRooms])();
+  const { rooms: allRooms, isLoading, isFetching, isError, refetch } = useLynkDiscovery(isActive);
+  const handleRefresh = useCallback(() => { void refetch(); }, [refetch]);
+  const liveRooms = allRooms.filter((room) => !discoveryRoomState(room).ended);
+  const endedRooms = allRooms.filter((room) => discoveryRoomState(room).ended);
 
   const handleCreateLynk = useCallback(() => {
     router.push("/(protected)/sneaky-lynk/create" as any);
@@ -601,7 +523,7 @@ function SneakyLynkContent({
 
   const handleRoomPress = useCallback(
     (room: LynkRecord) => {
-      if (!room.isLive || room.status === "ended") {
+      if (discoveryRoomState(room).ended) {
         showToast(
           "info",
           "Lynk Ended",
@@ -609,16 +531,7 @@ function SneakyLynkContent({
         );
         return;
       }
-      // Check capacity — toast if full
-      const max = room.maxParticipants || 50;
-      if (room.listeners >= max) {
-        showToast(
-          "error",
-          "Room Full",
-          "This Lynk is at max capacity. Pull to refresh when a slot opens.",
-        );
-        return;
-      }
+      // The server checks current capacity; a stale list must not block re-entry.
       router.push({
         pathname: "/(protected)/sneaky-lynk/room/[id]",
         params: {
@@ -633,68 +546,29 @@ function SneakyLynkContent({
 
   return (
     <View style={lynkStyles.container}>
-      {/* Header */}
       <View style={lynkStyles.header}>
-        <View style={lynkStyles.headerLeft}>
-          <Radio size={28} color="#FC253A" />
-          <Text style={lynkStyles.headerTitle}>Lynks</Text>
+        <View style={{ flex: 1 }}>
+          <View style={lynkStyles.headerLeft}><Radio size={24} color="#FC253A" /><Text style={lynkStyles.headerTitle}>Lynks</Text></View>
+          <Text style={{ color: "#9CA3AF", fontSize: 13, marginTop: 5 }}>Find your people. Join the conversation.</Text>
         </View>
-        <TouchableOpacity
-          style={lynkStyles.createButton}
-          onPress={handleCreateLynk}
-        >
-          <Plus size={20} color="#fff" />
-        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Start a Lynk" style={lynkStyles.createButton} onPress={handleCreateLynk}><Plus size={20} color="#fff" /></TouchableOpacity>
       </View>
-
-      {allRooms.length > 0 ? (
-        <ScrollView
-          contentContainerStyle={lynkStyles.liveList}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor="#FC253A"
-              colors={["#FC253A"]}
-            />
-          }
-        >
-          {allRooms.map((room) => (
-            <LiveRoomCard
-              key={room.id}
-              space={room}
-              onPress={() => handleRoomPress(room)}
-            />
-          ))}
-        </ScrollView>
-      ) : (
-        <ScrollView
-          contentContainerStyle={lynkStyles.emptyStateContainer}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor="#FC253A"
-              colors={["#FC253A"]}
-            />
-          }
-        >
-          <View style={lynkStyles.emptyState}>
-            <Radio size={48} color="#6B7280" />
-            <Text style={lynkStyles.emptyTitle}>No Lynks Yet</Text>
-            <Text style={lynkStyles.emptyText}>
-              Start a live conversation with friends
-            </Text>
-            <TouchableOpacity
-              style={lynkStyles.createLynkButton}
-              onPress={handleCreateLynk}
-            >
-              <Plus size={18} color="#fff" />
-              <Text style={lynkStyles.createLynkText}>Start a Lynk</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      )}
+      <ScrollView contentContainerStyle={allRooms.length ? lynkStyles.liveList : lynkStyles.emptyStateContainer}
+        refreshControl={<RefreshControl refreshing={isFetching && !isLoading} onRefresh={handleRefresh} tintColor="#FC253A" colors={["#FC253A"]} />}>
+        {isError && <View accessibilityRole="alert" style={lynkStyles.errorCard}>
+          <Text style={{ color: "#FDE68A", fontSize: 14, lineHeight: 21 }}>{allRooms.length ? "Couldn’t refresh Lynks. Showing the last available rooms." : "Couldn’t load Lynks. Check your connection and try again."}</Text>
+          <Pressable accessibilityRole="button" disabled={isFetching} onPress={handleRefresh} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: "#fff", fontSize: 14, fontWeight: "600", textDecorationLine: "underline" }}>{isFetching ? "Trying again…" : "Try again"}</Text></Pressable>
+        </View>}
+        {isLoading && !allRooms.length ? <View style={lynkStyles.emptyState} accessibilityLiveRegion="polite"><ActivityIndicator color="#FC253A" /><Text style={lynkStyles.emptyText}>Finding Lynks…</Text></View> : allRooms.length ? <>
+          {liveRooms.length > 0 ? <><Text style={lynkStyles.sectionTitle}>OPEN ROOMS · {liveRooms.length}</Text>{liveRooms.map((room) => <LiveRoomCard key={room.id} space={room} onPress={() => handleRoomPress(room)} />)}</> : !isError && <Text style={lynkStyles.emptyText}>No live conversations right now. Start a Lynk and invite your people.</Text>}
+          {endedRooms.length > 0 && <><Text style={lynkStyles.sectionTitle}>RECENTLY ENDED</Text>{endedRooms.map((room) => <LiveRoomCard key={room.id} space={room} onPress={() => handleRoomPress(room)} />)}</>}
+        </> : !isError ? <View style={lynkStyles.emptyState}>
+          <View style={lynkStyles.emptyIcon}><Radio size={28} color="#FC253A" /></View>
+          <Text style={lynkStyles.emptyTitle}>Make the first connection.</Text>
+          <Text style={lynkStyles.emptyText}>No Lynks to show yet. Start an audio or video room, public or just for your people.</Text>
+          <TouchableOpacity accessibilityRole="button" style={lynkStyles.createLynkButton} onPress={handleCreateLynk}><Plus size={18} color="#fff" /><Text style={lynkStyles.createLynkText}>Start a Lynk</Text></TouchableOpacity>
+        </View> : null}
+      </ScrollView>
     </View>
   );
 }
@@ -702,7 +576,7 @@ function SneakyLynkContent({
 const lynkStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000",
+    backgroundColor: "#06070D",
   },
   header: {
     flexDirection: "row",
@@ -725,9 +599,9 @@ const lynkStyles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   createButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 8,
     backgroundColor: "#FC253A",
     alignItems: "center",
     justifyContent: "center",
@@ -738,15 +612,20 @@ const lynkStyles = StyleSheet.create({
     paddingBottom: 20,
     gap: 16,
   },
+  errorCard: { padding: 16, borderRadius: 12, borderWidth: 1, borderColor: "rgba(252,211,77,0.2)", backgroundColor: "rgba(252,211,77,0.04)", width: "100%" },
+  sectionTitle: { fontSize: 12, fontWeight: "600", letterSpacing: 1, color: "#9CA3AF", marginTop: 4 },
+  emptyIcon: { width: 56, height: 56, borderRadius: 12, backgroundColor: "rgba(252,37,58,0.1)", alignItems: "center", justifyContent: "center" },
   emptyStateContainer: {
-    flex: 1,
+    flexGrow: 1,
+    padding: 24,
     justifyContent: "center",
     alignItems: "center",
   },
   emptyState: {
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 80,
+    paddingVertical: 40,
+    maxWidth: 360,
     gap: 12,
   },
   emptyTitle: {
@@ -756,7 +635,8 @@ const lynkStyles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 14,
-    color: "#6B7280",
+    color: "#9CA3AF",
+    lineHeight: 22,
     textAlign: "center",
   },
   createLynkButton: {
@@ -766,7 +646,8 @@ const lynkStyles = StyleSheet.create({
     backgroundColor: "#FC253A",
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 20,
+    borderRadius: 8,
+    minHeight: 44,
     marginTop: 8,
   },
   createLynkText: {

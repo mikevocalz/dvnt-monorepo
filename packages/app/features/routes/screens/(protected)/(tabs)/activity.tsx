@@ -1,3 +1,4 @@
+import { PendingCohostInvites } from "@dvnt/app/features/sneaky-lynk/ui/PendingCohostInvites";
 import { markActivityRead, markAllActivityRead } from "@dvnt/app/lib/activity/mark-activity-read";
 import { activitySenderLabel } from "@dvnt/app/lib/activity/event-activity";
 import { View, Text, Pressable, ScrollView } from "react-native";
@@ -100,6 +101,9 @@ const ActivityIcon = memo(({ type }: { type: Activity["type"] }) => {
     case "event_time_changed":
     case "event_venue_changed":
       return <Calendar size={16} color="#10B981" />;
+    case "lynk_cohost_invited":
+    case "lynk_cohost_accepted":
+    case "lynk_cohost_declined":
     case "room_invite":
     case "sneaky_lynk":
       return <Radio size={16} color="#38BDF8" />;
@@ -178,6 +182,12 @@ function getActivityText(activity: Activity): string {
       return roomInviteActivityText(
         activity.event?.title || activity.payload?.event_title,
       );
+    case "lynk_cohost_invited":
+      return " invited you to co-host a Lynk.";
+    case "lynk_cohost_accepted":
+      return " accepted your invitation to co-host a Lynk.";
+    case "lynk_cohost_declined":
+      return " declined your invitation to co-host a Lynk.";
     case "sneaky_lynk":
       return " invited you to a Sneaky Lynk.";
     default:
@@ -1009,6 +1019,8 @@ function ActivityScreenContent() {
             </Pressable>
           )}
         </View>
+
+        {activeTab !== "Liked" && <PendingCohostInvites />}
 
         {/* Tabs */}
         <View

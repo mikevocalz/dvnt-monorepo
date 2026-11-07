@@ -23,7 +23,7 @@
  * accent cyan #3FDCFF.
  */
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { useRouter } from "solito/navigation";
 import {
   ArrowLeft,
@@ -35,11 +35,15 @@ import {
   X,
   Plus,
   Smartphone,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { FormField } from "@dvnt/ui";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { usersApi } from "@dvnt/app/lib/api/users";
+import { useLynkCreateScope } from "../hooks/useLynkCreateScope";
+import { useLynkInviteSearch } from "../hooks/useLynkInviteSearch";
+import { resolveCreatedRoomId, roomInviteeIds } from "../create-room-policy";
 import { useEntitlements } from "@dvnt/app/lib/subscription/use-entitlements";
 import { lynkCreateSummary } from "@dvnt/app/lib/subscription/lynk-create-summary";
 import { useLynkHistoryStore } from "../stores/lynk-history-store";
@@ -48,23 +52,6 @@ import { useCreateLynkStore } from "../stores/create-store";
 import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
 
 const ACCENT = "#FC253A";
-const ROOM_UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function resolveCreatedRoomId(room: unknown): string {
-  const candidate = room as
-    | { id?: unknown; uuid?: unknown; internalId?: unknown }
-    | null;
-  const ids = [candidate?.uuid, candidate?.id, candidate?.internalId]
-    .filter((id): id is string | number => id != null)
-    .map((id) => String(id));
-
-  // Prefer a real UUID, but NEVER abort if the response shape differs — the
-  // room route + video_join_room both accept the integer id too. Returning ""
-  // here used to throw and strand the user on the create screen.
-  return ids.find((id) => ROOM_UUID_REGEX.test(id)) ?? ids[0] ?? "";
-}
-
 // Rounded-SQUARE avatar (never circular, per DVNT rule).
 function SquareAvatar({
   uri,
@@ -104,12 +91,14 @@ function ToggleRow({
   subtitle,
   value,
   onChange,
+  disabled,
 }: {
   icon: React.ReactNode;
   title: string;
   subtitle: string;
   value: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 bg-white/[0.06] rounded-xl px-4 py-4">
@@ -132,24 +121,28 @@ function ToggleRow({
         // "switch, on" with no clue what it toggles. The row title is the name.
         aria-label={title}
         aria-checked={value}
+        disabled={disabled}
+        className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white disabled:opacity-50"
         onClick={() => onChange(!value)}
         style={{
           position: "relative",
           width: 48,
-          height: 28,
+          height: 44,
           flexShrink: 0,
           padding: 0,
           border: "none",
           borderRadius: 9999,
           cursor: "pointer",
-          backgroundColor: value ? ACCENT : "#374151",
+          backgroundColor: "transparent",
           transition: "background-color 140ms ease",
         }}
       >
+        <span aria-hidden="true" style={{ position: "absolute", top: 8, left: 0, width: 48, height: 28, borderRadius: 9999, backgroundColor: value ? ACCENT : "#374151", transition: "background-color 140ms ease" }} />
         <span
+          aria-hidden="true"
           style={{
             position: "absolute",
-            top: 4,
+            top: 12,
             left: 4,
             width: 20,
             height: 20,
@@ -166,7 +159,11 @@ function ToggleRow({
 }
 
 export function SneakyLynkCreateScreen() {
-  const membership = lynkCreateSummary(useEntitlements());
+  const entitlementState = useEntitlements();
+  const membership = lynkCreateSummary(entitlementState);
+  const creatingRef = useRef(false);
+  const draftRevisionRef = useRef(0);
+  const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const router = useRouter();
   const showToast = useUIStore((s) => s.showToast);
   const authUser = useAuthStore((s) => s.user);
@@ -179,7 +176,8 @@ export function SneakyLynkCreateScreen() {
   const appOnly = useCreateLynkStore((s) => s.appOnly);
   const isCreating = useCreateLynkStore((s) => s.isCreating);
   const inviteSearch = useCreateLynkStore((s) => s.inviteSearch);
-  const inviteResults = useCreateLynkStore((s) => s.inviteResults);
+  const createError = useCreateLynkStore((s) => s.createError);
+  const setCreateError = useCreateLynkStore((s) => s.setCreateError);
   const invitees = useCreateLynkStore((s) => s.invitees);
   const setTitle = useCreateLynkStore((s) => s.setTitle);
   const setDescription = useCreateLynkStore((s) => s.setDescription);
@@ -188,69 +186,79 @@ export function SneakyLynkCreateScreen() {
   const setAppOnly = useCreateLynkStore((s) => s.setAppOnly);
   const setIsCreating = useCreateLynkStore((s) => s.setIsCreating);
   const setInviteSearch = useCreateLynkStore((s) => s.setInviteSearch);
-  const setInviteResults = useCreateLynkStore((s) => s.setInviteResults);
   const addInvitee = useCreateLynkStore((s) => s.addInvitee);
   const removeInvitee = useCreateLynkStore((s) => s.removeInvitee);
 
   useEffect(() => {
     return () => {
+      if (navigationTimer.current) clearTimeout(navigationTimer.current);
       useCreateLynkStore.getState().reset();
     };
   }, []);
+
+  const captureOwner = useLynkCreateScope(() => {
+    draftRevisionRef.current += 1;
+    creatingRef.current = false;
+    if (navigationTimer.current) clearTimeout(navigationTimer.current);
+    useCreateLynkStore.getState().reset();
+  });
+
+  const handleBack = useCallback(() => {
+    captureOwner.revoke();
+    if (navigationTimer.current) clearTimeout(navigationTimer.current);
+    router.back();
+  }, [captureOwner, router]);
+
+  useEffect(() => {
+    // Browser Back/page departure can happen before the route unmounts.
+    const revoke = () => captureOwner.revoke();
+    const createPath = window.location.pathname;
+    const onHistory = () => {
+      // A restored page may receive pageshow followed by popstate. The latter
+      // is not a departure when history has restored this same creation route.
+      if (window.location.pathname !== createPath) revoke();
+    };
+    const resume = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      // BFCache restores this mounted component, not a new screen instance.
+      const hadPendingCreation = creatingRef.current;
+      captureOwner.resume();
+      creatingRef.current = false;
+      if (navigationTimer.current) clearTimeout(navigationTimer.current);
+      setIsCreating(false);
+      if (hadPendingCreation) {
+        setCreateError("Your previous request may have created a Lynk. Check the Lynks tab before starting again.");
+      }
+    };
+    window.addEventListener("popstate", onHistory);
+    window.addEventListener("pagehide", revoke);
+    window.addEventListener("pageshow", resume);
+    return () => {
+      window.removeEventListener("popstate", onHistory);
+      window.removeEventListener("pagehide", revoke);
+      window.removeEventListener("pageshow", resume);
+    };
+  }, [captureOwner, setIsCreating, setCreateError]);
 
   const selfIds = [authUser?.id, (authUser as any)?.authId, (authUser as any)?.auth_id]
     .filter((id): id is string | number => id != null)
     .map((id) => String(id));
 
-  // Debounced invitee search (private rooms only) — same usersApi.searchUsers
-  // call + self/duplicate filtering as native.
-  useEffect(() => {
-    if (isPublic) {
-      setInviteSearch("");
-      setInviteResults([]);
-      return;
-    }
-    const query = inviteSearch.trim();
-    if (query.length < 2) {
-      setInviteResults([]);
-      return;
-    }
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      const { docs } = await usersApi.searchUsers(query, 8);
-      if (cancelled) return;
-      setInviteResults(
-        docs
-          .map((user: any) => ({
-            id: user.id,
-            authId: user.authId,
-            username: user.username,
-            avatar: user.avatar,
-          }))
-          .filter(
-            (user) =>
-              user.authId &&
-              !selfIds.includes(String(user.authId)) &&
-              !selfIds.includes(String(user.id)) &&
-              !invitees.some((invitee) => invitee.authId === user.authId),
-          ),
-      );
-    }, 300);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inviteSearch, invitees, isPublic]);
+  const inviteSearchState = useLynkInviteSearch({ query: inviteSearch, enabled: !isPublic && !isCreating, selfIds, invitees });
+  const inviteResults = inviteSearchState.results;
+  useEffect(() => { if (isPublic) setInviteSearch(""); }, [isPublic, setInviteSearch]);
 
   // Verified-only: opening a Lynk needs a verified account.
   const guardVerified = useVerifiedGate();
 
-  const handleCreate = useCallback(async () => {
+  const handleCreate = useCallback(async (isCurrent: () => boolean) => {
+    if (creatingRef.current || !isCurrent()) return;
     if (!title.trim()) {
       showToast("error", "Error", "Please enter a title for your Lynk");
       return;
     }
+    creatingRef.current = true;
+    setCreateError(null);
     setIsCreating(true);
     let didStartNavigation = false;
     try {
@@ -261,9 +269,10 @@ export function SneakyLynkCreateScreen() {
         hasVideo,
         isPublic,
         appOnly,
-        invitedUserIds: isPublic ? [] : invitees.map((i) => i.authId),
-      });
+        invitedUserIds: roomInviteeIds(isPublic, invitees),
+      }, { isCurrent });
 
+      if (!isCurrent()) return;
       if (!result.ok || !result.data) {
         throw new Error(result.error?.message || "Failed to create room");
       }
@@ -272,7 +281,7 @@ export function SneakyLynkCreateScreen() {
 
       if (!roomId) {
         console.error("[CreateLynk] No room id in create response:", result.data);
-        throw new Error("Created Lynk did not return a room id");
+        throw new Error("Your Lynk may have been created, but could not be opened. Check the Lynks tab before trying again.");
       }
 
       addRoom({
@@ -304,16 +313,16 @@ export function SneakyLynkCreateScreen() {
       }).toString();
 
       showToast("success", "Lynk Created", "Your Lynk is now live!");
-      didStartNavigation = true;
       const target = `/feed/sneaky-lynk/room/${roomId}?${qs}`;
       router.push(target);
+      didStartNavigation = true;
       // Hard-navigation safety net: in this ssr:false dynamic route the SPA
       // push has been getting swallowed (create screen stays put, button reverts
       // to "Start Lynk"). If we're still on /sneaky-lynk/create shortly after,
       // force a full navigation so the host ALWAYS lands in their new room.
       if (typeof window !== "undefined") {
-        setTimeout(() => {
-          if (window.location.pathname.includes("/sneaky-lynk/create")) {
+        navigationTimer.current = setTimeout(() => {
+          if (isCurrent() && window.location.pathname.includes("/sneaky-lynk/create")) {
             window.location.assign(target);
           }
         }, 700);
@@ -324,9 +333,13 @@ export function SneakyLynkCreateScreen() {
         error instanceof Error && error.message
           ? error.message
           : "Failed to create Lynk";
-      showToast("error", "Error", message);
+      if (isCurrent()) {
+        setCreateError(message);
+        showToast("error", "Couldn’t start Lynk", message);
+      }
     } finally {
-      if (!didStartNavigation) {
+      if (!didStartNavigation && isCurrent()) {
+        creatingRef.current = false;
         setIsCreating(false);
       }
     }
@@ -342,7 +355,20 @@ export function SneakyLynkCreateScreen() {
     router,
     showToast,
     setIsCreating,
+    setCreateError,
   ]);
+
+  const handleStart = () => {
+    const isCurrent = captureOwner(authUser);
+    if (creatingRef.current || !isCurrent()) return;
+    const reviewedRevision = ++draftRevisionRef.current;
+    guardVerified("sneaky_lynk", () => {
+      if (isCurrent() && draftRevisionRef.current === reviewedRevision) {
+        draftRevisionRef.current += 1; // Consume this exact reviewed intent once.
+        void handleCreate(isCurrent);
+      }
+    });
+  };
 
   const canCreate = !!title.trim() && !isCreating;
 
@@ -355,9 +381,9 @@ export function SneakyLynkCreateScreen() {
       >
         <button
           type="button"
-          onClick={() => router.back()}
+          onClick={handleBack}
           aria-label="Back"
-          className="w-9 h-9 rounded-xl bg-white/8 flex items-center justify-center active:scale-95"
+          className="w-11 h-11 rounded-xl bg-white/8 flex items-center justify-center active:scale-95 focus-visible:outline focus-visible:outline-white"
         >
           <ArrowLeft size={20} color="#fff" />
         </button>
@@ -365,10 +391,15 @@ export function SneakyLynkCreateScreen() {
           <Radio size={20} color={ACCENT} />
           <h1 className="text-[17px] font-semibold">Create Lynk</h1>
         </span>
-        <span className="w-9" />
+        <span className="w-11" />
       </div>
 
-      <main className="mx-auto w-full max-w-2xl px-4 py-5 flex flex-col gap-5 pb-16">
+      <main className="mx-auto w-full max-w-2xl px-4 py-6 flex flex-col gap-5 pb-16" aria-busy={isCreating}>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#FC253A]">Your room, your conversation</p>
+          <h2 className="mt-2 text-2xl font-bold tracking-tight">Set the tone.</h2>
+          <p className="mt-2 text-sm leading-6 text-white/60">Choose who can join and how you want to connect. Your room goes live when you start.</p>
+        </div>
         {/* Pricing banner */}
         <section
           className="rounded-2xl p-4 border"
@@ -377,8 +408,10 @@ export function SneakyLynkCreateScreen() {
             borderColor: "rgba(252, 37, 58, 0.2)",
           }}
         >
+          <p className="text-xs font-semibold uppercase tracking-wider text-white/50 mb-2">Current membership</p>
           <p className="text-base font-bold mb-1">{membership.title}</p>
           <p className="text-sm text-white/60 leading-5">{membership.description}</p>
+          {entitlementState.isError && <button type="button" onClick={entitlementState.refetch} className="mt-3 min-h-11 text-sm font-semibold underline underline-offset-4 focus-visible:outline focus-visible:outline-white">Retry membership check</button>}
           {membership.benefits.length > 0 && <ul className="mt-3 space-y-1 text-sm text-white/80">
             {membership.benefits.map((benefit) => <li key={benefit}>{benefit}</li>)}
           </ul>}
@@ -388,47 +421,53 @@ export function SneakyLynkCreateScreen() {
         <FormField label="Title" required htmlFor="lynk-title">
           <input
             id="lynk-title"
+            disabled={isCreating}
+            aria-describedby="lynk-title-count"
             value={title}
-            onChange={(e) => setTitle(e.target.value.slice(0, 100))}
+            onChange={(e) => { draftRevisionRef.current += 1; setTitle(e.target.value.slice(0, 100)); }}
             placeholder="What's your Lynk about?"
             maxLength={100}
             className={inputCls}
           />
-          <span className="text-xs text-white/40 text-right">{title.length}/100</span>
+          <span id="lynk-title-count" className="text-xs text-white/50 text-right">{title.length}/100</span>
         </FormField>
 
         {/* Description */}
         <FormField label="Description (optional)" htmlFor="lynk-desc">
           <textarea
             id="lynk-desc"
+            disabled={isCreating}
+            aria-describedby="lynk-desc-count"
             value={description}
-            onChange={(e) => setDescription(e.target.value.slice(0, 280))}
+            onChange={(e) => { draftRevisionRef.current += 1; setDescription(e.target.value.slice(0, 280)); }}
             placeholder="Tell people what to expect..."
             rows={3}
             maxLength={280}
             className={`${inputCls} min-h-[100px] resize-y`}
           />
-          <span className="text-xs text-white/40 text-right">{description.length}/280</span>
+          <span id="lynk-desc-count" className="text-xs text-white/50 text-right">{description.length}/280</span>
         </FormField>
 
         {/* Video toggle */}
         <ToggleRow
+          disabled={isCreating}
           icon={<Video size={20} color={ACCENT} />}
           title="Enable Video"
           subtitle="Allow speakers to share video"
           value={hasVideo}
-          onChange={setHasVideo}
+          onChange={(value) => { draftRevisionRef.current += 1; setHasVideo(value); }}
         />
 
         {/* Public/Private toggle */}
         <ToggleRow
+          disabled={isCreating}
           icon={
             isPublic ? <Globe size={20} color={ACCENT} /> : <Lock size={20} color={ACCENT} />
           }
-          title={isPublic ? "Public Lynk" : "Private Lynk"}
-          subtitle={isPublic ? "Anyone can join and listen" : "Only invited users can join"}
+          title="Public Lynk"
+          subtitle={isPublic ? "Public · Discoverable by the community" : "Private · Invited people and returning members"}
           value={isPublic}
-          onChange={setIsPublic}
+          onChange={(value) => { draftRevisionRef.current += 1; setIsPublic(value); }}
         />
 
         {/* App-only toggle — the only ENFORCED capture protection. Everything
@@ -436,17 +475,17 @@ export function SneakyLynkCreateScreen() {
             deterrence; an app-only room simply never mints a peer token for a
             browser. */}
         <ToggleRow
+          disabled={isCreating}
           icon={<Smartphone size={20} color={ACCENT} />}
           title="App-only room"
-          subtitle="Web viewers can't join · strongest capture protection"
+          subtitle="Everyone joins in the DVNT app, including you"
           value={appOnly}
-          onChange={setAppOnly}
+          onChange={(value) => { draftRevisionRef.current += 1; setAppOnly(value); }}
         />
         {appOnly ? (
           <p className="-mt-2 text-xs leading-5 text-white/50">
-            Everyone joins from the DVNT app, where the OS blacks out
-            screenshots and screen recordings at the system level. Browsers have
-            no equivalent, so they&apos;re turned away before they can connect.
+            Browser access is blocked. The app uses device capture protections where supported,
+            but no room can prevent someone recording with another device.
           </p>
         ) : null}
 
@@ -463,13 +502,15 @@ export function SneakyLynkCreateScreen() {
                 {invitees.map((invitee) => (
                   <span
                     key={invitee.authId}
-                    className="flex items-center gap-2 bg-[#06070d] px-3 py-1.5 rounded-full"
+                    className="flex min-w-0 max-w-full items-center gap-2 bg-[#06070d] px-3 py-1.5 rounded-lg"
                   >
                     <SquareAvatar uri={invitee.avatar} username={invitee.username} size={20} />
-                    <span className="text-sm">@{invitee.username}</span>
+                    <span className="truncate text-sm">@{invitee.username}</span>
                     <button
                       type="button"
-                      onClick={() => removeInvitee(invitee.authId)}
+                      disabled={isCreating}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg focus-visible:outline focus-visible:outline-white"
+                      onClick={() => { draftRevisionRef.current += 1; removeInvitee(invitee.authId); }}
                       aria-label={`Remove ${invitee.username}`}
                     >
                       <X size={12} className="text-white/60" />
@@ -479,26 +520,36 @@ export function SneakyLynkCreateScreen() {
               </div>
             ) : null}
 
+            <label htmlFor="lynk-invite-search" className="sr-only">Search people to invite</label>
             <input
+              id="lynk-invite-search"
+              disabled={isCreating}
+              aria-describedby="lynk-search-status"
               value={inviteSearch}
               onChange={(e) => setInviteSearch(e.target.value)}
               placeholder="Search by username..."
               autoCapitalize="none"
               autoCorrect="off"
-              className="w-full py-2.5 text-[15px] text-white placeholder:text-white/40 bg-transparent outline-none"
+              className="w-full rounded-lg px-2 py-2.5 text-[15px] text-white placeholder:text-white/40 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-[#FC253A]/60"
             />
 
+            <div id="lynk-search-status" role="status" aria-live="polite" className="text-sm text-white/60">
+              {inviteSearchState.isSearching ? "Searching people…" : inviteSearchState.isError ? "Couldn’t search people. Your selected invitations are saved." : inviteSearchState.isEmpty ? "No more people found. Try another username." : inviteSearch.trim().length < 2 ? "Type at least 2 characters to find people." : null}
+              {inviteSearchState.isError && <button type="button" onClick={inviteSearchState.retry} className="ml-2 min-h-11 font-semibold text-white underline underline-offset-4">Try again</button>}
+            </div>
             {inviteResults.length > 0 ? (
               <div className="mt-2 border-t border-white/10 pt-2">
                 {inviteResults.map((user) => (
                   <button
                     key={user.authId}
                     type="button"
-                    onClick={() => addInvitee(user)}
-                    className="flex w-full items-center gap-3 py-2.5 text-left active:bg-white/5"
+                    disabled={isCreating}
+                    aria-label={`Invite ${user.username}`}
+                    onClick={() => { draftRevisionRef.current += 1; addInvitee(user); }}
+                    className="flex min-h-11 w-full items-center gap-3 rounded-lg py-2.5 text-left hover:bg-white/5 focus-visible:outline focus-visible:outline-white"
                   >
                     <SquareAvatar uri={user.avatar} username={user.username} size={32} />
-                    <span className="flex-1 text-sm font-semibold">@{user.username}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">@{user.username}</span>
                     <Plus size={16} color={ACCENT} />
                   </button>
                 ))}
@@ -512,15 +563,22 @@ export function SneakyLynkCreateScreen() {
           </div>
         ) : null}
 
+        <section aria-label="Room summary" className="rounded-xl border border-white/10 px-4 py-3">
+          <p className="text-sm font-semibold">{hasVideo ? "Audio + video" : "Audio room"} · {isPublic ? "Public" : "Private"}</p>
+          <p className="mt-1 text-xs leading-5 text-white/60">{appOnly ? "DVNT app required for everyone." : "Join from the app or a supported browser."}{!isPublic ? ` ${invitees.length} ${invitees.length === 1 ? "person" : "people"} selected to invite.` : ""}</p>
+        </section>
+        {createError && <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-400/25 bg-red-500/10 p-4 text-sm leading-6 text-red-100"><AlertCircle size={18} className="mt-1 shrink-0" /><span>{createError}</span></div>}
         {/* Create button */}
         <button
           type="button"
-          onClick={() => guardVerified("sneaky_lynk", () => void handleCreate())}
+          onClick={handleStart}
           disabled={!canCreate}
-          className="py-4 rounded-full text-center font-bold text-base text-white disabled:opacity-50"
+          aria-busy={isCreating}
+          className="flex min-h-12 items-center justify-center gap-2 py-4 rounded-lg text-center font-bold text-base text-white disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
           style={{ backgroundColor: ACCENT }}
         >
-          {isCreating ? "Creating..." : "Start Lynk"}
+          {isCreating && <Loader2 size={18} className="motion-safe:animate-spin" aria-hidden="true" />}
+          {isCreating ? "Starting your Lynk…" : "Start Lynk"}
         </button>
 
         <p className="text-xs text-white/60 text-center">

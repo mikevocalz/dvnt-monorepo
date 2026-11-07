@@ -40,6 +40,8 @@ export interface SneakyRoom {
   description: string;
   sweetSpicyMode?: "sweet" | "spicy";
   isLive: boolean;
+  /** False when a fallback discovery read cannot verify roster presence. */
+  presenceKnown?: boolean;
   hasVideo: boolean;
   isPublic: boolean;
   status: RoomStatus;

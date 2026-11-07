@@ -43,7 +43,7 @@ const native = readFileSync(new URL("../routes/screens/(protected)/sneaky-lynk/r
 const web = readFileSync(new URL("./screens/room.web.tsx", import.meta.url), "utf8");
 
 test("native and web entry use status, never presence or an event-only access probe, to close rooms", () => {
-  assert.match(native, /getRoomEntryStatus\(roomLookup.room\) !== "prejoin"/);
+  assert.match(native, /getRoomEntryStatus\(currentLookup\?\.room \?\? null\) !== "prejoin"/);
   assert.match(native, /getRoomEntryStatus\(initialRoom\) === "ended"/);
   assert.match(native, /getRoomEntryStatus\(latestRoom\) === "ended"/);
   assert.match(web, /getRoomEntryStatus\(room\) === "ended"/);

@@ -27,6 +27,6 @@ test('expired grants fall back to free while paid Founders wins over VIP',()=>{
 });
 test('web and native create screens render the shared membership summary, never legacy prices',()=>{
  for(const rel of ['../../features/sneaky-lynk/screens/create.web.tsx','../../features/routes/screens/(protected)/sneaky-lynk/create.tsx']){
- const s=readFileSync(new URL(rel,import.meta.url),'utf8');assert.match(s,/lynkCreateSummary\(useEntitlements\(\)\)/);assert.match(s,/membership\.title/);assert.match(s,/membership\.benefits\.map/);assert.doesNotMatch(s,/\$15 \/ mo|\$25 \/ mo|Unlimited screens|Up to 15 screens/);
+ const s=readFileSync(new URL(rel,import.meta.url),'utf8');assert.match(s,/const entitlementState = useEntitlements\(\)/);assert.match(s,/lynkCreateSummary\(entitlementState\)/);assert.match(s,/on(?:Click|Press)=\{entitlementState\.refetch\}/);assert.match(s,/membership\.title/);assert.match(s,/membership\.benefits\.map/);assert.doesNotMatch(s,/\$15 \/ mo|\$25 \/ mo|Unlimited screens|Up to 15 screens/);
  }
 });

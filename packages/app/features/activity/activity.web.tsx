@@ -1,3 +1,4 @@
+import { cohostActivityRoute } from "@dvnt/app/features/sneaky-lynk/cohost-invite-policy";
 "use client";
 import { markActivityRead, markAllActivityRead } from "@dvnt/app/lib/activity/mark-activity-read";
 import { webEventDetailRoute } from "@dvnt/app/lib/events/event-detail-route";
@@ -182,6 +183,8 @@ function PostThumb({ src, className }: { src: string; className: string }) {
 // ── Web route helpers (clean web routes, NOT native (protected) groups) ──────
 export function webRouteForActivity(activity: Activity): string {
   const { type, entityType, entityId, post, postId, event, user } = activity;
+  const cohostRoute = cohostActivityRoute(type, "web");
+  if (cohostRoute) return cohostRoute;
   const detailPostId = post?.id || postId || (entityType === "post" ? entityId : undefined);
 
   // Promoter taps land on the promoter dashboard, not the public event
@@ -286,6 +289,9 @@ function ActivityIcon({ type }: { type: Activity["type"] }) {
     case "event_time_changed":
     case "event_venue_changed":
       return <Calendar size={14} color="#10B981" />;
+    case "lynk_cohost_invited":
+    case "lynk_cohost_accepted":
+    case "lynk_cohost_declined":
     case "room_invite":
     case "sneaky_lynk":
       return <Radio size={14} color="#38BDF8" />;
@@ -361,6 +367,12 @@ function getActivityText(activity: Activity): string {
       return roomInviteActivityText(
         activity.event?.title || activity.payload?.event_title,
       );
+    case "lynk_cohost_invited":
+      return " invited you to co-host a Lynk.";
+    case "lynk_cohost_accepted":
+      return " accepted your invitation to co-host a Lynk.";
+    case "lynk_cohost_declined":
+      return " declined your invitation to co-host a Lynk.";
     case "sneaky_lynk":
       return " invited you to a Sneaky Lynk.";
     default:
@@ -896,10 +908,6 @@ export function ActivityScreen() {
           ) : null}
         </div>
 
-      {/* Pending co-host invitations sit ABOVE the feed: they are the only rows
-          here that expire, and an invite you scroll past is an invite you
-          missed. Renders nothing when there are none. */}
-      <PendingCohostInvites />
         {!showLiked && unreadCount > 0 ? (
           <button
             type="button"
@@ -914,6 +922,7 @@ export function ActivityScreen() {
       </div>
 
       <main className="mx-auto w-full max-w-2xl px-4 py-4">
+        {!showLiked && <PendingCohostInvites />}
         {queryError && activeTab !== "Liked" && (
           <div role="alert" className="mb-4 rounded-xl bg-white/10 p-3 text-sm">
             <span>Notifications couldn't refresh. Your saved activity is still available. </span>

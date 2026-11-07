@@ -1,3 +1,4 @@
+import { cohostActivityRoute } from "@dvnt/app/features/sneaky-lynk/cohost-invite-policy";
 /**
  * Notification Router — DVNT
  *
@@ -33,6 +34,9 @@ export type NotificationPayloadType =
   | "event_update"
   | "event_broadcast"
   | "event_promoter_added"
+  | "lynk_cohost_invited"
+  | "lynk_cohost_accepted"
+  | "lynk_cohost_declined"
   | "sneaky_lynk"
   | "room_invite"
   | "call"
@@ -72,6 +76,10 @@ export function routeFromNotification(
   data: NotificationData | null | undefined,
 ): string | null {
   if (!data) return null;
+
+  // Co-host pushes open explicit choices, even if a legacy payload also has a URL.
+  const cohostRoute = cohostActivityRoute(data.type ?? "", "native");
+  if (cohostRoute) return cohostRoute;
 
   // 1. Canonical URL wins — run through Link Engine so we get the same
   //    parsing/auth-gating as any other deep link.

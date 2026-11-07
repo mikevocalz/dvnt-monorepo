@@ -95,9 +95,11 @@ import { useRoomStore } from "@dvnt/app/features/sneaky-lynk";
 import { useLynkHistoryStore } from "@dvnt/app/features/sneaky-lynk";
 import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
 import { getRoomEntryStatus } from "@dvnt/app/features/sneaky-lynk/room-entry-status";
+import { getRoomEntryIdentity, type RoomEntryIdentity } from "@dvnt/app/features/sneaky-lynk/api/room-entry-identity";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { audioSession } from "@dvnt/app/features/services/calls/audioSession";
 import { shareUrl } from "@dvnt/app/lib/deep-linking/share-link";
+import { roomShareCopy } from "@dvnt/app/features/sneaky-lynk/room-sharing";
 import {
   DVNTLiquidGlass,
   DVNTLiquidGlassIconButton,
@@ -347,18 +349,26 @@ const LYNKS_LIST_ROUTE = "/messages";
 function PreJoinScreen({
   roomTitle,
   hasVideo,
+  identity,
+  isCurrent,
+  onReviewChange,
   onJoin,
   onBack,
 }: {
   roomTitle: string;
   hasVideo: boolean;
+  identity: RoomEntryIdentity;
+  isCurrent: () => boolean;
+  onReviewChange: () => void;
   onJoin: (anonymous: boolean, cameraOn: boolean, micOn: boolean) => void;
   onBack: () => void;
 }) {
   const insets = useSafeAreaInsets();
   // Nothing captures until the user chooses it. A preview is local, never a
   // promise that the room can already see or hear this device.
-  const [anonymous, setAnonymous] = useState(false);
+  const [anonymousChoice, setAnonymous] = useState(false);
+  const identityLocked = identity.kind === "active";
+  const anonymous = identity.kind === "active" ? identity.anonymous : anonymousChoice;
   const [cameraOn, setCameraOn] = useState(false);
   const [micOn, setMicOn] = useState(false);
   const [permissionBusy, setPermissionBusy] = useState(false);
@@ -371,11 +381,12 @@ function PreJoinScreen({
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const { hasPermission: cameraPermission, requestPermission: requestCamera } = useCameraPermission();
   const { hasPermission: micPermission, requestPermission: requestMic } = useMicrophonePermission();
-  const previewEnabled = hasVideo && cameraOn && cameraPermission;
+  const previewEnabled = hasVideo && cameraOn && cameraPermission && isCurrent();
   const previewCamera = useCamera({ enabled: previewEnabled });
 
   const toggleDevice = async (device: "camera" | "microphone") => {
-    if (permissionBusyRef.current) return;
+    if (permissionBusyRef.current || !isCurrent()) return;
+    onReviewChange();
     const isCamera = device === "camera";
     const enabled = isCamera ? cameraOn : micOn;
     const setEnabled = isCamera ? setCameraOn : setMicOn;
@@ -388,15 +399,17 @@ function PreJoinScreen({
         ? cameraPermission || await requestCamera()
         : micPermission || await requestMic();
       if (!previewLifetimeRef.current) return;
+      if (!isCurrent()) return;
       setEnabled(granted);
       if (!granted) setPermissionError(`${isCamera ? "Camera" : "Microphone"} access is off. You can join without it, or enable access in device settings.`);
     } catch {
       if (!previewLifetimeRef.current) return;
+      if (!isCurrent()) return;
       setEnabled(false);
       setPermissionError(`Couldn't access your ${device}. You can still join with it off.`);
     } finally {
       permissionBusyRef.current = false;
-      if (previewLifetimeRef.current) setPermissionBusy(false);
+      if (previewLifetimeRef.current && isCurrent()) setPermissionBusy(false);
     }
   };
 
@@ -443,24 +456,29 @@ function PreJoinScreen({
           </View>
           {permissionError ? <View accessibilityRole="alert" style={{ padding: 14, gap: 8, backgroundColor: "rgba(245,197,24,0.08)", borderRadius: 12 }}>
             <Text style={{ color: "#FDE68A", fontSize: 13, lineHeight: 19 }}>{permissionError}</Text>
-            <Pressable onPress={() => void Linking.openSettings().catch(() => setPermissionError("Open your device settings to allow camera or microphone access for DVNT."))} accessibilityRole="button" style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: "#3FDCFF", fontWeight: "600" }}>Open device settings</Text></Pressable>
+            <Pressable onPress={() => void Linking.openSettings().catch(() => { if (previewLifetimeRef.current && isCurrent()) setPermissionError("Open your device settings to allow camera or microphone access for DVNT."); })} accessibilityRole="button" style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: "#3FDCFF", fontWeight: "600" }}>Open device settings</Text></Pressable>
           </View> : null}
           <View style={{ borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", padding: 16, gap: 12 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
               <EyeOff size={22} color="#B7B9C5" />
               <View style={{ flex: 1, gap: 4 }}>
-                <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>Hide my profile</Text>
-                <Text style={{ color: "#AEB3C2", fontSize: 13, lineHeight: 18 }}>Use an anonymous label in the room.</Text>
+                <Text style={{ color: "#fff", fontSize: 15, fontWeight: "600" }}>{identityLocked ? "Your room identity" : "Hide my profile"}</Text>
+                <Text style={{ color: "#AEB3C2", fontSize: 13, lineHeight: 18 }}>{identity.kind === "active"
+                  ? identity.anonymous
+                    ? `Rejoining as ${normalizeSneakyAnonLabel(identity.anonLabel) || "your anonymous label"}. Your existing room identity is kept.`
+                    : "Your profile remains visible in this room. Your existing room identity is kept."
+                  : "Use an anonymous label in the room."}</Text>
               </View>
-              <Switch accessibilityLabel="Hide my profile with an anonymous label" value={anonymous} onValueChange={setAnonymous} trackColor={{ false: "#343744", true: "#8A40CF" }} thumbColor="#fff" />
+              {!identityLocked ? <Switch accessibilityLabel="Hide my profile with an anonymous label" value={anonymous} onValueChange={(value) => { if (!isCurrent()) return; onReviewChange(); setAnonymous(value); }} trackColor={{ false: "#343744", true: "#8A40CF" }} thumbColor="#fff" /> : null}
             </View>
+            {identityLocked ? <Text style={{ color: "#AEB3C2", fontSize: 13, lineHeight: 20 }}>Going back does not end this Lynk or remove your existing membership. This device shares media only after you join.</Text> : null}
             {anonymous ? <Text style={{ color: "#D3D5DE", fontSize: 13, lineHeight: 20 }}>Your profile is hidden, but your camera and voice can identify you. Detected screenshots may identify your account to the host.</Text> : null}
           </View>
           <View style={{ gap: 6 }}>
             <Text style={{ color: "#D3D5DE", fontSize: 13, fontWeight: "600" }}>Be present. Respect privacy.</Text>
             <Text style={{ color: "#AEB3C2", fontSize: 13, lineHeight: 20 }}>Recording is prohibited. Screenshots may notify the room. Capture protection varies by device and cannot prevent someone recording with another device.</Text>
           </View>
-          <Pressable accessibilityRole="button" accessibilityLabel={anonymous ? "Join Lynk anonymously" : "Join Lynk"} accessibilityState={{ disabled: permissionBusy }} disabled={permissionBusy} onPress={() => onJoin(anonymous, previewEnabled, micOn && micPermission)} style={({ pressed }) => ({ borderRadius: 8, overflow: "hidden", opacity: permissionBusy ? 0.5 : pressed ? 0.85 : 1 })}>
+          <Pressable accessibilityRole="button" accessibilityLabel={anonymous ? "Join Lynk anonymously" : "Join Lynk"} accessibilityState={{ disabled: permissionBusy }} disabled={permissionBusy} onPress={() => { if (!permissionBusyRef.current && isCurrent()) onJoin(anonymous, previewEnabled, micOn && micPermission); }} style={({ pressed }) => ({ borderRadius: 8, overflow: "hidden", opacity: permissionBusy ? 0.5 : pressed ? 0.85 : 1 })}>
             <LinearGradient colors={["#3FDCFF", "#8A40CF", "#FF5BFC"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ minHeight: 56, alignItems: "center", justifyContent: "center" }}>
               <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>{anonymous ? "Join anonymously" : "Join Lynk"}</Text>
             </LinearGradient>
@@ -479,142 +497,194 @@ function SneakyLynkRoomScreenContent({
 }: {
   billing?: SneakyBilling | null;
 }) {
-  // Capture protection is mounted INSIDE ServerRoom + LocalRoom, not
-  // here, so the local screenshot listener has access to roomId +
-  // localUser for room-wide broadcast. Ref counter inside the hook
-  // guarantees a single active listener even if both child variants
-  // ever mount simultaneously.
-
-  const {
-    id,
-    title: paramTitle,
-    hasVideo: hasVideoParam,
-    isHost: isHostParam,
-  } = useLocalSearchParams<{
+  // Capture protection lives inside the actual room. This entry screen never
+  // joins or publishes until the person has reviewed their media choices.
+  const { id, title: paramTitle, hasVideo: hasVideoParam } = useLocalSearchParams<{
     id: string;
     title?: string;
     hasVideo?: string;
-    isHost?: string;
   }>();
   const router = useRouter();
+  const navigation = useNavigation();
+  const isFocused = useIsFocused();
+  const focusedRef = useRef(isFocused);
+  focusedRef.current = isFocused;
+  const [reviewGeneration, setReviewGeneration] = useState(0);
+  const reviewEpochRef = useRef(0);
+  const insets = useSafeAreaInsets();
+  const accountKey = useAuthStore((state) => state.user?.authId || state.user?.id || "");
+  const [accountGeneration, setAccountGeneration] = useState(0);
+  const accountEpochRef = useRef(0);
+  const entryLifetimeRef = useRef(false);
+  const exitedRef = useRef(false);
+  const joinIntentRef = useRef(0);
+  const joinedKeyRef = useRef<string | null>(null);
+  const lookupBusyRef = useRef(false);
+  const [lookupAttempt, setLookupAttempt] = useState(0);
+  const entryKey = JSON.stringify([id, accountKey, accountGeneration]);
+  const entryKeyRef = useRef(entryKey);
+  if (entryKeyRef.current !== entryKey) {
+    entryKeyRef.current = entryKey;
+    exitedRef.current = false;
+    joinedKeyRef.current = null;
+    joinIntentRef.current += 1;
+    lookupBusyRef.current = false;
+  }
+  const renderedAccountEpoch = accountEpochRef.current;
+  const isCurrentEntry = useCallback(() => entryLifetimeRef.current && !exitedRef.current &&
+    entryKeyRef.current === entryKey && accountEpochRef.current === renderedAccountEpoch &&
+    (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === accountKey,
+  [accountKey, entryKey, renderedAccountEpoch]);
 
-  // Default to true when param is absent (e.g. deep-link recipients who didn't
-  // pass hasVideo in the URL). Only force-off when the param is explicitly "0".
-  const roomHasVideo = hasVideoParam !== "0";
-  const isServerRoom = !id?.startsWith("space-") && id !== "my-room";
-
-  // Host (creator) skips the pre-join screen entirely
-  const isCreator = isHostParam === "1";
-  const shouldGateJoin = isServerRoom && !isCreator;
-  // Pre-join state for server rooms (joiners, not creators)
-  const [hasJoined, setHasJoined] = useState(!isServerRoom || isCreator);
-  const [joinAnonymous, setJoinAnonymous] = useState(false);
-  // How you said you wanted to arrive at the door. The room used to start
-  // camera and mic regardless, which made the pre-join choice decoration.
-  const [joinCameraOn, setJoinCameraOn] = useState(true);
-  const [joinMicOn, setJoinMicOn] = useState(true);
-  const [roomLookup, setRoomLookup] = useState<{
-    loading: boolean;
-    room: SneakyRoom | null;
-  }>({
-    loading: shouldGateJoin,
-    room: null,
-  });
+  const renderedReviewEpoch = reviewEpochRef.current;
+  const isCurrentReview = useCallback(() => isCurrentEntry() && focusedRef.current &&
+    reviewEpochRef.current === renderedReviewEpoch,
+  [isCurrentEntry, renderedReviewEpoch]);
 
   useEffect(() => {
-    if (!shouldGateJoin || !id) return;
+    const removeBlur = navigation.addListener("blur", () => {
+      focusedRef.current = false;
+      reviewEpochRef.current += 1;
+      joinIntentRef.current += 1;
+      setReviewGeneration((generation) => generation + 1);
+    });
+    const removeFocus = navigation.addListener("focus", () => { focusedRef.current = true; });
+    return () => { removeBlur(); removeFocus(); };
+  }, [navigation]);
+  useEffect(() => {
+    entryLifetimeRef.current = true;
+    return () => { entryLifetimeRef.current = false; joinIntentRef.current += 1; };
+  }, []);
+  useEffect(() => useAuthStore.subscribe((next, previous) => {
+    if ((next.user?.authId || next.user?.id) === (previous.user?.authId || previous.user?.id)) return;
+    // A → B → A can happen before React renders. Never revive a lookup,
+    // verification callback or media choice from the previous account session.
+    accountEpochRef.current += 1;
+    joinIntentRef.current += 1;
+    joinedKeyRef.current = null;
+    setAccountGeneration((generation) => generation + 1);
+  }), []);
 
-    let cancelled = false;
-    setRoomLookup({ loading: true, room: null });
+  const roomHasVideo = hasVideoParam !== "0";
+  const isServerRoom = !id?.startsWith("space-") && id !== "my-room";
+  const [reviewedJoin, setReviewedJoin] = useState<{
+    key: string;
+    anonymous: boolean;
+    cameraOn: boolean;
+    micOn: boolean;
+  } | null>(null);
+  const [roomLookup, setRoomLookup] = useState<{
+    key: string;
+    status: "loading" | "ready" | "error";
+    room: SneakyRoom | null;
+    identity: RoomEntryIdentity | null;
+    error?: string;
+  }>({ key: entryKey, status: "loading", room: null, identity: null });
+  const currentLookup = roomLookup.key === entryKey ? roomLookup : null;
+  const currentLookupRef = useRef(currentLookup);
+  currentLookupRef.current = currentLookup;
 
-    (async () => {
-      const room = await sneakyLynkApi.getRoomById(id);
-      if (!cancelled) {
-        setRoomLookup({ loading: false, room });
+  useEffect(() => {
+    if (!isServerRoom || !isCurrentEntry()) return;
+    let active = true;
+    const isCurrent = () => active && isCurrentEntry();
+    lookupBusyRef.current = true;
+    joinIntentRef.current += 1;
+    setRoomLookup({ key: entryKey, status: "loading", room: null, identity: null });
+    const timer = setTimeout(() => {
+      if (!isCurrent()) return;
+      active = false;
+      lookupBusyRef.current = false;
+      setRoomLookup({ key: entryKey, status: "error", room: null, identity: null,
+        error: "This Lynk is taking too long to load. Check your connection and try again." });
+    }, 15_000);
+    void (async () => {
+      try {
+        if (!id) throw new Error("Missing room");
+        const [room, identity] = await Promise.all([
+          sneakyLynkApi.getRoomById(id, { throwOnError: true }),
+          getRoomEntryIdentity(id, { isCurrent }),
+        ]);
+        if (!isCurrent()) return;
+        lookupBusyRef.current = false;
+        clearTimeout(timer);
+        setRoomLookup(room
+          ? { key: entryKey, status: "ready", room, identity }
+          : { key: entryKey, status: "error", room: null, identity: null,
+            error: "This Lynk is unavailable. It may have ended, or you may need an invitation. You can try again." });
+      } catch {
+        if (!isCurrent()) return;
+        lookupBusyRef.current = false;
+        clearTimeout(timer);
+        setRoomLookup({ key: entryKey, status: "error", room: null, identity: null,
+          error: "We couldn't load this Lynk. Check your connection and try again." });
       }
     })();
+    return () => { active = false; clearTimeout(timer); };
+  }, [entryKey, id, isCurrentEntry, isServerRoom, lookupAttempt]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [id, shouldGateJoin]);
-
-  // Verified-only: joining a Lynk needs a verified account. The pre-join
-  // screen stays up behind the popup.
+  const handleBack = useCallback(() => {
+    exitedRef.current = true;
+    joinIntentRef.current += 1;
+    router.replace(LYNKS_LIST_ROUTE);
+  }, [router]);
+  const handleRetryLookup = useCallback(() => {
+    if (!isCurrentEntry() || lookupBusyRef.current) return;
+    lookupBusyRef.current = true;
+    joinIntentRef.current += 1;
+    setLookupAttempt((attempt) => attempt + 1);
+  }, [isCurrentEntry]);
+  const handleReviewChange = useCallback(() => { joinIntentRef.current += 1; }, []);
   const guardVerified = useVerifiedGate();
-  const handleJoin = useCallback(
-    (anonymous: boolean, cameraOn: boolean, micOn: boolean) => {
-      guardVerified("sneaky_lynk", () => {
-        setJoinAnonymous(anonymous);
-        setJoinCameraOn(cameraOn);
-        setJoinMicOn(micOn);
-        setHasJoined(true);
-      });
-    },
-    [guardVerified],
-  );
+  const handleJoin = useCallback((anonymous: boolean, cameraOn: boolean, micOn: boolean) => {
+    const lookup = currentLookupRef.current;
+    if (!isCurrentReview() || joinedKeyRef.current === entryKey || lookup?.status !== "ready" ||
+      !lookup.identity || getRoomEntryStatus(lookup.room) !== "prejoin") return;
+    const intent = ++joinIntentRef.current;
+    guardVerified("sneaky_lynk", () => {
+      if (!isCurrentReview() || joinIntentRef.current !== intent || joinedKeyRef.current === entryKey ||
+        currentLookupRef.current !== lookup) return;
+      joinedKeyRef.current = entryKey;
+      setReviewedJoin({ key: entryKey,
+        anonymous: lookup.identity!.kind === "active" ? lookup.identity!.anonymous : anonymous,
+        cameraOn: cameraOn && (lookup.room?.hasVideo ?? roomHasVideo), micOn });
+    });
+  }, [entryKey, guardVerified, isCurrentReview, roomHasVideo]);
 
-  if (shouldGateJoin && roomLookup.loading) {
+  if (isServerRoom && (!currentLookup || currentLookup.status !== "ready")) {
+    const error = currentLookup?.status === "error" ? currentLookup.error : null;
     return (
-      <View className="flex-1 bg-background items-center justify-center">
-        <ActivityIndicator size="large" color="#FC253A" />
-        <Text className="text-muted-foreground mt-4">Loading Lynk...</Text>
+      <View style={{ flex: 1, backgroundColor: "#06070D", paddingTop: insets.top, paddingBottom: insets.bottom }}>
+        <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+          <Pressable onPress={handleBack} accessibilityRole="button" accessibilityLabel="Back to Lynks" style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}><ArrowLeft size={22} color="#fff" /></Pressable>
+        </View>
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 16 }}>
+          {error ? <Radio size={36} color="#3FDCFF" /> : <ActivityIndicator size="large" color="#3FDCFF" accessibilityLabel="Loading Lynk" />}
+          <Text accessibilityRole="header" style={{ color: "#fff", fontSize: 24, fontWeight: "700", textAlign: "center" }}>{error ? "Couldn't open this Lynk" : "Getting your Lynk ready"}</Text>
+          <Text accessibilityRole={error ? "alert" : undefined} style={{ color: "#B7B9C5", fontSize: 15, lineHeight: 22, textAlign: "center", maxWidth: 360 }}>{error || "Checking the room. Your camera and microphone stay off."}</Text>
+          {error ? <Pressable onPress={handleRetryLookup} accessibilityRole="button" accessibilityLabel="Try loading Lynk again" style={{ minHeight: 52, width: "100%", maxWidth: 360, alignItems: "center", justifyContent: "center", backgroundColor: "#3FDCFF", borderRadius: 8 }}><Text style={{ color: "#06070D", fontWeight: "700", fontSize: 15 }}>Try again</Text></Pressable> : null}
+          <Pressable onPress={handleBack} accessibilityRole="button" style={{ minHeight: 48, alignItems: "center", justifyContent: "center" }}><Text style={{ color: "#C5C7D1", fontWeight: "600", fontSize: 14 }}>Back to Lynks</Text></Pressable>
+        </View>
       </View>
     );
   }
-
-  if (
-    shouldGateJoin &&
-    getRoomEntryStatus(roomLookup.room) !== "prejoin"
-  ) {
-    return (
-      <ClosedRoomScreen
-        roomTitle={roomLookup.room?.title || paramTitle || getLynkDisplayName()}
-        message={
-          roomLookup.room
-            ? "This Lynk has ended and can't be reopened."
-            : "This Lynk is unavailable."
-        }
-        onBack={() => router.replace(LYNKS_LIST_ROUTE)}
-      />
-    );
+  if (isServerRoom && getRoomEntryStatus(currentLookup?.room ?? null) !== "prejoin") {
+    return <ClosedRoomScreen roomTitle={currentLookup?.room?.title || paramTitle || getLynkDisplayName()}
+      message="This Lynk has ended and can't be reopened." onBack={handleBack} />;
   }
-
-  // Show pre-join screen for server rooms
-  if (isServerRoom && !hasJoined) {
-    return (
-      <PreJoinScreen
-        hasVideo={roomLookup.room?.hasVideo ?? roomHasVideo}
-        roomTitle={roomLookup.room?.title || paramTitle || getLynkDisplayName()}
-        onJoin={handleJoin}
-        onBack={() => router.replace(LYNKS_LIST_ROUTE)}
-      />
-    );
+  if (isServerRoom && reviewedJoin?.key !== entryKey) {
+    return <PreJoinScreen key={`${entryKey}:${reviewGeneration}`} hasVideo={currentLookup?.room?.hasVideo ?? roomHasVideo}
+      roomTitle={currentLookup?.room?.title || paramTitle || getLynkDisplayName()}
+      identity={currentLookup!.identity!} isCurrent={isCurrentReview} onReviewChange={handleReviewChange}
+      onJoin={handleJoin} onBack={handleBack} />;
   }
-
-  if (isServerRoom) {
-    return (
-      <ServerRoom
-        key={id}
-        id={id}
-        paramTitle={paramTitle}
-        roomHasVideo={roomLookup.room?.hasVideo ?? roomHasVideo}
-        anonymous={joinAnonymous}
-        initialCameraOn={joinCameraOn}
-        initialMicOn={joinMicOn}
-        initialRoom={roomLookup.room}
-        billing={billing}
-      />
-    );
+  if (isServerRoom && reviewedJoin) {
+    return <ServerRoom key={entryKey} id={id} paramTitle={paramTitle}
+      roomHasVideo={currentLookup?.room?.hasVideo ?? roomHasVideo} anonymous={reviewedJoin.anonymous}
+      initialCameraOn={reviewedJoin.cameraOn} initialMicOn={reviewedJoin.micOn}
+      initialRoom={currentLookup?.room ?? null} billing={billing} />;
   }
-  return (
-    <LocalRoom
-      id={id}
-      paramTitle={paramTitle}
-      roomHasVideo={roomHasVideo}
-      billing={billing}
-    />
-  );
+  return <LocalRoom id={id} paramTitle={paramTitle} roomHasVideo={roomHasVideo} billing={billing} />;
 }
 
 // ── LocalRoom: direct MoQ capture, NO useVideoRoom ─────────────────
@@ -819,7 +889,7 @@ function LocalRoom({
       message: `Join "${roomTitle}" on DVNT\n${shareTargetUrl}`,
     });
     if (shareResult === "shared") {
-      showToast("success", "Invite Shared", "Your Lynk invite is ready.");
+      showToast("success", "Lynk link shared", "Room access rules still apply.");
       return;
     }
 
@@ -1989,58 +2059,28 @@ function ServerRoom({
   ]);
   const handleChat = useCallback(() => openChat(), [openChat]);
   const handleCloseChat = useCallback(() => closeChat(), [closeChat]);
+  const shareContextRef = useRef({ status: roomSnapshot?.status ?? videoRoom.room?.status });
+  shareContextRef.current = { status: roomSnapshot?.status ?? videoRoom.room?.status };
   const handleShare = useCallback(async () => {
-    if (shareInFlightRef.current) {
-      return;
-    }
-
-    const isLiveRoom =
-      !closedReason &&
-      (roomSnapshot?.status ?? videoRoom.room?.status ?? "open") === "open";
-
-    if (!isLiveRoom) {
-      showToast(
-        "info",
-        "Lynk Unavailable",
-        "This Lynk is no longer live to share.",
-      );
-      return;
-    }
-
+    const epoch = leaveLifetimeRef.current.epoch;
+    const authEpoch = authIntentEpochRef.current;
+    const owner = authUser?.authId || authUser?.id || "";
+    const isCurrent = () => leaveLifetimeRef.current.active && leaveLifetimeRef.current.epoch === epoch &&
+      authIntentEpochRef.current === authEpoch && !leavingRef.current && !closedReasonRef.current &&
+      shareContextRef.current.status === "open" &&
+      (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === owner;
+    if (shareInFlightRef.current || !isCurrent()) return;
     shareInFlightRef.current = true;
-
+    const copy = roomShareCopy(roomTitle, roomSnapshot?.isPublic ?? videoRoom.room?.isPublic);
     try {
       const shareTargetUrl = buildLynkShareUrl(id, roomHasVideo);
-      const shareResult = await shareUrl(shareTargetUrl, {
-        title: roomTitle,
-        message: `Jump into "${roomTitle}" on DVNT\n${shareTargetUrl}`,
-      });
-      if (shareResult === "shared") {
-        showToast("success", "Invite Shared", "Your Lynk invite is ready.");
-        return;
-      }
-
-      if (shareResult === "error") {
-        showToast(
-          "error",
-          "Share Failed",
-          "We couldn't open the share sheet right now.",
-        );
-        return;
-      }
-
-      showToast("info", "Share Cancelled", "Invite sharing was dismissed.");
-    } finally {
-      shareInFlightRef.current = false;
-    }
-  }, [
-    closedReason,
-    id,
-    roomSnapshot?.status,
-    roomTitle,
-    showToast,
-    videoRoom.room?.status,
-  ]);
+      const result = await shareUrl(shareTargetUrl, { title: roomTitle, message: `${copy.text}\n${shareTargetUrl}` });
+      if (!isCurrent()) return;
+      if (result === "shared") showToast("success", "Lynk link shared", copy.confirmation);
+      if (result === "error") showToast("error", "Couldn't share this Lynk", "Try sharing again in a moment.");
+      // Dismissing a system sheet is a normal choice, not an error toast.
+    } finally { shareInFlightRef.current = false; }
+  }, [authUser?.authId, authUser?.id, id, roomHasVideo, roomSnapshot?.isPublic, roomTitle, showToast, videoRoom.room?.isPublic]);
 
   const handleReportRoom = useCallback(async () => {
     if (reportInFlightRef.current) {

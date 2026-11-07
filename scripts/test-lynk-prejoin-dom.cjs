@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 (async () => {
   const source = fs.readFileSync(path.join(root,'packages/app/features/sneaky-lynk/screens/room.web.tsx'),'utf8');
   assert.match(source, /roomSnapshot\?\.hasVideo \?\? \(hasVideoParam !== "0"\)/, 'server audio/video mode wins over URL');
-  assert.match(source, /completePreJoin\(\{ anonymous, isCurrent: entryScope\.isCurrent, prepareJoin \}\)/);
+  assert.match(source, /completePreJoin\(\{ anonymous, isCurrent: isCurrentEntry, prepareJoin \}\)/);
   const result = await build({stdin:{resolveDir:root,loader:'tsx',contents:`
     import React,{StrictMode} from 'react';import {createRoot} from 'react-dom/client';
     import {completePreJoin} from './packages/app/features/sneaky-lynk/session/complete-prejoin';
@@ -17,7 +17,7 @@ const root = path.resolve(__dirname, '..');
     import {useRoomUIStore} from './packages/app/features/sneaky-lynk/stores/room-ui-store';
     const root=createRoot(document.getElementById('root'));
     const f=window.fixture={store:useRoomUIStore,joins:[],gate:'allow',pending:[],mounted:false,scope:0};
-    f.render=(video=true,strict=false)=>{f.mounted=true;const screen=<PreJoinSetup roomTitle="A room for friends" roomHasVideo={video} onJoin={(anonymous,prepare)=>{
+    f.render=(video=true,strict=false,identity)=>{f.mounted=true;const screen=<PreJoinSetup roomTitle="A room for friends" roomHasVideo={video} identity={identity} onJoin={(anonymous,prepare)=>{
       const scope=f.scope;const accept=()=>{if(completePreJoin({anonymous,isCurrent:()=>scope===f.scope,prepareJoin:prepare}))f.joins.push({anonymous,camera:useRoomUIStore.getState().joinCameraOn,mic:useRoomUIStore.getState().joinMicOn});};
       if(f.gate==='allow')accept();else if(f.gate==='defer')f.pending.push(accept);
     }}/>;root.render(strict?<StrictMode>{screen}</StrictMode>:screen)};
@@ -60,6 +60,8 @@ const root = path.resolve(__dirname, '..');
     f.hide();await tick();f.store.getState().reset();f.render();await wait(()=>requests.length===9);const beforeNavigation=media();requests[8].resolve(beforeNavigation);await wait(()=>window.document.querySelector('video'));f.gate='defer';button('Join Lynk').click();await tick();const stale=f.pending.shift();const count=f.joins.length;f.scope++;f.hide();await tick();f.store.getState().reset();f.render();await wait(()=>requests.length===10);const afterNavigation=media();requests[9].resolve(afterNavigation);await wait(()=>window.document.querySelector('video'));stale();await tick();assert.equal(f.joins.length,count);assert.equal(afterNavigation.track.stops,0);assert.equal(f.store.getState().phase,'prejoin');f.hide();await tick();
     // No mediaDevices (insecure/unsupported browser) is a usable recovery UI.
     Object.defineProperty(window.navigator,'mediaDevices',{value:undefined});f.store.getState().reset();f.render();await wait(()=>button('Retry camera'));assert.match(body(),/camera couldn't start/);
+    f.hide();await tick();f.store.getState().reset();f.store.getState().setJoinAnonymous(false);f.render(false,false,{kind:'active',anonymous:true,anonLabel:'Anon 07'});await tick();assert.match(body(),/Rejoining as Anon 07/);assert.equal(button('Join anonymously'),undefined);f.gate='allow';button('Join Anonymously').click();await tick();assert.equal(f.joins.at(-1).anonymous,true);
+    f.hide();await tick();f.store.getState().reset();f.store.getState().setJoinAnonymous(true);f.render(false,false,{kind:'active',anonymous:false,anonLabel:null});await tick();assert.match(body(),/Rejoining with your profile/);assert.equal(button('Join anonymously'),undefined);button('Join Lynk').click();await tick();assert.equal(f.joins.at(-1).anonymous,false);
     assert.ok(requests.every(r=>r.constraints.video===true&&r.constraints.audio===false));assert.deepEqual(errors,[]);f.unmount();
     console.log('PASS production pre-join React: audio-only privacy, pending Join/unmount cancellation, StrictMode ownership, blocked/deferred admission, capture interruption/recovery, explicit retry, truthful readiness, microphone intent, accessible anonymity, unsupported capture. Synthetic media only.');
   } finally {dom.window.close()}

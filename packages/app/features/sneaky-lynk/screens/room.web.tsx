@@ -103,6 +103,8 @@ import {
 } from "../session/useRoomSession";
 import { isActive } from "../session/machine";
 import { completePreJoin } from "../session/complete-prejoin";
+import { getRoomEntryIdentity, type RoomEntryIdentity } from "../api/room-entry-identity";
+import { roomShareCopy, shareRoomLink } from "../room-sharing";
 import { leaveRoomSafely } from "../session/leave-room";
 import { withRoomAdmissionLock } from "../session/room-admission-lock";
 import { useRoomHeartbeat } from "../hooks/useRoomHeartbeat";
@@ -1070,33 +1072,31 @@ function RoomInner({
     doLeave();
   }, [doLeave]);
 
-  // Share without leaving the room — the gap that pushed hosts to the back
-  // arrow in the first place. System share sheet when the browser has one,
-  // clipboard otherwise.
-  const shareRoom = useCallback(() => {
-    const url = `https://dvntapp.live/sneaky-lynk/room/${id}${roomHasVideo ? "?hasVideo=1" : ""}`;
+  // The system share sheet stays in this room. A copied private link is not
+  // an invitation grant, and an abandoned sheet must not copy after leaving.
+  const shareInFlightRef = useRef(false);
+  const shareContextRef = useRef({ admitted, eject, status: roomSnapshot?.status });
+  shareContextRef.current = { admitted, eject, status: roomSnapshot?.status };
+  const shareRoom = useCallback(async () => {
+    const ownerEpoch = accountEpochRef.current;
+    const leaveEpoch = leaveLifetimeRef.current.epoch;
+    const isCurrent = () => roomMountedRef.current && !leavingRef.current && leaveLifetimeRef.current.active &&
+      leaveLifetimeRef.current.epoch === leaveEpoch && accountEpochRef.current === ownerEpoch &&
+      currentAccountKeyRef.current === accountKey && shareContextRef.current.admitted && !shareContextRef.current.eject &&
+      shareContextRef.current.status !== "ended";
+    if (shareInFlightRef.current || !isCurrent()) return;
+    shareInFlightRef.current = true;
+    const url = `https://dvntapp.live/sneaky-lynk/room/${encodeURIComponent(id)}`;
     const title = roomSnapshot?.title || paramTitle || getLynkDisplayName();
-    const text = `Join "${title}" on DVNT`;
-    void (async () => {
-      try {
-        if (navigator.share) {
-          await navigator.share({ title, text, url });
-          return;
-        }
-        await navigator.clipboard.writeText(`${text}\n${url}`);
-        showToast("success", "Invite link copied", "Paste it anywhere to bring people in.");
-      } catch (err: any) {
-        // User dismissing the share sheet rejects with AbortError — not a failure.
-        if (err?.name === "AbortError") return;
-        try {
-          await navigator.clipboard.writeText(`${text}\n${url}`);
-          showToast("success", "Invite link copied", "Paste it anywhere to bring people in.");
-        } catch {
-          showToast("error", "Couldn't share", url);
-        }
-      }
-    })();
-  }, [id, roomHasVideo, roomSnapshot?.title, paramTitle, showToast]);
+    const copy = roomShareCopy(title, roomSnapshot?.isPublic);
+    try {
+      const result = await shareRoomLink({ title, text: copy.text, url, isCurrent,
+        share: navigator.share ? data => navigator.share(data) : undefined,
+        copy: navigator.clipboard?.writeText ? text => navigator.clipboard.writeText(text) : undefined });
+      if (result === "copied") showToast("success", "Lynk link copied", copy.confirmation);
+      if (result === "failed") showToast("error", "Couldn't share this Lynk", "Try sharing again from a supported browser.");
+    } finally { shareInFlightRef.current = false; }
+  }, [accountKey, id, roomSnapshot?.title, roomSnapshot?.isPublic, paramTitle, showToast]);
 
   // ── Free-host timer gate: entitlements + start time ───────────────────────
   // Mirrors the native room — a host on the free plan gets a 5-min countdown
@@ -1807,6 +1807,21 @@ export function SneakyLynkRoomScreen() {
   const router = useRouter();
   const params = useParams();
   const accountKey = useAuthStore((s) => s.user?.authId || s.user?.id || "");
+  const [accountGeneration, setAccountGeneration] = useState(0);
+  const entryAccountEpochRef = useRef(0);
+  const entryExitedRef = useRef(false);
+  const joinIntentRef = useRef(0);
+  useEffect(() => useAuthStore.subscribe((next, previous) => {
+    if ((next.user?.authId || next.user?.id) === (previous.user?.authId || previous.user?.id)) return;
+    entryAccountEpochRef.current += 1;
+    joinIntentRef.current += 1;
+    setAccountGeneration(value => value + 1);
+  }), []);
+  useEffect(() => useRoomUIStore.subscribe((next, previous) => {
+    if (next.joinAnonymous !== previous.joinAnonymous || next.joinCameraOn !== previous.joinCameraOn ||
+      next.joinMicOn !== previous.joinMicOn || next.cameraDeviceId !== previous.cameraDeviceId ||
+      next.microphoneDeviceId !== previous.microphoneDeviceId) joinIntentRef.current += 1;
+  }), []);
   const search = useSearchParams();
   const id = String((params as any)?.id ?? "");
   const paramTitle = search?.get("title") ?? undefined;
@@ -1816,20 +1831,30 @@ export function SneakyLynkRoomScreen() {
   // Default true unless explicitly "0" (deep-link recipients omit it).
   const isServerRoom = !id.startsWith("space-") && id !== "my-room";
   const isCreator = isHostParam === "1";
-  /**
-   * Arriving from an ACCEPTED co-host invite skips the pre-join gate.
-   *
-   * You already answered the question that screen asks — you tapped "Join as
-   * co-host", the server granted the seat and wrote your membership. Showing
-   * "Choose how you want to appear / Join Lynk" after that is the same decision
-   * a second time, and it is the exact dead stop this flow was built to remove.
-   * Anonymity is not offered because a co-host is a named role.
-   */
-  const viaInvite = search?.get("viaInvite") === "1";
-  const shouldGateJoin = isServerRoom && !isCreator && !viaInvite;
-  const entryScope = useRoomEntryScope(JSON.stringify([id, accountKey, shouldGateJoin]));
+  // URL flags are navigation hints, never camera/microphone consent.
+  // Hosts and accepted co-hosts review their arrival just like guests.
+  const shouldGateJoin = isServerRoom;
+  const scopeKey = JSON.stringify([id, accountKey, accountGeneration, shouldGateJoin]);
+  const previousScopeKey = useRef(scopeKey);
+  if (previousScopeKey.current !== scopeKey) {
+    previousScopeKey.current = scopeKey;
+    entryExitedRef.current = false;
+    joinIntentRef.current += 1;
+  }
+  const entryScope = useRoomEntryScope(scopeKey);
+  const accountEpoch = entryAccountEpochRef.current;
+  const isCurrentEntry = useCallback(() => !entryExitedRef.current && entryAccountEpochRef.current === accountEpoch &&
+    (useAuthStore.getState().user?.authId || useAuthStore.getState().user?.id || "") === accountKey && entryScope.isCurrent(),
+  [accountKey, accountEpoch, entryScope.isCurrent]);
+  const handleBack = useCallback(() => {
+    entryExitedRef.current = true;
+    joinIntentRef.current += 1;
+    useRoomUIStore.getState().setPhase("looking-up");
+    router.push(LYNKS_LIST_ROUTE);
+  }, [router]);
   const [lookupAttempt, setLookupAttempt] = useState(0);
   const [lookupFailed, setLookupFailed] = useState(false);
+  const [entryIdentity, setEntryIdentity] = useState<RoomEntryIdentity>({ kind: "choice" });
 
   const phase = useRoomUIStore((s) => s.phase);
   const roomSnapshot = useRoomUIStore((s) => s.roomSnapshot);
@@ -1838,7 +1863,7 @@ export function SneakyLynkRoomScreen() {
   const setRoomSnapshot = useRoomUIStore((s) => s.setRoomSnapshot);
   const setClosed = useRoomUIStore((s) => s.setClosed);
 
-  // Pre-join lookup for gated (server, non-creator) rooms.
+  // Look up every server room before media and identity review.
   useEffect(() => {
     // The render-time scope gate prevents a stale connected phase from
     // mounting a new room/account before this parent effect runs.
@@ -1847,20 +1872,28 @@ export function SneakyLynkRoomScreen() {
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     setLookupFailed(false);
+    setEntryIdentity({ kind: "choice" });
     const cleanup = () => { cancelled = true; clearTimeout(timeout); useRoomUIStore.getState().reset(); };
-    if (!shouldGateJoin || !id) {
-      setPhase("connecting"); // creators / local rooms skip pre-join
+    if (!id) {
+      setClosed("This Lynk link is incomplete.");
+      return cleanup;
+    }
+    if (!shouldGateJoin) {
+      setPhase("connecting"); // local rooms have no server admission
       return cleanup;
     }
     setPhase("looking-up");
     timeout = setTimeout(() => {
-      if (cancelled) return;
+      if (cancelled || !isCurrentEntry()) return;
       cancelled = true;
       setLookupFailed(true);
     }, 20000);
     (async () => {
-      const room = await sneakyLynkApi.getRoomById(id);
-      if (cancelled) return;
+      const [room, identity] = await Promise.all([
+        sneakyLynkApi.getRoomById(id, { throwOnError: true }),
+        getRoomEntryIdentity(id, { isCurrent: () => !cancelled && isCurrentEntry() }),
+      ]);
+      if (cancelled || !isCurrentEntry()) return;
       clearTimeout(timeout);
       if (!room) {
         setClosed("This Lynk is unavailable.");
@@ -1870,40 +1903,45 @@ export function SneakyLynkRoomScreen() {
       } else {
         if (cancelled) return;
         setRoomSnapshot(room);
+        setEntryIdentity(identity);
+        if (identity.kind === "active") useRoomUIStore.getState().setJoinAnonymous(identity.anonymous);
         setPhase("prejoin");
       }
     })().catch(() => {
-      if (cancelled) return;
+      if (cancelled || !isCurrentEntry()) return;
       clearTimeout(timeout);
       setLookupFailed(true);
     });
     return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, shouldGateJoin, accountKey, entryScope.initialize, lookupAttempt]);
+  }, [id, shouldGateJoin, accountKey, accountGeneration, entryScope.initialize, isCurrentEntry, lookupAttempt]);
 
   // Verified-only: joining a Lynk needs a verified account. The pre-join
   // screen stays up behind the popup.
   const guardVerified = useVerifiedGate();
   const handleJoin = useCallback(
     (anonymous: boolean, prepareJoin: () => void) => {
+      if (!isCurrentEntry()) return;
+      const intent = ++joinIntentRef.current;
       guardVerified("sneaky_lynk", () => {
-        completePreJoin({ anonymous, isCurrent: entryScope.isCurrent, prepareJoin });
+        if (!isCurrentEntry() || joinIntentRef.current !== intent || useRoomUIStore.getState().joinAnonymous !== anonymous) return;
+        completePreJoin({ anonymous, isCurrent: isCurrentEntry, prepareJoin });
       });
     },
-    [guardVerified, entryScope.isCurrent],
+    [guardVerified, isCurrentEntry],
   );
 
   const roomTitle = roomSnapshot?.title || paramTitle || getLynkDisplayName();
 
   if (!entryScope.ready || phase === "looking-up") {
     return (
-      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
+      <RoomShell title={roomTitle} onBack={handleBack}>
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-6 py-10 text-center">
           {!lookupFailed ? <div aria-hidden="true" className="h-8 w-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin motion-reduce:animate-none" /> : <Radio size={32} className="text-amber-200" aria-hidden="true" />}
           <h1 className="text-xl font-semibold">{lookupFailed ? "Couldn't load this Lynk" : "Getting your Lynk ready"}</h1>
           <p role="status" className="text-sm leading-6 text-white/60">{lookupFailed ? "Check your connection and try again. Your camera and microphone haven't been opened." : "Checking the room before you choose how to join."}</p>
           {lookupFailed ? <button type="button" onClick={() => { setLookupFailed(false); setLookupAttempt(value => value + 1); }} className="min-h-12 w-full rounded-xl bg-[#3FDCFF] px-5 py-3 font-semibold text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Try again</button> : null}
-          <button type="button" onClick={() => router.push(LYNKS_LIST_ROUTE)} className="min-h-11 rounded-xl bg-white/8 px-5 py-3 text-sm font-semibold hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">Back to Lynks</button>
+          <button type="button" onClick={handleBack} className="min-h-11 rounded-xl bg-white/8 px-5 py-3 text-sm font-semibold hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">Back to Lynks</button>
         </div>
       </RoomShell>
     );
@@ -1911,7 +1949,7 @@ export function SneakyLynkRoomScreen() {
 
   if (phase === "closed") {
     return (
-      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
+      <RoomShell title={roomTitle} onBack={handleBack}>
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
           <span className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-white/8">
             <Radio size={36} className="text-white/40" />
@@ -1920,7 +1958,7 @@ export function SneakyLynkRoomScreen() {
           <p className="text-white/60 mb-8">{useRoomUIStore.getState().closedReason}</p>
           <button
             type="button"
-            onClick={() => router.push(LYNKS_LIST_ROUTE)}
+            onClick={handleBack}
             className="rounded-lg bg-white/8 px-6 py-4 font-semibold active:scale-95"
           >
             Back to Lynks
@@ -1933,8 +1971,8 @@ export function SneakyLynkRoomScreen() {
   // Gated server rooms wait for the user to tap "Join" before connecting.
   if (shouldGateJoin && phase === "prejoin") {
     return (
-      <RoomShell title={roomTitle} onBack={() => router.push(LYNKS_LIST_ROUTE)}>
-        <PreJoinSetup roomTitle={roomTitle} roomHasVideo={roomHasVideo} onJoin={handleJoin} />
+      <RoomShell title={roomTitle} onBack={handleBack}>
+        <PreJoinSetup roomTitle={roomTitle} roomHasVideo={roomHasVideo} identity={entryIdentity} onJoin={handleJoin} />
       </RoomShell>
     );
   }

@@ -6,14 +6,17 @@ import { useCameraPreview } from "../../hooks/useCameraPreview.web";
 import { DeviceSelectors } from "./DeviceSelectors";
 import { useMicrophoneTest } from "../../hooks/use-microphone-test.web";
 import { useRoomUIStore } from "../../stores/room-ui-store";
+import type { RoomEntryIdentity } from "../../api/room-entry-identity";
 
-export function PreJoinSetup({ roomTitle, roomHasVideo, onJoin }: {
+export function PreJoinSetup({ roomTitle, roomHasVideo, identity, onJoin }: {
   roomTitle: string;
   roomHasVideo: boolean;
+  identity?: RoomEntryIdentity;
   /** Preparation runs only after the account gate allows this exact entry. */
   onJoin: (anonymous: boolean, prepareJoin: () => void) => void;
 }) {
-  const anonymous = useRoomUIStore(s => s.joinAnonymous);
+  const anonymousChoice = useRoomUIStore(s => s.joinAnonymous);
+  const anonymous = identity?.kind === "active" ? identity.anonymous : anonymousChoice;
   const cameraOn = useRoomUIStore(s => s.joinCameraOn);
   const micOn = useRoomUIStore(s => s.joinMicOn);
   const cameraDeviceId = useRoomUIStore(s => s.cameraDeviceId);
@@ -91,6 +94,11 @@ export function PreJoinSetup({ roomTitle, roomHasVideo, onJoin }: {
         </div> : null}
       </div>
       <div className="flex min-w-0 flex-col gap-4">
+        {identity?.kind === "active" ? <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-5" role="status">
+          <p className="font-semibold">{anonymous ? `Rejoining as ${identity.anonLabel || "Anon"}` : "Rejoining with your profile"}</p>
+          <p className="mt-2 text-xs leading-5 text-white/60">Your identity stays the same while your room membership is active. Your camera and microphone choices are yours.</p>
+          <p className="mt-2 text-xs leading-5 text-white/60">Going back does not end this Lynk or remove your existing membership. This device shares media only after you join.</p>
+        </div> : <>
         <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-5">
           <div className="flex items-center justify-between gap-4">
             <span className="flex items-center gap-3"><EyeOff size={20} className="shrink-0 text-[#FC253A]" aria-hidden="true" /><span><span className="block font-semibold">Join Anonymously</span><span className="mt-1 block text-xs leading-5 text-white/60">Your name and profile photo stay hidden in this room.</span></span></span>
@@ -100,6 +108,7 @@ export function PreJoinSetup({ roomTitle, roomHasVideo, onJoin }: {
             </button>
           </div>
         </div>
+        </>}
         <div className="rounded-2xl border border-white/10 p-5">
           <p className="mb-2 font-semibold">Your privacy, your choice</p>
           <p className="text-xs leading-5 text-white/60">Anonymous mode hides your profile, not your voice, camera or what you share. Recording is prohibited, but no room can prevent someone using another device to capture it.</p>

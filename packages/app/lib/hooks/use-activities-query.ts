@@ -1,3 +1,4 @@
+import { cohostActivityRoute } from "@dvnt/app/features/sneaky-lynk/cohost-invite-policy";
 /**
  * Activities Query Hook — TanStack Query
  *
@@ -62,6 +63,9 @@ export type ActivityType =
   | "event_time_changed"
   | "event_venue_changed"
   | "room_invite"
+  | "lynk_cohost_invited"
+  | "lynk_cohost_accepted"
+  | "lynk_cohost_declined"
   | "sneaky_lynk"
   // App-wide announcement. No actor and no entity — the copy travels in
   // `entity_payload` as { title, body }.
@@ -349,6 +353,8 @@ export function useLikedActivitiesQuery() {
 export function getRouteForActivity(activity: Activity): string {
   const { type, entityType, entityId, post, postId, event, user, commentId } =
     activity;
+  const cohostRoute = cohostActivityRoute(type, "native");
+  if (cohostRoute) return cohostRoute;
   const commentsPostId =
     post?.id ||
     postId ||
