@@ -100,12 +100,14 @@ export function ControlButton({
   onClick,
   active,
   danger,
+  disabled,
   label,
   children,
 }: {
   onClick: () => void;
   active?: boolean;
   danger?: boolean;
+  disabled?: boolean;
   label: string;
   children: React.ReactNode;
 }) {
@@ -118,6 +120,7 @@ export function ControlButton({
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
       // Toggle state was colour-only; expose it so a screen reader can tell a
       // muted mic from a live one. `danger` (Leave) is an action, not a toggle,
@@ -126,7 +129,7 @@ export function ControlButton({
       // Circular by this screen's own convention ("control buttons circular"),
       // which the design system allows alongside status dots and the shutter.
       title={label}
-      className={`flex h-11 w-11 min-[360px]:h-12 min-[360px]:w-12 shrink-0 items-center justify-center rounded-full text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF] sm:h-14 sm:w-14 [@media(max-height:500px)]:h-11 [@media(max-height:500px)]:w-11 ${bg}`}
+      className={`flex h-11 w-11 min-[360px]:h-12 min-[360px]:w-12 shrink-0 items-center justify-center rounded-full text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF] sm:h-14 sm:w-14 [@media(max-height:500px)]:h-11 [@media(max-height:500px)]:w-11 ${bg}`}
     >
       {children}
     </button>

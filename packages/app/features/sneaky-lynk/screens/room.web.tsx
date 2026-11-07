@@ -77,6 +77,7 @@ import { RoomHeader } from "../ui/web/room-header";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ConnectionBanner, Dialog, RoomTimer } from "@dvnt/ui";
 import { useLynkBroadcast } from "@dvnt/app/lib/lynk/useLynkBroadcast.web";
+import { DeviceSelectors } from "../ui/web/DeviceSelectors";
 import { PreJoinSetup } from "../ui/web/PreJoinSetup";
 import { CaptureErrorBanner } from "../ui/web/CaptureErrorBanner";
 import { useSpeakingDetection } from "@dvnt/app/lib/lynk/useSpeakingDetection.web";
@@ -420,7 +421,11 @@ function RoomInner({
   // never be seen or heard. Camera/mic still start from the pre-join choice.
   const { members, ready: rosterReady, error: rosterError } = useRoomMembersSync(id, admission?.user.id, admitted);
   const canPublish = admitted && isPublisherRole(localRole);
-  const lynk = useLynkBroadcast(admitted ? id : undefined, canPublish);
+  const cameraDeviceId = useRoomUIStore(s => s.cameraDeviceId);
+  const microphoneDeviceId = useRoomUIStore(s => s.microphoneDeviceId);
+  const isDeviceSettingsOpen = useRoomUIStore(s => s.isDeviceSettingsOpen);
+  const setDeviceSettingsOpen = useRoomUIStore(s => s.setDeviceSettingsOpen);
+  const lynk = useLynkBroadcast(admitted ? id : undefined, canPublish, { cameraDeviceId, microphoneDeviceId });
 
   // Same session machine as native, now fed from the MoQ lifecycle. It owns
   // "is this room live" and the observability seam follows it.
@@ -718,11 +723,9 @@ function RoomInner({
    * walked in live having just said you did not want to. Applied ONCE, when
    * publishing becomes possible — after that the in-room controls own it.
    */
-  // Captured on the FIRST render, before anything can wipe it: this screen's
-  // own unmount cleanup calls `useRoomUIStore.reset()`, and React re-runs
-  // effects without unmounting (StrictMode does it every mount), so reading
-  // the store later gave the default "camera on" back — the same shape of bug
-  // as `ended` surviving a transport teardown.
+  // Capture the reviewed entry choices once; later role changes must not
+  // replay them. UI resets belong to the parent entry scope, not this child
+  // cleanup: StrictMode replays child effects while the same entry stays active.
   const joinPrefsRef = useRef({ camera: joinCameraOn, mic: joinMicOn });
   const joinPrefsAppliedRef = useRef(false);
   useEffect(() => {
@@ -751,8 +754,8 @@ function RoomInner({
   // The transport owns capture; mirror it into the UI store so the mic/camera
   // buttons can never drift from what is actually being published.
   useEffect(() => {
-    setMicOn(lynk.micEnabled && !lynk.microphoneError && canPublish);
-  }, [lynk.micEnabled, lynk.microphoneError, canPublish, setMicOn]);
+    setMicOn(lynk.microphoneActive && !lynk.microphoneError && canPublish);
+  }, [lynk.microphoneActive, lynk.microphoneError, canPublish, setMicOn]);
 
   useEffect(() => {
     setCameraOn(lynk.cameraActive && !lynk.cameraError && canPublish && roomHasVideo);
@@ -822,7 +825,6 @@ function RoomInner({
         // ignore
       }
       resetRoomStore();
-      useRoomUIStore.getState().reset();
     };
   }, [resetRoomStore]);
 
@@ -1390,6 +1392,7 @@ function RoomInner({
         onBack={requestLeave}
         onShare={shareRoom}
         onParticipants={() => setParticipantsOpen(true)}
+        onDevices={() => { closeChat(); closeHandQueue(); setParticipantsOpen(false); setDeviceSettingsOpen(true); }}
         onHandQueue={openHandQueue}
         onMuteAll={muteAll}
         onUnmuteAll={unmuteAll}
@@ -1502,12 +1505,12 @@ function RoomInner({
           <ControlButton
             onClick={toggleMic}
             active={isMicOn}
+            disabled={!canPublish}
             label={
               hostMuteLocked
                 ? "Muted by host"
-                : isMicOn
-                  ? "Mute"
-                  : "Unmute"
+                : !canPublish ? "Microphone unavailable in listener mode"
+                : lynk.micEnabled ? "Mute" : "Unmute"
             }
           >
             {/* Held muted reads as a state to understand, not a failure, so
@@ -1524,7 +1527,8 @@ function RoomInner({
             <ControlButton
               onClick={toggleCamera}
               active={isCameraOn}
-              label={isCameraOn ? "Camera off" : "Camera on"}
+              disabled={!canPublish}
+              label={!canPublish ? "Camera unavailable in listener mode" : lynk.cameraEnabled ? "Camera off" : "Camera on"}
             >
               {isCameraOn ? <Video size={24} /> : <VideoOff size={24} />}
             </ControlButton>
@@ -1542,12 +1546,29 @@ function RoomInner({
             <MessageCircle size={24} />
           </ControlButton>
 
-          <ReactionsPicker onSend={sendReaction} overlayOpen={isChatOpen || isHandQueueOpen || isParticipantsOpen || showEndConfirm || showTimeUp} />
+          <ReactionsPicker onSend={sendReaction} overlayOpen={isChatOpen || isHandQueueOpen || isParticipantsOpen || isDeviceSettingsOpen || showEndConfirm || showTimeUp} />
           <ControlButton onClick={requestLeave} danger label="Leave Lynk">
             <PhoneOff size={24} />
           </ControlButton>
         </div>
+        <p role="status" className="max-w-full px-2 text-center text-[11px] leading-4 text-white/60">
+          {!canPublish ? "Listening · Raise your hand to speak" : hostMuteLocked ? "Microphone muted by host" : !lynk.micEnabled ? "Microphone muted" : lynk.microphoneError ? "Microphone unavailable" : isMicOn ? "Microphone on" : "Waiting for microphone"}
+          {roomHasVideo && canPublish ? ` · ${!lynk.cameraEnabled ? "Camera off" : lynk.cameraError ? "Camera unavailable" : isCameraOn ? "Camera on" : "Waiting for camera"}` : ""}
+        </p>
       </footer>
+
+      <SidePanel open={isDeviceSettingsOpen} onClose={() => setDeviceSettingsOpen(false)} title="Camera & microphone">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5" style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
+          <DeviceSelectors roomHasVideo={roomHasVideo} refreshKey={`${lynk.cameraActive}:${lynk.microphoneActive}`} />
+          <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4 text-sm">
+            <p className="font-semibold">Your microphone</p>
+            <p role="status" className="mt-1 text-white/70">{!canPublish ? "You are listening. Raise your hand to speak." : hostMuteLocked ? "Muted by host" : !lynk.micEnabled ? "Muted" : lynk.microphoneError ? "Unavailable. Check permissions or choose another device." : isMicOn ? "Connected" : "Waiting for microphone access or audio"}</p>
+            <div aria-hidden="true" className="mt-3 flex h-4 items-end gap-1">{[0, 1, 2, 3, 4].map(bar => <span key={bar} className={`w-2 rounded-sm ${isSelfSpeaking ? "bg-[#3FDCFF]" : "bg-white/15"}`} style={{ height: 4 + bar * 3 }} />)}</div>
+            <p className="mt-2 text-xs text-white/60">The bars light up when your microphone picks up speech. This isn't a guarantee others can hear you.</p>
+          </div>
+          <p className="text-xs leading-5 text-white/60">Device changes stay on this device for this room. Muted devices stay muted. Your room identity and anonymity choice are unchanged.</p>
+        </div>
+      </SidePanel>
 
       {/* Chat (side-panel) */}
       <ChatPanel
@@ -1718,12 +1739,13 @@ export function SneakyLynkRoomScreen() {
     // mounting a new room/account before this parent effect runs.
     useRoomUIStore.getState().reset();
     entryScope.initialize();
+    let cancelled = false;
+    const cleanup = () => { cancelled = true; useRoomUIStore.getState().reset(); };
     if (!shouldGateJoin || !id) {
       setPhase("connecting"); // creators / local rooms skip pre-join
-      return;
+      return cleanup;
     }
     setPhase("looking-up");
-    let cancelled = false;
     (async () => {
       const room = await sneakyLynkApi.getRoomById(id);
       if (cancelled) return;
@@ -1738,9 +1760,7 @@ export function SneakyLynkRoomScreen() {
         setPhase("prejoin");
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, shouldGateJoin, accountKey, entryScope.initialize]);
 

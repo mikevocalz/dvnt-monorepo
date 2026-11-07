@@ -3,6 +3,8 @@
 import { useCallback } from "react";
 import { EyeOff, Mic, MicOff, Radio, Video, VideoOff } from "lucide-react";
 import { useCameraPreview } from "../../hooks/useCameraPreview.web";
+import { DeviceSelectors } from "./DeviceSelectors";
+import { useMicrophoneTest } from "../../hooks/use-microphone-test.web";
 import { useRoomUIStore } from "../../stores/room-ui-store";
 
 export function PreJoinSetup({ roomTitle, roomHasVideo, onJoin }: {
@@ -14,7 +16,10 @@ export function PreJoinSetup({ roomTitle, roomHasVideo, onJoin }: {
   const anonymous = useRoomUIStore(s => s.joinAnonymous);
   const cameraOn = useRoomUIStore(s => s.joinCameraOn);
   const micOn = useRoomUIStore(s => s.joinMicOn);
-  const preview = useCameraPreview(roomHasVideo && cameraOn);
+  const cameraDeviceId = useRoomUIStore(s => s.cameraDeviceId);
+  const microphoneDeviceId = useRoomUIStore(s => s.microphoneDeviceId);
+  const microphoneTest = useMicrophoneTest(microphoneDeviceId, micOn);
+  const preview = useCameraPreview(roomHasVideo && cameraOn, cameraDeviceId);
   const bindPreview = useCallback((element: HTMLVideoElement | null) => {
     if (element) element.srcObject = preview.stream;
   }, [preview.stream]);
@@ -25,8 +30,9 @@ export function PreJoinSetup({ roomTitle, roomHasVideo, onJoin }: {
     const reviewedCamera = cameraReady;
     onJoin(anonymous, () => {
       const state = useRoomUIStore.getState();
-      state.setJoinCameraOn(reviewedCamera && state.joinCameraOn && preview.isReady());
+      state.setJoinCameraOn(reviewedCamera && state.joinCameraOn && state.cameraDeviceId === cameraDeviceId && preview.isReady());
       preview.stop();
+      microphoneTest.stop();
     });
   };
   const focus = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF] focus-visible:outline-offset-2";
@@ -60,7 +66,25 @@ export function PreJoinSetup({ roomTitle, roomHasVideo, onJoin }: {
             </button>
           </div>
         </div>
-        <p className="mt-3 text-xs leading-5 text-white/60">{micOn ? "Your microphone will turn on when you join, if your room role allows it. It isn't being tested here." : "You'll join muted. You can unmute in the room if your role allows it."}</p>
+        <p className="mt-3 text-xs leading-5 text-white/60">{microphoneTest.testing ? "Your microphone test is running on this device only. Close device settings to stop it." : micOn ? "Your microphone will turn on when you join, if your room role allows it. You can test it in device settings below." : "You'll join muted. You can unmute in the room if your role allows it."}</p>
+        <details onToggle={event => { if (!event.currentTarget.open) microphoneTest.stop(); }} className="mt-3 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+          <summary className={`flex min-h-11 cursor-pointer items-center text-sm font-semibold ${focus}`}>Camera &amp; microphone settings</summary>
+          <div className="mt-3 grid gap-4">
+            <DeviceSelectors roomHasVideo={roomHasVideo} refreshKey={`${preview.state}:${microphoneTest.state}`} />
+            <div className="border-t border-white/10 pt-4">
+              <button type="button" disabled={!micOn} onClick={microphoneTest.testing ? microphoneTest.stop : microphoneTest.start}
+                className={`min-h-11 rounded-lg bg-white/10 px-4 text-sm font-semibold disabled:opacity-40 ${focus}`}>
+                {microphoneTest.testing ? "Stop microphone test" : "Test microphone"}
+              </button>
+              <p className="mt-2 text-xs leading-5 text-white/60">The test stays on this device. Nothing is recorded or sent to the room.</p>
+              {microphoneTest.testing ? <div className="mt-3">
+                <meter min={0} max={1} value={microphoneTest.level} aria-label="Microphone input level" className="h-3 w-full accent-[#3FDCFF]" />
+                <p role="status" className="mt-1 text-xs text-white/70">{microphoneTest.state === "requesting" ? "Waiting for microphone access…" : microphoneTest.state === "ready" ? "Speak to check your microphone level." : "Microphone unavailable"}</p>
+              </div> : null}
+              {microphoneTest.message ? <p role="status" className="mt-2 text-xs text-amber-200">{microphoneTest.message}</p> : null}
+            </div>
+          </div>
+        </details>
         {roomHasVideo && cameraOn && preview.state === "error" ? <div role="alert" className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 p-3 text-sm text-amber-100">
           <p>{preview.message}</p>
           <button type="button" onClick={preview.retry} className={`mt-2 min-h-11 rounded-lg bg-white/10 px-4 font-semibold ${focus}`}>Retry camera</button>

@@ -34,6 +34,10 @@ interface RoomUIStore {
    *  you — walking in already live is the thing people are afraid of. */
   joinCameraOn: boolean;
   joinMicOn: boolean;
+  /** Session-only hardware choices, reset on room/account exit. Empty = system default. */
+  cameraDeviceId: string;
+  microphoneDeviceId: string;
+  isDeviceSettingsOpen: boolean;
   roomSnapshot: SneakyRoom | null;
   closedReason: string | null;
   errorMessage: string | null;
@@ -90,6 +94,9 @@ interface RoomUIStore {
   setJoinAnonymous: (v: boolean) => void;
   setJoinCameraOn: (v: boolean) => void;
   setJoinMicOn: (v: boolean) => void;
+  setCameraDeviceId: (v: string) => void;
+  setMicrophoneDeviceId: (v: string) => void;
+  setDeviceSettingsOpen: (v: boolean) => void;
   setRoomSnapshot: (v: SneakyRoom | null) => void;
   setClosed: (reason: string) => void;
   setAppOnly: () => void;
@@ -115,6 +122,9 @@ const initialUIState = {
   joinAnonymous: false,
   joinCameraOn: true,
   joinMicOn: true,
+  cameraDeviceId: "",
+  microphoneDeviceId: "",
+  isDeviceSettingsOpen: false,
   roomSnapshot: null as SneakyRoom | null,
   closedReason: null as string | null,
   errorMessage: null as string | null,
@@ -140,6 +150,9 @@ export const useRoomUIStore = create<RoomUIStore>((set) => ({
   setJoinAnonymous: (joinAnonymous) => set({ joinAnonymous }),
   setJoinCameraOn: (joinCameraOn) => set({ joinCameraOn }),
   setJoinMicOn: (joinMicOn) => set({ joinMicOn }),
+  setCameraDeviceId: (cameraDeviceId) => set({ cameraDeviceId }),
+  setMicrophoneDeviceId: (microphoneDeviceId) => set({ microphoneDeviceId }),
+  setDeviceSettingsOpen: (isDeviceSettingsOpen) => set({ isDeviceSettingsOpen }),
   setRoomSnapshot: (roomSnapshot) => set({ roomSnapshot }),
   setClosed: (closedReason) => set({ phase: "closed", closedReason }),
   setAppOnly: () => set({ phase: "app-only" }),

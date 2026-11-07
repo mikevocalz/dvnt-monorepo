@@ -17,8 +17,8 @@ export function cameraPreviewMessage(error: unknown): string {
   if (name === "NotAllowedError" || name === "SecurityError") {
     return "Camera access is blocked. Allow it in your browser's site settings, then retry.";
   }
-  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-    return "No camera was found. Connect a camera, then retry.";
+  if (name === "NotFoundError" || name === "DevicesNotFoundError" || name === "OverconstrainedError") {
+    return "That camera is unavailable. Connect it or choose another camera, then retry.";
   }
   if (name === "NotReadableError" || name === "TrackStartError") {
     return "Your camera may be in use by another app. Close it there, then retry.";
@@ -28,16 +28,17 @@ export function cameraPreviewMessage(error: unknown): string {
 
 /** Own exactly one preview request/stream, including requests that resolve after
  * Join, Back, a toggle, or StrictMode cleanup. Nothing here publishes media. */
-export function useCameraPreview(enabled: boolean) {
+export function useCameraPreview(enabled: boolean, deviceId = "") {
   const [preview, setPreview] = useState<{
     state: PreviewState;
     stream: MediaStream | null;
     message: string | null;
   }>({ state: enabled ? "requesting" : "off", stream: null, message: null });
   const [revision, setRevision] = useState(0);
+  const ownedDeviceRef = useRef<string | null>(null);
   const cancelRef = useRef<() => void>(() => {});
   const readyRef = useRef<() => boolean>(() => false);
-  const isReady = useCallback(() => readyRef.current(), []);
+  const isReady = useCallback(() => ownedDeviceRef.current === deviceId && readyRef.current(), [deviceId]);
   const stop = useCallback(() => {
     cancelRef.current();
     setPreview({ state: "off", stream: null, message: null });
@@ -56,6 +57,7 @@ export function useCameraPreview(enabled: boolean) {
       removeTrackListeners();
       owned?.getTracks().forEach(track => track.stop());
       owned = null;
+      ownedDeviceRef.current = null;
     };
     cancelRef.current = cancel;
     readyRef.current = () => {
@@ -70,12 +72,13 @@ export function useCameraPreview(enabled: boolean) {
     void (async () => {
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error("Capture unavailable");
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: deviceId ? { deviceId: { exact: deviceId } } : true, audio: false });
         if (cancelled) {
           stream.getTracks().forEach(track => track.stop());
           return;
         }
         owned = stream;
+        ownedDeviceRef.current = deviceId;
         const track = stream.getVideoTracks()[0];
         const update = () => {
           if (cancelled) return;
@@ -98,7 +101,7 @@ export function useCameraPreview(enabled: boolean) {
       }
     })();
     return cancel;
-  }, [enabled, revision]);
+  }, [enabled, deviceId, revision]);
 
-  return { ...preview, stop, retry, isReady };
+  return { ...preview, state: preview.state === "ready" && ownedDeviceRef.current !== deviceId ? "requesting" as const : preview.state, stop, retry, isReady };
 }

@@ -30,6 +30,8 @@ on:
       - 'scripts/test-lynk-relay-authorization-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
       - 'scripts/test-lynk-prejoin-dom.cjs'
+      - 'scripts/test-lynk-device-settings-dom.cjs'
+      - 'scripts/test-lynk-device-selection-sdk.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   push:
     branches: [master]
@@ -59,6 +61,8 @@ on:
       - 'scripts/test-lynk-relay-authorization-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
       - 'scripts/test-lynk-prejoin-dom.cjs'
+      - 'scripts/test-lynk-device-settings-dom.cjs'
+      - 'scripts/test-lynk-device-selection-sdk.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   workflow_dispatch:
 permissions:
@@ -86,6 +90,8 @@ jobs:
           node scripts/test-lynk-room-browser.cjs --dom
           node scripts/test-lynk-web-capture-ui.cjs
           node scripts/test-lynk-prejoin-dom.cjs
+          node scripts/test-lynk-device-settings-dom.cjs
+          node scripts/test-lynk-device-selection-sdk.cjs
           node scripts/test-lynk-native-capture.cjs
           node scripts/test-lynk-native-session.cjs
           node scripts/test-lynk-web-capture-sdk.cjs

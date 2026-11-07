@@ -49,9 +49,10 @@ const fixture = `
   f.configure({});
   export const attachCanvas = (peer, element) => { f.attachments.push({peer, attached:!!element}); };
   const mediaActions = { goLive:async()=>{}, end:noop, setMicEnabled:value=>f.actions.push('mic:'+value), setCameraEnabled:value=>f.actions.push('camera:'+value), attachCanvas };
-  export function useLynkBroadcast() {
+  export function useLynkBroadcast(_id,_canPublish,preferences) {
+    f.mediaPreferences=preferences;
     const c=useFixture();
-    return { ...mediaActions, state:'live', isLive:true, error:null, micEnabled:false,cameraEnabled:false,cameraActive:false,
+    return { ...mediaActions, state:'live', isLive:true, error:null, micEnabled:false,cameraEnabled:false,cameraActive:false,microphoneActive:false,
       localStream:null,localAudioStream:null,coPublishers:f.roster.filter(m=>m.role!=='listener' && m.userId!==localUser.id).map(m=>({peerId:m.userId,path:'fixture/'+m.userId,videoAvailable:c.hasVideo})) };
   }
   const moderationResult = (action, userId) => {
@@ -132,11 +133,12 @@ async function buildFixture() {
       import {useSneakyLynkCaptureStore} from '@dvnt/app/lib/stores/sneaky-lynk-capture-store';
       import {useRoomUIStore} from './${lynk}stores/room-ui-store';
       import {useFixture,f,localUser} from 'fixture';
-      if(location.search.includes('rail=prejoin')) {
-        useRoomUIStore.getState().setJoinCameraOn(false);
-        f.previewRequests=0;
-        Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:()=>{f.previewRequests++;return Promise.reject(Object.assign(new Error('synthetic denied camera'),{name:'NotAllowedError'}));}}});
-      }
+      f.previewRequests=0;
+      const fixtureDevices=new EventTarget();
+      fixtureDevices.enumerateDevices=async()=>[{kind:'videoinput',deviceId:'fixture-camera',label:'USB camera'},{kind:'audioinput',deviceId:'fixture-microphone',label:'Headset microphone'}];
+      fixtureDevices.getUserMedia=()=>{f.previewRequests++;return Promise.reject(Object.assign(new Error('synthetic denied capture'),{name:'NotAllowedError'}))};
+      Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:fixtureDevices});
+      if(location.search.includes('rail=prejoin'))useRoomUIStore.getState().setJoinCameraOn(false);
       f.expireSession=()=>useRoomUIStore.getState().setShowTimeUp(true);
       useSneakyLynkCaptureStore.getState().setWebPeerPresent(true);
       const portrait=document.createElement('canvas');portrait.width=180;portrait.height=320;
@@ -345,9 +347,16 @@ async function prejoinCases(browser,url) {
       await setup.waitFor();
       assert.equal(await page.evaluate(()=>window.fixture.previewRequests),0,'camera-off entry never requests capture');
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,c.name+' prejoin horizontal overflow');
-      const targets=await dimensions(setup.locator('button'));
+      const targets=await dimensions(setup.locator('button:visible'));
       for(const target of targets)assert.ok(target.width>=44&&target.height>=44,c.name+' minimum setup control target: '+target.label);
       assertNoOverlap(targets,c.name+' prejoin controls');
+      await setup.locator('summary').click();
+      await setup.getByLabel('Camera',{exact:true}).selectOption('fixture-camera');
+      await setup.getByLabel('Microphone',{exact:true}).selectOption('fixture-microphone');
+      assert.equal(await page.evaluate(()=>window.fixture.previewRequests),0,'selecting hardware never opens it');
+      const settingsTargets=await dimensions(setup.locator('select'));
+      for(const target of settingsTargets)assert.ok(target.width>=44&&target.height>=44,c.name+' device selector target');
+      await setup.locator('summary').click();
       const join=setup.getByRole('button',{name:'Join Lynk',exact:true});
       await join.scrollIntoViewIfNeeded();await assertReachable(join,c.name+' prejoin Join');
       const camera=setup.getByRole('button',{name:'Turn camera on',exact:true});
@@ -473,6 +482,22 @@ async function webCases(browser,url) {
         await queue.getByRole('button',{name:'Close',exact:true}).click();
         assert.equal(await page.getByRole('group',{name:'Room actions',exact:true}).count(),0,'closing queue does not resurrect overflow');
       }
+      // Device settings live outside the six primary media controls.
+      const settingsMounts=await page.evaluate(()=>window.fixture.attachments.length);
+      if(c.width<640) {
+        await page.getByRole('button',{name:/^Room actions/}).click();
+        await page.getByRole('group',{name:'Room actions',exact:true}).getByRole('button',{name:'Camera & microphone',exact:true}).click();
+      } else await page.getByRole('button',{name:'Camera and microphone settings',exact:true}).click();
+      const devices=page.getByRole('dialog',{name:'Camera & microphone',exact:true});
+      await devices.waitFor();
+      await devices.getByLabel('Camera',{exact:true}).selectOption('fixture-camera');
+      await devices.getByLabel('Microphone',{exact:true}).selectOption('fixture-microphone');
+      await page.waitForFunction(()=>window.fixture.mediaPreferences?.microphoneDeviceId==='fixture-microphone');
+      assert.equal(await page.evaluate(()=>window.fixture.previewRequests),0,'settings never capture or unmute');
+      assert.equal(await page.evaluate(()=>window.fixture.attachments.length),settingsMounts,'settings keep peer playback mounted');
+      await assertReachable(devices.getByRole('button',{name:'Close',exact:true}),c.name+' device settings Close');
+      if(process.env.LYNK_LAYOUT_OUTPUT)await page.screenshot({path:path.join(path.resolve(process.env.LYNK_LAYOUT_OUTPUT),'devices-'+c.name+'-'+role+'.png')});
+      await page.keyboard.press('Escape');assert.equal(await devices.count(),0,'Escape dismisses device settings');
       await reactionsToggle.click();
       await page.getByRole('button',{name:'Chat',exact:true}).click();
       const chat=page.getByRole('dialog',{name:'Chat',exact:true});

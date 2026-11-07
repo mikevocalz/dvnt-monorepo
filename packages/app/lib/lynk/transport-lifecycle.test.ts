@@ -90,6 +90,16 @@ class Computed extends Signal {
   }
   close() { this.closed = true; for (const stop of this.stops.splice(0)) stop(); this.set(undefined); }
 }
+class Derived extends Signal {
+  deps: Signal[];
+  fn: () => any;
+  constructor(deps: Signal[], fn: () => any) { super(undefined); this.deps = deps; this.fn = fn; }
+  peek() { return this.fn(); }
+  subscribe(callback: (value: any) => void) {
+    const stops = this.deps.map(dep => dep.subscribe(() => callback(this.fn())));
+    return () => stops.forEach(stop => stop());
+  }
+}
 const resources = {
   connections: [] as any[], players: [] as any[], watches: [] as any[], devices: [] as any[],
   captures: [] as any[], encoders: [] as any[], computeds: [] as any[], publications: [] as any[],
@@ -135,9 +145,10 @@ class Publication {
 }
 class Device {
   in: any;
+  device: any;
   out = { source: new Signal(undefined), error: new Signal(undefined) };
   closed = false;
-  constructor(props: any) { assert.ok(props.enabled instanceof Signal); this.in = props; resources.devices.push(this); }
+  constructor(props: any) { assert.ok(props.enabled instanceof Signal); this.in = props; this.device = { preferred: props.device?.preferred ?? new Signal(undefined), out: { available: new Signal([]), requested: new Signal(undefined), active: new Signal(undefined) } }; resources.devices.push(this); }
   close() { this.closed = true; }
 }
 class Capture {
@@ -158,14 +169,14 @@ const nativeSession = { state: "connected", connect() { nativeConnects++; }, dis
 const nativePublisher = { state: "publishing", publish: (opts: any) => resources.nativePublications.push(opts), stop() {} };
 const nativeCamera = { position: "front", state: "active", lastError: null as string | null };
 const nativeMicrophone = { state: "active", lastError: null as string | null };
-(globalThis as any).__lynkMocks = { Signal, Computed, Connection, Player, Publication, Device, Capture, Encoder, tokenState, nativeSession, nativePublisher, nativeCamera, nativeMicrophone, resources };
+(globalThis as any).__lynkMocks = { Signal, Computed, Derived, Connection, Player, Publication, Device, Capture, Encoder, tokenState, nativeSession, nativePublisher, nativeCamera, nativeMicrophone, resources };
 (globalThis as any).window = new EventTarget();
 (globalThis as any).document = Object.assign(new EventTarget(), { visibilityState: "visible" });
 const moduleUrl = (source: string) => `data:text/javascript,${encodeURIComponent(source)}`;
 const stubs: Record<string, string> = {
   "../observability": moduleUrl("export const enterRoomObservability = () => {}; export const exitRoomObservability = () => {};"),
   react: moduleUrl(["useState", "useRef", "useMemo", "useCallback", "useEffect", "useSyncExternalStore"].map((name) => `export const ${name} = (...args) => globalThis.__lynkHooks.${name}(...args);`).join("\n")),
-  "@moq/signals": moduleUrl("export const Signal = globalThis.__lynkMocks.Signal; export const Computed = globalThis.__lynkMocks.Computed;"),
+  "@moq/signals": moduleUrl("export const Signal = globalThis.__lynkMocks.Signal; export const Computed = globalThis.__lynkMocks.Computed; export const Derived = globalThis.__lynkMocks.Derived;"),
   "@moq/net": moduleUrl("export const Connection = globalThis.__lynkMocks.Connection; export const Path = { from: p => p }; export const Time = { Milli: { zero: 0 } };"),
   "@moq/watch": moduleUrl("export const Player = globalThis.__lynkMocks.Player;"),
   "@moq/publish": moduleUrl("export const Broadcast = globalThis.__lynkMocks.Publication; export const Source = { Camera: globalThis.__lynkMocks.Device, Microphone: globalThis.__lynkMocks.Device }; export const Video = { Capture: globalThis.__lynkMocks.Capture, Encoder: globalThis.__lynkMocks.Encoder }; export const Audio = Video;"),
