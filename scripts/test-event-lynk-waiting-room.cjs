@@ -19,12 +19,26 @@ async function exercise() {
   const count = () => f.admitted.length + f.refused.length;
   await next().then(p => p.resolve({ data: { state: 'scheduled', admitted: false } }));
   await next().then(p => p.resolve({ error: { status: 500, message: 'Could not verify event ticket' } }));
+  await until(() => f.controls.status === 'reconnecting');
+  f.controls.retry(); f.controls.retry();
   await next().then(p => p.resolve({ data: { state: 'live', admitted: true } }));
   await until(() => f.admitted.length === 1);
   check(f.refused.length === 0, 'network/read failures stay retryable even when copy contains ticket');
   const admittedCalls = f.calls.length;
   await sleep(40);
   check(f.calls.length === admittedCalls, 'admission fires once and stops polling');
+
+  f.controls.retry();
+  await sleep(30);
+  check(f.calls.length === admittedCalls, 'retry after ready never repeats admission');
+  f.serial++; f.render();
+  const cancelled = await next();
+  const beforeCancel = count();
+  f.controls.cancel(); f.controls.retry();
+  cancelled.resolve({ data: { state: 'live', admitted: true } });
+  await sleep(40);
+  check(count() === beforeCancel, 'cancel before navigation synchronously blocks late admission');
+  check(f.pending.length === 0, 'cancel cannot be revived by retry');
 
   for (const [status, message] of [[409, 'This event is no longer available'], [403, 'Admission removed'],
     [401, 'Unauthorized'], [404, 'Event Lynk not found'], [409, 'This Lynk has ended']]) {
@@ -84,7 +98,7 @@ async function exercise() {
     const originalTimeout=window.setTimeout.bind(window);
     window.setTimeout=(fn,ms,...args)=>originalTimeout(fn,ms===5000?10:ms,...args);
     function App(){const[text,setText]=useState('Waiting for host');const roomId=f.roomId;
-      useEventLynkWaitingRoom({roomId,enabled:true,onAdmitted:()=>{f.admitted.push(roomId);setText('Admitted');},
+      f.controls=useEventLynkWaitingRoom({roomId,enabled:true,onAdmitted:()=>{f.admitted.push(roomId);setText('Admitted');},
         onRefused:message=>{f.refused.push({roomId,message});setText(message);}});return <p>{text}</p>;}
     const root=createRoot(document.getElementById('root'));f.render=()=>root.render(<App key={f.serial}/>);
     f.unmount=()=>root.unmount();f.render();` }, bundle: true, write: false, alias: reactAliases, platform: 'browser', format: 'iife',

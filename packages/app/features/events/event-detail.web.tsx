@@ -1,3 +1,4 @@
+import { EventLynkCard } from "./ui/EventLynkCard.web";
 import { useReviewSection } from "./use-review-section.web";
 import { useEventLynkEntry } from "@dvnt/app/lib/hooks/use-event-lynk-entry";
 import { useEventAttendeePrivacy } from "@dvnt/app/lib/hooks/use-event-attendee-privacy";
@@ -8,7 +9,7 @@ import { useDeleteEvent } from "@dvnt/app/lib/hooks/use-events";
 import { ShareEventToStoryMenuItem } from "./ui/share-event-to-story.web";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
-import { canHostEventLynk, waitingSinceLabel } from "@dvnt/app/lib/events/event-lynk";
+import { canHostEventLynk } from "@dvnt/app/lib/events/event-lynk";
 import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { canScanTickets, canViewFullRoster } from "@dvnt/app/lib/events/event-role";
 /**
@@ -814,7 +815,6 @@ export function EventDetailScreen() {
     onError: (message) => showToast("error", "Couldn't open the Lynk", message),
   });
   const openEventLynk = lynkEntry.open;
-  const startEventLynk = lynkEntry.open;
 
   if (!e && resolving) return <Centered>Loading…</Centered>;
   if (!e) {
@@ -1903,84 +1903,20 @@ export function EventDetailScreen() {
             </Section>
           ) : null}
 
-          {/* Sneaky Lynk — the room this event is hosted in.
-              Above Lineup on purpose: when an event HAS a room, "where do I
-              go" outranks "who is playing". The card states the room is
-              private and that entry follows the event's guest list, because a
-              guest who taps into a refusal learns that too late. */}
           {e.lynkRoomId ? (
             <Section title="Sneaky Lynk" Icon={Radio}>
-              <button
-                type="button"
-                data-lynk-room={e.lynkRoomId}
-                disabled={lynkEntry.isOpening || lynkHost.isTerminal}
-                aria-busy={lynkEntry.isOpening}
-                onClick={() => void openEventLynk()}
-                className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 text-left transition-colors hover:bg-white/[0.1]"
-              >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#8A40CF]/20">
-                  <Radio size={18} className="text-[#8A40CF]" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold text-white">
-                    {lynkHost.isTerminal ? "This Lynk has ended" : lynkEntry.isOpening ? "Opening Lynk…" : mayHostLynk ? "Open your event's Lynk" : "Join the event's Lynk"}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-white/55">
-                    Private video room · only people on this event&apos;s list get in
-                  </span>
-                </span>
-              </button>
-              {mayHostLynk && lynkHost.isError ? (
-                <p role="alert" className="mt-2 text-sm text-white/70">
-                  Couldn&apos;t load the waiting room. <button type="button" className="underline" onClick={() => void lynkHost.refetch()}>Try again</button>
-                </p>
-              ) : null}
-              {mayHostLynk && lynkHost.view && !lynkHost.isLive && !lynkHost.isTerminal ? (
-                <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" data-testid="event-lynk-host-panel">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-white" aria-live="polite">
-                      {lynkHost.view.count === 0
-                        ? "No one waiting yet"
-                        : lynkHost.view.count === 1
-                          ? "1 person waiting"
-                          : `${lynkHost.view.count} people waiting`}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => void startEventLynk()}
-                      disabled={lynkEntry.isOpening}
-                      aria-busy={lynkEntry.isOpening}
-                      data-testid="event-lynk-start"
-                      className="rounded-full bg-[#8A40CF] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-60"
-                    >
-                      {lynkEntry.isOpening ? "Starting" : "Start Lynk"}
-                    </button>
-                  </div>
-                  <p className="mt-1 text-xs text-white/55">
-                    Guests wait here until you start. Everyone waiting joins when you do.
-                  </p>
-                  {lynkHost.view.count > 0 ? (
-                    <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
-                      {lynkHost.view.waiting.map((w) => {
-                        const name = w.displayName || w.username || "Guest";
-                        return (
-                          <li key={w.userId} className="flex items-center gap-3 py-1">
-                            {w.avatar ? (
-                              <img src={w.avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
-                            ) : (
-                              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-white/60">
-                                {name.slice(0, 1).toUpperCase()}
-                              </span>
-                            )}
-                            <span className="min-w-0 flex-1 truncate text-sm text-white">{name}</span>
-                            <span className="text-xs text-white/55">{waitingSinceLabel(w.joinedAt)}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : null}
-                </div>
-              ) : null}
+              <EventLynkCard roomId={e.lynkRoomId} signedIn={isAuthenticated}
+                mayHost={mayHostLynk} view={lynkHost.view} isLoading={lynkHost.isLoading}
+                isError={lynkHost.isError} isLive={lynkHost.isLive} isTerminal={lynkHost.isTerminal}
+                isOpening={lynkEntry.isOpening}
+                onOpen={() => {
+                  if (!isAuthenticated) {
+                    router.push(loginPathWithReturn(`/feed/sneaky-lynk/room/${e.lynkRoomId}`));
+                    return;
+                  }
+                  void openEventLynk();
+                }}
+                onRetry={() => void lynkHost.refetch()} />
             </Section>
           ) : null}
 

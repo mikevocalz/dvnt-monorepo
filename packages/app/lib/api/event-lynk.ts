@@ -7,6 +7,7 @@ import { invokeEdge } from "./invoke-edge";
 export type EventLynkState = "scheduled" | "ready" | "live" | "ended" | "cancelled";
 
 export interface EventLynkWaiter {
+  /** Response-local row key, never a member identity; may change on every poll. */
   userId: string;
   username: string | null;
   displayName: string | null;
@@ -51,9 +52,9 @@ export const eventLynkApi = {
   list: (eventId: number) =>
     call<EventLynkHostView>({ action: "list", event_id: eventId }, "Couldn't load the waiting room"),
   /** Host only: open the room. Idempotent. */
-  start: (eventId: number) =>
-    call<{ state: EventLynkState; started: boolean; admitted: number }>(
-      { action: "start", event_id: eventId },
+  start: (eventId: number, expectedRoomId: string) =>
+    call<{ state: EventLynkState; started: boolean; admitted: number; roomId: string }>(
+      { action: "start_bound", event_id: eventId, expected_room_id: expectedRoomId },
       "Couldn't start the Lynk",
     ),
 };

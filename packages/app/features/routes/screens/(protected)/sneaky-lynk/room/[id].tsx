@@ -1,3 +1,5 @@
+import { eventWaitingCopy, roomUnavailableTitle } from "@dvnt/app/features/sneaky-lynk/ui/event-waiting-copy";
+import type { EventWaitingStatus } from "@dvnt/app/features/sneaky-lynk/hooks/useEventLynkWaitingRoom";
 /**
  * Private Video Room
  * Live audio/video room with speakers, listeners, and controls
@@ -229,55 +231,32 @@ function PresenceToast({ event }: { event: PresenceEvent }) {
  * An event Lynk the host has not started. The guest stays here, on the host's
  * waiting list, and joins on their own the moment the host starts.
  */
-function WaitingRoomScreen({
-  roomTitle,
-  onBack,
-}: {
-  roomTitle: string;
+function WaitingRoomScreen({ onBack, status, onRetry }: {
   onBack: () => void;
+  status: EventWaitingStatus;
+  onRetry: () => void;
 }) {
   const insets = useSafeAreaInsets();
-
-  return (
-    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <View className="w-full py-3 border-b border-border">
-        <View className="flex-row items-center px-4" style={DETAIL_HEADER_ROW}>
-          <Pressable onPress={onBack} hitSlop={12} accessibilityLabel="Leave the waiting room">
-            <ArrowLeft size={24} color="#fff" />
-          </Pressable>
-          <View className="flex-1 mx-4">
-            <Text className="text-foreground font-semibold text-center" numberOfLines={1}>
-              {roomTitle || getLynkDisplayName()}
-            </Text>
-          </View>
-          <View className="w-6" />
-        </View>
-      </View>
-
-      <View
-        className="flex-1 items-center justify-center px-6"
-        accessibilityLiveRegion="polite"
-        testID="lynk-waiting-room"
-      >
-        <View className="w-20 h-20 rounded-full bg-primary/20 items-center justify-center mb-6">
-          <Radio size={36} color="#8A40CF" />
-        </View>
-        <Text className="text-2xl font-bold text-foreground text-center mb-3">
-          Waiting for the host to start
-        </Text>
-        <Text className="text-muted-foreground text-center mb-8">
-          You&apos;re in the waiting room. You&apos;ll join automatically when the host starts.
-        </Text>
-        <ActivityIndicator color="#8A40CF" />
-        <Pressable
-          onPress={onBack}
-          className="mt-8 px-6 py-4 rounded-full bg-secondary items-center"
-        >
-          <Text className="text-foreground font-semibold">Leave</Text>
-        </Pressable>
-      </View>
+  const copy = eventWaitingCopy(status);
+  return <View className="flex-1 bg-background" style={{ paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 16) }}>
+    <View className="flex-row items-center px-4 py-3 border-b border-border">
+      <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Leave lobby" style={{ minWidth: 48, minHeight: 48, justifyContent: "center" }}><ArrowLeft size={24} color="#fff" /></Pressable>
+      <Text className="flex-1 text-foreground font-semibold">Event Lynk</Text>
     </View>
-  );
+    <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 24 }} testID="lynk-waiting-room">
+      <View style={{ padding: 24, borderRadius: 24, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "#10121d" }}>
+        <Text style={{ color: "#9DEBFF", fontSize: 11, letterSpacing: 2, marginBottom: 28 }}>{copy.eyebrow}</Text>
+        <View style={{ width: 64, height: 64, borderRadius: 16, backgroundColor: "rgba(63,220,255,0.1)", alignItems: "center", justifyContent: "center", marginBottom: 24 }}><Radio size={28} color="#3FDCFF" /></View>
+        <Text className="text-3xl font-semibold text-foreground mb-3" accessibilityRole="header">{copy.title}</Text>
+        <Text className="text-muted-foreground" style={{ lineHeight: 24 }}>{copy.body}</Text>
+        <Text accessibilityLiveRegion="polite" style={{ color: "#9DEBFF", lineHeight: 22, paddingVertical: 24 }}>{copy.status}</Text>
+        <Text className="text-foreground" style={{ lineHeight: 22 }}>{copy.privacy}</Text>
+        <Text className="text-muted-foreground mt-2" style={{ fontSize: 12, lineHeight: 20 }}>{copy.capacity}</Text>
+        {status === "reconnecting" ? <Pressable onPress={onRetry} accessibilityRole="button" style={{ minHeight: 48, backgroundColor: "#3FDCFF", borderRadius: 12, justifyContent: "center", alignItems: "center", marginTop: 24 }}><Text style={{ color: "#06070d", fontWeight: "600" }}>Check again</Text></Pressable> : null}
+        <Pressable onPress={onBack} accessibilityRole="button" className="mt-4 px-6 py-4 rounded-xl bg-secondary items-center" style={{ minHeight: 48 }}><Text className="text-foreground font-semibold">Leave lobby</Text></Pressable>
+      </View>
+    </ScrollView>
+  </View>;
 }
 
 function ClosedRoomScreen({
@@ -316,7 +295,7 @@ function ClosedRoomScreen({
           <Radio size={36} color="#6B7280" />
         </View>
         <Text className="text-2xl font-bold text-foreground text-center mb-3">
-          Lynk Closed
+          {roomUnavailableTitle(message)}
         </Text>
         <Text className="text-muted-foreground text-center mb-8">
           {message}
@@ -1360,7 +1339,7 @@ function ServerRoom({
 
   // Heartbeat the waiting room; when the host starts, run the normal join so
   // video_join_room still applies bans, capacity and verification.
-  useEventLynkWaitingRoom({
+  const eventWaiting = useEventLynkWaitingRoom({
     roomId: id,
     enabled: waitingForHost,
     onAdmitted: () => {
@@ -2278,8 +2257,9 @@ function ServerRoom({
   if (waitingForHost && !closedReason) {
     return (
       <WaitingRoomScreen
-        roomTitle={roomSnapshot?.title || paramTitle || getLynkDisplayName()}
-        onBack={handleLeave}
+        status={eventWaiting.status}
+        onRetry={eventWaiting.retry}
+        onBack={() => { eventWaiting.cancel(); void handleLeave(); }}
       />
     );
   }
