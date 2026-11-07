@@ -8,10 +8,10 @@ import { URL } from "node:url";
 const source = readFileSync(new URL("../../features/routes/screens/(protected)/_layout.tsx", import.meta.url), "utf8");
 const callback = source.match(/fetchNewMemberProgress\(\)\.then\(\(progress\) => \{([\s\S]*?)\n    \}\)\.catch/);
 assert.ok(callback, "native progress callback must remain covered");
-const run = new Function("progress", "memberPath", "memberRouter", "cancelled", callback[1].replaceAll(" as any", ""));
+const run = new Function("progress", "memberPath", "memberRouter", "cancelled", "deepLinkAccountKey", "accountKey", callback[1].replaceAll(" as any", ""));
 function redirects(step: string, path: string, cancelled = false): string[] {
   const destinations: string[] = [];
-  run({ step }, path, { replace: (to: string) => destinations.push(to) }, cancelled);
+  run({ step }, path, { replace: (to: string) => destinations.push(to) }, cancelled, () => "fixture-account", "fixture-account");
   return destinations;
 }
 

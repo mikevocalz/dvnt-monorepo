@@ -237,6 +237,11 @@ Deno.serve(async (req) => {
     if (!eventAccess.ok) {
       return errorResponse(eventAccess.code, eventAccess.message, eventAccess.detail);
     }
+    // Accepted event admin/editor co-organizers may start this event's Lynk
+    // without a pre-existing room role. They must still satisfy current
+    // creator standing before receiving a seat or media token.
+    const isEventHost = !!eventAccess.event &&
+      await isEventLynkHost(supabase, eventAccess.event, userId);
     room.ends_at = eventAccess.endsAt;
     // A server deadline is authoritative for both Lynks and personal/group
     // calls. Calls receive their deadline only after the first invited
@@ -342,7 +347,7 @@ Deno.serve(async (req) => {
 
       const isHostOrCoHost = userId === room.created_by ||
         existingMember?.role === "host" ||
-        existingMember?.role === "co-host";
+        existingMember?.role === "co-host" || isEventHost;
 
       // ── Creator standing ───────────────────────────────────────────────────
       // Refusing room CREATION is not enough on its own: a creator suspended
@@ -664,7 +669,7 @@ Deno.serve(async (req) => {
     // succeeded, so a failure here is logged and never costs the host a seat.
     if (!isCall && eventAccess.event) {
       try {
-        if (await isEventLynkHost(supabase, eventAccess.event, userId)) {
+        if (isEventHost) {
           const started = await startEventLynk(supabase, eventAccess.event, userId);
           if (!started.ok) {
             console.warn(`[video_join_room] host join did not start event ${eventAccess.event.id}: ${started.reason}`);

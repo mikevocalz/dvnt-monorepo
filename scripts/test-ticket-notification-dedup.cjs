@@ -12,6 +12,7 @@ function load(file,extra=''){
    if(n.endsWith('/api/notifications'))return {notificationsApiClient:{getNotifications:async()=>({docs:rows}),formatTimeAgo:()=>''}};
    if(n.endsWith('/stores/unread-counts-store'))return {useUnreadCountsStore:{getState:()=>({setNotificationsUnread(){}})}};
    if(n.endsWith('/api/auth-helper'))return {getCurrentUserIdSync:()=>null};
+   if(n.endsWith('/sneaky-lynk/cohost-invite-policy'))return load('packages/app/features/sneaky-lynk/cohost-invite-policy.ts');
    if(n.includes('/activity/'))return load('packages/app/lib/activity/'+n.split('/').at(-1)+'.ts');
    return {};
   },

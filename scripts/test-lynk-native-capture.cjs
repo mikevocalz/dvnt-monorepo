@@ -41,7 +41,7 @@ const dependency = (name) => require(resolve(name));
     broadcasts: [{ path: 'lynk/room/peer', videoTracks: [{}], audioTracks: [{}], player: { setVolume() {} } }],
   };
   const bundle = await dependency('esbuild').build({
-    stdin: { contents: `export { useLynkBroadcast } from './packages/app/lib/lynk/useLynkBroadcast.native'; export { CaptureErrorBanner } from './packages/app/features/sneaky-lynk/ui/CaptureErrorBanner';`, resolveDir: path.join(__dirname, '..'), loader: 'ts' },
+    stdin: { contents: `export { useLynkBroadcast } from './packages/app/lib/lynk/useLynkBroadcast.native'; export { CaptureErrorBanner } from './packages/app/features/sneaky-lynk/ui/CaptureErrorBanner'; export { leaveRoomSafely } from './packages/app/features/sneaky-lynk/session/leave-room';`, resolveDir: path.join(__dirname, '..'), loader: 'ts' },
     bundle: true, write: false, platform: 'node', format: 'cjs', jsx: 'automatic',
     plugins: [{ name: 'native-capture-adapter', setup(build) {
       build.onResolve({ filter: /^(react|react\/jsx-runtime)$/ }, ({ path: name }) => ({ path: resolve(name), external: true }));
@@ -91,7 +91,7 @@ const dependency = (name) => require(resolve(name));
   });
   const module = { exports: {} };
   new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, module, module.exports);
-  const { useLynkBroadcast, CaptureErrorBanner } = module.exports;
+  const { useLynkBroadcast, CaptureErrorBanner, leaveRoomSafely } = module.exports;
   function Peer() {
     React.useEffect(() => { fixture.peerMounts++; return () => fixture.peerUnmounts++; }, []);
     return React.createElement('div', { 'data-testid': 'receiving-peer' }, 'Remote participant');
@@ -234,6 +234,201 @@ const dependency = (name) => require(resolve(name));
     } finally {
       if (!nextUnmounted) await act(() => nextRoot.unmount());
     }
+    // Exercise the shipped ServerRoom consent callbacks against the REAL
+    // native broadcaster, not a reimplementation of its default capture flags.
+    const fs = require('node:fs');
+    const ts = dependency('typescript');
+    const routePath = path.join(__dirname, '../packages/app/features/routes/screens/(protected)/sneaky-lynk/room/[id].tsx');
+    const routeSource = fs.readFileSync(routePath, 'utf8');
+    const ast = ts.createSourceFile(routePath, routeSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const server = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'ServerRoom');
+    assert.ok(server, 'native ServerRoom exists');
+    function actualCallback(name, scope) {
+      let callback;
+      function visit(node) {
+        if (ts.isVariableDeclaration(node) && node.name.getText(ast) === name) callback = node.initializer.arguments[0];
+        ts.forEachChild(node, visit);
+      }
+      visit(server);
+      assert.ok(callback, `${name} must remain testable from the native screen`);
+      const expression = ts.transpileModule(`(${callback.getText(ast)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText.trim().replace(/;$/, '');
+      return new Function(...Object.keys(scope), `return ${expression}`)(...Object.values(scope));
+    }
+    const serverSource = server.getText(ast);
+    const authModule = { exports: {} };
+    new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(__dirname, '../packages/app/features/sneaky-lynk/room-entry-auth.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(authModule, authModule.exports);
+    const consentAuthState = { user: { id: 'account' }, isAuthenticated: true, _hasHydrated: true, authStatus: 'authenticated' };
+    const lockModule = { exports: {} };
+    new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(__dirname, '../packages/app/features/sneaky-lynk/session/room-admission-lock.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(lockModule, lockModule.exports);
+    assert.equal((serverSource.match(/videoRoom(?:Ref\.current)?\.join\(/g) || []).length, 1, 'all admission paths must use the consent wrapper');
+    assert.match(serverSource, /onReconnect: joinWithReviewedMedia/);
+    assert.match(serverSource, /onAdmitted:[\s\S]*?void joinWithReviewedMedia\(\)/);
+    assert.match(serverSource, /const joined = await joinWithReviewedMedia\(\)/);
+
+    fixture.camera.allowed = fixture.mic.allowed = true;
+    const consentContainer = document.createElement('div'); document.body.append(consentContainer);
+    const consentRoot = createRoot(consentContainer);
+    let consentUnmounted = false;
+    let cameraRequests = 0;
+    let microphoneRequests = 0;
+    let admissionCalls = 0;
+    const scope = {
+      leaveLifetimeRef: { current: { active: true, epoch: 1 } },
+      deviceIntentEpochRef: { current: 0 },
+      authIntentEpochRef: { current: 0 },
+      withRoomAdmissionLock: lockModule.exports.withRoomAdmissionLock,
+      fullRoomRetry: { stop() {} },
+      useAuthStore: { getState: () => consentAuthState },
+      authenticatedLynkAccount: authModule.exports.authenticatedLynkAccount,
+      id: 'room',
+      sneakyLynkApi: { leaveRoom: async () => ({ ok: true }) },
+      queueRoomDeparture: async () => {},
+      leavingRef: { current: false },
+      closedReasonRef: { current: null },
+      admissionInFlightRef: { current: null },
+      micChangeInFlightRef: { current: false },
+      cameraChangeInFlightRef: { current: false },
+      desiredVideoEnabledRef: { current: false },
+      desiredMicEnabledRef: { current: false },
+      permissionsRef: { current: {
+        hasCamPermission: false, hasMicPermission: false,
+        requestCamPermission: async () => { cameraRequests++; return true; },
+        requestMicPermission: async () => { microphoneRequests++; return true; },
+      } },
+      roomHasVideo: true,
+      HOST_MUTE_COPY: { blocked: 'Muted by host' },
+      showToast() {},
+      videoRoomRef: { current: {
+        isEjected: false, hostMuteLocked: false,
+        get isMicOn() { return fixture.latest.micEnabled && fixture.mic.active; },
+        get isCameraOn() { return fixture.latest.cameraEnabled && fixture.camera.active; },
+        setCameraEnabled: async (enabled) => fixture.latest.setCameraEnabled(enabled),
+        setMicEnabled: async (enabled) => {
+          if (enabled && scope.videoRoomRef.current.hostMuteLocked) return false;
+          fixture.latest.setMicEnabled(enabled);
+          return true;
+        },
+        join: async () => { admissionCalls++; consentRoot.render(React.createElement(Harness, { canPublish: true })); return true; },
+      } },
+    };
+    const joinReviewed = actualCallback('joinWithReviewedMedia', scope);
+    const toggleMic = actualCallback('handleToggleMic', scope);
+    const toggleCamera = actualCallback('handleToggleVideo', scope);
+    try {
+      await act(() => consentRoot.render(React.createElement(Harness, { canPublish: false })));
+      const cameraBeforeAdmission = fixture.camera.starts;
+      const microphoneBeforeAdmission = fixture.mic.starts;
+      await act(() => joinReviewed());
+      await act(() => fixture.latest.goLive());
+      assert.equal(admissionCalls, 1);
+      assert.equal(cameraRequests, 0, 'off camera never asks for permission at admission');
+      assert.equal(microphoneRequests, 0, 'muted entry never asks for microphone permission');
+      assert.equal(fixture.camera.starts, cameraBeforeAdmission, 'off camera never briefly starts when canPublish becomes true');
+      assert.equal(fixture.mic.starts, microphoneBeforeAdmission, 'muted mic never briefly starts when canPublish becomes true');
+      assert.deepEqual(latestTypes(), [], 'off/off admission publishes no capture tracks');
+
+      // Capacity/manual retry and host-start admission use this same callback.
+      await act(() => consentRoot.render(React.createElement(Harness, { canPublish: false })));
+      await act(() => joinReviewed());
+      assert.equal(admissionCalls, 2);
+      assert.equal(fixture.camera.starts, cameraBeforeAdmission);
+      assert.equal(fixture.mic.starts, microphoneBeforeAdmission);
+      assert.equal(cameraRequests + microphoneRequests, 0);
+
+      // A profile can stay cached when authentication is revoked. A late
+      // permission result cannot admit or enable media in that status-only gap.
+      let releasePermission;
+      const originalCameraRequest = scope.permissionsRef.current.requestCamPermission;
+      scope.permissionsRef.current.requestCamPermission = () => new Promise(resolve => { releasePermission = resolve; });
+      scope.desiredVideoEnabledRef.current = true;
+      let pendingAuthJoin;
+      await act(() => { pendingAuthJoin = joinReviewed(); });
+      consentAuthState.isAuthenticated = false;
+      await act(async () => { releasePermission(true); assert.equal(await pendingAuthJoin, false); });
+      assert.equal(admissionCalls, 2, 'status-only sign-out prevents dispatch after permission');
+      assert.equal(fixture.camera.starts, cameraBeforeAdmission);
+      consentAuthState.isAuthenticated = true;
+      scope.desiredVideoEnabledRef.current = false;
+      scope.permissionsRef.current.requestCamPermission = originalCameraRequest;
+
+      scope.videoRoomRef.current.hostMuteLocked = true;
+      await act(() => toggleMic());
+      assert.equal(microphoneRequests, 0, 'host lock is checked before asking for mic permission');
+      assert.equal(fixture.mic.starts, microphoneBeforeAdmission);
+      scope.videoRoomRef.current.hostMuteLocked = false;
+      scope.permissionsRef.current.requestMicPermission = async () => { microphoneRequests++; return false; };
+      await act(() => toggleMic());
+      assert.equal(microphoneRequests, 1);
+      assert.equal(fixture.mic.starts, microphoneBeforeAdmission, 'denied explicit enable never starts capture');
+
+      scope.permissionsRef.current.requestMicPermission = async () => { microphoneRequests++; return true; };
+      await act(() => toggleMic());
+      assert.equal(microphoneRequests, 2, 'explicit mic enable requests missing OS permission');
+      assert.equal(fixture.mic.active, true);
+      await act(() => toggleMic());
+      assert.equal(microphoneRequests, 2, 'microphone shutoff never asks for permission');
+      assert.equal(fixture.mic.active, false);
+
+      // A confirmed host Leave stops local devices before the slow server
+      // response. Refusal preserves room reception, not the old media intent.
+      await act(() => toggleMic());
+      await act(() => toggleCamera());
+      assert.equal(fixture.mic.active, true);
+      assert.equal(fixture.camera.active, true);
+      let resolveEnd;
+      let navigations = 0;
+      let leavingState = false;
+      const leaveScope = { ...scope, leaveRoomSafely, isHost: true, id: 'room',
+        setIsLeaving(value) { leavingState = value; },
+        sneakyLynkApi: {
+          endRoom: () => new Promise((resolve) => { resolveEnd = resolve; }),
+          leaveRoom: async () => ({ ok: true }),
+        },
+        useRoomStore: { getState: () => ({ listeners: [] }) },
+        reset() {}, endRoomHistory() {},
+        router: { replace() { navigations++; } },
+      };
+      const leaveReviewed = actualCallback('doLeave', leaveScope);
+      let pendingEnd;
+      await act(() => { pendingEnd = leaveReviewed(); });
+      assert.equal(leavingState, true);
+      assert.equal(fixture.camera.active, false, 'camera stops while host end request is pending');
+      assert.equal(fixture.mic.active, false, 'microphone stops while host end request is pending');
+      assert.equal(scope.desiredVideoEnabledRef.current, false);
+      assert.equal(scope.desiredMicEnabledRef.current, false);
+      await act(async () => { resolveEnd({ ok: false, error: { message: 'Try again' } }); await pendingEnd; });
+      assert.equal(leavingState, false);
+      assert.equal(navigations, 0, 'refused host end stays in the room');
+      assert.equal(fixture.camera.active, false, 'refused host end never restores camera');
+      assert.equal(fixture.mic.active, false, 'refused host end never restores microphone');
+      const cameraStartsBeforeLatePermission = fixture.camera.starts;
+      const requestsBeforeLatePermission = cameraRequests;
+
+      let resolveCamera;
+      scope.permissionsRef.current.requestCamPermission = () => { cameraRequests++; return new Promise((resolve) => { resolveCamera = resolve; }); };
+      const pendingCamera = toggleCamera();
+      const duplicateCamera = toggleCamera();
+      assert.equal(cameraRequests, requestsBeforeLatePermission + 1, 'repeated camera enable shares one in-flight permission request');
+      scope.leavingRef.current = true;
+      scope.deviceIntentEpochRef.current++;
+      await act(async () => { resolveCamera(true); await pendingCamera; await duplicateCamera; });
+      assert.equal(fixture.camera.starts, cameraStartsBeforeLatePermission, 'late camera permission after Leave cannot start capture');
+      scope.leavingRef.current = false;
+
+      let resolveMicrophone;
+      scope.permissionsRef.current.requestMicPermission = () => { microphoneRequests++; return new Promise((resolve) => { resolveMicrophone = resolve; }); };
+      const pendingMic = toggleMic();
+      scope.leaveLifetimeRef.current.active = false;
+      await act(() => { consentRoot.unmount(); consentUnmounted = true; });
+      await act(async () => { resolveMicrophone(true); await pendingMic; });
+      assert.equal(fixture.mic.active, false, 'permission completion after navigation cannot restart microphone');
+      assert.equal(fixture.camera.active, false);
+      assert.equal(fixture.currentPublication, null);
+      assert.equal(fixture.invalidPublications.length, 0);
+    } finally {
+      if (!consentUnmounted) await act(() => consentRoot.unmount());
+    }
+    console.log('PASS: actual ServerRoom consent callbacks + real native broadcaster: off/off before admission and retries, zero unsolicited permission requests, explicit OS permission enable, host lock, denial, single-flight, local shutoff, late permission after leave/navigation.');
     console.log('PASS: real React native capture error/retry lifecycle, immutable SDK tracks, healthy/receiving preservation, repeated reconciliation/retry, host mute, role loss, terminal leave, cleanup, and accessible Retry/settings banner. Native SDK adapters only; no device or live transport exercised.');
   } finally {
     if (!unmounted) await act(() => root.unmount());

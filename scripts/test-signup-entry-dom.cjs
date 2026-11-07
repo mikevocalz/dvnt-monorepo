@@ -23,7 +23,7 @@ function load(relative){const file=path.resolve(ROOT,relative);if(caches.has(fil
   if(name.includes('stores/auth-store'))return {useAuthStore:auth};
   if(name.includes('auth-client'))return {getSession:session,authClient:{getSession:session}};
   if(name.startsWith('@dvnt/app/lib/auth/'))return load('packages/app/lib/auth/'+name.split('/').at(-1).replace(/\.ts$/,'')+'.ts');
-  if(name.startsWith('./'))return load(path.relative(ROOT,path.resolve(path.dirname(file),name.replace(/\.ts$/,'')+'.ts')));
+  if(name.startsWith('.'))return load(path.relative(ROOT,path.resolve(path.dirname(file),name.replace(/\.ts$/,'')+'.ts')));
   throw Error('Unexpected import '+name);
  };
  const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{fileName:file,compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
@@ -45,6 +45,10 @@ async function resolve(index,value){await React.act(async()=>requests[index].res
   assert.equal(hasForm(),false);await resolve(0,member());assert.deepEqual(navigation,['/feed'],progress+' member enters feed; normal required gates remain downstream');assert.equal(hasForm(),false);
  }
  await mount('/auth/signup?entry=login&returnTo=%2Ffeed%2Fevents%2F42%3Fsection%3Dreviews');await resolve(0,member());assert.deepEqual(navigation,['/feed/events/42?section=reviews'],'login-to-signup race preserves Rate destination');
+ for (const entry of ['', '&entry=login']) {
+  await mount('/auth/signup?returnTo=%2Ffeed%2Fsneaky-lynk%2Froom%2Froom_123'+entry);
+  await resolve(0,member());assert.deepEqual(navigation,['/feed/sneaky-lynk/room/room_123'],'direct or login-handoff room intent survives an existing session');
+ }
  await mount('/auth/signup?entry=login&returnTo=https%3A%2F%2Fevil.invalid');await resolve(0,member());assert.deepEqual(navigation,['/feed'],'unsafe return target ignored');
  await mount('/auth/signup',{isAuthenticated:true,user:{id:'stale',authId:'stale'}});await resolve(0,guest());assert.equal(hasForm(),true,'stale persisted member state cannot fake a server session');assert.deepEqual(navigation,[]);
  await mount();await React.act(async()=>requests[0].reject(new Error('fixture session unavailable')));assert.equal(hasForm(),false,'session error must not expose signup');assert.deepEqual(navigation,[]);

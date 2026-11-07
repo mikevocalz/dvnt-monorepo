@@ -26,18 +26,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Moq from "@moq/net";
 import * as Publish from "@moq/publish";
 import { Signal, Computed } from "@moq/signals";
+import { createSelectedCamera, createSelectedMicrophone } from "./selected-capture-source.web";
 import { useMoqToken } from "./useMoqToken";
 import { useMoqRelayAuthorization } from "./useMoqRelayAuthorization";
 import { useLynkViewer } from "./useLynkViewer.web";
 import { deriveLynkState } from "./lynkState";
 import { useSignalValue } from "./moq-signals-react";
 import type { LynkBroadcastBase, LynkPublisher } from "./types";
+import type { AudioOutputRouter } from "./audio-output-router";
 
 export interface UseLynkBroadcastResult extends LynkBroadcastBase {
   /** Local camera preview for the broadcaster's own tile. */
   localStream: MediaStream | null;
   /** Usable capture, separate from the user's camera intent. */
   cameraActive: boolean;
+  /** Usable microphone track, not merely an unmuted intent. */
+  microphoneActive: boolean;
   /**
    * The local microphone capture, for client-side VAD (`useSpeakingDetection`).
    * MoQ carries no voice-activity signal, so a speaking ring is computed from
@@ -51,6 +55,7 @@ export interface UseLynkBroadcastResult extends LynkBroadcastBase {
 export function useLynkBroadcast(
   roomId: string | undefined,
   canPublish = true,
+  devicePreferences: { cameraDeviceId?: string; microphoneDeviceId?: string; audioOutput?: AudioOutputRouter } = {},
 ): UseLynkBroadcastResult {
   const { token, error: tokenError, authorizationScope } = useMoqToken(
     roomId,
@@ -58,7 +63,7 @@ export function useLynkBroadcast(
     !!roomId && canPublish,
   );
   // Compose the viewer for co-publisher discovery + canvas mounting.
-  const viewer = useLynkViewer(roomId);
+  const viewer = useLynkViewer(roomId, devicePreferences.audioOutput);
 
   const urlSignal = useRef(new Signal<URL | undefined>(undefined));
   const reloadRef = useRef<Moq.Connection | null>(null);
@@ -75,6 +80,12 @@ export function useLynkBroadcast(
     typeof document === "undefined" || document.visibilityState !== "hidden");
   const [visibilityRevision, setVisibilityRevision] = useState(0);
   const videoAvailable = useRef(new Signal(false));
+  const cameraPreference = useRef(new Signal<string | undefined>(devicePreferences.cameraDeviceId || undefined));
+  const microphonePreference = useRef(new Signal<string | undefined>(devicePreferences.microphoneDeviceId || undefined));
+  useEffect(() => {
+    cameraPreference.current.set(devicePreferences.cameraDeviceId || undefined);
+    microphonePreference.current.set(devicePreferences.microphoneDeviceId || undefined);
+  }, [devicePreferences.cameraDeviceId, devicePreferences.microphoneDeviceId]);
   // Blur alone includes browser chrome and permission dialogs: only actual
   // page lifecycle transitions suspend capture. Keep microphone intent intact.
   useEffect(() => {
@@ -145,8 +156,8 @@ export function useLynkBroadcast(
     // know this member may publish. See the header note.
     const cameraOn = new Signal(false);
     const micOn = new Signal(false);
-    const camera = new Publish.Source.Camera({ enabled: cameraOn });
-    const mic = new Publish.Source.Microphone({ enabled: micOn });
+    const camera = createSelectedCamera(cameraOn, cameraPreference.current);
+    const mic = createSelectedMicrophone(micOn, microphonePreference.current);
     reloadRef.current = reload;
     cameraRef.current = camera;
     micRef.current = mic;
@@ -197,11 +208,17 @@ export function useLynkBroadcast(
   const microphoneFailure = useSignalValue(
     mic?.out.error ?? new Signal<Error | undefined>(undefined),
   );
+  const cameraChoices = useSignalValue(camera?.device.out.available ?? new Signal<MediaDeviceInfo[] | undefined>(undefined));
+  const microphoneChoices = useSignalValue(mic?.device.out.available ?? new Signal<MediaDeviceInfo[] | undefined>(undefined));
+  const cameraSelectionError = devicePreferences.cameraDeviceId && cameraChoices && !cameraChoices.some(item => item.deviceId === devicePreferences.cameraDeviceId)
+    ? "Selected camera unavailable. Reconnect it or choose another in device settings." : null;
+  const microphoneSelectionError = devicePreferences.microphoneDeviceId && microphoneChoices && !microphoneChoices.some(item => item.deviceId === devicePreferences.microphoneDeviceId)
+    ? "Selected microphone unavailable. Reconnect it or choose another in device settings." : null;
   // A local permission/device failure does not disconnect reception. Fatal
   // auth/transport errors retain their existing room recovery path separately.
   const error = tokenError ?? connectionError?.message ?? null;
-  const cameraError = canPublish && !ended && cameraEnabled ? cameraFailure?.message ?? null : null;
-  const microphoneError = canPublish && !ended && micEnabled ? microphoneFailure?.message ?? null : null;
+  const cameraError = canPublish && !ended && cameraEnabled ? cameraSelectionError ?? cameraFailure?.message ?? null : null;
+  const microphoneError = canPublish && !ended && micEnabled ? microphoneSelectionError ?? microphoneFailure?.message ?? null : null;
   const captureError = microphoneError ?? cameraError;
   const captureIntent = useRef({ devices, canPublish, ended, cameraEnabled, micEnabled });
   captureIntent.current = { devices, canPublish, ended, cameraEnabled, micEnabled };
@@ -221,13 +238,13 @@ export function useLynkBroadcast(
     if (retryCamera) {
       previous.camera.close();
       next.cameraOn = new Signal(false);
-      next.camera = new Publish.Source.Camera({ enabled: next.cameraOn });
+      next.camera = createSelectedCamera(next.cameraOn, cameraPreference.current);
       cameraRef.current = next.camera;
     }
     if (retryMic) {
       previous.mic.close();
       next.micOn = new Signal(false);
-      next.mic = new Publish.Source.Microphone({ enabled: next.micOn });
+      next.mic = createSelectedMicrophone(next.micOn, microphonePreference.current);
       micRef.current = next.mic;
     }
     setDevices(next);
@@ -258,7 +275,7 @@ export function useLynkBroadcast(
     };
   }, [cameraTrack]);
   const cameraActive = !!cameraTrack && cameraTrack.readyState === "live" &&
-    !cameraTrack.muted && trackUsable && pageVisible && cameraEnabled && canPublish && !ended;
+    !cameraTrack.muted && (!devicePreferences.cameraDeviceId || cameraTrack.getSettings().deviceId === devicePreferences.cameraDeviceId) && trackUsable && pageVisible && cameraEnabled && canPublish && !ended;
   useEffect(() => { videoAvailable.current.set(cameraActive); }, [cameraActive, visibilityRevision]);
   const localStream = useMemo(
     () => (cameraActive && cameraTrack ? new MediaStream([cameraTrack]) : null),
@@ -272,9 +289,24 @@ export function useLynkBroadcast(
   const micTrack = audioSource && !("samples" in audioSource)
     ? ("track" in audioSource ? audioSource.track : audioSource)
     : undefined;
+  const [micTrackUsable, setMicTrackUsable] = useState(false);
+  useEffect(() => {
+    const update = () => setMicTrackUsable(!!micTrack && micTrack.readyState === "live" && !micTrack.muted);
+    update();
+    micTrack?.addEventListener("mute", update);
+    micTrack?.addEventListener("unmute", update);
+    micTrack?.addEventListener("ended", update);
+    return () => {
+      micTrack?.removeEventListener("mute", update);
+      micTrack?.removeEventListener("unmute", update);
+      micTrack?.removeEventListener("ended", update);
+    };
+  }, [micTrack]);
+  const microphoneActive = !!micTrack && micTrack.readyState === "live" && !micTrack.muted &&
+    (!devicePreferences.microphoneDeviceId || micTrack.getSettings().deviceId === devicePreferences.microphoneDeviceId) && micTrackUsable && micEnabled && canPublish && !ended;
   const localAudioStream = useMemo(
-    () => (micTrack ? new MediaStream([micTrack]) : null),
-    [micTrack],
+    () => (microphoneActive && micTrack ? new MediaStream([micTrack]) : null),
+    [micTrack, microphoneActive],
   );
 
   // Capture follows the flags AND the role. Same rule as the native hook, where
@@ -405,6 +437,7 @@ export function useLynkBroadcast(
     isLive,
     localStream,
     cameraActive,
+    microphoneActive,
     localAudioStream,
     cameraEnabled,
     micEnabled,

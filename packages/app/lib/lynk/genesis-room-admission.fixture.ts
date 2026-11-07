@@ -31,7 +31,7 @@ const boundaries: Record<string, string> = {
   "@dvnt/app/features/sneaky-lynk/api/supabase": `const f=window.fixture;export const sneakyLynkApi={heartbeat:f.heartbeat,leaveRoom:f.leave};`,
   "@dvnt/app/lib/api/event-lynk": `export const eventLynkApi={wait:room=>window.fixture.wait(room)};`,
   "lifecycle-source-fixture": `export const createRoomLifecycleSource=options=>window.fixture.lifecycle(options.roomId);`,
-  "@moq/signals": `export const Signal=window.fixture.Signal;export const Computed=window.fixture.Computed;`,
+  "@moq/signals": `export const Signal=window.fixture.Signal;export const Computed=window.fixture.Computed;export const Derived=window.fixture.Derived;`,
   "@moq/net": `export const Connection=window.fixture.Connection;export const Path={from:path=>path};export const Time={Milli:{zero:0}};`,
   "@moq/watch": `export const Player=window.fixture.Player;`,
   "@moq/publish": `export const Broadcast=window.fixture.Publication;export const Source={Camera:window.fixture.Device,Microphone:window.fixture.Device};export const Video={Capture:window.fixture.Capture,Encoder:window.fixture.Encoder};export const Audio=Video;`,
@@ -77,7 +77,7 @@ class Signal {
   constructor(value: any) { this.value = value; }
   peek() { return this.value; }
   set(value: any) { if (Object.is(value, this.value)) return; this.value = value; for (const callback of [...this.listeners]) callback(); }
-  subscribe(callback: () => void) { this.listeners.add(callback); return () => this.listeners.delete(callback); }
+  subscribe(callback: () => void) { this.listeners.add(callback); return () => { this.listeners.delete(callback); }; }
 }
 class Computed extends Signal {
   stops: (() => void)[] = [];
@@ -93,6 +93,16 @@ class Computed extends Signal {
     queueMicrotask(run);
   }
   close() { this.closed = true; for (const stop of this.stops.splice(0)) stop(); this.set(undefined); }
+}
+class Derived extends Signal {
+  deps: Signal[];
+  fn: () => any;
+  constructor(deps: Signal[], fn: () => any) { super(undefined); this.deps = deps; this.fn = fn; }
+  peek() { return this.fn(); }
+  subscribe(callback: () => void) {
+    const stops = this.deps.map(dep => dep.subscribe(callback));
+    return () => stops.forEach(stop => stop());
+  }
 }
 const deferred = () => {
   let resolve!: (value: any) => void;
@@ -156,7 +166,7 @@ function client(s: ReturnType<typeof server>, owner = "alice", broadcast = false
         subscribe(callbacks: any) { const sub = { room, callbacks, client: f }; s.lifecycle.add(sub); return () => s.lifecycle.delete(sub); },
       };
     },
-    Signal,
+    Signal, Derived,
   };
   f.Computed = class extends Computed { constructor(fn: (effect: any) => any) { super(fn); f.computeds.push(this); } };
   f.Connection = class {
@@ -175,12 +185,15 @@ function client(s: ReturnType<typeof server>, owner = "alice", broadcast = false
   f.Device = class {
     enabled: Signal;
     in: any;
+    device: any;
     out = { source: new Signal(undefined), error: new Signal(undefined) };
     closed = false;
     constructor(options?: any) {
       this.enabled = options?.enabled ?? new Signal(false);
       assert.ok(this.enabled instanceof Signal);
-      this.in = { enabled: this.enabled }; f.devices.push(this);
+      this.in = { enabled: this.enabled };
+      this.device = { preferred: options?.device?.preferred ?? new Signal(undefined), out: { available: new Signal([]), requested: new Signal(undefined), active: new Signal(undefined) } };
+      f.devices.push(this);
     }
     close() { this.closed = true; this.enabled.set(false); }
   };

@@ -7,7 +7,9 @@
  * either, for a plainer reason: if it fails, the invite must still be there.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getBridgeRequestEpoch } from "@dvnt/app/lib/supabase/client";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import {
   lynkCohostInvites,
@@ -23,11 +25,27 @@ import {
  * Lynk room render a second tile of the host — worth its own hook so the next
  * caller cannot repeat it.
  */
+function invitationAccountKey(state: { isAuthenticated: boolean; user: { id: string; authId?: string } | null }) {
+  return state.isAuthenticated && state.user?.id ? `${state.user.id}:${state.user.authId ?? ""}` : "";
+}
+
 export function useMyAuthId() {
+  const accountKey = useAuthStore(invitationAccountKey);
   return useQuery({
-    queryKey: ["my-auth-id"],
-    queryFn: () => getCurrentUserAuthId(),
-    staleTime: Infinity,
+    queryKey: ["my-auth-id", accountKey],
+    queryFn: async () => {
+      const epoch = getBridgeRequestEpoch();
+      const isCurrent = () => !!accountKey && invitationAccountKey(useAuthStore.getState()) === accountKey && getBridgeRequestEpoch() === epoch;
+      // A retry can execute after its original observer's account switched.
+      // Its query key still belongs to that rendered account, not the new one.
+      if (!isCurrent()) throw new Error("Your account changed");
+      const authId = await getCurrentUserAuthId();
+      if (!isCurrent()) throw new Error("Your account changed");
+      if (!authId) throw new Error("Couldn't verify your invitation account");
+      return authId;
+    },
+    enabled: !!accountKey,
+    staleTime: 30_000,
   });
 }
 
@@ -41,14 +59,36 @@ export const lynkInviteKeys = {
  *  invite that arrives while you are on the notifications screen is the case
  *  this feature exists for. */
 export function usePendingCohostInvites(_ignored?: string | undefined) {
-  const { data: authId } = useMyAuthId();
-  return useQuery({
+  const accountKey = useAuthStore(invitationAccountKey);
+  const identity = useMyAuthId();
+  const authId = identity.isError ? undefined : identity.data;
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: lynkInviteKeys.pending(authId ?? undefined),
-    queryFn: () => lynkCohostInvites.listPending(authId!),
+    queryFn: () => {
+      const isCurrent = () => !!accountKey && invitationAccountKey(useAuthStore.getState()) === accountKey;
+      if (!isCurrent()) throw new Error("Your account changed");
+      return lynkCohostInvites.listPending(authId!, { isCurrent });
+    },
     enabled: !!authId,
-    refetchInterval: 30_000,
+    refetchInterval: 15_000,
     staleTime: 10_000,
   });
+  return {
+    ...query,
+    data: identity.isError ? undefined : query.data,
+    isError: identity.isError || query.isError,
+    error: identity.error ?? query.error,
+    isFetching: identity.isFetching || query.isFetching,
+    refetch: async () => {
+      // An identity-read failure must be retryable; retrying a disabled invite
+      // query alone would never recover a cold-cache signed-in account.
+      const refreshed = await identity.refetch();
+      if (refreshed.data && !refreshed.error) {
+        await queryClient.invalidateQueries({ queryKey: lynkInviteKeys.pending(refreshed.data) });
+      }
+    },
+  };
 }
 
 export function useInviteCohost() {
@@ -64,21 +104,46 @@ export type CohostInviteResult =
   | { status: "accepted"; roomId: string; role: "co-host" }
   | { status: "declined" };
 
+// One write per account across the toast and durable card, including rapid taps
+// before React has painted a pending state. The server remains authoritative.
+const responsesInFlight = new Set<string>();
+
 export function useRespondToCohostInvite(userId: string | undefined) {
   const queryClient = useQueryClient();
-  return useMutation<
+  const mutationKey = [...lynkInviteKeys.all, "respond", userId ?? "anon"];
+  const pendingCount = useIsMutating({ mutationKey });
+  const mutation = useMutation<
     CohostInviteResult,
     Error,
     { inviteId: number; action: "accept" | "decline" }
   >({
-    mutationFn: (v) =>
-      v.action === "accept"
-        ? lynkCohostInvites.accept(v.inviteId)
-        : lynkCohostInvites.decline(v.inviteId),
+    mutationKey,
+    mutationFn: async (v) => {
+      const epoch = getBridgeRequestEpoch();
+      const isCurrent = () => getBridgeRequestEpoch() === epoch;
+      if (!userId || await getCurrentUserAuthId() !== userId || !isCurrent()) {
+        throw new Error("Your account changed");
+      }
+      if (responsesInFlight.has(userId)) throw new Error("Already responding");
+      responsesInFlight.add(userId);
+      try {
+        return await (v.action === "accept"
+          ? lynkCohostInvites.accept(v.inviteId, { isCurrent })
+          : lynkCohostInvites.decline(v.inviteId, { isCurrent }));
+      } finally {
+        responsesInFlight.delete(userId);
+      }
+    },
+    onSuccess: (_result, variables) => {
+      // Remove only after server confirmation, not optimistically.
+      queryClient.setQueryData<LynkCohostInvite[]>(lynkInviteKeys.pending(userId),
+        (current) => current?.filter((invite) => invite.id !== variables.inviteId));
+    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: lynkInviteKeys.pending(userId) });
     },
   });
+  return { ...mutation, isPending: mutation.isPending || pendingCount > 0 };
 }
 
 export type { LynkCohostInvite };

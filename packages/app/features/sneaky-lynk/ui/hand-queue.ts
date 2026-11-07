@@ -1,17 +1,7 @@
 /**
- * Hand-queue behaviour, shared by both room legs.
- *
- * The two legs render different affordances on purpose — a bottom sheet on
- * native, a side panel on web — but the queue semantics, the available actions
- * and the words on the buttons are not platform decisions, and they had drifted
- * into three separate ones:
- *
- *   - web offered only "promote", so a host on web could invite someone up but
- *     could not lower a hand or clear the queue at all;
- *   - the same action was labelled "Bring up" on web and "Invite to speak" on
- *     native, so the product had two names for one thing;
- *   - web resolved the raiser's name with its own fallback chain, which is how
- *     anonymous participants ended up showing real names to the host.
+ * Shared FIFO queue semantics and truthful copy for web and native.
+ * Public aliases identify anonymous guests; departed members retain their
+ * numbered position until dismissed. Local dismissal is not a peer-hand update.
  */
 // Explicit extension: this module is exercised by `node --test`, whose ESM
 // resolver requires it for a relative TS specifier. Metro and the Next build
@@ -74,18 +64,13 @@ export function buildHandQueue(
   return queue;
 }
 
-/** One set of words for both legs. */
+/** Local dismissal must not imply a server-side peer-hand change. */
 export const HAND_QUEUE_COPY = {
   title: "Raised hands",
-  /** An empty panel is a chance to explain the rule the host is about to rely
-   *  on. Web's "No raised hands right now." only restated the emptiness. */
   empty: "Raised hands will show up here in the order they're raised.",
-  /** Names what happens, not where it happens — "Bring up" described the
-   *  layout, "Invite to speak" describes the outcome. */
-  invite: "Invite to speak",
-  lower: "Lower",
-  /** "Lower all hands", not "Dismiss all": it matches the per-row action and
-   *  cannot be misread as dismissing the panel. */
-  lowerAll: "Lower all hands",
+  invite: "Make co-host",
+  lower: "Dismiss here",
+  lowerAll: "Clear my queue",
+  dismissalHint: "Dismissing only clears your view; it does not lower their hand.",
   departed: "Left the room",
 } as const;

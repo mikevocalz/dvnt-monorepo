@@ -28,7 +28,7 @@ export * from "./api/room-stats";
 // Hooks — TanStack Query + Zustand selectors + capture protection/broadcast.
 export * from "./hooks/useRoomEvents";
 export * from "./hooks/useRoomReactions";
-export * from "./hooks/useRoomCapacityWatcher";
+export * from "./hooks/useFullRoomRetry";
 export * from "./hooks/useEventLynkWaitingRoom";
 export * from "./hooks/useSneakyLynkCaptureProtection";
 export * from "./hooks/useSneakyLynkCaptureBroadcast";
@@ -57,3 +57,9 @@ export {
   getSneakyUserLabel,
   normalizeSneakyAnonLabel,
 } from "./ui/user-labels";
+
+export { resolveCreatedRoomId, roomInviteeIds } from "./create-room-policy";
+export { useLynkInviteSearch } from "./hooks/useLynkInviteSearch";
+export { useLynkDiscovery } from "./hooks/useLynkDiscovery";
+export { useLynkCreateScope } from "./hooks/useLynkCreateScope";
+export { discoveryRoomState } from "./discovery-room-state";

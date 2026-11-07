@@ -53,9 +53,13 @@ async function resolveRealtimeRoomId(roomId: string): Promise<string | null> {
 async function callEdgeFunction<T>(
   functionName: string,
   body: Record<string, unknown>,
+  options?: { isCurrent?: () => boolean },
 ): Promise<ApiResponse<T>> {
   try {
+    if (options?.isCurrent && !options.isCurrent()) return { ok: false, error: { code: "cancelled", message: "Request cancelled" } };
     const token = await requireBetterAuthToken();
+    // Auth hydration can outlive Stop, navigation or an account switch.
+    if (options?.isCurrent && !options.isCurrent()) return { ok: false, error: { code: "cancelled", message: "Request cancelled" } };
 
     const { data, error } = await supabase.functions.invoke<ApiResponse<T>>(
       functionName,
@@ -158,12 +162,13 @@ export const videoApi = {
   async joinRoom(
     roomId: string,
     anonymous = false,
+    options?: { isCurrent?: () => boolean },
   ): Promise<ApiResponse<JoinRoomResponse>> {
     return callEdgeFunction<JoinRoomResponse>("video_join_room", {
       roomId,
       anonymous,
       platform: Platform.OS,
-    });
+    }, options);
   },
 
   /**
@@ -186,8 +191,8 @@ export const videoApi = {
     roomId: string;
     targetUserId: string;
     reason?: string;
-  }): Promise<ApiResponse<{ kicked: boolean }>> {
-    return callEdgeFunction("video_kick_user", params);
+  }, options?: { isCurrent?: () => boolean }): Promise<ApiResponse<{ kicked: boolean }>> {
+    return callEdgeFunction("video_kick_user", params, options);
   },
 
   /**
@@ -209,8 +214,8 @@ export const videoApi = {
     roomId: string;
     targetUserId: string;
     newRole: "co-host" | "participant";
-  }): Promise<ApiResponse<{ changed: boolean; role: string }>> {
-    return callEdgeFunction("video_change_role", params);
+  }, options?: { isCurrent?: () => boolean }): Promise<ApiResponse<{ changed: boolean; role: string }>> {
+    return callEdgeFunction("video_change_role", params, options);
   },
 
   /**
@@ -219,15 +224,15 @@ export const videoApi = {
   async mutePeer(params: {
     roomId: string;
     targetUserId: string;
-  }): Promise<ApiResponse<{ muted: boolean }>> {
-    return callEdgeFunction("video_mute_peer", params);
+  }, options?: { isCurrent?: () => boolean }): Promise<ApiResponse<{ muted: boolean }>> {
+    return callEdgeFunction("video_mute_peer", params, options);
   },
 
   /**
    * Mute ALL participants (host only)
    */
-  async muteAll(roomId: string): Promise<ApiResponse<{ mutedAll: boolean }>> {
-    return callEdgeFunction("video_mute_all", { roomId, action: "mute" });
+  async muteAll(roomId: string, options?: { isCurrent?: () => boolean }): Promise<ApiResponse<{ mutedAll: boolean }>> {
+    return callEdgeFunction("video_mute_all", { roomId, action: "mute" }, options);
   },
 
   /**
@@ -235,8 +240,9 @@ export const videoApi = {
    */
   async unmuteAll(
     roomId: string,
+    options?: { isCurrent?: () => boolean },
   ): Promise<ApiResponse<{ unmutedAll: boolean }>> {
-    return callEdgeFunction("video_mute_all", { roomId, action: "unmute" });
+    return callEdgeFunction("video_mute_all", { roomId, action: "unmute" }, options);
   },
 
   /**
@@ -245,8 +251,8 @@ export const videoApi = {
   async unmutePeer(params: {
     roomId: string;
     targetUserId: string;
-  }): Promise<ApiResponse<{ unmuted: boolean }>> {
-    return callEdgeFunction("video_mute_peer", { ...params, action: "unmute" });
+  }, options?: { isCurrent?: () => boolean }): Promise<ApiResponse<{ unmuted: boolean }>> {
+    return callEdgeFunction("video_mute_peer", { ...params, action: "unmute" }, options);
   },
 
   /**

@@ -39,3 +39,17 @@ export function waitingSinceLabel(joinedAt: string, now = Date.now()): string {
   if (min < 60) return `Waiting ${min} min`;
   return `Waiting ${Math.floor(min / 60)} h`;
 }
+
+/** Terminal waiting-room refusals stop polling. Network/server/rate-limit
+ * failures remain retryable; old untyped responses retain a narrow fallback. */
+export function isEventLynkWaitRefusal(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const { status, reason, message } = error as { status?: number; reason?: string; message?: string };
+  if (typeof status === "number") {
+    return status >= 400 && status < 500 && ![408, 425, 429].includes(status);
+  }
+  if (reason) return ["not_found", "room_ended", "event_unavailable", "event_ticket_required",
+    "event_invite_required", "event_schedule_missing", "session_expired"].includes(reason);
+  return typeof message === "string" &&
+    /ticket|invitation|cancel|ended|not found|no longer available|unauthorized|not authenticated|session expired/i.test(message);
+}

@@ -16,7 +16,7 @@
  * mounted or is still bootstrapping.
  */
 
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   AlertCircle,
   Users,
@@ -34,6 +34,7 @@ import type {
 
 interface RoomJoinErrorSheetProps {
   error: ClassifiedError | null;
+  retrying?: boolean;
   onDismiss: () => void;
   /** Optional primary action — e.g. "Try again" retries `joinRoom()`. */
   onRetry?: () => void;
@@ -69,6 +70,7 @@ function iconFor(reason: SneakyLynkErrorReason, color: string) {
 
 export function RoomJoinErrorSheet({
   error,
+  retrying = false,
   onDismiss,
   onRetry,
   onSignIn,
@@ -93,7 +95,7 @@ export function RoomJoinErrorSheet({
       onSignIn();
       return;
     }
-    if (error.ctaLabel && onRetry) {
+    if (error.reason === "unknown" && onRetry) {
       onRetry();
       return;
     }
@@ -108,12 +110,13 @@ export function RoomJoinErrorSheet({
       onRequestClose={onDismiss}
       statusBarTranslucent
     >
-      <View style={styles.backdrop}>
+      <ScrollView style={{ backgroundColor: "rgba(2,3,10,0.82)" }} contentContainerStyle={styles.backdrop}>
         <View
+          accessibilityViewIsModal
           style={[
             styles.card,
             {
-              backgroundColor: colors.secondary,
+              backgroundColor: "#0D1019",
               borderColor: colors.border,
             },
           ]}
@@ -127,7 +130,7 @@ export function RoomJoinErrorSheet({
             {error ? iconFor(error.reason, iconTint) : null}
           </View>
 
-          <Text style={[styles.title, { color: colors.foreground }]}>
+          <Text accessibilityRole="header" style={[styles.title, { color: colors.foreground }]}>
             {error?.title ?? "Something went wrong"}
           </Text>
           <Text style={[styles.body, { color: colors.mutedForeground }]}>
@@ -137,6 +140,9 @@ export function RoomJoinErrorSheet({
           <View style={styles.actions}>
             {error?.ctaLabel && !isAppOnly ? (
               <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: retrying, busy: retrying }}
+                disabled={retrying}
                 onPress={handleCta}
                 style={({ pressed }) => [
                   styles.primaryBtn,
@@ -152,11 +158,12 @@ export function RoomJoinErrorSheet({
                     { color: colors.primaryForeground },
                   ]}
                 >
-                  {error.ctaLabel}
+                  {retrying ? "Trying again…" : error.ctaLabel}
                 </Text>
               </Pressable>
             ) : null}
             <Pressable
+              accessibilityRole="button"
               onPress={onDismiss}
               style={({ pressed }) => [
                 styles.secondaryBtn,
@@ -177,14 +184,15 @@ export function RoomJoinErrorSheet({
             </Pressable>
           </View>
         </View>
-      </View>
+      </ScrollView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   backdrop: {
-    flex: 1,
+    flexGrow: 1,
+    paddingVertical: 48,
     backgroundColor: "rgba(0,0,0,0.72)",
     alignItems: "center",
     justifyContent: "center",
@@ -224,7 +232,7 @@ const styles = StyleSheet.create({
   },
   primaryBtn: {
     height: 48,
-    borderRadius: 12,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -235,7 +243,7 @@ const styles = StyleSheet.create({
   },
   secondaryBtn: {
     height: 48,
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
     justifyContent: "center",

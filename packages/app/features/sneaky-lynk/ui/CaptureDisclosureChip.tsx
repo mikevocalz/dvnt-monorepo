@@ -32,9 +32,9 @@ export function CaptureDisclosureChip() {
   if (!webPeerPresent) return null;
 
   return (
-    <View style={styles.chip} accessibilityRole="text">
+    <View style={styles.chip} accessibilityRole="text" accessibilityLiveRegion="polite">
       <ShieldAlert size={13} color="#FDE68A" />
-      <Text style={styles.label} numberOfLines={2}>
+      <Text style={styles.label} >
         Web viewers in room — capture protection limited on web
       </Text>
     </View>
@@ -49,7 +49,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingHorizontal: 10,
     paddingVertical: 7,
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(252, 211, 77, 0.35)",
     backgroundColor: "rgba(252, 211, 77, 0.12)",
@@ -57,9 +57,9 @@ const styles = StyleSheet.create({
   label: {
     flex: 1,
     color: "#FDE68A",
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "600",
-    lineHeight: 15,
+    lineHeight: 18,
     letterSpacing: 0.1,
   },
 });

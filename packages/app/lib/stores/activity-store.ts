@@ -1,3 +1,4 @@
+import { cohostActivityRoute } from "@dvnt/app/features/sneaky-lynk/cohost-invite-policy";
 import { ticketActivityRoute } from "@dvnt/app/lib/activity/ticket-activity";
 import { eventActivityRoute } from "@dvnt/app/lib/activity/event-activity";
 import { create } from "zustand";
@@ -43,6 +44,9 @@ export type ActivityType =
   | "ticket_comped"
   | "ticket_refunded"
   | "room_invite"
+  | "lynk_cohost_invited"
+  | "lynk_cohost_accepted"
+  | "lynk_cohost_declined"
   | "sneaky_lynk"
   // App-wide announcement. No actor and no entity — the copy travels in
   // `entity_payload` as { title, body }.
@@ -321,6 +325,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   // Get the correct route for an activity item
   getRouteForActivity: (activity) => {
     const { type, entityType, entityId, post, event, user } = activity;
+
+    const cohostRoute = cohostActivityRoute(type, "native");
+    if (cohostRoute) return cohostRoute;
 
     const ticketRoute = ticketActivityRoute(activity, "native");
     if (ticketRoute) return ticketRoute;

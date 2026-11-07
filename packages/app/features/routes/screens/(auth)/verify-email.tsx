@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useIsFocused } from "@react-navigation/native";
 import { View, Text } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Button } from "@dvnt/app/components/ui/button";
@@ -11,6 +12,7 @@ import {
 import { Check, Mail, AlertCircle } from "lucide-react-native";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 
 /**
  * Verify Email Screen
@@ -29,50 +31,56 @@ export default function VerifyEmailScreen() {
   const { colors } = useColorScheme();
   const showToast = useUIStore((s) => s.showToast);
   const params = useGlobalSearchParams<{ token?: string }>();
+  const isFocused = useIsFocused();
 
   useEffect(() => {
+    if (!isFocused) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = useAuthStore.subscribe((next, previous) => {
+      if ((next.user?.authId || next.user?.id) !== (previous.user?.authId || previous.user?.id) ||
+          next.isAuthenticated !== previous.isAuthenticated ||
+          (next.authStatus === "unauthenticated" && previous.authStatus !== "unauthenticated")) {
+        active = false;
+        if (timer) clearTimeout(timer);
+      }
+    });
     const verify = async () => {
-      // If we have a token param, Better Auth's expo client should have
-      // already handled the callback. Check if the session is now verified.
+      const onVerified = () => {
+        if (!active) return;
+        setStatus("success");
+        showToast("success", "Email Verified", "Your email has been confirmed");
+        timer = setTimeout(() => {
+          if (active) router.replace("/(protected)/(tabs)" as any);
+        }, 2000);
+      };
       if (params.token) {
-        console.log("[VerifyEmail] Token detected, verifying...");
-        const onVerified = () => {
-          setStatus("success");
-          showToast("success", "Email Verified", "Your email has been confirmed");
-          setTimeout(() => {
-            router.replace("/(protected)/(tabs)" as any);
-          }, 2000);
-        };
-        // Web: complete verification with the token directly (cookie-independent).
         try {
           const res = await submitEmailVerification(params.token);
-          if (!res?.error) {
-            console.log("[VerifyEmail] Email verified via token");
-            onVerified();
-            return;
-          }
+          if (!res?.error) { onVerified(); return; }
         } catch (err) {
           console.error("[VerifyEmail] Token verify error:", err);
         }
-        // Native / legacy: the expo client may have verified via session.
-        try {
-          const { data: session } = await authClient.getSession();
-          if (session?.user?.emailVerified) {
-            onVerified();
-            return;
-          }
-        } catch (err) {
-          console.error("[VerifyEmail] Verification check error:", err);
-        }
-        setStatus("error");
-      } else {
-        // No token — user landed here manually, show "check inbox" state
-        setStatus("waiting");
       }
+      if (!active) return;
+      // Native callbacks can be session-based and carry no token. Read the
+      // server session rather than treating the callback as a generic feed link.
+      try {
+        const { data: session } = await authClient.getSession();
+        if (session?.user?.emailVerified) { onVerified(); return; }
+      } catch (err) {
+        console.error("[VerifyEmail] Verification check error:", err);
+      }
+      if (active) setStatus(params.token ? "error" : "waiting");
     };
 
-    verify();
-  }, [params.token]);
+    void verify();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [params.token, isFocused]);
 
   const handleResendEmail = async () => {
     try {

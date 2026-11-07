@@ -15,6 +15,9 @@ export type NotificationType =
   | "event_update"
   | "message"
   | "room_invite"
+  | "lynk_cohost_invited"
+  | "lynk_cohost_accepted"
+  | "lynk_cohost_declined"
   | "sneaky_lynk";
 
 export interface Notification {

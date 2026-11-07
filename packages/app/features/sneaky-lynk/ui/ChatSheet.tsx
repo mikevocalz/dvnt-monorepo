@@ -52,15 +52,15 @@ import { useRoomChat } from "../hooks/useRoomChat";
 // ── Constants ────────────────────────────────────────────────────────
 
 const REACTION_EMOJIS = ["😂", "😢", "😊", "😈", "🥵", "💝"];
-const BUBBLE_BG = "#232327";
-const BUBBLE_OWN_BG = "rgba(52,162,223,0.14)";
+const BUBBLE_BG = "rgba(255,255,255,0.06)";
+const BUBBLE_OWN_BG = "rgba(63,220,255,0.10)";
 const BORDER = "rgba(255,255,255,0.08)";
 const TEXT_PRIMARY = "#F9FAFB";
 const TEXT_SECONDARY = "#9CA3AF";
-const TEXT_TERTIARY = "#6B7280";
-const ACCENT = "#34A2DF";
+const TEXT_TERTIARY = "#9BA1B2";
+const ACCENT = "#3FDCFF";
 const PANEL_BG = "#1D1D21";
-const SHEET_BG = "#141416";
+const SHEET_BG = "#0D1019";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -223,9 +223,11 @@ const CommentBubble = memo(function CommentBubble({
               </Text>
               {!isReply && (
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Reply to ${authorName}`}
                   onPress={() => onReply(comment)}
                   hitSlop={8}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+                  style={{ minHeight: 44, minWidth: 44, flexDirection: "row", alignItems: "center", gap: 4 }}
                 >
                   <Reply size={12} color={TEXT_SECONDARY} />
                   <Text style={{ color: TEXT_SECONDARY, fontSize: 11, fontWeight: "600" }}>
@@ -265,7 +267,8 @@ const CommentBubble = memo(function CommentBubble({
                 onReact(comment.id, emoji);
                 setShowReactionPicker(false);
               }}
-              style={{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" }}
+              accessibilityRole="button" accessibilityLabel={`React ${emoji}, visible only to you`}
+              style={{ width: 44, height: 44, borderRadius: 8, alignItems: "center", justifyContent: "center" }}
             >
               <Text style={{ fontSize: 18 }}>{emoji}</Text>
             </Pressable>
@@ -289,6 +292,8 @@ const CommentBubble = memo(function CommentBubble({
           {Object.entries(groupedReactions).map(([emoji, count]) => (
             <Pressable
               key={emoji}
+              accessibilityRole="button"
+              accessibilityLabel={`Toggle ${emoji} reaction, visible only to you`}
               onPress={() => onReact(comment.id, emoji)}
               style={{
                 flexDirection: "row",
@@ -296,6 +301,9 @@ const CommentBubble = memo(function CommentBubble({
                 backgroundColor: PANEL_BG,
                 borderRadius: 12,
                 paddingHorizontal: 6,
+                minHeight: 44,
+                minWidth: 44,
+                justifyContent: "center",
                 paddingVertical: 3,
                 borderWidth: 1,
                 borderColor: reactions.some(
@@ -680,7 +688,7 @@ export function ChatSheet({
     <TrueSheet
       ref={sheetRef as any}
       detents={[0.72, 0.92]}
-      cornerRadius={16}
+      cornerRadius={24}
       grabber
       grabberOptions={{ width: 44, height: 6, topMargin: 10, color: "#FFFFFF" }}
       scrollable
@@ -696,9 +704,10 @@ export function ChatSheet({
         <View>
         {chatError ? <Text accessibilityRole="alert" style={{ color: "#FC253A", padding: 12 }}>{chatError}</Text> : null}
       <SheetHeader
-          title={`Comments${comments.length > 0 ? ` (${comments.length})` : ""}`}
+          title={`Room chat${comments.length > 0 ? ` (${comments.length})` : ""}`}
           onClose={handleRequestClose}
         />
+        <Text style={{ color: TEXT_SECONDARY, fontSize: 12, lineHeight: 18, paddingHorizontal: 20, paddingBottom: 12 }}>{enabled ? `Visible to everyone here · Posting as ${getSneakyUserLabel(currentUser)}` : "Chat is available after you join the room."}</Text>
         </View>
       }
       footer={
@@ -706,7 +715,7 @@ export function ChatSheet({
           <TypingIndicator typingUsers={typingUsers} />
           <CommentComposerFooter
             value={inputText}
-            placeholder={replyingTo ? "Write a reply..." : "Add a comment..."}
+            placeholder={replyingTo ? "Write a reply…" : "Message the room…"}
             isSubmitting={isSubmitting}
             disabled={!enabled}
             replyTargetLabel={replyingTo ? getCommentAuthorLabel(replyingTo) : null}
@@ -729,6 +738,8 @@ export function ChatSheet({
           pointerEvents="box-none"
         >
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Jump to ${newMessagesCount} new messages`}
             onPress={handleJumpToLatest}
             hitSlop={8}
             style={({ pressed }) => ({
@@ -737,7 +748,8 @@ export function ChatSheet({
               gap: 6,
               paddingHorizontal: 12,
               paddingVertical: 7,
-              borderRadius: 100,
+              borderRadius: 8,
+              minHeight: 44,
               backgroundColor: ACCENT,
               opacity: pressed ? 0.85 : 1,
             })}
@@ -754,15 +766,15 @@ export function ChatSheet({
       {isLoadingComments ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", minHeight: 240, paddingVertical: 48 }}>
           <ActivityIndicator size="small" color={ACCENT} />
-          <Text style={{ color: TEXT_SECONDARY, fontSize: 13, marginTop: 12 }}>Loading comments...</Text>
+          <Text style={{ color: TEXT_SECONDARY, fontSize: 13, marginTop: 12 }}>Loading room chat…</Text>
         </View>
       ) : threads.length === 0 ? (
         <View style={{ alignItems: "center", justifyContent: "center", minHeight: 280, paddingHorizontal: 40, paddingVertical: 48 }}>
-          <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(52,162,223,0.14)", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+          <View style={{ width: 72, height: 72, borderRadius: 20, backgroundColor: "rgba(63,220,255,0.10)", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
             <MessageCircleMore size={30} color={ACCENT} />
           </View>
           <Text style={{ color: TEXT_PRIMARY, fontSize: 20, fontWeight: "700", textAlign: "center", marginBottom: 8 }}>
-            No comments yet
+            Break the ice
           </Text>
           <Text style={{ color: TEXT_SECONDARY, fontSize: 14, lineHeight: 20, textAlign: "center" }}>
             Start the conversation while this Lynk is live.

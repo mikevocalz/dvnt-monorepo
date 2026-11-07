@@ -149,7 +149,18 @@ export function oldObserver(){const release=observeUnreadChanges(qc,'101','activ
     await page.evaluate(()=>{BadgeFixture.defer('messages');BadgeFixture.setServer('messages',{inbox:42,spam:0});BadgeFixture.refresh('messages')});await page.waitForTimeout(20);await page.evaluate(()=>BadgeFixture.switchUser('202'));
     await activity().filter({hasText:'2'}).waitFor();assert.ok(!(await messages().innerText()).includes('42'));
     await page.evaluate(()=>BadgeFixture.release('messages'));await messages().filter({hasText:'1'}).waitFor();assert.equal(await messages().getAttribute('aria-label'),'Messages, 1 unread conversation','old account result never paints current badge');
-    await page.setViewportSize({width:1440,height:900});await messages().filter({hasText:'1'}).waitFor();await activity().focus();await page.evaluate(()=>{globalThis.focusedActivity=document.activeElement;BadgeFixture.setServer('activity',123);BadgeFixture.emit()});await activity().filter({hasText:'99+'}).waitFor();assert.equal(await page.evaluate(()=>document.activeElement===globalThis.focusedActivity),true,'rail focus survives refresh');
+    await page.setViewportSize({width:1440,height:900});
+    // Resizing delivers the RN Web breakpoint update asynchronously. The mobile
+    // Messages badge already says "1", so wait for the desktop rail itself before
+    // focusing Activity; otherwise the pending resize replaces the focused tab.
+    const rail=page.getByRole('navigation',{name:'Primary',exact:true});
+    const railActivity=rail.getByRole('button',{name:/^Activity/});
+    await rail.getByRole('button',{name:/^Messages/}).filter({hasText:'1'}).waitFor();
+    await railActivity.focus();
+    assert.equal(await railActivity.evaluate(node=>document.activeElement===node),true,'desktop Activity receives focus');
+    await page.evaluate(()=>{globalThis.focusedActivity=document.activeElement;BadgeFixture.setServer('activity',123);BadgeFixture.emit()});
+    await railActivity.filter({hasText:'99+'}).waitFor();
+    assert.equal(await railActivity.evaluate(node=>node===globalThis.focusedActivity&&document.activeElement===node),true,'rail focus survives refresh');
     await page.setViewportSize({width:850,height:900});assert.equal(await activity().getAttribute('aria-label'),'Activity, 123 unread notifications','collapsed rail retains full accessible name');
     await messages().click();assert.equal((await page.evaluate(()=>BadgeFixture.snapshot())).routes.at(-1),'/feed/messages');
     await page.evaluate(()=>BadgeFixture.switchUser(null));await page.waitForFunction(()=>document.querySelector('[aria-label="Activity"]')&&document.querySelector('[aria-label="Messages"]'));assert.equal((await page.evaluate(()=>BadgeFixture.snapshot())).channels.length,0,'logout detaches observers');

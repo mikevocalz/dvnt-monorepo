@@ -16,8 +16,9 @@
  *   - Stagger-fade entering animation on first 8 rows (50ms stride)
  */
 
-import React, { useCallback, useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useMemo, useEffect, useState, useRef } from "react";
+import { Alert, BackHandler, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useRouter } from "expo-router";
 import {
@@ -49,6 +50,8 @@ interface RoomParticipantsSheetProps {
   onMute: (userId: string) => void;
   onUnmute: (userId: string) => void;
   onRemove: (userId: string) => void;
+  /** Opens the existing role controls without relying on a hidden long press. */
+  onManageParticipant?: (participant: VideoParticipant) => void;
 }
 
 const ROLE_ORDER: Record<string, number> = {
@@ -103,6 +106,7 @@ function ParticipantRow({
   onMute,
   onUnmute,
   onRemove,
+  onManageParticipant,
 }: {
   item: VideoParticipant;
   index: number;
@@ -113,10 +117,11 @@ function ParticipantRow({
   onMute: (userId: string) => void;
   onUnmute: (userId: string) => void;
   onRemove: (userId: string) => void;
+  onManageParticipant?: (participant: VideoParticipant) => void;
 }) {
   const isSelf = item.id === localUserId;
   const isAnon = item.user.isAnonymous;
-  const displayLabel = isAnon ? "Anonymous" : getSneakyUserLabel(item.user);
+  const displayLabel = getSneakyUserLabel(item.user);
   const roleMeta = getRoleMeta(item.role);
   const permissions = participantModeration(
     actorRole,
@@ -157,6 +162,8 @@ function ParticipantRow({
           <View style={styles.avatarSlot}>{avatarEl}</View>
         ) : (
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`View ${displayLabel} profile`}
             onPress={() => onProfilePress(item.user.username)}
             hitSlop={6}
             style={({ pressed }) => [
@@ -245,7 +252,7 @@ function ParticipantRow({
         {/* Right-side actions: mic status + optional mod buttons */}
         <View style={styles.rightActions}>
           {/* Muted badge — only shown when muted */}
-          {!item.isMicOn ? (
+          {!item.isMicOn && !permissions.mute ? (
             <View
               style={[
                 styles.micBadge,
@@ -311,6 +318,18 @@ function ParticipantRow({
           ) : null}
         </View>
       </View>
+      {permissions.changeRole && onManageParticipant ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Co-host options for ${displayLabel}`}
+          accessibilityHint="Choose whether to grant or remove co-host moderation controls"
+          onPress={() => onManageParticipant(item)}
+          style={({ pressed }) => ({ minHeight: 44, marginLeft: 60, marginBottom: 8, paddingHorizontal: 12, borderRadius: 8, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: `${colors.primary}14`, opacity: pressed ? 0.7 : 1 })}
+        >
+          <Crown size={14} color={colors.primary} />
+          <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>Co-host options</Text>
+        </Pressable>
+      ) : null}
     </Animated.View>
   );
 }
@@ -326,9 +345,68 @@ export function RoomParticipantsSheet({
   onMute,
   onUnmute,
   onRemove,
+  onManageParticipant,
 }: RoomParticipantsSheetProps) {
   const { colors } = useColorScheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const [query, setQuery] = useState("");
+  const latest = useRef({ visible, participants, localUserId, actorRole, onRemove, onManageParticipant });
+  latest.current = { visible, participants, localUserId, actorRole, onRemove, onManageParticipant };
+  const presentationKey = JSON.stringify([visible, localUserId, actorRole]);
+  const presentation = useRef({ key: presentationKey, version: 0 });
+  if (presentation.current.key !== presentationKey) {
+    presentation.current = { key: presentationKey, version: presentation.current.version + 1 };
+  }
+  // Stable tokens identify each continuously present role. A departed guest
+  // rejoining with the same user ID receives a new token, as does a role change.
+  const membershipTokens = useRef(new Map<string, { role: string }>());
+  membershipTokens.current = new Map(participants.map((participant): [string, { role: string }] => {
+    const previous = membershipTokens.current.get(participant.id);
+    return [participant.id, previous?.role === participant.role ? previous : { role: participant.role }];
+  }));
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; presentation.current.version += 1; };
+  }, []);
+  const removeCurrentParticipant = useCallback((userId: string) => {
+    const current = latest.current;
+    const target = current.participants.find((participant) => participant.id === userId);
+    const actor = current.participants.find((participant) => participant.id === current.localUserId);
+    if (!mounted.current || !current.visible || current.localUserId !== localUserId || !target || !actor || actor.role !== current.actorRole ||
+      !participantModeration(current.actorRole, current.localUserId, userId, target.role).remove) return;
+    const version = presentation.current.version;
+    const targetToken = membershipTokens.current.get(userId);
+    const actorToken = membershipTokens.current.get(localUserId);
+    let consumed = false;
+    Alert.alert(`Remove ${getSneakyUserLabel(target.user)}?`, "They will be removed from this Lynk.", [
+      { text: "Cancel", style: "cancel", onPress: () => { consumed = true; } },
+      { text: "Remove", style: "destructive", onPress: () => {
+        const latestState = latest.current;
+        const latestTarget = latestState.participants.find((participant) => participant.id === userId);
+        if (consumed || !mounted.current || !latestState.visible || presentation.current.version !== version ||
+          latestState.localUserId !== localUserId || !latestTarget ||
+          membershipTokens.current.get(userId) !== targetToken || membershipTokens.current.get(localUserId) !== actorToken ||
+          !participantModeration(latestState.actorRole, localUserId, userId, latestTarget.role).remove) return;
+        consumed = true;
+        latestState.onRemove(userId);
+      } },
+    ], { cancelable: true, onDismiss: () => { consumed = true; } });
+  }, [localUserId]);
+  const manageCurrentParticipant = useCallback((participant: VideoParticipant) => {
+    const current = latest.current;
+    const target = current.participants.find((candidate) => candidate.id === participant.id);
+    if (!mounted.current || !current.visible || current.localUserId !== localUserId || !target ||
+      !participantModeration(current.actorRole, current.localUserId, target.id, target.role).changeRole) return;
+    current.onManageParticipant?.(target);
+  }, [localUserId]);
+  useEffect(() => {
+    if (!visible) { setQuery(""); return; }
+    const back = BackHandler.addEventListener("hardwareBackPress", () => { onDismiss(); return true; });
+    return () => back.remove();
+  }, [visible, onDismiss]);
 
   const sortedParticipants = useMemo(
     () =>
@@ -369,7 +447,8 @@ export function RoomParticipantsSheet({
         onProfilePress={handleProfilePress}
         onMute={onMute}
         onUnmute={onUnmute}
-        onRemove={onRemove}
+        onRemove={removeCurrentParticipant}
+        onManageParticipant={onManageParticipant ? manageCurrentParticipant : undefined}
       />
     ),
     [
@@ -378,20 +457,24 @@ export function RoomParticipantsSheet({
       actorRole,
       localUserId,
       onMute,
-      onRemove,
+      removeCurrentParticipant,
+      manageCurrentParticipant,
+      onManageParticipant,
       onUnmute,
     ],
   );
 
+  const filteredParticipants = sortedParticipants.filter((participant) => getSneakyUserLabel(participant.user).toLowerCase().includes(query.trim().toLowerCase()));
+
   if (!visible) return null;
 
   return (
-    <View style={styles.overlay} pointerEvents="auto">
-      <Pressable style={styles.backdrop} onPress={onDismiss} />
+    <View style={styles.overlay} pointerEvents="auto" accessibilityViewIsModal onAccessibilityEscape={onDismiss}>
+      <Pressable accessible={false} style={styles.backdrop} onPress={onDismiss} />
       <View
         style={[
           styles.sheet,
-          { backgroundColor: colors.secondary, borderColor: colors.border },
+          { backgroundColor: "#0D1019", borderColor: colors.border, maxHeight: height - insets.top - 16, minHeight: Math.min(340, height * 0.7) },
         ]}
       >
         {/* Hero header */}
@@ -415,14 +498,16 @@ export function RoomParticipantsSheet({
                 <Text
                   style={[styles.hostHint, { color: colors.mutedForeground }]}
                 >
-                  · tap icons to mute or remove
+                  · moderation controls available
                 </Text>
               ) : null}
             </View>
           </View>
           <Pressable
             onPress={onDismiss}
-            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Close participants"
+            hitSlop={4}
             style={[
               styles.closeBtn,
               {
@@ -431,12 +516,23 @@ export function RoomParticipantsSheet({
               },
             ]}
           >
-            <X size={18} color="rgb(255, 109, 193)" />
+            <X size={20} color="#C5C7D1" />
           </Pressable>
         </View>
 
+        <TextInput
+          accessibilityLabel="Search people in this Lynk"
+          placeholder="Find someone in the room"
+          placeholderTextColor="#9BA1B2"
+          value={query}
+          onChangeText={setQuery}
+          autoCorrect={false}
+          autoCapitalize="none"
+          clearButtonMode="while-editing"
+          style={{ minHeight: 48, marginHorizontal: 20, marginBottom: 12, paddingHorizontal: 14, color: "#fff", fontSize: 14, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)" }}
+        />
         {/* Participant list */}
-        {participants.length === 0 ? (
+        {filteredParticipants.length === 0 ? (
           <View style={styles.emptyWrap}>
             <View
               style={[styles.emptyRing, { borderColor: `${colors.primary}66` }]}
@@ -449,24 +545,26 @@ export function RoomParticipantsSheet({
               />
             </View>
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-              No one here yet
+              {query.trim() ? "No matches" : "No one here yet"}
             </Text>
             <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>
-              Participants will show up as they join.
+              {query.trim() ? "Try a different name or anonymous label." : "Participants will show up as they join."}
             </Text>
           </View>
         ) : (
           <LegendList
-            data={sortedParticipants}
+            data={filteredParticipants}
             keyExtractor={keyExtractor}
             renderItem={renderItem}
-            estimatedItemSize={64}
+            estimatedItemSize={actorRole === "host" && onManageParticipant ? 116 : 64}
             recycleItems
             contentContainerStyle={{
               paddingHorizontal: 16,
-              paddingBottom: 32,
+              paddingBottom: insets.bottom + 24,
               paddingTop: 4,
             }}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
           />
         )}
@@ -505,10 +603,10 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   heroCount: {
-    fontSize: 52,
+    fontSize: 40,
     fontWeight: "800",
     letterSpacing: -2,
-    lineHeight: 56,
+    lineHeight: 46,
   },
   heroLabelRow: {
     flexDirection: "row",
@@ -528,9 +626,9 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
     justifyContent: "center",
@@ -580,7 +678,7 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: 7,
     paddingVertical: 3,
-    borderRadius: 100,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
   },
   chipLabel: {
@@ -606,9 +704,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   modIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 9,
+    width: 44,
+    height: 44,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
     justifyContent: "center",

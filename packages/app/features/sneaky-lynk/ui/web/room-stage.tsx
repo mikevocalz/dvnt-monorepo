@@ -12,12 +12,13 @@
  * renderer rather than the same component forked.
  *
  * HARD CONVENTIONS: raw semantic HTML + Tailwind className only, no
- * <View>/<Text>. Video tiles object-cover, control buttons circular, avatars
+ * <View>/<Text>. Video fills by default with optional viewer fit; room controls
+ * are circular and avatars are
  * rounded SQUARES.
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Crown, Hand, Mic, MicOff, RotateCw, Smile, Zap } from "lucide-react";
+import { Crown, Mic, MicOff, RotateCw, Smile, Zap } from "lucide-react";
 
 import { SquareAvatar } from "./room-panels";
 
@@ -100,12 +101,14 @@ export function ControlButton({
   onClick,
   active,
   danger,
+  disabled,
   label,
   children,
 }: {
   onClick: () => void;
   active?: boolean;
   danger?: boolean;
+  disabled?: boolean;
   label: string;
   children: React.ReactNode;
 }) {
@@ -118,6 +121,7 @@ export function ControlButton({
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
       // Toggle state was colour-only; expose it so a screen reader can tell a
       // muted mic from a live one. `danger` (Leave) is an action, not a toggle,
@@ -126,7 +130,7 @@ export function ControlButton({
       // Circular by this screen's own convention ("control buttons circular"),
       // which the design system allows alongside status dots and the shutter.
       title={label}
-      className={`flex h-11 w-11 min-[360px]:h-12 min-[360px]:w-12 shrink-0 items-center justify-center rounded-full text-white transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF] sm:h-14 sm:w-14 [@media(max-height:500px)]:h-11 [@media(max-height:500px)]:w-11 ${bg}`}
+      className={`flex h-11 w-11 min-[360px]:h-12 min-[360px]:w-12 shrink-0 items-center justify-center rounded-full text-white transition-colors motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF] sm:h-14 sm:w-14 [@media(max-height:500px)]:h-11 [@media(max-height:500px)]:w-11 ${bg}`}
     >
       {children}
     </button>
@@ -197,7 +201,7 @@ export function ReactionBar({ onSend }: { onSend: (emoji: string) => void }) {
           type="button"
           onClick={() => onSend(emoji)}
           aria-label={`React ${emoji}`}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-lg transition-transform hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-lg transition-transform hover:scale-110 motion-reduce:transform-none motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
         >
           {emoji}
         </button>
@@ -248,7 +252,7 @@ export function ReactionsPicker({ onSend, overlayOpen = false }: { onSend: (emoj
         title="Reactions"
         onClick={() => setOpen((value) => !value)}
         className="flex h-11 w-11 min-[360px]:h-12 min-[360px]:w-12 sm:h-14 sm:w-14 [@media(max-height:500px)]:h-11 [@media(max-height:500px)]:w-11 items-center justify-center rounded-full bg-white/15 text-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
-      ><Smile size={24} /></button>
+      ><Smile size={24} aria-hidden="true" /></button>
       {open ? (
         <div ref={paletteRef} id={paletteId} role="group" aria-label="Choose a reaction" className="absolute bottom-[calc(100%+8px)] left-1/2 w-max max-w-[calc(100%-16px)] -translate-x-1/2 rounded-xl border border-white/15 bg-[#090b15] p-1">
           <ReactionBar onSend={(emoji) => { onSend(emoji); setOpen(false); buttonRef.current?.focus({ preventScroll: true }); }} />
@@ -298,7 +302,7 @@ export function TimeUpDialog({
           className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl"
           style={{ backgroundColor: `${PURPLE}20` }}
         >
-          <Crown size={26} color={PURPLE} />
+          <Crown size={26} color={PURPLE} aria-hidden="true" />
         </span>
         <h2 className="text-center text-xl font-bold text-white">Time&apos;s up</h2>
         <p className="mt-2 text-center text-sm text-white/60">
@@ -308,15 +312,15 @@ export function TimeUpDialog({
         <button
           type="button"
           onClick={onUpgrade}
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg py-3.5 font-bold text-white"
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg py-3.5 font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF]"
           style={{ backgroundColor: PURPLE }}
         >
-          <Zap size={16} /> Upgrade plan
+          <Zap size={16} aria-hidden="true" /> Upgrade plan
         </button>
         <button
           type="button"
           onClick={onLeave}
-          className="mt-3 w-full rounded-lg bg-white/8 py-3.5 font-semibold text-white/80 hover:bg-white/15"
+          className="mt-3 w-full rounded-lg bg-white/8 py-3.5 font-semibold text-white/80 hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF]"
         >
           Leave Lynk
         </button>
@@ -340,7 +344,12 @@ export function StageTile({ tile }: { tile: Tile }) {
   // MoQ exposes no camera orientation metadata to the web watcher. A blanket
   // transform would break upright cameras, so correction is per remote tile.
   const [rotation, setRotation] = useState(0);
+  // Presentation only: neither this preference nor rotation can recreate the
+  // MoQ canvas ref or change capture, subscriptions, or another person's view.
+  const [fitVideo, setFitVideo] = useState(false);
   const [tileSize, setTileSize] = useState({ width: 0, height: 0 });
+  const hasVideo = tile.isCameraOn && (!!canvasPath || !!tile.videoStream);
+  const avatarSize = tileSize.height > 0 ? Math.max(24, Math.min(88, Math.round(tileSize.height * 0.42))) : 64;
 
   useEffect(() => setRotation(0), [canvasPath]);
 
@@ -370,7 +379,7 @@ export function StageTile({ tile }: { tile: Tile }) {
     width: sideways ? (tileSize.height || "100%") : "100%",
     height: sideways ? (tileSize.width || "100%") : "100%",
     transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-    objectFit: "cover" as const,
+    objectFit: fitVideo ? "contain" as const : "cover" as const,
     // Keep the player mounted for audio/recovery, but never show a stale frame.
     opacity: tile.isCameraOn ? 1 : 0,
   };
@@ -385,17 +394,17 @@ export function StageTile({ tile }: { tile: Tile }) {
 
   return (
     <div
-      // The ring is colour-only, so nothing but a human eye can read it. This
-      // attribute is the observable seam the e2e asserts on, and the hook an
-      // a11y pass will hang a live region off.
+      // Speaking has a text/icon counterpart as well as the ring. Avoid a
+      // live region here: rapid voice activity would interrupt room navigation.
       data-speaking={tile.isSpeaking ? "true" : "false"}
       data-tile={tile.isLocal ? "local" : tile.key}
       data-video-rotation={rotation}
+      data-video-fit={fitVideo ? "contain" : "cover"}
       ref={tileRef}
       // Speaking is a RING, not a background or a glow: it reads at thumbnail
       // size, survives on top of video, and costs no contrast against the tile.
       // Cyan rather than signal — someone talking is not an alert.
-      className={`relative h-full min-h-0 w-full overflow-hidden rounded-2xl border bg-white/[0.04] transition-[box-shadow,border-color] duration-200 ${
+      className={`relative h-full min-h-0 w-full overflow-hidden rounded-2xl border bg-[#0b0d14] text-white transition-[box-shadow,border-color] duration-200 motion-reduce:transition-none ${
         tile.isSpeaking
           ? "border-[#3FDCFF]/70 shadow-[0_0_0_2px_rgba(63,220,255,0.45)]"
           : "border-white/8"
@@ -404,15 +413,15 @@ export function StageTile({ tile }: { tile: Tile }) {
       {/* Avatar is the FLOOR of the tile, not an alternative to it: the canvas
           above it is hidden until MoQ has available video, so a camera-off
           participant reads as their avatar while their audio still plays. */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <SquareAvatar uri={tile.avatar} name={tile.name} size={88} />
+      <div className="absolute inset-0 flex items-center justify-center pb-6" aria-hidden="true">
+        <SquareAvatar uri={tile.avatar} name={tile.name} size={avatarSize} />
       </div>
       {canvasPath ? (
         <canvas
           ref={canvasRef}
           draggable={false}
           onContextMenu={(event) => event.preventDefault()}
-          className="absolute object-cover"
+          className="absolute bg-[#0b0d14]"
           style={canvasStyle}
         />
       ) : tile.isCameraOn && tile.videoStream ? (
@@ -420,40 +429,59 @@ export function StageTile({ tile }: { tile: Tile }) {
           stream={tile.videoStream}
           muted={tile.isLocal}
           mirror={tile.isLocal}
-          className="absolute inset-0 h-full w-full object-cover"
+          className={`absolute inset-0 h-full w-full bg-[#0b0d14] ${fitVideo ? "object-contain" : "object-cover"}`}
         />
       ) : null}
-      {canvasPath && !tile.isLocal ? (
-        <button
-          type="button"
-          aria-label={`Rotate ${tile.name}'s video clockwise`}
-          title="Video sideways? Rotate 90°"
-          onClick={() => setRotation((angle) => (angle + 90) % 360)}
-          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg border border-white/20 bg-black/65 text-white/90 backdrop-blur-sm transition-colors hover:bg-black/85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
-        >
-          <RotateCw size={16} aria-hidden="true" />
-        </button>
-      ) : null}
-      {/* Muted reads as a badge in the corner, the way Discord and Skype show
-          it, so it is legible at thumbnail size and against moving video. A
-          dimmed inline icon in a name row was invisible on a busy tile. */}
-      {!tile.isMicOn ? (
+      <div className="absolute right-1 top-1 z-10 flex gap-1">
+        {hasVideo ? (
+          <button
+            type="button"
+            aria-label={`Fit ${tile.name}'s full video`}
+            aria-pressed={fitVideo}
+            title={fitVideo ? "Fill tile · only changes your view" : "Show full video · only changes your view"}
+            onClick={() => setFitVideo((value) => !value)}
+            className={`flex h-11 w-11 items-center justify-center rounded-lg border text-[11px] font-semibold transition-colors motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#3FDCFF] ${fitVideo ? "border-[#3FDCFF]/50 bg-[#06070D]/90 text-[#3FDCFF]" : "border-white/15 bg-[#06070D]/80 text-white hover:bg-[#06070D]"}`}
+          >
+            {fitVideo ? "Fill" : "Fit"}
+          </button>
+        ) : null}
+        {canvasPath && !tile.isLocal && tile.isCameraOn ? (
+          <button
+            type="button"
+            aria-label={`Rotate ${tile.name}'s video clockwise`}
+            title="Video sideways? Rotate 90°"
+            onClick={() => setRotation((angle) => (angle + 90) % 360)}
+            className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/15 bg-[#06070D]/80 text-white transition-colors motion-reduce:transition-none hover:bg-[#06070D] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#3FDCFF]"
+          >
+            <RotateCw size={16} aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
+      {/* Only our own capture reports a verified mic state. Remote isMicOn is
+          publisher discovery, not evidence that their microphone is muted. */}
+      {tile.isLocal && !tile.isMicOn ? (
         <span
-          className="absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-lg bg-black/65 backdrop-blur-sm"
+          className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-[#06070D]/90"
+          role="img"
           aria-label={`${tile.name} is muted`}
         >
-          <MicOff size={13} className="text-white/90" />
+          <MicOff size={14} aria-hidden="true" />
         </span>
       ) : null}
-      <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/75 to-transparent px-2 pb-1.5 pt-4">
-        <span className="truncate text-xs font-medium">{tile.name}</span>
-        {tile.isHost || tile.isCoHost ? (
-          // Role as a chip, not a suffix on the name: it stops the role being
-          // truncated away first on a narrow tile.
-          <span className="shrink-0 rounded bg-white/15 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-white/80">
-            {tile.isHost ? "Host" : "Co-host"}
-          </span>
-        ) : null}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#02030A] via-[#02030A]/85 to-transparent px-2 pb-2 pt-6">
+        <div className="flex min-w-0 items-center gap-1.5">
+          {tile.isSpeaking ? <span role="img" aria-label={`${tile.name} is speaking`} className="shrink-0 text-[#3FDCFF]"><Mic size={13} aria-hidden="true" /></span> : null}
+          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-4" title={tile.name}>{tile.name}</span>
+          {tile.isLocal && tile.name !== "You" ? <span className="shrink-0 text-[11px] text-white/70">You</span> : null}
+          {tile.isHost || tile.isCoHost ? (
+            // Role as a chip, not a suffix on the name: it stops the role being
+            // truncated away first on a narrow tile.
+            <span className="shrink-0 rounded bg-white/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/90">
+              {tile.isHost ? "Host" : "Co-host"}
+            </span>
+          ) : null}
+        </div>
+        {!tile.isCameraOn ? <span className="mt-0.5 block text-[11px] leading-3 text-white/60">{tile.isLocal ? "Camera off" : "No video"}</span> : null}
       </div>
     </div>
   );

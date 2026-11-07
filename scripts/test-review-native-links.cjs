@@ -10,8 +10,8 @@ function load(file, mocks) {
   mod._compile(ts.transpileModule(fs.readFileSync(path.join(root,file),'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,file);
   return mod.exports;
 }
-const registry = load('packages/app/lib/deep-linking/route-registry.ts', {zod:require('zod'),'@dvnt/app/lib/branding/lynk-branding':{getLynkDisplayName:()=> 'Lynk'}});
-const engine = load('packages/app/lib/deep-linking/link-engine.ts', {'expo-router':{router:{}},'@dvnt/app/lib/stores/auth-store':{useAuthStore:{}},'@dvnt/app/lib/stores/deep-link-store':{useDeepLinkStore:{}},'./route-registry':registry});
+const registry = load('packages/app/lib/deep-linking/route-registry.ts', {zod:require('zod'),'@dvnt/app/lib/branding/lynk-branding':{getLynkDisplayName:()=> 'Lynk'},'@dvnt/app/features/sneaky-lynk/room-links':load('packages/app/features/sneaky-lynk/room-links.ts', {})});
+const engine = load('packages/app/lib/deep-linking/link-engine.ts', {'expo-router':{router:{}},'@dvnt/app/lib/stores/auth-store':{useAuthStore:{}},'@dvnt/app/lib/stores/deep-link-store':{useDeepLinkStore:{}},'./route-registry':registry,'@dvnt/app/features/sneaky-lynk/room-links':load('packages/app/features/sneaky-lynk/room-links.ts', {})});
 for (const url of ['https://dvntapp.live/feed/events/42/reviews?id=99', 'dvnt://events/42/reviews?id=99', 'https://dvntapp.live/public/events/42/reviews?id=99']) {
   const parsed = engine.parseIncomingUrl(url);
   assert.equal(parsed.requiresAuth, true);

@@ -41,6 +41,7 @@ import {
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { useEffect,
+  useRef,
   useState,
 } from "react";
 import { useFonts } from "expo-font";
@@ -59,6 +60,8 @@ import { useScreenViewTracking } from "@dvnt/app/lib/analytics/useScreenViewTrac
 import { usePathname } from "expo-router";
 import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { useDeepLinkStore } from "@dvnt/app/lib/stores/deep-link-store";
+import { isLynkRoomLink, parseIncomingUrl, replayPendingLink } from "@dvnt/app/lib/deep-linking/link-engine";
+import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Platform,
@@ -225,9 +228,13 @@ function RootLayout() {
   const { colorScheme } = useColorScheme();
   const loadAuthState = useAuthStore((s) => s.loadAuthState);
   const authStatus = useAuthStore((s) => s.authStatus);
+  const authHydrated = useAuthStore((s) => s._hasHydrated);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasSeenOnboarding = useAuthStore((s) => s.hasSeenOnboarding);
   const userId = useAuthStore((s) => s.user?.id);
+  const pendingDeepLink = useDeepLinkStore((s) => s.pendingLink);
+  const pathname = usePathname();
+  const deepLinkReplayOrigin = useRef<{ link: typeof pendingDeepLink; path: string } | null>(null);
 
   // Product analytics — what Sentry was being asked for and could not answer.
   // Mounted here so every route is covered without per-screen instrumentation
@@ -490,7 +497,7 @@ function RootLayout() {
   }, [appReady]);
 
   // ── BOOT GATE ─────────────────────────────────────────────────────────
-  const authSettled = authStatus !== "loading";
+  const authSettled = authHydrated && authStatus !== "loading";
 
   // Skip splash when opening from share intent — get to ShareIntentHandler faster
   useEffect(() => {
@@ -504,16 +511,26 @@ function RootLayout() {
   // unauthenticated user lands on a (protected) route — including via deep
   // link — bounce to login. If an authenticated user lands on (auth), forward
   // to the tabs root. (public) is intentionally accessible in both states.
-  const segments = useSegments();
+  // Expo's generated fallback can be a one-segment tuple; the runtime
+  // route may contain auth screen segments, so inspect it as a string array.
+  const segments: readonly string[] = useSegments();
   useEffect(() => {
     if (!authSettled) return;
     const top = segments[0] as string | undefined;
     if (!isAuthenticated && top === "(protected)") {
+      // Direct internal navigation can bypass +native-intent. Preserve its
+      // validated room without overwriting a newer incoming destination.
+      const directRoom = parseIncomingUrl(pathname);
+      const linkStore = useDeepLinkStore.getState();
+      if (!linkStore.pendingLink && directRoom && isLynkRoomLink(directRoom)) {
+        linkStore.setPendingLink(directRoom);
+      }
       router.replace("/(auth)/login");
-    } else if (isAuthenticated && top === "(auth)") {
+    } else if (isAuthenticated && top === "(auth)" &&
+      (segments[1] === "login" || segments[1] === "onboarding")) {
       router.replace("/(protected)/(tabs)");
     }
-  }, [isAuthenticated, authSettled, segments]);
+  }, [isAuthenticated, authSettled, segments, pathname]);
 
   // ── Execute queued notification route ─────────────────────────────────
   // After splash is done + auth settled + authenticated, navigate to the
@@ -557,20 +574,33 @@ function RootLayout() {
     splashAnimationFinished,
   ]);
 
-  // ── Replay pending deep link after auth settles ──────────────────────
-  // +native-intent.tsx may fire before Zustand rehydrates, causing it to
-  // treat an already-authenticated user as a guest and save the link as
-  // pending. Once splash is done + auth settled + user is authenticated,
-  // replay any saved deep link so the user lands on the intended screen.
+  // One owner for deferred link replay. Leave mandatory signup/verification
+  // screens in place, and retain exact-room intent throughout photo/first-post
+  // onboarding. Native links only open prejoin; room admission stays gated.
   useEffect(() => {
-    if (!splashAnimationFinished || !authSettled || !isAuthenticated) return;
-    const pending = useDeepLinkStore.getState().consumePendingLink();
-    if (!pending) return;
-    setTimeout(() => {
-      console.log("[RootLayout] Replaying pending deep link:", pending.routerPath);
-      router.push(pending.routerPath as any);
-    }, 150);
-  }, [splashAnimationFinished, authSettled, isAuthenticated]);
+    if (!splashAnimationFinished || !authSettled || !isAuthenticated || !pendingDeepLink) return;
+    if (segments[0] === "(auth)" && segments[1] !== "login" && segments[1] !== "onboarding") return;
+    const origin = deepLinkReplayOrigin.current;
+    if (origin?.link !== pendingDeepLink) deepLinkReplayOrigin.current = { link: pendingDeepLink, path: pathname };
+    else if (isLynkRoomLink(pendingDeepLink) && origin.path !== pathname &&
+      segments[0] !== "(auth)" &&
+      pathname !== pendingDeepLink.routerPath.replace(/^\/\(protected\)/, "") &&
+      !["/", "/home", "/feed", "/welcome", "/edit-profile", "/profile/edit", "/create"].includes(pathname) &&
+      !/\/(crop-preview|camera)(\/|$)/.test(pathname)) {
+      // A manual destination such as Back to Lynks wins over a slow progress
+      // read. Keep only the known auth/bootstrap and mandatory setup detours.
+      useDeepLinkStore.getState().setPendingLink(null);
+      return;
+    }
+    return replayPendingLink({
+      currentPath: pathname,
+      canReplay: async (pending) => {
+        if (!isLynkRoomLink(pending) || !useDeepLinkStore.getState().pendingOnboarding) return true;
+        const progress = await fetchNewMemberProgress();
+        return progress.step !== "photo" && progress.step !== "first_post";
+      },
+    });
+  }, [splashAnimationFinished, authSettled, isAuthenticated, userId, pendingDeepLink, pathname, segments]);
 
   // Show animated splash until BOTH app is ready AND animation is finished
   // IMPORTANT: Always wait for splashAnimationFinished, even if appReady is true

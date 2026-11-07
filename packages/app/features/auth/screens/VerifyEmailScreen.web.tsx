@@ -4,12 +4,13 @@ import { useAuthStore } from "../../../lib/stores/auth-store";
 import { invalidateProfileCompletion } from "../../../lib/profile/profile-completion-invalidation";
 import { useState, useEffect } from 'react';
 import { View, Text, ScrollView } from 'react-native';
-import { useRouter } from 'solito/navigation';
+import { useRouter, useSearchParams } from 'solito/navigation';
 import { toast } from 'sonner';
 import { Button } from '../../../components/ui/button';
 import { authClient, resendVerificationEmail, submitEmailVerification } from '../../../lib/auth-client';
 import { Check, Mail, AlertCircle } from 'lucide-react';
 import { AUTH_PRIMARY_COLOR as P, AUTH_DESTRUCTIVE_COLOR as D } from './AuthScreens.shared';
+import { captureAuthContinuation } from '../../../lib/auth/continuation-guard';
 
 type Status = 'checking' | 'success' | 'error' | 'waiting';
 
@@ -17,6 +18,7 @@ export function VerifyEmailScreen() {
   const [status, setStatus] = useState<Status>('checking');
   // Next app uses Solito/Next routing (no TanStack RouterProvider).
   const router = useRouter();
+  const search = useSearchParams()?.toString() ?? '';
   const navigate = ({ to }: { to: string }) => router.push(
     to === '/auth/login' ? loginPathWithReturn(readReturnToFromUrl('')) : to,
   );
@@ -24,6 +26,10 @@ export function VerifyEmailScreen() {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const continuation = captureAuthContinuation();
+    const entryUrl = window.location.href;
+    const stillCurrent = () => !cancelled && window.location.href === entryUrl && continuation.isCurrent();
+    setStatus('checking');
     const destination = readReturnToFromUrl('/feed');
     const verifyingMember = useAuthStore.getState().user;
     const params = new URLSearchParams(window.location.search);
@@ -31,7 +37,7 @@ export function VerifyEmailScreen() {
     const verify = async () => {
       if (token) {
         const onVerified = () => {
-          if (cancelled) return;
+          if (!stillCurrent()) return;
           invalidateProfileCompletion(verifyingMember);
           clearSignupContinuation();
           setStatus('success');
@@ -40,7 +46,7 @@ export function VerifyEmailScreen() {
           // redirects /story/:id to /feed/story/:id — so confirming an email
           // dropped the member on a dead page at the exact moment they had
           // just done what we asked. The authenticated web app is /feed.
-          timer = setTimeout(() => { if (!cancelled) router.replace(destination); }, 2000);
+          timer = setTimeout(() => { if (stillCurrent()) router.replace(destination); }, 2000);
         };
         // Token-based verification (cookie-independent) — same reason as reset.
         try {
@@ -58,14 +64,14 @@ export function VerifyEmailScreen() {
             return;
           }
         } catch {}
-        if (!cancelled) setStatus('error');
+        if (stillCurrent()) setStatus('error');
       } else {
         setStatus('waiting');
       }
     };
     void verify();
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, []);
+    return () => { cancelled = true; continuation.release(); if (timer) clearTimeout(timer); };
+  }, [router, search]);
 
   const handleResend = async () => {
     try {

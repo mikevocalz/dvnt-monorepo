@@ -163,14 +163,10 @@ export const VideoTile = memo(function VideoTile({
     if (isCapturing) {
       // Single theatrical pulse — fade in fast, hold briefly, ease out.
       // 1.2s total to match the store's TILE_PULSE_MS window.
-      capturePulse.value = withTiming(1, {
-        duration: 160,
-        easing: Easing.out(Easing.cubic),
-      });
-      capturePulse.value = withTiming(0, {
-        duration: 900,
-        easing: Easing.in(Easing.cubic),
-      });
+      capturePulse.value = withSequence(
+        withTiming(1, { duration: 160, easing: Easing.out(Easing.cubic) }),
+        withTiming(0, { duration: 900, easing: Easing.in(Easing.cubic) }),
+      );
     } else {
       capturePulse.value = withTiming(0, { duration: 160 });
     }
@@ -232,6 +228,10 @@ export const VideoTile = memo(function VideoTile({
         ]}
       >
         <Pressable
+          accessibilityRole={onPress ? "button" : "text"}
+          accessibilityLabel={`${label}${isLocal ? ", you" : ""}, ${role}, ${isCameraOn ? showVideo ? "camera on" : "video connecting" : "camera off"}, ${isMicOn ? "microphone on" : "microphone muted"}${isHandRaised ? ", hand raised" : ""}`}
+          accessibilityHint={onPress ? "Open participant actions" : undefined}
+          onPress={onPress}
           onLongPress={onPress}
           delayLongPress={260}
           style={[styles.tile, { width: "100%", height: "100%" }]}
@@ -263,7 +263,7 @@ export const VideoTile = memo(function VideoTile({
                 />
               )}
               <Text style={styles.cameraOffText}>
-                {isCameraOn ? "Live video" : "Audio only"}
+                {isCameraOn ? "Connecting video…" : "Camera off"}
               </Text>
             </LinearGradient>
           )}
@@ -300,7 +300,7 @@ export const VideoTile = memo(function VideoTile({
               {!isCameraOn && (
                 <View style={styles.stateBadge}>
                   <VideoOff size={11} color="#D1D5DB" />
-                  <Text style={styles.stateBadgeText}>Audio</Text>
+                  <Text style={styles.stateBadgeText}>Camera off</Text>
                 </View>
               )}
               {showRaisedHandBadge && (

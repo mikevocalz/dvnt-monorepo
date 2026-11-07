@@ -6,12 +6,11 @@
  * "wait" and video_join_room), the way a Zoom meeting starts when the host
  * joins. Idempotent: a room that is already live answers started: false.
  *
- * The caller decides who is a host (_shared/event-lynk-host.ts). Read and
- * write failures throw; callers turn that into a 500 or, after a join that
- * already succeeded, into a log line.
+ * The caller checks verified admission, creator standing and host authority.
+ * The atomic RPC rechecks host authority and holds event/room locks through
+ * lifecycle synchronization and start. Read/write failures throw; callers turn
+ * that into a 500 or, after a join that already succeeded, into a log line.
  */
-
-import { decideEventRoomAccess } from "./event-access.ts";
 
 export interface EventLynkStartEvent {
   id: number;
@@ -23,66 +22,30 @@ export interface EventLynkStartEvent {
 
 export type EventLynkStartResult =
   | { ok: true; started: boolean; admitted: number }
-  | { ok: false; reason: "event_unavailable" | "event_ended" | "room_ended" | "event_schedule_missing" | "session_expired"; message: string; state?: string };
-
-const ASSUMED_EVENT_LENGTH_MS = 6 * 60 * 60 * 1000;
-
-export function eventLynkEnd(event: EventLynkStartEvent): number {
-  const start = Date.parse(event.start_date ?? "");
-  const end = Date.parse(event.end_date ?? "");
-  return Number.isFinite(end) ? end : start + ASSUMED_EVENT_LENGTH_MS;
-}
+  | { ok: false; reason: "event_unavailable" | "event_ended" | "room_ended" | "event_schedule_missing" | "session_expired" | "event_link_ambiguous" | "event_link_changed" | "not_host"; message: string; state?: string };
 
 export async function startEventLynk(
   db: any,
   event: EventLynkStartEvent,
   actor: string,
 ): Promise<EventLynkStartResult> {
-  if (["cancelled", "deleted"].includes(String(event.status)))
-    return { ok: false, reason: "event_unavailable", message: "This event was cancelled" };
-  if (!Number.isFinite(Date.parse(event.start_date ?? "")))
-    return { ok: false, reason: "event_schedule_missing", message: "The event schedule is not ready" };
-  if (Date.now() >= eventLynkEnd(event))
-    return { ok: false, reason: "event_ended", message: "This event has ended" };
-
-  const { data: room, error: roomError } = await db.from("video_rooms").select("status,created_at,ends_at")
-    .eq("uuid", event.lynk_room_id).maybeSingle();
-  if (roomError) throw new Error("Could not read the Lynk room");
-  if (!room || room.status !== "open")
-    return { ok: false, reason: "room_ended", message: "This Lynk has ended" };
-
-  // Use the same host-plan window as wait/join/token refresh. Starting a room
-  // must not report success when its token rails will immediately reject it.
-  const access = decideEventRoomAccess(
-    { ...event, host_id: actor }, { organizer: true, ticket: false, invited: false }, room,
-  );
-  if (!access.ok)
-    return { ok: false, reason: "session_expired", message: access.message };
-
-  const { data: synced, error: syncError } = await db.rpc("sync_event_lynk_lifecycle", { p_event_id: event.id });
-  if (syncError || (synced && synced.ok === false)) throw new Error("Could not sync the Lynk lifecycle");
-
-  const now = new Date().toISOString();
-  const { data: flipped, error: flipError } = await db.from("event_lynk_lifecycle")
-    .update({ state: "live", live_at: now, started_by: actor, updated_at: now })
-    .eq("event_id", event.id).in("state", ["scheduled", "ready"])
-    .select("state").maybeSingle();
-  if (flipError) throw new Error("Could not start the Lynk");
-  const started = !!flipped;
-  if (!started) {
-    const { data: current, error: readError } = await db.from("event_lynk_lifecycle").select("state")
-      .eq("event_id", event.id).maybeSingle();
-    if (readError) throw new Error("Could not read the Lynk lifecycle");
-    const state = current?.state || "scheduled";
-    if (state !== "live") return { ok: false, reason: "room_ended", message: "This Lynk has ended", state };
+  // No read/HTTP-write gap: all eligibility and lifecycle mutations happen
+  // under database locks. Never fall back to the old non-atomic start when a
+  // rollout has not installed the RPC yet.
+  const { data, error } = await db.rpc("start_event_lynk_atomic", {
+    p_event_id: event.id, p_actor: actor, p_room_uuid: event.lynk_room_id ?? null,
+  });
+  if (error || !data || typeof data.ok !== "boolean")
+    throw new Error("Could not start the Lynk");
+  if (data.ok) {
+    if (typeof data.started !== "boolean" || !Number.isInteger(data.admitted) || data.admitted < 0)
+      throw new Error("Could not confirm the Lynk start");
+    return { ok: true, started: data.started, admitted: data.admitted };
   }
-
-  // Bookkeeping only: waiting guests learn the room is live from their next
-  // "wait" heartbeat and then join through video_join_room, which still runs
-  // the ban, capacity and verified-admission gates.
-  const { data: admittedRows, error: admitError } = await db.from("event_lynk_waiting")
-    .update({ admitted_at: now }).eq("event_id", event.id).is("admitted_at", null)
-    .select("user_id");
-  if (admitError) console.error("[event-lynk-start] marking waiters admitted failed:", admitError.message);
-  return { ok: true, started, admitted: admitError ? 0 : (admittedRows || []).length };
+  const reasons = ["event_unavailable", "event_ended", "room_ended", "event_schedule_missing",
+    "session_expired", "event_link_ambiguous", "event_link_changed", "not_host"];
+  if (!reasons.includes(data.reason) || typeof data.message !== "string")
+    throw new Error("Could not verify the Lynk start");
+  return { ok: false, reason: data.reason, message: data.message,
+    ...(typeof data.state === "string" ? { state: data.state } : {}) };
 }

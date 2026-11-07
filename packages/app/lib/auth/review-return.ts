@@ -1,5 +1,8 @@
 /** Tab-local, account-bound intent across mandatory photo/first-post setup.
  * Stores navigation only: it never grants admission or skips a server check. */
+import { roomReturnPath } from "./room-return.ts";
+
+// Keep the existing key/API so pending review continuations remain compatible.
 const KEY = 'dvnt:review-return';
 const MAX_AGE_MS = 60 * 60 * 1000;
 
@@ -14,8 +17,9 @@ export function reviewReturnPath(raw: string): string | null {
 }
 
 export function rememberReviewReturn(userId: string | number | undefined, raw: string): void {
-  const target = reviewReturnPath(raw);
-  if (!userId || !target || typeof window === 'undefined') return;
+  const target = reviewReturnPath(raw) ?? roomReturnPath(raw);
+  if (typeof window === 'undefined') return;
+  if (!userId || !target) { clearReviewReturn(); return; }
   try {
     window.sessionStorage.setItem(KEY, JSON.stringify({ userId: String(userId), target, savedAt: Date.now() }));
   } catch { /* Storage can be disabled; do not block required setup. */ }
@@ -31,7 +35,7 @@ export function consumeReviewReturn(userId: string | number | undefined): string
     window.sessionStorage.removeItem(KEY);
     const age = Date.now() - saved.savedAt;
     if (saved.userId !== String(userId) || !Number.isFinite(age) || age < 0 || age > MAX_AGE_MS) return null;
-    return typeof saved.target === 'string' ? reviewReturnPath(saved.target) : null;
+    return typeof saved.target === 'string' ? reviewReturnPath(saved.target) ?? roomReturnPath(saved.target) : null;
   } catch {
     try { window.sessionStorage.removeItem(KEY); } catch { /* unavailable */ }
     return null;

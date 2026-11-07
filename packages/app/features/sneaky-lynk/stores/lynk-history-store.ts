@@ -16,6 +16,8 @@ export interface LynkRecord {
   description: string;
   source?: "sneaky_lynk" | "messages";
   isLive: boolean;
+  presenceKnown?: boolean;
+  endsAt?: string | null;
   hasVideo: boolean;
   isPublic: boolean;
   status: "open" | "ended";

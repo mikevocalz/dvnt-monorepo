@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "solito/navigation";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { getSession } from "@dvnt/app/lib/auth-client";
+import { roomReturnPath } from "@dvnt/app/lib/auth/room-return";
 
 /**
  * Renders nothing; once the persisted auth store has hydrated, sends an already
@@ -22,7 +23,7 @@ export function RedirectIfAuthed({ to = "/feed" }: { to?: string }) {
     // A persisted app profile alone does not prove the browser still has a
     // Better Auth session. A stale profile otherwise loops between /admin and
     // /auth/login because the editor correctly refuses unauthenticated users.
-    if (to === "/admin" || to.startsWith("/admin/")) {
+    if (to === "/admin" || to.startsWith("/admin/") || roomReturnPath(to)) {
       let active = true;
       void getSession()
         .then(({ data }) => {

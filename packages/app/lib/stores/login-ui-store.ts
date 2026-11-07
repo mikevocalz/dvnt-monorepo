@@ -7,10 +7,22 @@ import { create } from "zustand";
  */
 interface LoginUiState {
   isSubmitting: boolean;
-  setSubmitting: (value: boolean) => void;
+  submission: number | null;
+  beginSubmission: () => number | null;
+  finishSubmission: (owner: number) => void;
 }
 
-export const useLoginUiStore = create<LoginUiState>((set) => ({
+let nextSubmission = 0;
+export const useLoginUiStore = create<LoginUiState>((set, get) => ({
   isSubmitting: false,
-  setSubmitting: (value) => set({ isSubmitting: value }),
+  submission: null,
+  beginSubmission: () => {
+    if (get().isSubmitting) return null;
+    const submission = ++nextSubmission;
+    set({ isSubmitting: true, submission });
+    return submission;
+  },
+  finishSubmission: (owner) => {
+    if (get().submission === owner) set({ isSubmitting: false, submission: null });
+  },
 }));

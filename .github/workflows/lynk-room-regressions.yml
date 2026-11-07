@@ -3,6 +3,36 @@ on:
   pull_request:
     paths:
       - 'packages/app/features/sneaky-lynk/**'
+      - 'packages/app/lib/auth/**'
+      - 'packages/app/features/auth/**'
+      - 'packages/app/components/web-*.tsx'
+      - 'packages/app/components/signup-entry.web.tsx'
+      - 'packages/app/lib/auth-client.web.ts'
+      - 'packages/app/lib/deep-linking/**'
+      - 'packages/app/lib/stores/deep-link-store.ts'
+      - 'packages/app/lib/hooks/use-begin-verification*'
+      - 'packages/app/features/routes/screens/(auth)/**'
+      - 'packages/app/features/routes/screens/_layout.tsx'
+      - 'packages/app/features/routes/screens/+native-intent.tsx'
+      - 'packages/app/features/routes/screens/(protected)/_layout.tsx'
+      - 'apps/web/src/middleware.ts'
+      - 'apps/web/src/app/(frontend)/auth/**'
+      - 'apps/web/src/app/.well-known/**'
+      - 'packages/app/lib/api/event-lynk.ts'
+      - 'packages/app/lib/events/event-lynk*'
+      - 'apps/mobile/supabase/functions/event-lynk-room/**'
+      - 'apps/mobile/supabase/functions/_shared/event-*'
+      - 'apps/mobile/supabase/migrations/*event_lynk_atomic_admission_window.sql'
+      - 'apps/mobile/supabase/migrations/*event_lynk_terminal_start.sql'
+      - 'scripts/test-event-lynk-terminal-start.cjs'
+      - 'scripts/test-event-lynk-admission-window.cjs'
+      - 'scripts/test-event-lynk-waiting-room.cjs'
+      - 'scripts/test-event-lynk-entry-hooks.cjs'
+      - 'scripts/test-lynk-native-links.cjs'
+      - 'scripts/test-lynk-native-auth-callbacks.cjs'
+      - 'scripts/test-lynk-web-routes.cjs'
+      - 'scripts/test-lynk-room-auth-return-dom.cjs'
+      - 'scripts/test-review-auth-return-dom.cjs'
       - 'packages/app/features/video/**'
       - 'packages/app/features/routes/screens/(protected)/sneaky-lynk/**'
       - 'packages/app/features/screens/(protected)/lynk/**'
@@ -24,16 +54,64 @@ on:
       - 'scripts/test-lynk-atomic-admission.cjs'
       - 'scripts/test-lynk-room-browser.cjs'
       - 'scripts/test-lynk-native-capture.cjs'
+      - 'scripts/test-lynk-native-polish.cjs'
       - 'scripts/test-lynk-native-session.cjs'
       - 'scripts/test-lynk-web-capture-sdk.cjs'
       - 'scripts/test-lynk-web-viewer-sdk.cjs'
       - 'scripts/test-lynk-relay-authorization-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
+      - 'scripts/test-lynk-prejoin-dom.cjs'
+      - 'scripts/test-lynk-full-room-retry.cjs'
+      - 'scripts/test-lynk-native-admission-cancel.cjs'
+      - 'scripts/test-lynk-admission-dispatch.cjs'
+      - 'scripts/test-lynk-speaker-settings-dom.cjs'
+      - 'scripts/test-lynk-host-actions.cjs'
+      - 'scripts/test-lynk-native-entry.cjs'
+      - 'scripts/test-lynk-entry-identity.cjs'
+      - 'scripts/test-lynk-cohost-invites.cjs'
+      - 'scripts/test-lynk-cohost-api.cjs'
+      - 'scripts/test-lynk-creation-discovery.cjs'
+      - 'scripts/test-lynk-create-callbacks.cjs'
+      - 'scripts/test-lynk-native-moderation-callbacks.cjs'
+      - 'scripts/test-lynk-room-panels.cjs'
+      - 'scripts/test-lynk-stage-polish-dom.cjs'
+      - 'scripts/test-lynk-device-settings-dom.cjs'
+      - 'scripts/test-lynk-device-selection-sdk.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   push:
     branches: [master]
     paths:
       - 'packages/app/features/sneaky-lynk/**'
+      - 'packages/app/lib/auth/**'
+      - 'packages/app/features/auth/**'
+      - 'packages/app/components/web-*.tsx'
+      - 'packages/app/components/signup-entry.web.tsx'
+      - 'packages/app/lib/auth-client.web.ts'
+      - 'packages/app/lib/deep-linking/**'
+      - 'packages/app/lib/stores/deep-link-store.ts'
+      - 'packages/app/lib/hooks/use-begin-verification*'
+      - 'packages/app/features/routes/screens/(auth)/**'
+      - 'packages/app/features/routes/screens/_layout.tsx'
+      - 'packages/app/features/routes/screens/+native-intent.tsx'
+      - 'packages/app/features/routes/screens/(protected)/_layout.tsx'
+      - 'apps/web/src/middleware.ts'
+      - 'apps/web/src/app/(frontend)/auth/**'
+      - 'apps/web/src/app/.well-known/**'
+      - 'packages/app/lib/api/event-lynk.ts'
+      - 'packages/app/lib/events/event-lynk*'
+      - 'apps/mobile/supabase/functions/event-lynk-room/**'
+      - 'apps/mobile/supabase/functions/_shared/event-*'
+      - 'apps/mobile/supabase/migrations/*event_lynk_atomic_admission_window.sql'
+      - 'apps/mobile/supabase/migrations/*event_lynk_terminal_start.sql'
+      - 'scripts/test-event-lynk-terminal-start.cjs'
+      - 'scripts/test-event-lynk-admission-window.cjs'
+      - 'scripts/test-event-lynk-waiting-room.cjs'
+      - 'scripts/test-event-lynk-entry-hooks.cjs'
+      - 'scripts/test-lynk-native-links.cjs'
+      - 'scripts/test-lynk-native-auth-callbacks.cjs'
+      - 'scripts/test-lynk-web-routes.cjs'
+      - 'scripts/test-lynk-room-auth-return-dom.cjs'
+      - 'scripts/test-review-auth-return-dom.cjs'
       - 'packages/app/features/video/**'
       - 'packages/app/features/screens/(protected)/lynk/**'
       - 'packages/app/lib/lynk/**'
@@ -52,11 +130,29 @@ on:
       - 'scripts/test-subscription-owner-rls.cjs'
       - 'scripts/test-lynk-atomic-admission.cjs'
       - 'scripts/test-lynk-native-capture.cjs'
+      - 'scripts/test-lynk-native-polish.cjs'
       - 'scripts/test-lynk-native-session.cjs'
       - 'scripts/test-lynk-web-capture-sdk.cjs'
       - 'scripts/test-lynk-web-viewer-sdk.cjs'
       - 'scripts/test-lynk-relay-authorization-sdk.cjs'
       - 'scripts/test-lynk-web-capture-ui.cjs'
+      - 'scripts/test-lynk-prejoin-dom.cjs'
+      - 'scripts/test-lynk-full-room-retry.cjs'
+      - 'scripts/test-lynk-native-admission-cancel.cjs'
+      - 'scripts/test-lynk-admission-dispatch.cjs'
+      - 'scripts/test-lynk-speaker-settings-dom.cjs'
+      - 'scripts/test-lynk-host-actions.cjs'
+      - 'scripts/test-lynk-native-entry.cjs'
+      - 'scripts/test-lynk-entry-identity.cjs'
+      - 'scripts/test-lynk-cohost-invites.cjs'
+      - 'scripts/test-lynk-cohost-api.cjs'
+      - 'scripts/test-lynk-creation-discovery.cjs'
+      - 'scripts/test-lynk-create-callbacks.cjs'
+      - 'scripts/test-lynk-native-moderation-callbacks.cjs'
+      - 'scripts/test-lynk-room-panels.cjs'
+      - 'scripts/test-lynk-stage-polish-dom.cjs'
+      - 'scripts/test-lynk-device-settings-dom.cjs'
+      - 'scripts/test-lynk-device-selection-sdk.cjs'
       - '.github/workflows/lynk-room-regressions.yml'
   workflow_dispatch:
 permissions:
@@ -70,7 +166,7 @@ jobs:
         with:
           node-version: 24
       - name: Install isolated fixture tools
-        run: npm install --prefix "$RUNNER_TEMP/lynk-tests" --no-package-lock --no-save typescript@5.9.3 esbuild@0.25.11 jsdom@26.1.0 react@19.2.3 react-dom@19.2.3 zod@3.22.4 @electric-sql/pglite@0.3.14 zustand@5.0.14
+        run: npm install --prefix "$RUNNER_TEMP/lynk-tests" --no-package-lock --no-save typescript@5.9.3 esbuild@0.25.11 jsdom@26.1.0 happy-dom@20.10.3 lucide-react@0.468.0 react@19.2.3 react-dom@19.2.3 zod@3.22.4 @electric-sql/pglite@0.3.14 zustand@5.0.14 @tanstack/react-query@5.99.0
       - name: Install isolated released MoQ SDK (separate Zod 4 peer graph)
         run: npm install --legacy-peer-deps --prefix "$RUNNER_TEMP/lynk-sdk" --no-package-lock --no-save @moq/net@0.4.3 @moq/publish@0.5.2 @moq/signals@0.2.5 @zod/mini@4.5.0 zod@4.5.0 react@19.2.3
       - name: Test multi-user chat, media, room end and subscriptions
@@ -78,12 +174,37 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/lynk-tests/node_modules
           LYNK_SDK_DEPS: ${{ runner.temp }}/lynk-sdk/node_modules
         run: |
-          node --test packages/app/features/sneaky-lynk/publish-roles.test.ts packages/app/features/sneaky-lynk/room-entry-status.test.ts packages/app/features/sneaky-lynk/api/*.test.ts packages/app/features/sneaky-lynk/session/*.test.ts packages/app/features/sneaky-lynk/ui/*.test.ts packages/app/lib/video/*.test.ts packages/app/lib/events/event-lynk.test.ts packages/app/features/video/room-lifecycle.test.ts packages/app/features/video/stores/*.test.ts packages/app/lib/lynk/*.test.ts packages/ui/src/video/moqPlayerHtml.test.ts packages/app/lib/lynk/genesis-room-admission.fixture.ts packages/app/lib/subscription/*.test.ts apps/mobile/supabase/functions/video_create_room/subscription.test.cjs apps/mobile/supabase/functions/video_end_room/index.test.cjs apps/mobile/supabase/functions/_shared/lynk-moq-access.test.cjs apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs
+          node --test packages/app/features/sneaky-lynk/*.test.ts packages/app/features/sneaky-lynk/api/*.test.ts packages/app/features/sneaky-lynk/hooks/*.test.ts packages/app/features/sneaky-lynk/session/*.test.ts packages/app/features/sneaky-lynk/ui/*.test.ts packages/app/features/sneaky-lynk/ui/web/*.test.ts packages/app/lib/video/*.test.ts packages/app/lib/events/event-lynk.test.ts packages/app/features/video/room-lifecycle.test.ts packages/app/features/video/stores/*.test.ts packages/app/lib/lynk/*.test.ts packages/ui/src/video/moqPlayerHtml.test.ts packages/app/lib/lynk/genesis-room-admission.fixture.ts packages/app/lib/subscription/*.test.ts apps/mobile/supabase/functions/video_create_room/subscription.test.cjs apps/mobile/supabase/functions/video_end_room/index.test.cjs apps/mobile/supabase/functions/_shared/lynk-moq-access.test.cjs apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs
           node --test scripts/test-subscription-owner-rls.cjs scripts/test-lynk-atomic-admission.cjs
           node --test apps/mobile/supabase/functions/lynk-livestream-token/index.test.cjs
           node scripts/test-lynk-room-browser.cjs --dom
           node scripts/test-lynk-web-capture-ui.cjs
+          node scripts/test-lynk-prejoin-dom.cjs
+          node scripts/test-lynk-full-room-retry.cjs
+          node scripts/test-lynk-native-admission-cancel.cjs
+          node scripts/test-lynk-admission-dispatch.cjs
+          node scripts/test-lynk-speaker-settings-dom.cjs
+          node scripts/test-lynk-host-actions.cjs
+          node scripts/test-lynk-native-entry.cjs
+          node scripts/test-lynk-native-links.cjs
+          node scripts/test-lynk-native-auth-callbacks.cjs
+          node scripts/test-lynk-web-routes.cjs
+          node scripts/test-lynk-room-auth-return-dom.cjs
+          node --test scripts/test-event-lynk-terminal-start.cjs scripts/test-event-lynk-admission-window.cjs apps/mobile/supabase/functions/event-lynk-room/index.test.cjs apps/mobile/supabase/functions/video_join_room/event-host.test.cjs apps/mobile/supabase/functions/lynk-cohost-invite/event-access.test.cjs
+          node scripts/test-event-lynk-entry-hooks.cjs
+          node scripts/test-event-lynk-waiting-room.cjs
+          node scripts/test-lynk-entry-identity.cjs
+          node scripts/test-lynk-cohost-invites.cjs
+          node scripts/test-lynk-cohost-api.cjs
+          node scripts/test-lynk-creation-discovery.cjs
+          node scripts/test-lynk-create-callbacks.cjs
+          node scripts/test-lynk-native-moderation-callbacks.cjs
+          node scripts/test-lynk-room-panels.cjs
+          node scripts/test-lynk-stage-polish-dom.cjs
+          node scripts/test-lynk-device-settings-dom.cjs
+          node scripts/test-lynk-device-selection-sdk.cjs
           node scripts/test-lynk-native-capture.cjs
+          node scripts/test-lynk-native-polish.cjs
           node scripts/test-lynk-native-session.cjs
           node scripts/test-lynk-web-capture-sdk.cjs
           node scripts/test-lynk-web-viewer-sdk.cjs

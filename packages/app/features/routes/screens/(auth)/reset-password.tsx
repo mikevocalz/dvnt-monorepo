@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useIsFocused } from "@react-navigation/native";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { View, Text, Pressable, Linking } from "react-native";
 import { toast } from "sonner-native";
 import { useForm } from "@tanstack/react-form";
@@ -26,8 +28,25 @@ export default function ResetPasswordScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const params = useGlobalSearchParams<{ token?: string; error?: string }>();
   const { colors } = useColorScheme();
+  const isFocused = useIsFocused();
+  const continuation = useRef({ active: false, epoch: 0, timer: undefined as ReturnType<typeof setTimeout> | undefined });
 
   useEffect(() => {
+    continuation.current.active = isFocused;
+    const epoch = ++continuation.current.epoch;
+    if (!isFocused) return;
+    setIsSubmitting(false);
+    const isCurrent = () => continuation.current.active && continuation.current.epoch === epoch;
+    const cancel = () => {
+      continuation.current.active = false;
+      continuation.current.epoch += 1;
+      if (continuation.current.timer) clearTimeout(continuation.current.timer);
+    };
+    const unsubscribe = useAuthStore.subscribe((next, previous) => {
+      if ((next.user?.authId || next.user?.id) !== (previous.user?.authId || previous.user?.id) ||
+          next.isAuthenticated !== previous.isAuthenticated ||
+          (next.authStatus === "unauthenticated" && previous.authStatus !== "unauthenticated")) cancel();
+    });
     const validateResetState = async () => {
       try {
         // Web: the email link carries the recovery token in ?token= — that's
@@ -41,6 +60,7 @@ export default function ResetPasswordScreen() {
 
         // Native / legacy: the link established a recovery session.
         const session = await getSession();
+        if (!isCurrent()) return;
         if (session) {
           setStatus("ready");
           AppTrace.trace("RECOVERY", "reset_link_ready");
@@ -50,6 +70,7 @@ export default function ResetPasswordScreen() {
         setStatus("invalid");
         AppTrace.warn("RECOVERY", "reset_link_invalid");
       } catch (error) {
+        if (!isCurrent()) return;
         console.error("[ResetPassword] Validation error:", error);
         setStatus("invalid");
         AppTrace.error("RECOVERY", "reset_link_validation_failed", {
@@ -59,17 +80,22 @@ export default function ResetPasswordScreen() {
     };
 
     void validateResetState();
-  }, [params.token, params.error]);
+    return () => { cancel(); unsubscribe(); };
+  }, [params.token, params.error, isFocused]);
 
   const form = useForm({
     defaultValues: { password: "", confirmPassword: "" },
     onSubmit: async ({ value }) => {
+      const epoch = continuation.current.epoch;
+      const isCurrent = () => continuation.current.active && continuation.current.epoch === epoch;
+      if (!isCurrent()) return;
       setIsSubmitting(true);
       const startedAt = Date.now();
       AppTrace.trace("RECOVERY", "reset_submit_started");
 
       try {
         const response = await submitPasswordReset(value.password, params.token);
+        if (!isCurrent()) return;
 
         if (response?.error) {
           AppTrace.warn("RECOVERY", "reset_submit_failed", {
@@ -94,10 +120,11 @@ export default function ResetPasswordScreen() {
           description: "Your new password is set.",
         });
 
-        setTimeout(() => {
-          router.replace("/(auth)/login");
+        continuation.current.timer = setTimeout(() => {
+          if (isCurrent()) router.replace("/(auth)/login");
         }, 1800);
       } catch (error: any) {
+        if (!isCurrent()) return;
         AppTrace.error("RECOVERY", "reset_submit_failed_exception", {
           elapsedMs: Date.now() - startedAt,
           error: getErrorMessage(error),
@@ -108,7 +135,7 @@ export default function ResetPasswordScreen() {
             "We couldn’t update your password. Please try again.",
         });
       } finally {
-        setIsSubmitting(false);
+        if (isCurrent()) setIsSubmitting(false);
       }
     },
   });

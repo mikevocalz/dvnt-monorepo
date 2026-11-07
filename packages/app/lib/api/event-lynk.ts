@@ -28,12 +28,17 @@ export interface EventLynkHostView {
 }
 
 async function call<T>(body: Record<string, unknown>, fallback: string): Promise<T> {
-  const { data, error } = await invokeEdge<T & { ok?: boolean; error?: string }>(
+  const { data, error } = await invokeEdge<T & { ok?: boolean; error?: string; reason?: string }>(
     "event-lynk-room",
     body,
   );
   if (error || !data || (data as any).ok === false) {
-    throw new Error(error?.message || (data as any)?.error || fallback);
+    // A terminal refusal is not a transient failed heartbeat. Preserve the
+    // HTTP status instead of asking the waiting UI to guess from English copy.
+    throw Object.assign(new Error(error?.message || data?.error || fallback), {
+      status: error?.status,
+      reason: data?.reason,
+    });
   }
   return data;
 }
