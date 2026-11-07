@@ -181,6 +181,16 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
           shareButton().click();
           await until(()=>!shareButton());
           assert.equal(JSON.stringify(dom.window.fixture.storyShares),JSON.stringify([{type:'event',id:'42'}]),'actual story menu dispatches the event at the service boundary');
+          const f=dom.window.fixture;
+          f.configure({authenticated:false,event:{...f.baseEvent,price:0,ticketingEnabled:false,ticketTiers:[],lynkRoomId:'fixture-lynk',showAttendees:false},tiers:[]});
+          const lynk=()=>dom.window.document.querySelector('[data-lynk-room="fixture-lynk"]');
+          await until(()=>lynk()?.textContent.includes('Sign in to join'));
+          lynk().click();
+          assert.match(decodeURIComponent(f.routes.at(-1)),/returnTo=\/feed\/sneaky-lynk\/room\/fixture-lynk/);
+          f.configure({authenticated:true});
+          await until(()=>lynk()?.textContent.includes('Enter event Lynk'));
+          assert.equal(lynk().disabled,false);
+
         }else{
           await until(()=>dom.window.document.body.textContent.includes('VIP admission. See the organizer'));
           const text=dom.window.document.body.textContent;
@@ -390,7 +400,11 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       await page.evaluate(()=>window.fixture.configure({event:{...window.fixture.baseEvent,price:0,ticketingEnabled:false,ticketTiers:[],lynkRoomId:'fixture-lynk',showAttendees:false},tiers:[]}));
       const lynk=page.locator('[data-lynk-room="fixture-lynk"]');
       await lynk.waitFor();await lynk.scrollIntoViewIfNeeded();await tick(page);
-      assert.match(await lynk.innerText(),/Join the event's Lynk/);
+      assert.match(await lynk.innerText(),/Sign in to join/,'signed-out visitors see an explicit sign-in action');
+      await lynk.click();await tick(page);
+      assert.match(decodeURIComponent((await page.evaluate(()=>window.fixture.routes)).at(-1)),/returnTo=\/feed\/sneaky-lynk\/room\/fixture-lynk/,'sign-in preserves the exact event room');
+      await page.evaluate(()=>window.fixture.configure({authenticated:true}));await tick(page);
+      assert.match(await lynk.innerText(),/Enter event Lynk/,'signed-in members enter the linked room');
       assert.equal(await page.getByRole('heading',{name:"Who's going",exact:true}).count(),0,'protected afterparty attendees hidden');
       const lynkBox=await lynk.boundingBox();assert.ok(lynkBox.height>=44&&lynkBox.x>=0&&lynkBox.x+lynkBox.width<=size.width,'Lynk action fits viewport and touch target');
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&document.body.scrollWidth<=innerWidth),true,'free Sneaky event does not overflow');

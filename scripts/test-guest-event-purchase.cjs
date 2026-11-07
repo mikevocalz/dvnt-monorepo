@@ -1,6 +1,6 @@
 // Synthetic ReactDOM regressions against the actual EventDetailScreen module.
 // No network, checkout requests, holds, orders, or browser credentials are used.
-// Dependencies: typescript, react, react-dom, zustand, jsdom (normal dev deps or NODE_PATH).
+// Dependencies: typescript, react, react-dom, zustand, jsdom, lucide-react (normal dev deps or NODE_PATH).
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
