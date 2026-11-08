@@ -43,6 +43,8 @@ on:
       - 'packages/app/lib/subscription/**'
       - 'packages/app/lib/video/**'
       - 'apps/mobile/supabase/functions/video_join_room/**'
+      - 'apps/mobile/supabase/functions/video_list_rooms/**'
+      - 'apps/mobile/supabase/functions/_shared/read-all-rows*'
       - 'apps/mobile/supabase/functions/lynk-cohost-invite/**'
       - 'apps/mobile/supabase/functions/video_create_room/**'
       - 'apps/mobile/supabase/functions/video_end_room/**'
@@ -73,6 +75,9 @@ on:
       - 'scripts/test-lynk-cohost-invites.cjs'
       - 'scripts/test-lynk-cohost-api.cjs'
       - 'scripts/test-lynk-creation-discovery.cjs'
+      - 'scripts/test-lynk-native-discovery.cjs'
+      - 'packages/app/features/messages/messages.web.tsx'
+      - 'packages/app/features/routes/screens/(protected)/messages.tsx'
       - 'scripts/test-lynk-create-callbacks.cjs'
       - 'scripts/test-lynk-native-moderation-callbacks.cjs'
       - 'scripts/test-lynk-room-panels.cjs'
@@ -125,6 +130,8 @@ on:
       - 'apps/mobile/supabase/functions/lynk-moq-token/**'
       - 'apps/mobile/supabase/functions/lynk-livestream-token/**'
       - 'apps/mobile/supabase/functions/video_join_room/**'
+      - 'apps/mobile/supabase/functions/video_list_rooms/**'
+      - 'apps/mobile/supabase/functions/_shared/read-all-rows*'
       - 'apps/mobile/supabase/functions/lynk-cohost-invite/**'
       - 'apps/mobile/supabase/functions/video_create_room/**'
       - 'apps/mobile/supabase/functions/video_end_room/**'
@@ -151,6 +158,9 @@ on:
       - 'scripts/test-lynk-cohost-invites.cjs'
       - 'scripts/test-lynk-cohost-api.cjs'
       - 'scripts/test-lynk-creation-discovery.cjs'
+      - 'scripts/test-lynk-native-discovery.cjs'
+      - 'packages/app/features/messages/messages.web.tsx'
+      - 'packages/app/features/routes/screens/(protected)/messages.tsx'
       - 'scripts/test-lynk-create-callbacks.cjs'
       - 'scripts/test-lynk-native-moderation-callbacks.cjs'
       - 'scripts/test-lynk-room-panels.cjs'
@@ -179,6 +189,7 @@ jobs:
           LYNK_SDK_DEPS: ${{ runner.temp }}/lynk-sdk/node_modules
         run: |
           node --test packages/app/features/sneaky-lynk/*.test.ts packages/app/features/sneaky-lynk/api/*.test.ts packages/app/features/sneaky-lynk/hooks/*.test.ts packages/app/features/sneaky-lynk/session/*.test.ts packages/app/features/sneaky-lynk/ui/*.test.ts packages/app/features/sneaky-lynk/ui/web/*.test.ts packages/app/lib/video/*.test.ts packages/app/lib/events/event-lynk.test.ts packages/app/features/video/room-lifecycle.test.ts packages/app/features/video/stores/*.test.ts packages/app/lib/lynk/*.test.ts packages/ui/src/video/moqPlayerHtml.test.ts packages/app/lib/lynk/genesis-room-admission.fixture.ts packages/app/lib/subscription/*.test.ts apps/mobile/supabase/functions/video_create_room/subscription.test.cjs apps/mobile/supabase/functions/video_end_room/index.test.cjs apps/mobile/supabase/functions/_shared/lynk-moq-access.test.cjs apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs
+          node --test apps/mobile/supabase/functions/video_list_rooms/index.test.cjs apps/mobile/supabase/functions/_shared/read-all-rows.test.cjs apps/mobile/supabase/functions/_shared/event-access.test.cjs
           node --test scripts/test-subscription-owner-rls.cjs scripts/test-lynk-atomic-admission.cjs
           node --test apps/mobile/supabase/functions/lynk-livestream-token/index.test.cjs
           node scripts/test-lynk-room-browser.cjs --dom
@@ -202,6 +213,7 @@ jobs:
           node scripts/test-lynk-cohost-invites.cjs
           node scripts/test-lynk-cohost-api.cjs
           node scripts/test-lynk-creation-discovery.cjs
+          node scripts/test-lynk-native-discovery.cjs
           node scripts/test-lynk-create-callbacks.cjs
           node scripts/test-lynk-native-moderation-callbacks.cjs
           node scripts/test-lynk-room-panels.cjs

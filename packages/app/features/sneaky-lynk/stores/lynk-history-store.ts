@@ -1,3 +1,4 @@
+import type { DiscoveryProof } from "../discovery-room-state";
 /**
  * Lynk History Store
  * Persists Sneaky Lynk rooms locally via MMKV so ended rooms survive app restarts.
@@ -9,7 +10,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { storage } from "@dvnt/app/lib/utils/storage";
 import type { SneakyUser } from "../types";
 
-export interface LynkRecord {
+export interface LynkRecord extends DiscoveryProof {
   id: string;
   title: string;
   topic: string;

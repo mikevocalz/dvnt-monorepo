@@ -24,3 +24,29 @@ test('cursor scan does not offset-skip when earlier rows disappear',async()=>{
  const factory=()=>{if(call++===1)rows.shift();return p.factory();};
  assert.deepEqual(Array.from(await readAllRows(factory),x=>x.id),[1,2,3]);
 });
+
+test('custom stable cursor scans lifecycle event_id under a smaller server cap', async () => {
+ const rows = [{event_id: 3, room_uuid: 'a'}, {event_id: 7, room_uuid: 'b'}];
+ const cursors = [];
+ const factory = () => {
+  let cursor = null;
+  const q = {
+   order(key, opts) { assert.equal(key, 'event_id'); assert.equal(opts.ascending, true); return q; },
+   limit() { return q; },
+   gt(key, value) { assert.equal(key, 'event_id'); cursor = value; return q; },
+   then(ok, bad) { cursors.push(cursor); return Promise.resolve({data: rows.filter(r => cursor === null || r.event_id > cursor).slice(0, 1), error: null}).then(ok, bad); },
+  };
+  return q;
+ };
+ assert.deepEqual(Array.from(await readAllRows(factory, {cursorColumn: 'event_id'}), r => r.event_id), [3, 7]);
+ assert.deepEqual(cursors, [null, 3, 7]);
+ for (const cursorColumn of ['', 'id.desc', 'event_id)', 'room.id', 'id,secret', 'ID']) {
+  await assert.rejects(readAllRows(factory, {cursorColumn}), /cursor column/);
+ }
+});
+
+test('custom cursor rejects missing and duplicate keys rather than trusting id', async () => {
+ const factory = (data) => () => ({order() {return this;}, limit() {return this;}, then(ok) {return Promise.resolve({data, error: null}).then(ok);}});
+ await assert.rejects(readAllRows(factory([{id: 1}]), {cursorColumn: 'event_id'}), /invalid/);
+ await assert.rejects(readAllRows(factory([{event_id: 1}, {event_id: 1}]), {cursorColumn: 'event_id'}), /repeated/);
+});
