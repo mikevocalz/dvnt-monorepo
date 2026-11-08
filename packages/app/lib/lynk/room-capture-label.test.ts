@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
+import { URL } from "node:url";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 const web = read("../../features/sneaky-lynk/screens/room.web.tsx");
