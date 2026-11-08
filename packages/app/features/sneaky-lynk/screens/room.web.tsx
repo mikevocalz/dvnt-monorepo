@@ -71,7 +71,6 @@ import {
   PhoneOff,
   MessageCircle,
   Smartphone,
-  ShieldAlert,
 } from "lucide-react";
 import { RoomHeader } from "../ui/web/room-header";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -349,32 +348,6 @@ function CaptureNotificationBannerWeb() {
         </span>
       </div>
     </div>
-  );
-}
-
-/**
- * Persistent platform disclosure.
- *
- * Web capture protection is deterrence + attribution; native runs under
- * FLAG_SECURE / the iOS capture blackout. When the room is mixed, everyone —
- * including the web viewer themselves — is told, because a participant can't
- * make an informed choice about what to show without knowing which rail the
- * other people are on. Driven by presence on the `sneaky-capture-<roomId>`
- * channel (see `useSneakyLynkCaptureBroadcast`), so it tracks the room live
- * rather than only at join time.
- */
-function WebViewerDisclosureChip() {
-  const webPeerPresent = useSneakyLynkCaptureStore((s) => s.webPeerPresent);
-  if (!webPeerPresent) return null;
-
-  return (
-    <span
-      role="status"
-      className="inline-flex max-w-full items-center gap-2 rounded-xl border border-[#F5C518]/35 bg-[#F5C518]/10 px-3 py-1.5 text-[11px] font-medium leading-tight text-[#F5C518]"
-    >
-      <ShieldAlert size={13} className="shrink-0" />
-      Web viewers in room — capture protection limited on web
-    </span>
   );
 }
 
@@ -1519,13 +1492,6 @@ function RoomInner({
         </div>
       )}
 
-
-      {/* Standing disclosure — own row so the copy is never truncated by
-          the three-column header. Renders only while a web viewer is in
-          the room. */}
-      <div className="relative z-10 shrink-0 pl-[max(12px,env(safe-area-inset-left))] pr-[max(12px,env(safe-area-inset-right))] pb-1 empty:hidden [@media(max-height:500px)_and_(min-width:600px)]:pb-0">
-        <WebViewerDisclosureChip />
-      </div>
 
       {connecting ? (
         <div className="flex min-h-32 flex-1 flex-col items-center justify-center gap-4">
