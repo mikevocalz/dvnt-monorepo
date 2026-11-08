@@ -81,7 +81,6 @@ import { RoomJoinErrorSheet } from "@dvnt/app/features/sneaky-lynk";
 import { RoomFullSheet } from "@dvnt/app/features/sneaky-lynk";
 import { useEventLynkWaitingRoom } from "@dvnt/app/features/sneaky-lynk";
 import { CaptureNotificationBanner } from "@dvnt/app/features/sneaky-lynk";
-import { CaptureDisclosureChip } from "@dvnt/app/features/sneaky-lynk/ui";
 import { useSneakyLynkCaptureBroadcast } from "@dvnt/app/features/sneaky-lynk";
 import {
   classifySneakyLynkError,
@@ -2753,7 +2752,6 @@ function RoomLayout({
               <MicOff size={16} color="#C5C7D1" /><Text style={{ color: "#C5C7D1", fontSize: 12, fontWeight: "600" }}>{allMuted ? "Allow unmute" : "Mute all"}</Text>
             </Pressable> : null}
           </View> : null}
-          <CaptureDisclosureChip />
         </View>
         {!isPractice ? <RoomConnectionNotice status={connectionState} admitted={admitted} exhausted={recoveryExhausted} onRetry={onRetryJoin} /> : null}
 

@@ -318,6 +318,7 @@ async function assertWebGeometry(page, c, visible={top:0,height:c.height},checkH
 }
 
 async function assertActiveCaptureGuard(page) {
+  assert.doesNotMatch(await page.locator('body').innerText(), /Web viewers in room|capture protection limited on web/i, 'mixed-platform rooms do not render the removed disclosure banner');
   assert.equal(await page.locator('[data-secure-capture-boundary="sneaky-lynk"]').count(),1,'real capture guard must be enabled');
   assert.equal(await page.locator('#anticapture-wrapper,[class*="alert-anticapture"]').count(),0,'no Enter-only third-party gate');
   assert.equal(await page.locator('[data-secure-capture-blackout]').count(),0,'focused first entry is usable without keyboard unlock');
@@ -1311,6 +1312,7 @@ async function main() {
         window.eval(assets.js);await new Promise(resolve=>setTimeout(resolve,350));
         assert.ok(window.fixture,rail+' fixture mounted');
         assert.ok(window.document.querySelector(rail==='web'?'main[data-room-phase="connected"]':'[data-native-room] [role="button"]'),rail+' actual component mounted: '+window.document.body.innerHTML.slice(0,1200));
+        if(rail==='web')assert.doesNotMatch(window.document.body.textContent,/Web viewers in room|capture protection limited on web/i,'the actual room omits the banner even with a web peer present');
         if(rail==='web')assert.ok(window.document.querySelector('[role="timer"]'),'host fixture must exercise the real always-visible timer badge');
         for(const publishers of [1,2,10,20,30]) {
           window.fixture.configure({publishers});await new Promise(resolve=>setTimeout(resolve,30));
