@@ -8,6 +8,7 @@ test("Sneaky Lynk live rooms hide the site sidebar and app chrome", () => {
     "/feed/sneaky-lynk/room/123",
     "/feed/lynk/123",
     "/feed/call/123",
+    "/video/room/123",
   ]) {
     assert.equal(routeIsImmersive(route), true, route);
   }
@@ -19,10 +20,24 @@ test("creating, browsing and billing for Lynks retain normal navigation", () => 
     "/feed/sneaky-lynk/billing",
     "/feed/messages",
     "/feed/events",
+    "/video/rooms",
   ]) {
     assert.equal(routeIsImmersive(route), false, route);
   }
   assert.equal(routeOwnsHeader("/feed/sneaky-lynk/room/123"), false);
+});
+
+test("immersive room prefixes respect segment boundaries", () => {
+  for (const prefix of ["/feed/sneaky-lynk/room", "/feed/lynk", "/video/room"]) {
+    for (const route of [prefix, `${prefix}/`, `${prefix}/room_123`, `${prefix}/room_123/`]) {
+      assert.equal(routeIsImmersive(route), true, route);
+    }
+  }
+  for (const route of [
+    "/video", "/video/rooms", "/video/rooms/123", "/video/roommates",
+    "/feed/lynks", "/feed/sneaky-lynk/rooms", "/feed/sneaky-lynk/room-settings",
+    "/feed/sneaky-lynk/create", "/feed/sneaky-lynk/billing",
+  ]) assert.equal(routeIsImmersive(route), false, route);
 });
 
 test("event detail and editor aliases recover their visible viewport", () => {

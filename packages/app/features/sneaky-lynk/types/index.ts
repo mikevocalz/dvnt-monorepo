@@ -1,3 +1,4 @@
+import type { DiscoveryProof } from "../discovery-room-state";
 /**
  * Sneaky Lynk Types
  * Audio-first live rooms with optional video stage
@@ -28,7 +29,7 @@ export interface SneakyUser {
   anonLabel?: string | null;
 }
 
-export interface SneakyRoom {
+export interface SneakyRoom extends DiscoveryProof {
   id: string;
   createdBy: string;
   /** Server session deadline, ISO. A room can be `status: "open"` and still
@@ -40,7 +41,7 @@ export interface SneakyRoom {
   description: string;
   sweetSpicyMode?: "sweet" | "spicy";
   isLive: boolean;
-  /** False when a fallback discovery read cannot verify roster presence. */
+  /** True only when the authoritative discovery service verified presence. */
   presenceKnown?: boolean;
   hasVideo: boolean;
   isPublic: boolean;

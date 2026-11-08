@@ -103,7 +103,6 @@ const boundaries = new Map([
   [source(lynk+'session/useRoomSession'), `import {useFixture} from 'fixture';export const useRoomSession=()=>({state:useFixture(s=>s.connection)});export const bannerPhaseFor=s=>s.state;`],
   [source(lynk+'stores/lynk-history-store'), `import {create} from 'zustand';export const useLynkHistoryStore=create(()=>({endRoom:()=>{}}));`],
   [source(lynk+'hooks/useRoomReactions'), `import {useFixture,f} from 'fixture';export const useRoomReactions=()=>({reactions:useFixture(s=>s.reactions),sendReaction:emoji=>f.actions.push('reaction:'+emoji)});`],
-  [source('packages/app/lib/secure-capture/useSecureCaptureGuard'), `export const shouldEnableWebSecureCapture=()=>true;export const useSecureCaptureGuard=()=>({blackoutReason:null});`],
   ['react-native-safe-area-context', `import {useFixture} from 'fixture';export const useSafeAreaInsets=()=>useFixture(s=>s.insets);`],
   ['expo-haptics', `export const impactAsync=async()=>{};export const notificationAsync=async()=>{};export const ImpactFeedbackStyle={Light:'light',Medium:'medium'};export const NotificationFeedbackType={Warning:'warning'};`],
   ['react-native-reanimated', `import {View} from 'react-native';const chain={springify:()=>chain,damping:()=>chain,stiffness:()=>chain,duration:()=>chain};export const FadeInRight=chain,FadeOutRight=chain;export const useReducedMotion=()=>true;export default {View};`],
@@ -172,7 +171,8 @@ async function buildFixture() {
     bundle:true, write:false, platform:'browser', format:'iife', jsx:'automatic',
     tsconfigRaw:{compilerOptions:{jsx:'react-jsx',jsxImportSource:'react'}},
     nodePaths, resolveExtensions:['.web.tsx','.web.ts','.tsx','.ts','.jsx','.js','.json'],
-    define:{'process.env.NODE_ENV':'"test"','process.env.EXPO_PUBLIC_SNEAKY_LYNK_WEB_CAPTURE_PROTECTION':'"true"','__DEV__':'false'},
+    // The guard checks typeof process. Field-only defines leave it disabled in a browser.
+    define:{process:JSON.stringify({env:{NODE_ENV:'test',EXPO_PUBLIC_SNEAKY_LYNK_WEB_CAPTURE_PROTECTION:'true'}}),'__DEV__':'false'},
     plugins:[{name:'room-service-boundaries',setup(build){
       build.onResolve({filter:/.*/},args=>{
         if(args.path==='./VideoGrid'&&args.importer===source(lynk+'ui/RoomStage.tsx'))return {path:'native-media-tile',namespace:'fixture'};
@@ -272,7 +272,7 @@ async function evidence(page,name,error) {
     fs.writeFileSync(path.join(directory,name+'.txt'),String(error.stack||error));
     const geometry=await page.evaluate(()=>({
       viewport:{width:innerWidth,height:innerHeight,visualHeight:visualViewport?.height,offsetTop:visualViewport?.offsetTop},
-      nodes:[...document.querySelectorAll('[data-room-viewport],[data-room-viewport]>*,#anticapture-wrapper,[data-secure-capture-boundary],main,[data-room-content],[data-room-content]>header,footer,[data-stage-scroll],[data-stage-card],[role="dialog"],[data-native-room]>*,[data-testid="lynk-native-stage"],[data-testid="lynk-native-focus"],[data-testid="lynk-native-participants"]')].map(el=>{
+      nodes:[...document.querySelectorAll('[data-room-viewport],[data-room-viewport]>*,[data-secure-capture-boundary],main,[data-room-content],[data-room-content]>header,footer,[data-stage-scroll],[data-stage-card],[role="dialog"],[data-native-room]>*,[data-testid="lynk-native-stage"],[data-testid="lynk-native-focus"],[data-testid="lynk-native-participants"]')].map(el=>{
         const r=el.getBoundingClientRect(),s=getComputedStyle(el);
         return {tag:el.tagName,id:el.id,classes:el.getAttribute('class'),testId:el.getAttribute('data-testid'),card:el.getAttribute('data-stage-card'),
           x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom,scrollTop:el.scrollTop,scrollHeight:el.scrollHeight,
@@ -315,6 +315,15 @@ async function assertWebGeometry(page, c, visible={top:0,height:c.height},checkH
   assert.ok(viewport,c.name+': room owns a viewport wrapper');
   assert.ok(Math.abs(viewport.y-visible.top)<=1&&Math.abs(viewport.height-visible.height)<=1,
     c.name+': room must follow the visible viewport, including keyboard offsets');
+}
+
+async function assertActiveCaptureGuard(page) {
+  assert.equal(await page.locator('[data-secure-capture-boundary="sneaky-lynk"]').count(),1,'real capture guard must be enabled');
+  assert.equal(await page.locator('#anticapture-wrapper,[class*="alert-anticapture"]').count(),0,'no Enter-only third-party gate');
+  assert.equal(await page.locator('[data-secure-capture-blackout]').count(),0,'focused first entry is usable without keyboard unlock');
+  assert.equal(await page.locator('[data-secure-capture-content]').evaluate(el=>{
+    const event=new Event('copy',{bubbles:true,cancelable:true});el.dispatchEvent(event);return event.defaultPrevented;
+  }),true,'actual scoped capture listener must be active, not mocked');
 }
 
 async function setInsets(page, insets) {
@@ -394,22 +403,18 @@ async function webCases(browser,url) {
   for(const c of cases)for(const role of ['host','participant']) {
     const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,role);
     try {
-      const privacyNotice=page.locator('[data-room-viewport] > [class*="alert-anticapture"]');
-      assert.match(await privacyNotice.textContent(),/Press enter to continue/,'the real privacy notice is part of initial layout');
-      await assertWebGeometry(page,c);
-      if(c.insets?.top) {
-        const [noticeRect]=await dimensions(privacyNotice);
-        const [backRect]=await dimensions(page.locator('[data-room-header]').getByRole('button',{name:'Leave Lynk',exact:true}));
-        assert.ok(Math.abs(backRect.y-noticeRect.bottom-8)<=1,c.name+': the visible notice consumes top safe area once, without a second header inset');
-      }
-      const mountedBeforeNoticeDismiss=await page.evaluate(()=>window.fixture.attachments.length);
-      await page.keyboard.press('Enter');await privacyNotice.waitFor({state:'hidden'});await tick(page);
+      await assertActiveCaptureGuard(page);
+      const mediaBeforeFirstTap=await page.evaluate(()=>window.fixture.attachments.length);
+      await page.getByRole('button',{name:'Chat',exact:true}).click();
+      const firstChat=page.getByRole('dialog',{name:'Chat',exact:true});
+      await firstChat.waitFor();
+      await firstChat.getByRole('button',{name:'Close',exact:true}).click();
+      assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mediaBeforeFirstTap,'first-tap chat never remounts media');
       await assertWebGeometry(page,c);
       if(c.insets?.top) {
         const [backRect]=await dimensions(page.locator('[data-room-header]').getByRole('button',{name:'Leave Lynk',exact:true}));
-        assert.ok(Math.abs(backRect.y-c.insets.top-8)<=1,c.name+': dismissed notice restores the header top safe area');
+        assert.ok(Math.abs(backRect.y-c.insets.top-8)<=1,c.name+': room header owns its top safe area');
       }
-      assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mountedBeforeNoticeDismiss,'privacy notice dismissal must not remount media');
       // Exercise the production stage's distinct solo/duo layouts before
       // switching to the crowd view. No copied HTML is used for any mode.
       for(const publishers of [1,2]) {
@@ -542,7 +547,7 @@ async function moderationCases(browser,url) {
   for(const c of cases)for(const role of (process.env.LYNK_MODERATION_ROLES || 'host,co-host,participant,moderator').split(',')) {
     const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,role);
     try {
-      await page.keyboard.press('Enter');
+      await assertActiveCaptureGuard(page);
       await page.evaluate(role=>{
         const f=window.fixture;
         f.configure({publishers:12,listeners:0});
@@ -831,32 +836,40 @@ async function keyboardCase(browser,url) {
     await page.reload();
     await page.locator('main[data-room-phase="connected"]').waitFor();
     await tick(page);
-    const privacyNotice=page.locator('[data-room-viewport] > [class*="alert-anticapture"]');
-    const initialNoticeHeight=(await privacyNotice.boundingBox()).height;
+    await assertActiveCaptureGuard(page);
     const mediaMounts=await page.evaluate(()=>window.fixture.attachments.length);
     await assertWebGeometry(page,c);
-    await page.keyboard.press('Enter');await privacyNotice.waitFor({state:'hidden'});
-    // Drive the installed privacy library's own warning state. Its wrapped
-    // message must take space away from content without pushing the dock out.
-    await page.keyboard.down('F12');await tick(page);await page.keyboard.up('F12');
-    await privacyNotice.waitFor({state:'visible'});
-    assert.match(await privacyNotice.textContent(),/prohibited from being copied or captured/);
-    // Exercise user-enlarged text independently of the notice's normal font.
-    // Preserve the real message, DOM and events; only increase its font size.
-    await privacyNotice.evaluate(el=>el.style.setProperty('font-size','20px','important'));await tick(page);
-    assert.ok((await privacyNotice.boundingBox()).height>initialNoticeHeight,'capture warning must exercise a multiline notice');
-    const noticeLines=await privacyNotice.evaluate(el=>{const range=document.createRange();range.selectNodeContents(el.querySelector('p'));return range.getClientRects().length});
-    assert.ok(noticeLines>=2,'enlarged privacy warning must actually wrap across multiple lines');
     await page.evaluate(()=>window.setFixtureViewport({height:310,offsetTop:70}));await tick(page);
     await assertWebGeometry(page,c,{top:70,height:310});
-    assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mediaMounts,'multiline notice and keyboard resize preserve media mounts');
     await page.getByRole('button',{name:'Chat',exact:true}).click();
     const chat=page.getByRole('dialog',{name:'Chat',exact:true});
     await page.evaluate(()=>window.setFixtureViewport({height:310,offsetTop:70}));await tick(page);
     const targets=page.getByRole('dialog',{name:'Chat',exact:true}).locator('button[aria-label="Close"],button[aria-label="Send message"],input');
     assertContained(await dimensions(targets),{left:0,right:390,top:70,bottom:380},'keyboard chat');
     await assertReachable(targets,'keyboard chat');
-    await chat.getByRole('textbox',{name:'Message',exact:true}).fill('Keyboard remains usable');
+    const input=chat.getByRole('textbox',{name:'Message',exact:true});
+    await input.fill('Keyboard remains usable');
+    await page.keyboard.press('Control+p');
+    const recovery=page.getByRole('dialog',{name:'Sneaky Lynk is protected.',exact:true});
+    await recovery.waitFor();
+    await page.evaluate(()=>window.setFixtureViewport({height:240,offsetTop:70}));await tick(page);
+    const returnButton=recovery.getByRole('button',{name:'Return to room',exact:true});
+    assert.equal(await returnButton.evaluate(el=>!!el.closest('[inert]')),false,'recovery escapes the open chat inert subtree');
+    await page.keyboard.press('Tab');
+    assert.equal(await returnButton.evaluate(el=>el===document.activeElement),true,'Tab stays on recovery above the chat focus trap');
+    const recoveryScroll=recovery.locator('[data-secure-capture-blackout-scroll]');
+    assert.equal(await recoveryScroll.evaluate(el=>el.scrollHeight>el.clientHeight),true,'short keyboard viewport has a real recovery scroll surface');
+    await returnButton.scrollIntoViewIfNeeded();
+    assertContained(await dimensions(returnButton),{left:0,right:390,top:70,bottom:310},'short keyboard Return');
+    await assertReachable(returnButton,'short keyboard Return');
+    await returnButton.click();
+    await recovery.waitFor({state:'detached'});
+    assert.equal(await input.evaluate(el=>el===document.activeElement),true,'Return restores the chat input');
+    assert.equal(await input.inputValue(),'Keyboard remains usable','recovery retains the draft');
+    await page.evaluate(()=>window.setFixtureViewport({height:310,offsetTop:70}));await tick(page);
+    const log=chat.getByRole('log',{name:'Room messages'});
+    await log.evaluate(el=>{el.scrollTop=0});await log.focus();await page.keyboard.press('PageDown');await tick(page);
+    assert.ok(await log.evaluate(el=>el.scrollTop)>0,'focused message history supports PageDown');
     await chat.getByRole('button',{name:'Send message',exact:true}).click();
     await page.waitForFunction(()=>window.fixture.sent.length===1);
     await chat.getByRole('button',{name:'Close',exact:true}).click();
@@ -865,7 +878,7 @@ async function keyboardCase(browser,url) {
     await assertWebGeometry(page,c,{top:110,height:310});
     await page.evaluate(()=>window.setFixtureViewport({height:844,offsetTop:0}));await tick(page);
     await assertWebGeometry(page,c);
-    assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mediaMounts,'notice, chat and keyboard resize/scroll never detach media');
+    assert.equal(await page.evaluate(()=>window.fixture.attachments.length),mediaMounts,'recovery, chat and keyboard resize/scroll never detach media');
     assert.deepEqual(errors,[]);
     await evidence(page,'web-keyboard-restored');
     console.log('PASS keyboard visualViewport resize, scroll offset, send, close and restore');
@@ -1074,7 +1087,7 @@ async function recoveryCases(browser,url) {
       await page.locator('main[data-room-phase="connected"]').waitFor();
       assert.equal(await page.evaluate(()=>window.fixture.joinCalls),2,'manual retry performs one new checked admission');
       assert.equal(await page.evaluate(()=>window.fixture.previewRequests),0);
-      await page.keyboard.press('Enter');await tick(page);
+      await assertActiveCaptureGuard(page);await tick(page);
       const canvas=await page.locator('canvas').first().elementHandle();
       const mounted=await page.evaluate(()=>window.fixture.attachments.length);
       await page.evaluate(()=>window.fixture.configure({transport:'error'}));await tick(page);
@@ -1252,7 +1265,7 @@ async function roomShareCases(browser,url) {
   for(const cancel of ['leave','dismiss','private-copy']) {
     const {page,context,errors,unexpectedRequests}=await createPage(browser,url,c,'participant');
     try {
-      await page.keyboard.press('Enter');
+      await assertActiveCaptureGuard(page);
       await page.locator('main[data-room-phase="connected"]').waitFor();
       await page.evaluate(cancel=>{
         const f=window.fixture;f.shareCalls=[];f.copies=[];

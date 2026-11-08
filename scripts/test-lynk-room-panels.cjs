@@ -98,6 +98,54 @@ const resolve = name => require.resolve(name, { paths });
     await chatRender({ error: null });
     assert.match(node.textContent, /visible to everyone in this Lynk/);
     assert.match(node.textContent, /Break the ice/);
+    assert.doesNotMatch(node.textContent, /Enter to send/, 'chat does not present Enter as an entry gate');
+    assert.equal(button('Send message').textContent.trim(), 'Send', 'Send is visibly labeled');
+    assert.equal(node.querySelector('[role="log"]').tabIndex, 0, 'history is keyboard focusable');
+    assert.match(node.querySelector('[role="log"]').className, /focus-visible:outline/);
+    const historyKey = new window.KeyboardEvent('keydown', { key: 'PageDown', bubbles: true, cancelable: true });
+    await fixture.act(async () => node.querySelector('[role="log"]').dispatchEvent(historyKey));
+    assert.equal(historyKey.defaultPrevented, false, 'PageDown is left to native history scrolling');
+    const imeSent = [];
+    await chatRender({ onSend: async body => { imeSent.push(body); return true; } });
+    await change(node.querySelector('input'), 'Pointer first');
+    await click(button('Send message'));
+    assert.deepEqual(imeSent, ['Pointer first'], 'first pointer send works without pressing Enter');
+    const enter = async options => {
+      const event = new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...options });
+      if (options?.keyCode) Object.defineProperty(event, 'keyCode', { value: options.keyCode });
+      await fixture.act(async () => node.querySelector('input').dispatchEvent(event));
+      // DOM adapter: emulate the browser's implicit submit only for an
+      // uncancelled key. Real keyboard submission is covered by browser CI.
+      if (!event.defaultPrevented) await submit();
+      return event;
+    };
+    const composition = type => fixture.act(async () => node.querySelector('input').dispatchEvent(new window.CompositionEvent(type, { bubbles: true })));
+    await change(node.querySelector('input'), '普通のメッセージ');
+    await composition('compositionstart');
+    assert.equal((await enter()).defaultPrevented, true, 'tracked composition suppresses committing Enter');
+    await submit();
+    assert.equal(imeSent.length, 1, 'form submit also respects an active composition');
+    await composition('compositionend');
+    assert.equal((await enter({ isComposing: true })).defaultPrevented, true, 'native composition flag is respected');
+    assert.equal((await enter({ keyCode: 229 })).defaultPrevented, true, 'Safari 229 commit cannot submit');
+    assert.equal(imeSent.length, 1);
+    assert.equal((await enter()).defaultPrevented, false, 'ordinary Enter remains optional');
+    assert.deepEqual(imeSent, ['Pointer first', '普通のメッセージ']);
+    for (const scope of ['close', 'room', 'account']) {
+      await change(node.querySelector('input'), 'Unfinished composition');
+      await composition('compositionstart');
+      if (scope === 'close') {
+        await chatRender({ open: false }); await chatRender({ open: true });
+        assert.equal(node.querySelector('input').value, 'Unfinished composition', 'closing retains the draft');
+      } else {
+        await chatRender(scope === 'room' ? { roomId: 'ime-room' } : { currentUserId: 'ime-account' });
+        assert.equal(node.querySelector('input').value, '', scope + ' change resets private drafts');
+      }
+      await change(node.querySelector('input'), 'After ' + scope);
+      assert.equal((await enter()).defaultPrevented, false, scope + ' clears stale composition state');
+      assert.equal(imeSent.at(-1), 'After ' + scope);
+    }
+    await chatRender({ roomId: 'one', currentUserId: 'me' });
     let attempts = 0;
     await chatRender({ onSend: async () => { attempts++; throw new Error('Network failed'); } });
     await change(node.querySelector('input'), 'Keep this draft');

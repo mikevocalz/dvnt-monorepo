@@ -512,7 +512,8 @@ function SneakyLynkContent({
 
   const { rooms: allRooms, isLoading, isFetching, isError, refetch } = useLynkDiscovery(isActive);
   const handleRefresh = useCallback(() => { void refetch(); }, [refetch]);
-  const liveRooms = allRooms.filter((room) => !discoveryRoomState(room).ended);
+  const liveRooms = allRooms.filter((room) => discoveryRoomState(room).live);
+  const waitingRooms = allRooms.filter((room) => { const state = discoveryRoomState(room); return !state.live && !state.ended; });
   const endedRooms = allRooms.filter((room) => discoveryRoomState(room).ended);
 
   const handleCreateLynk = useCallback(() => {
@@ -523,15 +524,15 @@ function SneakyLynkContent({
 
   const handleRoomPress = useCallback(
     (room: LynkRecord) => {
-      if (discoveryRoomState(room).ended) {
+      if (!discoveryRoomState(room).actionable) {
         showToast(
           "info",
-          "Lynk Ended",
-          "This Lynk has ended and can't be rejoined",
+          "Room unavailable",
+          "Refresh Lynks to check the current room status.",
         );
         return;
       }
-      // The server checks current capacity; a stale list must not block re-entry.
+      // Fresh discovery permits entry; the server remains authoritative for capacity.
       router.push({
         pathname: "/(protected)/sneaky-lynk/room/[id]",
         params: {
@@ -560,7 +561,8 @@ function SneakyLynkContent({
           <Pressable accessibilityRole="button" disabled={isFetching} onPress={handleRefresh} style={{ minHeight: 44, justifyContent: "center" }}><Text style={{ color: "#fff", fontSize: 14, fontWeight: "600", textDecorationLine: "underline" }}>{isFetching ? "Trying again…" : "Try again"}</Text></Pressable>
         </View>}
         {isLoading && !allRooms.length ? <View style={lynkStyles.emptyState} accessibilityLiveRegion="polite"><ActivityIndicator color="#FC253A" /><Text style={lynkStyles.emptyText}>Finding Lynks…</Text></View> : allRooms.length ? <>
-          {liveRooms.length > 0 ? <><Text style={lynkStyles.sectionTitle}>OPEN ROOMS · {liveRooms.length}</Text>{liveRooms.map((room) => <LiveRoomCard key={room.id} space={room} onPress={() => handleRoomPress(room)} />)}</> : !isError && <Text style={lynkStyles.emptyText}>No live conversations right now. Start a Lynk and invite your people.</Text>}
+          {liveRooms.length > 0 ? <><Text style={lynkStyles.sectionTitle}>LIVE NOW · {liveRooms.length}</Text>{liveRooms.map((room) => <LiveRoomCard key={room.id} space={room} onPress={() => handleRoomPress(room)} />)}</> : !isError && <Text style={lynkStyles.emptyText}>No live conversations right now. Start a Lynk and invite your people.</Text>}
+          {waitingRooms.length > 0 && <><Text style={lynkStyles.sectionTitle}>YOUR ROOMS &amp; INVITATIONS</Text>{waitingRooms.map((room) => <LiveRoomCard key={room.id} space={room} onPress={() => handleRoomPress(room)} />)}</>}
           {endedRooms.length > 0 && <><Text style={lynkStyles.sectionTitle}>RECENTLY ENDED</Text>{endedRooms.map((room) => <LiveRoomCard key={room.id} space={room} onPress={() => handleRoomPress(room)} />)}</>}
         </> : !isError ? <View style={lynkStyles.emptyState}>
           <View style={lynkStyles.emptyIcon}><Radio size={28} color="#FC253A" /></View>

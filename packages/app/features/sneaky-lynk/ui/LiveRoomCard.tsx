@@ -6,7 +6,7 @@ import { Avatar } from "@dvnt/app/components/ui/avatar";
 import type { SneakyUser } from "../types";
 
 interface LiveRoomCardProps {
-  space: {
+  space: Parameters<typeof discoveryRoomState>[0] & {
     id: string;
     title: string;
     topic: string;
@@ -25,13 +25,13 @@ interface LiveRoomCardProps {
 }
 
 export function LiveRoomCard({ space, onPress }: LiveRoomCardProps) {
-  const { ended, live, full, countKnown, label } = discoveryRoomState(space);
+  const { ended, live, countKnown, label, actionable, actionLabel } = discoveryRoomState(space);
   const hostName = space.host.displayName || space.host.username || "Host";
   return (
-    <TouchableOpacity onPress={onPress} disabled={ended} activeOpacity={0.85}
-      accessibilityRole="button" accessibilityState={{ disabled: ended }}
-      accessibilityLabel={`${space.title}. ${ended ? "Ended" : full ? "Full, check availability" : "Join room"}. ${space.isPublic === false ? "Private" : "Public"}. ${countKnown ? `${space.listeners} people` : "Availability checked on entry"}.`}
-      style={[styles.card, ended && styles.ended]}>
+    <TouchableOpacity onPress={() => { if (discoveryRoomState(space).actionable) onPress(); }} disabled={!actionable} activeOpacity={0.85}
+      accessibilityRole="button" accessibilityState={{ disabled: !actionable }}
+      accessibilityLabel={`${space.title}. ${actionLabel || label}. ${space.isPublic === false ? "Private" : "Public"}. ${countKnown ? `${space.listeners} people` : "Participant count unavailable"}.`}
+      style={[styles.card, !actionable && styles.ended]}>
       <View style={styles.header}>
         <View style={[styles.badge, live && styles.liveBadge]}>{live && <View style={styles.dot} />}<Text style={[styles.badgeText, live && styles.liveText]}>{label}</Text></View>
         <View style={styles.meta}>{space.isPublic === false ? <Lock size={12} color="#9CA3AF" /> : <Globe size={12} color="#9CA3AF" />}<Text style={styles.metaText}>{space.isPublic === false ? "Private" : "Public"}</Text></View>
@@ -40,8 +40,8 @@ export function LiveRoomCard({ space, onPress }: LiveRoomCardProps) {
       <View style={styles.content}><Text style={styles.title} numberOfLines={2}>{space.title}</Text>{!!space.topic && <Text style={styles.topic} numberOfLines={2}>{space.topic}</Text>}</View>
       <View style={styles.footer}>
         <Avatar uri={space.host.avatar} username={hostName} size={36} />
-        <View style={{ flex: 1, minWidth: 0 }}><Text style={styles.host} numberOfLines={1}>{hostName}</Text><View style={styles.meta}><Users size={12} color="#9CA3AF" /><Text style={styles.metaText}>{countKnown ? `${space.listeners.toLocaleString()}${!ended && space.maxParticipants ? ` / ${space.maxParticipants}` : ""} ${ended ? "joined" : "in room"}` : ended ? "Session ended" : "Availability checked on entry"}</Text></View></View>
-        {!ended && <View style={styles.meta}><Text style={styles.join}>{full || !live ? "Check room" : "Join"}</Text><ArrowUpRight size={15} color="#3FDCFF" /></View>}
+        <View style={{ flex: 1, minWidth: 0 }}><Text style={styles.host} numberOfLines={1}>{hostName}</Text><View style={styles.meta}><Users size={12} color="#9CA3AF" /><Text style={styles.metaText}>{countKnown ? `${space.listeners.toLocaleString()}${!ended && space.maxParticipants ? ` / ${space.maxParticipants}` : ""} ${ended ? "joined" : "in room"}` : ended ? "Session ended" : label}</Text></View></View>
+        {actionLabel && <View style={styles.meta}><Text style={styles.join}>{actionLabel}</Text><ArrowUpRight size={15} color="#3FDCFF" /></View>}
       </View>
     </TouchableOpacity>
   );

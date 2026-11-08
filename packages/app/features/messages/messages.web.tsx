@@ -118,14 +118,17 @@ function SneakyLynkTab() {
   const { rooms, isLoading, isFetching, isError, refetch } = useLynkDiscovery();
   const showToast = useUIStore((s) => s.showToast);
 
+  const search = useMessagesTabStore((s) => s.search);
+  const query = search.trim().toLowerCase();
+  const visibleRooms = rooms.filter((room) => !query || [room.title, room.topic, room.host?.displayName, room.host?.username].some((value) => value?.toLowerCase().includes(query)));
   const createLynk = () => router.push("/feed/sneaky-lynk/create");
 
   const openRoom = (r: LynkRecord) => {
-    if (discoveryRoomState(r).ended) {
+    if (!discoveryRoomState(r).actionable) {
       showToast(
         "info",
-        "Lynk Ended",
-        "This Lynk has ended and can't be rejoined",
+        "Room unavailable",
+        "Refresh Lynks to check the current room status.",
       );
       return;
     }
@@ -136,14 +139,15 @@ function SneakyLynkTab() {
     router.push(`/feed/sneaky-lynk/room/${r.id}?${query.toString()}`);
   };
 
-  const liveRooms = rooms.filter((room) => !discoveryRoomState(room).ended);
-  const endedRooms = rooms.filter((room) => discoveryRoomState(room).ended);
+  const liveRooms = visibleRooms.filter((room) => discoveryRoomState(room).live);
+  const waitingRooms = visibleRooms.filter((room) => { const state = discoveryRoomState(room); return !state.live && !state.ended; });
+  const endedRooms = visibleRooms.filter((room) => discoveryRoomState(room).ended);
   const focusClass = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#3FDCFF]";
   const roomCard = (room: LynkRecord) => {
-    const { ended, live, full, countKnown, label } = discoveryRoomState(room);
+    const { ended, live, countKnown, label, actionable, actionLabel } = discoveryRoomState(room);
     return (
-      <button key={room.id} type="button" onClick={() => openRoom(room)} disabled={ended}
-        aria-label={`${room.title}. ${ended ? "Ended" : full ? "Full, check availability" : "Join room"}. ${room.isPublic ? "Public" : "Private"}. ${countKnown ? `${room.listeners} people` : "Availability checked on entry"}.`}
+      <button key={room.id} type="button" onClick={() => openRoom(room)} disabled={!actionable}
+        aria-label={`${room.title}. ${actionLabel || label}. ${room.isPublic ? "Public" : "Private"}. ${countKnown ? `${room.listeners} people` : "Participant count unavailable"}.`}
         className={`group flex w-full min-w-0 flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-left transition-colors enabled:hover:border-white/25 enabled:hover:bg-white/[0.07] disabled:opacity-60 ${focusClass}`}>
         <span className="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
           <span className={`flex items-center gap-1.5 rounded-md px-2 py-1 ${live ? "bg-[#FC253A]/15 text-[#FF8793]" : "bg-white/8 text-white/60"}`}>
@@ -158,8 +162,8 @@ function SneakyLynkTab() {
         </span>
         <span className="mt-auto flex min-w-0 items-center gap-2.5 border-t border-white/8 pt-3">
           {room.host?.avatar ? <img src={room.host.avatar} alt="" loading="lazy" className="h-9 w-9 shrink-0 rounded-lg object-cover" /> : <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white/70">{(room.host?.displayName || room.host?.username || "?").charAt(0).toUpperCase()}</span>}
-          <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-white/85">{room.host?.displayName || room.host?.username || "Host"}</span><span className="block text-xs text-white/50">{countKnown ? `${room.listeners.toLocaleString()}${!ended && room.maxParticipants ? ` / ${room.maxParticipants}` : ""} ${ended ? "joined" : "in room"}` : ended ? "Session ended" : "Availability checked on entry"}</span></span>
-          {!ended && <span className="flex shrink-0 items-center gap-1 text-xs font-semibold text-[#3FDCFF]">{full || !live ? "Check room" : "Join"}<ArrowUpRight size={15} /></span>}
+          <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-white/85">{room.host?.displayName || room.host?.username || "Host"}</span><span className="block text-xs text-white/50">{countKnown ? `${room.listeners.toLocaleString()}${!ended && room.maxParticipants ? ` / ${room.maxParticipants}` : ""} ${ended ? "joined" : "in room"}` : ended ? "Session ended" : label}</span></span>
+          {actionLabel && <span className="flex shrink-0 items-center gap-1 text-xs font-semibold text-[#3FDCFF]">{actionLabel}<ArrowUpRight size={15} /></span>}
         </span>
       </button>
     );
@@ -176,9 +180,10 @@ function SneakyLynkTab() {
       {isError && <div role="alert" className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm leading-6 text-amber-100"><p>{rooms.length ? "Couldn’t refresh Lynks. Showing the last available rooms." : "Couldn’t load Lynks. Check your connection and try again."}</p><button type="button" onClick={() => void refetch()} disabled={isFetching} className={`mt-2 min-h-11 font-semibold underline underline-offset-4 disabled:opacity-50 ${focusClass}`}>{isFetching ? "Trying again…" : "Try again"}</button></div>}
       {isLoading && !rooms.length ? (
         <div role="status" aria-live="polite"><p className="mb-3 text-sm text-white/60">Finding Lynks…</p><div aria-hidden="true" className="grid gap-3 sm:grid-cols-2">{[0, 1, 2, 3].map((key) => <div key={key} className="h-44 rounded-2xl border border-white/8 bg-white/[0.04] p-4 motion-safe:animate-pulse"><div className="h-4 w-20 rounded bg-white/10" /><div className="mt-6 h-5 w-3/4 rounded bg-white/10" /><div className="mt-3 h-3 w-1/2 rounded bg-white/5" /></div>)}</div></div>
-      ) : rooms.length ? (
+      ) : query && !visibleRooms.length ? <p role="status" className="rounded-xl border border-white/10 p-4 text-sm text-white/60">No Lynks match your search.</p> : visibleRooms.length ? (
         <>
-          {liveRooms.length > 0 ? <section aria-label="Open rooms"><h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-white/55">Open rooms · {liveRooms.length}</h3><div className="grid items-stretch gap-3 sm:grid-cols-2">{liveRooms.map(roomCard)}</div></section> : !isError && <p className="rounded-xl border border-white/10 p-4 text-sm text-white/60">No live conversations right now. Start a Lynk and invite your people.</p>}
+          {liveRooms.length > 0 ? <section aria-label="Live now"><h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-white/55">Live now · {liveRooms.length}</h3><div className="grid items-stretch gap-3 sm:grid-cols-2">{liveRooms.map(roomCard)}</div></section> : !isError && <p className="rounded-xl border border-white/10 p-4 text-sm text-white/60">No live conversations right now. Start a Lynk and invite your people.</p>}
+          {waitingRooms.length > 0 && <section aria-label="Your rooms & invitations"><h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-white/55">Your rooms &amp; invitations</h3><div className="grid items-stretch gap-3 sm:grid-cols-2">{waitingRooms.map(roomCard)}</div></section>}
           {endedRooms.length > 0 && <section aria-label="Recently ended"><h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-white/45">Recently ended</h3><div className="grid items-stretch gap-3 sm:grid-cols-2">{endedRooms.map(roomCard)}</div></section>}
         </>
       ) : !isError ? (
@@ -767,7 +772,8 @@ export function MessagesScreen() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search messages"
+            placeholder={activeTab === "lynk" ? "Search Lynks" : "Search messages"}
+            aria-label={activeTab === "lynk" ? "Search Lynks" : "Search messages"}
             className="w-full bg-transparent text-sm text-white placeholder:text-white/40 focus:outline-none"
           />
         </div>

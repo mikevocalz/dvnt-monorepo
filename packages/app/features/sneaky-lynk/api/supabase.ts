@@ -245,128 +245,24 @@ export const sneakyLynkApi = {
     const checkOwner = () => {
       if (options?.isCurrent && !options.isCurrent()) throw new Error("Discovery account changed");
     };
+    // Start before authentication, not receipt: slow responses must not renew a lease.
+    const requestStartedAt = Date.now();
+    const requestStartedMonotonic = globalThis.performance?.now?.() ?? NaN;
     try {
       checkOwner();
       const response = await callEdgeFunction<{ rooms: SneakyRoom[] }>(
-        "video_list_rooms",
-        {},
-        options,
+        "video_list_rooms", { discoveryVersion: 2 }, options,
       );
-
       checkOwner();
-      if (response.ok && response.data?.rooms) {
-        return response.data.rooms;
+      if (!response.ok || !Array.isArray(response.data?.rooms)) throw new Error(response.error?.message || "Invalid discovery response");
+      const validTime = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value));
+      if (response.data.rooms.some((room) => !["live", "inactive", "scheduled", "ended", "unknown"].includes(room.availability ?? "") ||
+        typeof room.presenceKnown !== "boolean" || typeof room.isOwner !== "boolean" || typeof room.isInvited !== "boolean" ||
+        !validTime(room.observedAt) || (room.presenceExpiresAt !== null && !validTime(room.presenceExpiresAt)) ||
+        (room.endsAt !== null && !validTime(room.endsAt)))) {
+        throw new Error("Discovery server must support version 2");
       }
-
-      console.warn(
-        "[SneakyLynk] video_list_rooms unavailable, falling back to public rooms:",
-        response.error?.message,
-      );
-
-      const twentyFourHoursAgo = new Date(
-        Date.now() - 24 * 60 * 60 * 1000,
-      ).toISOString();
-      const nowMs = Date.now();
-
-      // No FK on created_by → fetch rooms first, then batch-lookup creators
-      const { data, error } = await supabase
-        .from("video_rooms")
-        .select("*")
-        .eq("is_public", true)
-        .or(
-          `status.eq.open,and(status.eq.ended,ended_at.gte.${twentyFourHoursAgo})`,
-        )
-        .order("status", { ascending: false }) // "open" (o) before "ended" (e)
-        .order("created_at", { ascending: false })
-        .limit(50);
-
-      if (error) {
-        throw error;
-      }
-
-      checkOwner();
-      // Batch-lookup creators by auth_id
-      const creatorIds = [
-        ...new Set((data || []).map((r: any) => r.created_by).filter(Boolean)),
-      ];
-      let creatorsMap: Record<string, any> = {};
-      if (creatorIds.length > 0) {
-        const { data: creators } = await supabase
-          .from("users")
-          .select(
-            "id, auth_id, username, first_name, avatar:avatar_id(url), verified",
-          )
-          .in("auth_id", creatorIds);
-        if (creators) {
-          for (const c of creators) {
-            creatorsMap[c.auth_id] = c;
-          }
-        }
-      }
-
-      checkOwner();
-      // Derive audience counts from room-membership rows so ended Lynks can
-      // still show who was actually there after participant_count is zeroed.
-      const roomIds = (data || []).map((r: any) => r.id).filter(Boolean);
-      let roomStats: Record<
-        number,
-        { activeCount: number; activeHostCount: number; historicalCount: number }
-      > = {};
-      if (roomIds.length > 0) {
-        const { data: members } = await supabase
-          .from("video_room_members")
-          .select(MEMBER_STAT_COLUMNS)
-          .in("room_id", roomIds);
-        if (members) {
-          roomStats = buildRoomParticipantStats(
-            members.map(toMemberStatRow),
-            nowMs,
-          );
-        }
-      }
-
-      checkOwner();
-      return (data || []).map((r: any) => {
-        const creator = creatorsMap[r.created_by] || null;
-        const audience = resolveRoomAudience(
-          {
-            id: r.id,
-            status: r.status as "open" | "ended",
-            participant_count: r.participant_count,
-            created_at: r.created_at,
-          },
-          roomStats[r.id],
-          nowMs,
-        );
-        return {
-          id: r.uuid || String(r.id),
-          createdBy: r.created_by || "",
-          title: r.title || "Untitled Lynk",
-          topic: r.topic || "",
-          description: r.description || "",
-          sweetSpicyMode: r.sweet_spicy_mode || "sweet",
-          isLive: audience.isLive,
-          // RLS may hide the host, and a failed stats read is not an ended room.
-          presenceKnown: (roomStats[r.id]?.activeHostCount ?? 0) > 0,
-          endsAt: r.ends_at ?? null,
-          hasVideo: r.has_video ?? false,
-          isPublic: r.is_public ?? true,
-          status: r.status as "open" | "ended",
-          createdAt: r.created_at,
-          endedAt: r.ended_at || undefined,
-          host: {
-            id: String(creator?.id || ""),
-            username: creator?.username || "unknown",
-            displayName: creator?.first_name || creator?.username || "unknown",
-            avatar: (creator?.avatar as any)?.url || "",
-            isVerified: creator?.verified || false,
-          },
-          speakers: [],
-          listeners: audience.listeners,
-          maxParticipants: r.max_participants || 50,
-          fishjamRoomId: r.fishjam_room_id || undefined,
-        };
-      });
+      return response.data.rooms.map((room) => ({ ...room, requestStartedAt, requestStartedMonotonic }));
     } catch (error) {
       console.error("[SneakyLynk] getLiveRooms error:", error);
       throw new Error("Lynks could not be loaded. Please try again.");

@@ -177,6 +177,8 @@ export interface SecureCaptureEnvironment {
   containsEvent(event: { target?: unknown }): boolean;
   /** `document.visibilityState === "hidden"`. */
   isHidden(): boolean;
+  /** Whether the document, rather than browser chrome or another app, has focus. */
+  hasDocumentFocus(): boolean;
   /** Keyboard focus or the live text selection sits inside the subtree. */
   isFocusInsideRoot(): boolean;
 }
@@ -194,6 +196,16 @@ export interface SecureCaptureGuardHandlers {
 export interface SecureCaptureGuardBindOptions {
   blackoutOnBlur: boolean;
   blackoutOnVisibilityHidden: boolean;
+}
+
+/** Recovery must never reveal a hidden tab or an unfocused protected room. */
+export function secureCaptureRecoveryReason(
+  env: Pick<SecureCaptureEnvironment, "isHidden" | "hasDocumentFocus">,
+  { blackoutOnBlur, blackoutOnVisibilityHidden }: SecureCaptureGuardBindOptions,
+): SecureCaptureBlackoutReason {
+  if (env.isHidden() && (blackoutOnVisibilityHidden || blackoutOnBlur)) return "hidden";
+  if (blackoutOnBlur && !env.hasDocumentFocus()) return "blur";
+  return null;
 }
 
 /**
@@ -244,29 +256,37 @@ export function bindSecureCaptureGuard(
     event.preventDefault();
   };
 
-  // Tier B. A hidden tab is not a recording — it is a tab switch. Blackout so
-  // nothing sensitive sits in a background-tab compositor snapshot, breadcrumb
-  // it for support, and stop there.
-  const onVisibilityChange = () => {
-    if (!env.isHidden() || !blackoutOnVisibilityHidden) return;
-    handlers.log("secure_capture_visibility_hidden");
-    handlers.setBlackout("hidden");
-  };
+  let printing = false;
+  const recover = () => handlers.setBlackout(
+    printing ? "print" : secureCaptureRecoveryReason(env, { blackoutOnBlur, blackoutOnVisibilityHidden }),
+  );
 
-  // Tier B, same reasoning as visibility: clicking the URL bar is not capture.
+  // Focus and tab changes protect locally. Returning never broadcasts capture.
+  const onVisibilityChange = () => {
+    if (env.isHidden()) {
+      if (blackoutOnVisibilityHidden || blackoutOnBlur) {
+        handlers.log("secure_capture_visibility_hidden");
+        handlers.setBlackout("hidden");
+      }
+    } else recover();
+  };
   const onBlur = () => {
     if (!blackoutOnBlur) return;
     handlers.log("secure_capture_blur");
-    handlers.setBlackout("blur");
+    handlers.setBlackout(env.isHidden() ? "hidden" : "blur");
   };
+  const onFocus = recover;
 
-  const onFocus = () => handlers.setBlackout(null);
-
-  // Tier A — print rasterises the room, and `beforeprint` fires for the
-  // menu path too, not just the chord.
+  // The menu print path needs afterprint recovery. A prevented Ctrl/Cmd+P
+  // does not open a dialog or produce a focus event: Return also recovers it.
   const onBeforePrint = (event: Event) => {
     event.preventDefault();
+    printing = true;
     broadcastAttempt("secure_capture_print_attempt", "print");
+  };
+  const onAfterPrint = () => {
+    printing = false;
+    recover();
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -311,6 +331,7 @@ export function bindSecureCaptureGuard(
   env.windowTarget.addEventListener("blur", onBlur);
   env.windowTarget.addEventListener("focus", onFocus);
   env.windowTarget.addEventListener("beforeprint", onBeforePrint);
+  env.windowTarget.addEventListener("afterprint", onAfterPrint);
   env.documentTarget.addEventListener("keydown", onKeyDown, true);
   env.documentTarget.addEventListener("keyup", onKeyUp, true);
 
@@ -328,6 +349,7 @@ export function bindSecureCaptureGuard(
     env.windowTarget.removeEventListener("blur", onBlur);
     env.windowTarget.removeEventListener("focus", onFocus);
     env.windowTarget.removeEventListener("beforeprint", onBeforePrint);
+    env.windowTarget.removeEventListener("afterprint", onAfterPrint);
     env.documentTarget.removeEventListener("keydown", onKeyDown, true);
     env.documentTarget.removeEventListener("keyup", onKeyUp, true);
   };
@@ -347,8 +369,21 @@ export function useSecureCaptureGuard({
   onLogEvent,
   onCaptureAttempt,
 }: SecureCaptureGuardOptions): SecureCaptureGuardState {
-  const [blackoutReason, setBlackoutReason] =
-    useState<SecureCaptureBlackoutReason>(null);
+  const [state, setState] = useState<{ enabled: boolean; reason: SecureCaptureBlackoutReason }>(
+    () => ({ enabled, reason: null }),
+  );
+  // Reset stale incidents on re-entry, including an enablement before effects
+  // run. Deriving ambient protection during render also prevents a visible
+  // first layout commit when the room mounts or becomes enabled in a hidden tab.
+  if (state.enabled !== enabled) setState({ enabled, reason: null });
+  const ambientReason = () => typeof document === "undefined" ? null : secureCaptureRecoveryReason(
+    { isHidden: () => document.visibilityState === "hidden", hasDocumentFocus: () => document.hasFocus() },
+    { blackoutOnBlur, blackoutOnVisibilityHidden },
+  );
+  const blackoutReason = enabled ? ambientReason() ?? (state.enabled === enabled ? state.reason : null) : null;
+  const setBlackoutReason = useCallback((reason: SecureCaptureBlackoutReason) => {
+    setState(previous => ({ ...previous, reason }));
+  }, []);
 
   const eventContext = useMemo<SecureCaptureEventContext>(
     () => ({ roomId, sessionId, userId, userHandle, mode }),
@@ -370,7 +405,13 @@ export function useSecureCaptureGuard({
     [onCaptureAttempt],
   );
 
-  const clearBlackout = useCallback(() => setBlackoutReason(null), []);
+  const clearBlackout = useCallback(() => {
+    if (!enabled || typeof document === "undefined") return;
+    setBlackoutReason(secureCaptureRecoveryReason(
+      { isHidden: () => document.visibilityState === "hidden", hasDocumentFocus: () => document.hasFocus() },
+      { blackoutOnBlur, blackoutOnVisibilityHidden },
+    ));
+  }, [enabled, blackoutOnBlur, blackoutOnVisibilityHidden, setBlackoutReason]);
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined" || typeof document === "undefined") {
@@ -385,6 +426,7 @@ export function useSecureCaptureGuard({
         containsEvent: (event) =>
           eventStartedInside(rootRef.current, event as Event),
         isHidden: () => document.visibilityState === "hidden",
+        hasDocumentFocus: () => document.hasFocus(),
         isFocusInsideRoot: () => {
           const root = rootRef.current;
           if (!root) return false;
@@ -403,6 +445,7 @@ export function useSecureCaptureGuard({
     log,
     notifyCaptureAttempt,
     rootRef,
+    setBlackoutReason,
   ]);
 
   return { blackoutReason, clearBlackout };

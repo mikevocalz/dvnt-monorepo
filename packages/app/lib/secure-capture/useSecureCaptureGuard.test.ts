@@ -15,6 +15,7 @@ import {
   isPrintShortcut,
   isSecureCaptureShortcut,
   secureCaptureKeyTier,
+  secureCaptureRecoveryReason,
   shouldEnableWebSecureCapture,
   type SecureCaptureAttemptKind,
   type SecureCaptureBlackoutReason,
@@ -72,6 +73,7 @@ interface Harness {
   doc: StubTarget;
   win: StubTarget;
   hidden: boolean;
+  focused: boolean;
   attempts: Array<{ kind: SecureCaptureAttemptKind; eventName: SecureCaptureEventName }>;
   logs: SecureCaptureEventName[];
   blackouts: SecureCaptureBlackoutReason[];
@@ -89,6 +91,7 @@ function harness(
     doc,
     win,
     hidden: false,
+    focused: true,
     attempts: [],
     logs: [],
     blackouts: [],
@@ -102,6 +105,7 @@ function harness(
       windowTarget: win,
       containsEvent: overrides.containsEvent ?? (() => true),
       isHidden: () => state.hidden,
+      hasDocumentFocus: () => state.focused,
       isFocusInsideRoot: overrides.isFocusInsideRoot ?? (() => true),
     },
     {
@@ -235,7 +239,7 @@ test("a visibilitychange to visible does not blackout", () => {
   h.doc.dispatch("visibilitychange");
 
   assert.deepEqual(h.logs, []);
-  assert.deepEqual(h.blackouts, []);
+  assert.deepEqual(h.blackouts, [null]);
 });
 
 // (c)
@@ -314,7 +318,62 @@ test("detach removes every listener it registered", () => {
   for (const type of ["visibilitychange", "keydown", "keyup"]) {
     assert.equal(h.doc.count(type), 0, `document ${type} still bound`);
   }
-  for (const type of ["blur", "focus", "beforeprint"]) {
+  for (const type of ["blur", "focus", "beforeprint", "afterprint"]) {
     assert.equal(h.win.count(type), 0, `window ${type} still bound`);
+  }
+});
+
+
+test("focus before visibility never reveals a hidden room", () => {
+  const h = harness();
+  h.hidden = true;
+  h.win.dispatch("focus");
+  assert.equal(h.blackouts.at(-1), "hidden");
+  h.hidden = false;
+  h.doc.dispatch("visibilitychange");
+  assert.equal(h.blackouts.at(-1), null, "visible return needs no second focus event");
+  assert.deepEqual(h.attempts, []);
+});
+
+test("visibility and afterprint wait for actual document focus", () => {
+  const h = harness();
+  h.focused = false;
+  h.doc.dispatch("visibilitychange");
+  h.win.dispatch("focus");
+  assert.deepEqual(h.blackouts, ["blur", "blur"]);
+  h.win.dispatch("beforeprint");
+  h.win.dispatch("afterprint");
+  assert.equal(h.blackouts.at(-1), "blur");
+  h.focused = true;
+  h.win.dispatch("focus");
+  assert.equal(h.blackouts.at(-1), null);
+  assert.equal(h.attempts.length, 1, "recovery adds no capture allegation");
+});
+
+test("actual print blackout lasts until afterprint and recovers safely", () => {
+  const h = harness();
+  h.win.dispatch("beforeprint");
+  h.win.dispatch("focus");
+  assert.equal(h.blackouts.at(-1), "print");
+  h.hidden = true;
+  h.win.dispatch("afterprint");
+  assert.equal(h.blackouts.at(-1), "hidden");
+  h.hidden = false;
+  h.doc.dispatch("visibilitychange");
+  assert.equal(h.blackouts.at(-1), null);
+  assert.equal(h.attempts.length, 1);
+});
+
+test("recovery checks respect guard options without weakening blur protection", () => {
+  const env = { isHidden: () => true, hasDocumentFocus: () => true };
+  assert.equal(secureCaptureRecoveryReason(env, { blackoutOnBlur: true, blackoutOnVisibilityHidden: false }), "hidden");
+  assert.equal(secureCaptureRecoveryReason(env, { blackoutOnBlur: false, blackoutOnVisibilityHidden: true }), "hidden");
+  assert.equal(secureCaptureRecoveryReason(env, { blackoutOnBlur: false, blackoutOnVisibilityHidden: false }), null);
+});
+
+test("scroll, wheel and touch movement have no cancellation listeners", () => {
+  const h = harness();
+  for (const target of [h.root, h.doc, h.win]) {
+    for (const type of ["scroll", "wheel", "touchmove"]) assert.equal(target.count(type), 0);
   }
 });

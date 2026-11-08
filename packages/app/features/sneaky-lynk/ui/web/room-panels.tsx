@@ -180,7 +180,7 @@ export function SidePanel({
     let branch = rootRef.current as HTMLElement | null;
     while (branch?.parentElement) {
       for (const sibling of Array.from(branch.parentElement.children)) {
-        if (sibling !== branch && sibling instanceof HTMLElement && !sibling.hasAttribute("data-room-side-panel-root")) {
+        if (sibling !== branch && sibling instanceof HTMLElement && !sibling.hasAttribute("data-room-side-panel-root") && !sibling.hasAttribute("data-secure-capture-overlay-root")) {
           const state = isolatedBranches.get(sibling);
           if (state) state.count += 1;
           else isolatedBranches.set(sibling, { count: 1, wasInert: sibling.inert });
@@ -197,6 +197,9 @@ export function SidePanel({
     (focusable()[0] ?? panel)?.focus({ preventScroll: true });
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || panelStack.at(-1)?.panel !== panel) return;
+      // Capture recovery is above this panel, including events from the page
+      // rather than a focused element. Do not steal Tab or Escape from it.
+      if (document.querySelector('[data-secure-capture-overlay-root] [role="dialog"]')) return;
       // A later confirmation dialog may be rendered in a portal above this one.
       const targetDialog = (event.target as HTMLElement | null)?.closest?.('[role="dialog"], [role="alertdialog"]');
       if (targetDialog && targetDialog !== panel) return;
@@ -315,6 +318,7 @@ export function ChatPanel({
   const [draftLength, setDraftLength] = useState(0);
   const draftRef = useRef("");
   const sendingRef = useRef(false);
+  const composingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinnedToLatest = useRef(true);
@@ -331,12 +335,15 @@ export function ChatPanel({
     scopeRef.current = draftScope;
     scopeVersion.current += 1;
     draftRef.current = "";
+    composingRef.current = false;
     if (inputRef.current) inputRef.current.value = "";
     sendingRef.current = false;
     setSending(false);
     setSendError(null);
     setDraftLength(0);
   }, [draftScope]);
+
+  useEffect(() => { if (!open) composingRef.current = false; }, [open]);
 
   const jumpToLatest = useCallback(() => {
     pinnedToLatest.current = true;
@@ -364,7 +371,7 @@ export function ChatPanel({
       event.preventDefault();
       const input = inputRef.current;
       const body = input?.value.trim();
-      if (!input || !body || disabled || sendingRef.current) return;
+      if (!input || !body || disabled || sendingRef.current || composingRef.current) return;
       draftRef.current = input.value;
       const submissionScope = scopeVersion.current;
       sendingRef.current = true;
@@ -407,6 +414,7 @@ export function ChatPanel({
         ref={scrollRef}
         data-room-chat-messages
         role="log"
+        tabIndex={0}
         aria-label="Room messages"
         aria-live="polite"
         aria-relevant="additions"
@@ -416,7 +424,7 @@ export function ChatPanel({
           pinnedToLatest.current = list.scrollHeight - list.clientHeight - list.scrollTop < 40;
           if (pinnedToLatest.current) setHasNewMessages(false);
         }}
-        className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-4 py-3"
+        className={`min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-4 py-3 ${FOCUS_RING}`}
       >
         {comments.length === 0 ? (
           <PanelEmptyState
@@ -490,6 +498,15 @@ export function ChatPanel({
               setDraftLength(event.currentTarget.value.length);
               setSendError(null);
             }}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={() => { composingRef.current = false; }}
+            onKeyDown={(event) => {
+              // Some IMEs finish composition before dispatching the committing
+              // Enter. Safari's legacy 229 code still identifies that key.
+              if (event.key === "Enter" && (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229)) {
+                event.preventDefault();
+              }
+            }}
             type="text"
             placeholder={disabled ? "Chat is not ready…" : "Say something…"}
             aria-label="Message"
@@ -503,13 +520,14 @@ export function ChatPanel({
             type="submit"
             aria-label="Send message"
             disabled={disabled || sending}
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#3FDCFF] text-black transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none ${FOCUS_RING}`}
+            className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold bg-[#3FDCFF] text-black transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none ${FOCUS_RING}`}
           >
             {sending ? <LoaderCircle size={18} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Send size={18} aria-hidden="true" />}
+            <span>Send</span>
           </button>
         </div>
         <div className="mt-2 flex min-h-4 items-center justify-between gap-2 text-[11px] text-white/50">
-          <p id={composerHintId} role="status">{disabled ? "Chat is not ready. Your draft stays here." : sending ? "Sending message…" : "Enter to send"}</p>
+          <p id={composerHintId} role="status">{disabled ? "Chat is not ready. Your draft stays here." : sending ? "Sending message…" : "Send a message to the room."}</p>
           {draftLength >= 400 ? <span className="shrink-0 font-mono" aria-label={`${500 - draftLength} characters remaining`}>{draftLength}/500</span> : null}
         </div>
       </form>
