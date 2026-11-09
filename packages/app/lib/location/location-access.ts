@@ -4,6 +4,7 @@ export interface LocationAccessSnapshot {
   eventsMapEnabled: boolean;
   revision: number;
   shareUntil: string | null;
+  consentVersion?: string | null;
 }
 export function mapGrantActive(settings: LocationAccessSnapshot | null, now: number): boolean {
   return !!settings && settings.locationEnabled === true && settings.eventsMapEnabled === true &&

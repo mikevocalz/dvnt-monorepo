@@ -9,6 +9,13 @@ on:
       - 'packages/app/lib/events/event-save-session*'
       - 'packages/app/features/events/event-edit.web.tsx'
       - 'packages/supabase/**'
+      - 'apps/web/next.config.ts'
+      - 'apps/web/public/sw.js'
+      - 'apps/web/src/lib/public-web-backend.ts'
+      - 'apps/web/src/app/api/pwa/backend/**'
+      - 'apps/web/src/app/api/observability/probes/**'
+      - 'scripts/test-web-backend.cjs'
+      - 'scripts/test-web-worker-backend.cjs'
       - 'apps/mobile/lib/auth/supabase-jwt.ts'
       - 'scripts/test-account-bridge-browser.cjs'
       - '.github/workflows/account-bridge-regressions.yml'
@@ -30,6 +37,8 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/dvnt-bridge" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.25.11 playwright@1.58.2 @supabase/supabase-js@2.112.2
           node "$RUNNER_TEMP/dvnt-bridge/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Web backend and auth routing configuration
+        run: NODE_PATH="$RUNNER_TEMP/dvnt-bridge/node_modules" node --test scripts/test-web-backend.cjs scripts/test-web-worker-backend.cjs
       - name: Actual event API identity boundaries
         run: NODE_PATH="$RUNNER_TEMP/dvnt-bridge/node_modules" node --test packages/app/lib/events/event-type-persistence.test.ts packages/app/lib/hooks/event-update-account-cache.test.ts
       - name: Actual browser and Supabase requests across account changes

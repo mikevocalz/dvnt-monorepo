@@ -1,3 +1,4 @@
+import { projectVisiblePosts } from "../_shared/post-access.ts";
 /**
  * Edge Function: get-post-comments
  * Fetch deterministic 2-level comment threads for a post.
@@ -19,7 +20,7 @@ const corsHeaders = {
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, no-store" },
   });
 }
 
@@ -117,6 +118,12 @@ Deno.serve(async (req) => {
       );
       viewerId = userData?.id ?? null;
     }
+
+    const parent = await supabaseAdmin.from("posts").select("id, author_id, visibility, is_nsfw").eq("id", postId).maybeSingle();
+    const visible = parent.error || !parent.data ? [] : await projectVisiblePosts(
+      supabaseAdmin, [parent.data], { authId: viewerAuthId, userId: viewerId },
+    );
+    if (visible.length === 0) return json({ error: "Post unavailable" }, 403);
 
     const selectColumns =
       "id, post_id, content, attachment, likes_count, created_at, parent_id, root_id, depth, author:author_id(id, username, first_name, avatar:avatar_id(url))";

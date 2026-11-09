@@ -27,7 +27,7 @@ export const useLightboxStore = create<LightboxState>((set) => ({
   items: [],
   index: 0,
   openAt: (items, index) => set({ open: true, items, index }),
-  close: () => set({ open: false }),
+  close: () => set({ open: false, items: [], index: 0 }),
   next: () =>
     set((s) => ({ index: Math.min(s.index + 1, s.items.length - 1) })),
   prev: () => set((s) => ({ index: Math.max(s.index - 1, 0) })),

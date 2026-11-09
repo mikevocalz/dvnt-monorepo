@@ -1,3 +1,4 @@
+import { projectVisiblePosts } from "../_shared/post-access.ts";
 import { selectVenueForecast } from "../_shared/venue-forecast.ts";
 /**
  * Edge Function: live-surface
@@ -204,7 +205,7 @@ async function buildTile2(
     .from("posts")
     .select(
       `
-      id, content, likes_count,
+      id, author_id, visibility, is_nsfw, content, likes_count,
       media:posts_media(type, url, _order)
     `,
     )
@@ -221,7 +222,8 @@ async function buildTile2(
       ? [...arr].sort((a: any, b: any) => (a._order ?? 0) - (b._order ?? 0))
       : [];
 
-  for (const post of posts || []) {
+  const visiblePosts = await projectVisiblePosts(supabase, posts || [], { authId: null, userId: null });
+  for (const post of visiblePosts) {
     const mediaArr = mediaSorted(post.media);
     const firstImage = mediaArr.find((m: any) => m.type === "image");
     if (!firstImage?.url) continue; // Skip video-only posts and posts with no image

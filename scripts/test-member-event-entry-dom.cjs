@@ -16,7 +16,7 @@ const requireModule=name=>{
  if(name.includes('guest-checkout-store'))return {useGuestCheckoutStore:select=>select({open:false,eventId:null})};
  if(name.includes('member-event-route'))return load('packages/app/lib/auth/member-event-route.ts');
  if(name.includes('supabase-jwt'))return {ensureSupabaseJwt:async()=>{}};
- if(name.includes('web-chrome'))return {routeIsImmersive:()=>false};
+ if(name.includes('web-chrome'))return load('packages/app/lib/web-chrome.ts');
  if(name.includes('chrome-error-boundary'))return {ChromeErrorBoundary:({children})=>children};
  if(name.includes('app-shell'))return {AppShell:({children})=>React.createElement('div',{'data-app':'1'},children)};
  throw Error('Unexpected import '+name);

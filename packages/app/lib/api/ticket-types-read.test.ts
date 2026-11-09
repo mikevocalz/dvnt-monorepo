@@ -27,7 +27,7 @@ test("getTicketTypes preserves failed reads as errors for the retry UI", async (
   const failure = { code: "NETWORK", message: "Fixture read failed" };
   const { read, reads } = fixture({ data: null, error: failure });
   await assert.rejects(read("42"), (error) => error === failure);
-  assert.deepEqual(reads.slice(0, 3), [["from", "ticket_types"], ["select", "*"], ["eq", "event_id", 42]]);
+  assert.deepEqual(reads.slice(0, 3), [["from", "ticket_types_public"], ["select", "*"], ["eq", "event_id", 42]]);
 });
 
 test("a successful empty ticket read remains distinguishable from failure", async () => {
@@ -37,4 +37,10 @@ test("a successful empty ticket read remains distinguishable from failure", asyn
 test("successful ticket reads preserve authoritative row IDs and prices", async () => {
   const rows = [{ id: "11111111-1111-4111-8111-111111111111", price_cents: 2500 }];
   assert.equal(await fixture({ data: rows, error: null }).read("42"), rows);
+});
+
+test("public buyers query active tiers only, including when the viewer is the host", async () => {
+  const { read, reads } = fixture({ data: [], error: null });
+  await read("42");
+  assert.ok(reads.some(call => call[0] === "eq" && call[1] === "is_active" && call[2] === true));
 });

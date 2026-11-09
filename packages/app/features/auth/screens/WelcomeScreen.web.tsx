@@ -178,6 +178,7 @@ export function WelcomeScreen() {
     await locationAccess.setOverall(true);
     if (!locationAllowedFor(owner)) return;
     const generation = useLocationAccessStore.getState().generation;
+    const observationSession = useLocationAccessStore.getState().settings?.sessionKey;
     const allowed = () => useAuthStore.getState().user?.authId === owner && locationAllowedFor(owner) && useLocationAccessStore.getState().generation === generation;
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       toast.error('Location unavailable', { description: 'Your browser does not support location.' });
@@ -190,7 +191,7 @@ export function WelcomeScreen() {
         const { latitude, longitude } = pos.coords;
         const { setDeviceLocation, setLocationMode, setActiveCity } =
           useEventsLocationStore.getState();
-        setDeviceLocation(latitude, longitude);
+        setDeviceLocation(latitude, longitude, { observedAt: pos.timestamp, ownerAuthId: owner, sessionKey: observationSession });
         setLocationMode('device');
         try {
           // Snap to the nearest known city so event filters have a name.

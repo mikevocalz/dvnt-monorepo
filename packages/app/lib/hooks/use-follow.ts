@@ -1,3 +1,7 @@
+import { useSyncExternalStore } from "react";
+import { getSessionLifecycle, subscribeSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { assertFollowIdentity, getFollowIdentity, getFollowIdentityRevision, subscribeFollowIdentityRevision, isFollowIdentityCurrent, type FollowIdentity } from "@dvnt/app/lib/auth/follow-identity";
+import { resetFollowAccessCaches } from "@dvnt/app/lib/hooks/reset-follow-access-caches";
 /**
  * Follow/Unfollow Hook with Optimistic Updates
  *
@@ -174,129 +178,39 @@ function updateAuthUserFallbackCaches(
   return snapshots;
 }
 
+interface FollowVariables {
+  userId: string;
+  action: "follow" | "unfollow";
+  username?: string;
+}
+type OwnedFollowVariables = FollowVariables & { identity: FollowIdentity | null };
+
 export function useFollow() {
   const queryClient = useQueryClient();
   const showToast = useUIStore((s) => s.showToast);
   const authUser = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const viewerId = authUser?.id;
+  useSyncExternalStore(subscribeSessionLifecycle, getSessionLifecycle, getSessionLifecycle);
+  useSyncExternalStore(subscribeFollowIdentityRevision, getFollowIdentityRevision, getFollowIdentityRevision);
+  const identity = getFollowIdentity();
 
-  return useMutation({
-    mutationFn: async ({
-      userId,
-      action,
-    }: {
-      userId: string;
-      action: "follow" | "unfollow";
-      username?: string;
-    }) => {
-      return await followsApi.followAction(userId, action);
+  const mutation = useMutation({
+    mutationFn: async (variables: OwnedFollowVariables) => {
+      assertFollowIdentity(variables.identity);
+      return followsApi.followAction(variables.userId, variables.action, variables.identity);
     },
-    // Optimistic update — instant UI feedback across ALL screens
-    onMutate: async ({ userId, action, username }) => {
-      const newIsFollowing = action === "follow";
-      const countDelta = newIsFollowing ? 1 : -1;
-
-      // Cancel relevant queries in PARALLEL to prevent overwrites
-      // PERF: Previously 6 sequential awaits blocked the optimistic update.
-      const userQueryKey = username
-        ? ["users", "username", username]
-        : ["users", "id", userId];
-      const viewerProfileKey = viewerId ? ["profile", viewerId] : null;
-      const cancels: Promise<void>[] = [
-        queryClient.cancelQueries({ queryKey: userQueryKey }),
-        queryClient.cancelQueries({ queryKey: ["users", "followers"] }),
-        queryClient.cancelQueries({ queryKey: ["users", "following"] }),
-      ];
-      if (userId) {
-        cancels.push(
-          queryClient.cancelQueries({ queryKey: ["profile", userId] }),
-        );
-      }
-      if (viewerProfileKey) {
-        cancels.push(queryClient.cancelQueries({ queryKey: viewerProfileKey }));
-      }
-      if (viewerId) {
-        cancels.push(
-          queryClient.cancelQueries({ queryKey: activityKeys.list(viewerId) }),
-        );
-      }
-      await Promise.all(cancels);
-
-      // Snapshot previous state for rollback
-      const previousUserData = queryClient.getQueryData(userQueryKey);
-      const previousViewerData = viewerProfileKey
-        ? queryClient.getQueryData(viewerProfileKey)
-        : undefined;
-      const previousAuthUser = authUser;
-      const previousActivityFollowed = username
-        ? useActivityStore.getState().followedUsers.has(username)
-        : undefined;
-      const previousActivities = viewerId
-        ? queryClient.getQueryData<Activity[]>(activityKeys.list(viewerId))
-        : undefined;
-
-      // 1. Update target user's profile cache
-      if (previousUserData) {
-        queryClient.setQueryData(userQueryKey, (old: any) => {
-          if (!old) return old;
-          return {
-            ...old,
-            isFollowing: newIsFollowing,
-            followersCount: Math.max(0, (old.followersCount || 0) + countDelta),
-          };
-        });
-      }
-
-      // 2. Update viewer's profile cache (following count)
-      if (viewerProfileKey && previousViewerData) {
-        queryClient.setQueryData(viewerProfileKey, (old: any) => {
-          if (!old) return old;
-          return {
-            ...old,
-            followingCount: Math.max(0, (old.followingCount || 0) + countDelta),
-          };
-        });
-      }
-
-      // 3. Update auth store (following count)
-      if (authUser) {
-        setUser({
-          ...authUser,
-          followingCount: Math.max(
-            0,
-            (authUser.followingCount || 0) + countDelta,
-          ),
-        });
-      }
-
-      // 4. CENTRALIZED: Update ALL list + activities caches
-      const previousListCaches = updateUserRelationshipEverywhere(
-        queryClient,
-        userId,
-        username,
-        newIsFollowing,
-        viewerId,
-      );
-      const previousAuthFallbackCaches = updateAuthUserFallbackCaches(
-        queryClient,
-        userId,
-        username,
-        newIsFollowing,
-      );
-
-      return {
-        previousUserData,
-        username: username || null,
-        previousViewerData,
-        previousAuthUser,
-        previousListCaches,
-        previousAuthFallbackCaches,
-        previousActivityFollowed,
-        previousActivities,
-      } as FollowContext;
+    // A follow can become a pending request. Never optimistically grant access.
+    onMutate: async (variables) => {
+      const isCurrent = () => isFollowIdentityCurrent(variables.identity);
+      assertFollowIdentity(variables.identity);
+      if (variables.action === "unfollow") await resetFollowAccessCaches(queryClient, false, isCurrent);
+      assertFollowIdentity(variables.identity);
+      return undefined as FollowContext | undefined;
     },
     onError: (error: any, variables, context) => {
+      if (!isFollowIdentityCurrent(variables.identity)) return;
+      void resetFollowAccessCaches(queryClient, true, () => isFollowIdentityCurrent(variables.identity));
       // Rollback on error
       let targetKey: readonly unknown[] | null = null;
       if (variables.username) {
@@ -353,7 +267,12 @@ export function useFollow() {
         "Check your connection and try again.";
       showToast("error", "Follow failed", errorMessage);
     },
-    onSuccess: (data: FollowMutationResult, variables) => {
+    onSuccess: async (data: FollowMutationResult, variables) => {
+      if (!isFollowIdentityCurrent(variables.identity)) return;
+      await resetFollowAccessCaches(queryClient, true, () => isFollowIdentityCurrent(variables.identity));
+      if (!isFollowIdentityCurrent(variables.identity)) return;
+      updateUserRelationshipEverywhere(queryClient, variables.userId, variables.username, data.following, viewerId);
+      queryClient.setQueryData(["follow-request-status", viewerId, variables.userId, variables.identity.epoch, variables.identity.revision], { following: data.following, followRequestStatus: data.followRequestStatus });
       // CRITICAL: Use server-authoritative counts to reconcile cache
       console.log("[useFollow] Server response:", {
         following: data.following,
@@ -374,6 +293,7 @@ export function useFollow() {
         return {
           ...old,
           isFollowing: data.following,
+          followRequestStatus: data.followRequestStatus,
           followersCount: data.targetFollowersCount,
         };
       });
@@ -384,6 +304,7 @@ export function useFollow() {
           return {
             ...old,
             isFollowing: data.following,
+          followRequestStatus: data.followRequestStatus,
             followersCount: data.targetFollowersCount,
           };
         });
@@ -412,15 +333,16 @@ export function useFollow() {
       // Show success toast
       showToast(
         "success",
-        data.following ? "Following" : "Unfollowed",
-        data.following
+        data.followRequestStatus === "pending" ? "Request sent" : data.following ? "Following" : "Follow removed",
+        data.followRequestStatus === "pending" ? "Waiting for this member to approve your request." : data.following
           ? `You are now following ${data.targetUsername || "this user"}`
           : `You unfollowed ${data.targetUsername || "this user"}`,
       );
     },
     onSettled: (_data, _error, variables) => {
+      if (!isFollowIdentityCurrent(variables.identity)) return;
       // Targeted invalidation — NOT broad storms
-      const invalidations: Promise<unknown>[] = [];
+      const invalidations: Promise<unknown>[] = [queryClient.invalidateQueries({ queryKey: ["follow-request-status", viewerId, variables.userId] })];
 
       if (variables.username) {
         invalidations.push(
@@ -462,4 +384,18 @@ export function useFollow() {
       });
     },
   });
+  type Options = NonNullable<Parameters<typeof mutation.mutate>[1]>;
+  const ownedOptions = (options?: Options): Options => ({
+    ...options,
+    onSuccess: (...args) => { if (isFollowIdentityCurrent(identity)) options?.onSuccess?.(...args); },
+    onError: (...args) => { if (isFollowIdentityCurrent(identity)) options?.onError?.(...args); },
+    onSettled: (...args) => { if (isFollowIdentityCurrent(identity)) options?.onSettled?.(...args); },
+  });
+  const stale = mutation.variables && !isFollowIdentityCurrent(mutation.variables.identity);
+  return {
+    ...mutation,
+    ...(stale ? { error: null, data: undefined, variables: undefined, isError: false, isPending: false, isSuccess: false, isIdle: true, status: "idle" as const } : {}),
+    mutate: (variables: FollowVariables, options?: Options) => mutation.mutate({ ...variables, identity }, ownedOptions(options)),
+    mutateAsync: (variables: FollowVariables, options?: Options) => mutation.mutateAsync({ ...variables, identity }, ownedOptions(options)),
+  };
 }

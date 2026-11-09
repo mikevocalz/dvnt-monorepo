@@ -6,10 +6,13 @@ import Logo from "@dvnt/app/components/logo";
 import { useUnreadMessageCount } from "@dvnt/app/lib/hooks/use-messages";
 import { UnreadBadge } from "@dvnt/app/components/unread-badge";
 import { unreadAccessibilityLabel } from "@dvnt/app/lib/badges/unread-badge";
+import { useAppStore } from "@dvnt/app/lib/stores/app-store";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useFeedScrollStore } from "@dvnt/app/lib/stores/feed-scroll-store";
 
 export function TabHeaderLogo() {
   const pathname = usePathname();
+  const router = useRouter();
   const triggerScrollToTop = useFeedScrollStore((s) => s.triggerScrollToTop);
   const isHome =
     pathname === "/" ||
@@ -20,8 +23,12 @@ export function TabHeaderLogo() {
   return (
     <Pressable
       onPress={() => {
-        if (isHome) triggerScrollToTop();
+        useAppStore.getState().setNsfwEnabled(false, "home_logo");
+        triggerScrollToTop();
+        if (!isHome) router.navigate((useAuthStore.getState().user ? "/(protected)/(tabs)" : "/(public)/(tabs)") as any);
       }}
+      accessibilityRole="button"
+      accessibilityLabel="Sweet feed, back to top"
       hitSlop={12}
     >
       <Logo width={100} height={36} />

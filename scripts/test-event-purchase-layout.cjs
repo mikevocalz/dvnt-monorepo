@@ -85,7 +85,7 @@ const boundaries = new Map([
   ['@dvnt/app/lib/hooks/use-share-post-to-story', `import {f} from 'fixture';export const useSharePostToStory=()=>({isPending:false,shareEvent:(event,onShared)=>{f.storyShares.push({type:'event',id:String(event.id)});onShared?.()}});`],
   ['@dvnt/app/lib/hooks/use-weather', `import {query} from 'fixture';export const useWeatherForecast=()=>query([]);`],
   ['@dvnt/app/lib/color/useEventDominantColor', `export const useEventDominantColor=()=>({color:'#26173d'});`],
-  ['@dvnt/app/lib/stores/auth-store', `import {useFixture} from 'fixture';export const useAuthStore=select=>{const authenticated=useFixture(s=>s.authenticated);return select({isAuthenticated:authenticated,user:authenticated?{id:'fixture-member',authId:'fixture-auth',username:'member'}:null})};`],
+  ['@dvnt/app/lib/stores/auth-store', `import {useFixture} from 'fixture';const snapshot=state=>({isAuthenticated:state.authenticated,_hasHydrated:true,user:state.authenticated?{id:'fixture-member',authId:'fixture-auth',username:'member'}:null});export const useAuthStore=select=>{const authenticated=useFixture(s=>s.authenticated);return select(snapshot({authenticated}))};useAuthStore.getState=()=>snapshot(useFixture.getState());useAuthStore.subscribe=listener=>useFixture.subscribe((next,previous)=>listener(snapshot(next),snapshot(previous)));`],
   ['@dvnt/app/lib/stores/guest-checkout-store', `export {guestCheckout as useGuestCheckoutStore} from 'fixture';`],
   ['@dvnt/app/lib/stores/guest-rsvp-store', `export {guestRsvp as useGuestRsvpStore} from 'fixture';`],
   ['@dvnt/app/lib/stores/ui-store', `import {store,noop} from 'fixture';export const useUIStore=store({showToast:noop});`],
@@ -236,7 +236,11 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       await page.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
       await page.goto(origin+'/public/events/42');
       const purchase=page.getByTestId('event-purchase');
-      await purchase.waitFor();await tick(page);
+      try { await purchase.waitFor(); } catch (error) {
+        console.error('Event purchase mount failed:', JSON.stringify({errors:evidence.errors,body:await page.locator('body').innerText()},null,2));
+        throw error;
+      }
+      await tick(page);
       assert.equal(await page.evaluate(()=>window.fixture.attendancePrivacy.some(row=>row.eventId==='42'&&row.allowed===true)),true,'real privacy hook keeps ordinary event attendance enabled');
       assert.equal(evidence.errors.length,0,'actual privacy hook and accordion mount without boundary errors');
       assert.equal(await purchase.count(),1,'one purchase group');
@@ -368,6 +372,29 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       evidence.screens.at(-1).screenshots.push(compScreenshot);
       evidence.checks.push(size.name+': wallet service URL selects Coat Check for active/scanned comp; explicit checkout and Escape preserve original admission');
       await page.evaluate(()=>history.replaceState(null,'',location.pathname));
+
+      // Organizer hides/deletes a sales tier after a member bought it. The
+      // actual selector must stop selling it without removing the held pass.
+      for (const mode of ['inactive','deleted']) {
+        await page.evaluate(({mode,paidId})=>{
+          const f=window.fixture;f.reset();
+          f.configure({authenticated:true,ownedTicket:f.ownedTicket});
+          // Keep stale embedded event tiers to verify authoritative query rows
+          // win when a tier is disabled or removed from the current catalog.
+          f.configure({tiers:mode==='inactive'
+            ? f.baseEvent.ticketTiers.map(t=>t.id===paidId?{...t,is_active:false}:t)
+            : f.baseEvent.ticketTiers.filter(t=>t.id!==paidId)});
+        },{mode,paidId:PAID});
+        await tick(page);
+        assert.equal(await page.getByTestId('ticket-tier-'+PAID).count(),0,mode+' tier must not remain for sale');
+        await page.getByTestId('ticket-tier-'+FREE).waitFor();
+        const retained=purchase.getByRole('button',{name:'View ticket',exact:true});
+        await retained.waitFor();await retained.click();await tick(page);
+        assert.deepEqual(await page.evaluate(()=>window.fixture.routes),['/feed/ticket/fixture-ticket'],mode+' tier preserves purchased pass route');
+        assert.equal(await page.evaluate(()=>window.fixture.ui.getState().checkoutOpen),false);
+        assert.deepEqual(await page.evaluate(()=>window.fixture.checkouts),[]);
+      }
+      evidence.checks.push(size.name+': inactive and deleted catalog tiers disappear despite stale embedded data; purchased ticket remains viewable without checkout');
 
       await page.evaluate(()=>window.fixture.reset());await tick(page);
       // Stress realistic long names/descriptions without changing production markup.

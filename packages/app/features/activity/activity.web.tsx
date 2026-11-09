@@ -185,7 +185,7 @@ export function webRouteForActivity(activity: Activity): string {
   const { type, entityType, entityId, post, postId, event, user } = activity;
   const cohostRoute = cohostActivityRoute(type, "web");
   if (cohostRoute) return cohostRoute;
-  const detailPostId = post?.id || postId || (entityType === "post" ? entityId : undefined);
+  const detailPostId = (entityType === "post" ? entityId : undefined) || post?.id || postId;
 
   // Promoter taps land on the promoter dashboard, not the public event
   // page — must run before the generic entityType "event" branch below.
@@ -211,7 +211,7 @@ export function webRouteForActivity(activity: Activity): string {
     case "mention":
     case "tag":
       if (detailPostId)
-        return `/feed/${encodeURIComponent(user.username)}/post/${encodeURIComponent(detailPostId)}`;
+        return `/feed/post/${encodeURIComponent(detailPostId)}`;
       return `/profile/${encodeURIComponent(user.username)}`;
     case "follow":
       return `/profile/${encodeURIComponent(user.username)}`;
@@ -525,6 +525,13 @@ export function ActivityRow({
     <div
       onClick={() => onActivityPress(activity)}
       role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onActivityPress(activity);
+        }
+      }}
       className={`flex items-center gap-3 border-b border-white/8 px-4 py-4 cursor-pointer active:bg-white/6 ${
         !activity.isRead ? "bg-[#3FDCFF]/10" : ""
       }`}
@@ -543,8 +550,7 @@ export function ActivityRow({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            if (activity.type === "event_broadcast") onActivityPress(activity);
-            else onUserPress(activity.user.username, activity.user.avatar);
+            onUserPress(activity.user.username, activity.user.avatar);
           }}
           className="relative shrink-0"
           style={{ width: 48, height: 48 }}
@@ -564,16 +570,16 @@ export function ActivityRow({
       <div className="min-w-0 flex-1">
         <p className="text-sm text-white line-clamp-2">
           {activity.type === "system" ? null : (
-            <span
+            <button
+              type="button"
               className="font-semibold text-white"
               onClick={(e) => {
                 e.stopPropagation();
-                if (activity.type === "event_broadcast") onActivityPress(activity);
-                else onUserPress(activity.user.username, activity.user.avatar);
+                onUserPress(activity.user.username, activity.user.avatar);
               }}
             >
               {activitySenderLabel(activity)}
-            </span>
+            </button>
           )}
           {getActivityText(activity)}
         </p>
@@ -597,7 +603,7 @@ export function ActivityRow({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onPostPress(activity.post!.id);
+            onActivityPress(activity);
           }}
           className="shrink-0"
         >

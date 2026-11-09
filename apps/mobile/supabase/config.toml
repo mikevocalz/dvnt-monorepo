@@ -597,3 +597,6 @@ verify_jwt = false
 # Separate activation/schedule approval required; never invokes recovery workers.
 [functions.refresh-platform-fees]
 verify_jwt = false
+
+[functions.get-posts]
+verify_jwt = false

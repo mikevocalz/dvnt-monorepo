@@ -5,7 +5,9 @@
  */
 import { Pressable, View, StyleSheet, useWindowDimensions } from "react-native";
 import { Header } from "@dvnt/app/components/ui/html";
-import { useRouter } from "solito/navigation";
+import { useAppStore } from "@dvnt/app/lib/stores/app-store";
+import { useFeedScrollStore } from "@dvnt/app/lib/stores/feed-scroll-store";
+import { useRouter, usePathname } from "solito/navigation";
 import { Search, MessageCircle } from "lucide-react";
 import Logo from "./logo";
 import { UnreadBadge } from "./unread-badge";
@@ -17,6 +19,7 @@ export const WEB_APP_HEADER_HEIGHT = 78;
 
 export function WebAppHeader() {
   const router = useRouter();
+  const pathname = usePathname();
   const { data: unreadCount } = useUnreadMessageCount();
   // Phones: flush, edge-to-edge glass at the top (no floating gap / black frame).
   const { width } = useWindowDimensions();
@@ -24,7 +27,11 @@ export function WebAppHeader() {
   return (
     <Header style={[styles.wrap, isMobile && styles.wrapMobile]}>
       <View style={[styles.bar, isMobile && styles.barMobile]}>
-        <Pressable onPress={() => router.push("/feed")} style={styles.brand}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Sweet feed, back to top" onPress={() => {
+          useAppStore.getState().setNsfwEnabled(false, "home_logo");
+          useFeedScrollStore.getState().triggerScrollToTop();
+          if (pathname !== "/feed") router.push("/feed");
+        }} style={styles.brand}>
           <Logo width={88} height={34} style={{marginBottom: 4}} />
         </Pressable>
         <View style={styles.actions}>

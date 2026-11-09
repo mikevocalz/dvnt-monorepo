@@ -1,10 +1,11 @@
 import { supabase } from "../supabase/client";
-import { DB } from "../supabase/db-map";
-import { getCurrentUserIdSync, resolveUserIdInt } from "./auth-helper";
+import { resolveUserIdInt } from "./auth-helper";
 import { requireBetterAuthToken } from "../auth/identity";
+import { assertFollowIdentity, getFollowIdentity, type FollowIdentity } from "../auth/follow-identity";
 
 interface ToggleFollowResponseData {
   following: boolean;
+  followRequestStatus: "none" | "pending" | "approved";
   targetUserId: string;
   targetUsername: string;
   viewerFollows: boolean;
@@ -25,6 +26,7 @@ interface ToggleFollowResponse {
 export interface FollowMutationResult {
   success: boolean;
   following: boolean;
+  followRequestStatus: "none" | "pending" | "approved";
   targetUsername: string;
   targetFollowersCount: number;
   targetFollowingCount: number;
@@ -34,6 +36,30 @@ export interface FollowMutationResult {
 }
 
 export const followsApi = {
+  async requestAction(action: "status" | "requests" | "approve" | "decline", targetUserId?: string, expectedIdentity?: FollowIdentity) {
+    const identity = expectedIdentity ?? getFollowIdentity();
+    assertFollowIdentity(identity);
+    const token = await requireBetterAuthToken();
+    assertFollowIdentity(identity);
+    const targetId = targetUserId ? await resolveUserIdInt(targetUserId) : undefined;
+    assertFollowIdentity(identity);
+    const { data, error } = await supabase.functions.invoke("toggle-follow", {
+      body: { action, expectedAuthId: identity.authId, ...(targetId ? { targetUserId: targetId } : {}) },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assertFollowIdentity(identity);
+    if (error || !data?.ok || !data.data) throw new Error(data?.error?.message || error?.message || "Follow request failed");
+    return data.data;
+  },
+  async getFollowRequestStatus(targetUserId: string, expectedIdentity?: FollowIdentity): Promise<{ following: boolean; followRequestStatus: "none" | "pending" | "approved" }> {
+    return followsApi.requestAction("status", targetUserId, expectedIdentity);
+  },
+  async getFollowRequests(expectedIdentity?: FollowIdentity): Promise<Array<{ follower_id: number; created_at: string; requester: { username: string } | null }>> {
+    return (await followsApi.requestAction("requests", undefined, expectedIdentity)).requests;
+  },
+  async respondToFollowRequest(requesterId: string, action: "approve" | "decline", expectedIdentity?: FollowIdentity) {
+    return followsApi.requestAction(action, requesterId, expectedIdentity);
+  },
   /**
    * Follow/unfollow user via Edge Function.
    * Accepts explicit action for race-free, idempotent mutations.
@@ -42,10 +68,14 @@ export const followsApi = {
   async followAction(
     targetUserId: string,
     action: "follow" | "unfollow",
+    expectedIdentity?: FollowIdentity,
   ): Promise<FollowMutationResult> {
+    const identity = expectedIdentity ?? getFollowIdentity();
+    assertFollowIdentity(identity);
     console.log(`[Follows] ${action} via Edge Function:`, targetUserId);
 
     const token = await requireBetterAuthToken();
+    assertFollowIdentity(identity);
 
     // Resolve to integer ID, or fall back to passing auth_id for server-side provisioning
     let bodyPayload: {
@@ -69,12 +99,14 @@ export const followsApi = {
       }
     }
 
+    assertFollowIdentity(identity);
     const { data, error } =
       await supabase.functions.invoke<ToggleFollowResponse>("toggle-follow", {
-        body: bodyPayload,
+        body: { ...bodyPayload, expectedAuthId: identity.authId },
         headers: { Authorization: `Bearer ${token}` },
       });
 
+    assertFollowIdentity(identity);
     if (error) {
       console.error("[Follows] Edge Function error:", error);
       throw new Error(error.message || `Failed to ${action}`);
@@ -89,6 +121,7 @@ export const followsApi = {
     const result: FollowMutationResult = {
       success: true,
       following: data.data.following,
+      followRequestStatus: data.data.followRequestStatus ?? "none",
       targetUsername: data.data.targetUsername,
       targetFollowersCount: data.data.targetFollowersCount,
       targetFollowingCount: data.data.targetFollowingCount,
@@ -117,20 +150,8 @@ export const followsApi = {
    */
   async isFollowing(targetUserId: string): Promise<boolean> {
     try {
-      const currentUserId = getCurrentUserIdSync();
-      if (!currentUserId) return false;
-
-      const { data, error } = await supabase
-        .from(DB.follows.table)
-        .select("id")
-        .eq(DB.follows.followerId, currentUserId)
-        .eq(DB.follows.followingId, await resolveUserIdInt(targetUserId))
-        .single();
-
-      return !!data && !error;
-    } catch (error) {
-      return false;
-    }
+      return (await followsApi.getFollowRequestStatus(targetUserId)).following;
+    } catch { return false; }
   },
 
   /**

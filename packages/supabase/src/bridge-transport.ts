@@ -34,6 +34,14 @@ export function createBridgeTransport(anonKey: string) {
           return Promise.reject(new Error('Your account changed before this request. Please try again.'));
         }
         const bearer = headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? '';
+        // Notifications are private even while a legacy endpoint still has broad
+        // grants. Never degrade their reads/writes to the public anon credential.
+        // RLS remains the server boundary; this guard makes mint failures visible
+        // and prevents the current client from silently using the legacy rail.
+        if (/\/rest\/v1\/notifications(?:[/?#]|$)/.test(url) &&
+          (!bearer || bearer === anonKey || bearer !== token || !usable(bearer))) {
+          return Promise.reject(new Error('Your private activity could not be verified. Please sign in again or retry.'));
+        }
         // Final synchronous gate after supabase-js's async token selection and
         // immediately before dispatch. Never replace an old request's A with B.
         if (bearer && bearer !== anonKey && (bearer !== token || !usable(bearer))) {

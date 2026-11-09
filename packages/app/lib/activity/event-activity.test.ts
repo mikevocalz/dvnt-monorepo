@@ -23,3 +23,11 @@ test("numeric event notifications use ID detail routes on both platforms", () =>
   assert.equal(eventActivityRoute({ type: "event_broadcast" }, "web"), "/feed/events");
   assert.equal(eventActivityRoute({ type: "follow", entityType: "user", entityId: "613" }, "web"), null);
 });
+
+
+test("co-organizer invite UUID never becomes an event route", () => {
+  const invite = { type: "event_co_organizer_invited", entityType: "event", entityId: "bfad6afe-9c00-4000-8000-000000000001" };
+  assert.equal(eventActivityRoute(invite, "web"), "/feed/events");
+  assert.equal(eventActivityRoute({...invite, payload: {event_id: 90}}, "web"), "/feed/events/90");
+  assert.equal(eventActivityRoute({...invite, event: {id: "91"}}, "native"), "/(protected)/events/91");
+});

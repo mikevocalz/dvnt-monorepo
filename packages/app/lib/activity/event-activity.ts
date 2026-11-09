@@ -4,6 +4,7 @@ interface EventActivity {
   entityType?: string;
   entityId?: string;
   event?: { id?: string };
+  payload?: { event_id?: unknown; eventId?: unknown } | null;
   user?: { username?: string; displayName?: string };
 }
 
@@ -20,7 +21,12 @@ export function eventActivityRoute(
   platform: "web" | "native",
 ): string | null {
   if (activity.entityType !== "event" && !EVENT_TYPES.has(activity.type)) return null;
-  const id = activity.entityType === "event"
+  const payloadEventId = activity.payload?.event_id ?? activity.payload?.eventId;
+  const inviteEventId = activity.event?.id || (typeof payloadEventId === "string" || typeof payloadEventId === "number" ? String(payloadEventId) : "");
+  // Pending co-organizer notifications carry the INVITE uuid in entityId.
+  const id = activity.type === "event_co_organizer_invited"
+    ? (/^\d+$/.test(inviteEventId) ? inviteEventId : undefined)
+    : activity.entityType === "event"
     ? activity.entityId || activity.event?.id
     : activity.event?.id || activity.entityId;
   const root = platform === "web" ? "/feed/events" : "/(protected)/events";

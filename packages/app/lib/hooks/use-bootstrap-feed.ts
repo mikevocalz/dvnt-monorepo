@@ -33,33 +33,6 @@ import {
  * Hydrate TanStack Query cache from bootstrap response.
  * This replaces 5+ individual queries with cache writes from a single response.
  */
-/**
- * Would hydrating this response destroy data we already have?
- *
- * Bootstrap is an ACCELERATION — it exists to put the first page on screen
- * without waiting on five round-trips. It is not authoritative. When the edge
- * function answers with an empty feed while the ordinary paginated query has
- * already filled the cache, writing it through blanks the screen: observed live
- * as `getFeedPostsPaginated success, count: 10` followed by
- * `[BootstrapFeed] Hydrated cache: 0 posts, 0 stories` and a "No Posts Yet"
- * empty state over ten perfectly good posts. Same mechanism empties the stories
- * row.
- *
- * An empty accelerator is a no-op, never a wipe.
- */
-function wouldClobber(
-  queryClient: ReturnType<typeof useQueryClient>,
-  data: BootstrapFeedResponse,
-): boolean {
-  if (data.posts?.length) return false;
-  const existing = queryClient.getQueryData<{ pages?: { data?: unknown[] }[] }>(
-    postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
-  );
-  const cachedCount =
-    existing?.pages?.reduce((n, page) => n + (page?.data?.length ?? 0), 0) ?? 0;
-  return cachedCount > 0;
-}
-
 function hydrateFromBootstrap(
   queryClient: ReturnType<typeof useQueryClient>,
   userId: string,
@@ -96,6 +69,8 @@ function hydrateFromBootstrap(
           kind === "text" ? textPresentation.textSlides.length : undefined,
         createdAt: p.createdAt,
         isNSFW: p.isNSFW,
+        isSpicyLocked: p.isSpicyLocked,
+        spicyAccessViewerId: p.spicyAccessViewerId,
         location: p.location,
         likes: p.likes,
         comments: p.commentsCount,
@@ -126,16 +101,11 @@ function hydrateFromBootstrap(
     hasMore: data.hasMore,
   };
 
-  // Never seed an EMPTY page. The bootstrap edge function scopes spicy to
-  // followed authors only, while the client feed query returns all public
-  // spicy posts — so seeding its 0 results marked the cache "loaded" and the
-  // real query never ran, leaving the spicy feed blank after the toggle.
-  if (feedPage.data.length > 0) {
-    queryClient.setQueryData(
-      postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
-      { pages: [feedPage], pageParams: [0] },
-    );
-  }
+  // Bootstrap and pagination share the same server access projection.
+  queryClient.setQueryData(
+    postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
+    { pages: [feedPage], pageParams: [0] },
+  );
 
   // Unread totals are fetched independently. This accelerator's bounded
   // history count must not overwrite the canonical inbox/Requests snapshot.
@@ -265,12 +235,15 @@ export function useBootstrapFeed() {
     isBootstrapping.current = true;
     setBootstrapState({ key: bootstrapKey, status: "bootstrapping" });
 
+    // Capture both viewer and mode; a late accelerator must not seed a newer session.
+    const requestAuthId = useAuthStore.getState().user?.authId;
     // Fire bootstrap request
     console.log("[BootstrapFeed] No cached data, running bootstrap");
     bootstrapApi
       .feed({ userId, includeNSFW: nsfwEnabled })
       .then((data) => {
         isBootstrapping.current = false;
+        if (useAuthStore.getState().user?.id !== userId || useAuthStore.getState().user?.authId !== requestAuthId || useAppStore.getState().nsfwEnabled !== nsfwEnabled) return;
 
         if (!data) {
           console.warn(
@@ -280,14 +253,7 @@ export function useBootstrapFeed() {
           return;
         }
 
-        if (wouldClobber(queryClient, data)) {
-          console.warn(
-            "[BootstrapFeed] Empty bootstrap over a populated feed — skipping " +
-              "hydration so the real query's posts survive",
-          );
-        } else {
-          hydrateFromBootstrap(queryClient, userId, data);
-        }
+        hydrateFromBootstrap(queryClient, userId, data);
         trace.markUsable();
         setBootstrapState({ key: bootstrapKey, status: "ready" });
       })

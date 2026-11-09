@@ -624,9 +624,10 @@ export const ticketsApi = {
   async getTicketTypes(eventId: string) {
     try {
       const { data, error } = await supabase
-        .from("ticket_types")
+        .from("ticket_types_public")
         .select("*")
         .eq("event_id", parseInt(eventId))
+        .eq("is_active", true)
         .order("price_cents", { ascending: true });
 
       if (error) throw error;

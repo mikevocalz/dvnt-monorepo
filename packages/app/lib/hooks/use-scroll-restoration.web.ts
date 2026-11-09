@@ -55,6 +55,8 @@ export function useScrollRestoration(
   enabled = true,
   /** Listen on window rather than the element (document scrolling). */
   onWindow = false,
+  resetToTop = false,
+  resetGeneration = 0,
 ) {
   useEffect(() => {
     const el = ref.current;
@@ -64,7 +66,12 @@ export function useScrollRestoration(
     let frame = 0;
     let frames = 0;
     let restored = false;
-    const target = read(key);
+    const target = resetToTop ? 0 : read(key);
+    if (resetToTop) {
+      el.scrollTop = 0;
+      window.sessionStorage.setItem(PREFIX + key, "0");
+      restored = true;
+    }
 
     // Restore first, and keep trying while the content grows into the offset.
     if (target > 0) {
@@ -105,5 +112,5 @@ export function useScrollRestoration(
       if (frame) cancelAnimationFrame(frame);
       if (writeFrame) cancelAnimationFrame(writeFrame);
     };
-  }, [ref, key, enabled, onWindow]);
+  }, [ref, key, enabled, onWindow, resetToTop, resetGeneration]);
 }

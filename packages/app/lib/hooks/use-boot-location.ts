@@ -27,6 +27,7 @@ export function useBootLocation() {
     if (didRun.current) return;
     const owner = useAuthStore.getState().user?.authId;
     const generation = useLocationAccessStore.getState().generation;
+    const observationSession = useLocationAccessStore.getState().settings?.sessionKey;
     const allowed = () => locationAllowedFor(owner) && useAuthStore.getState().user?.authId === owner && useLocationAccessStore.getState().generation === generation;
     didRun.current = true;
 
@@ -55,7 +56,7 @@ export function useBootLocation() {
         const { latitude, longitude } = loc.coords;
         const { setDeviceLocation, setLocationMode, setActiveCity } =
           useEventsLocationStore.getState();
-        setDeviceLocation(latitude, longitude);
+        setDeviceLocation(latitude, longitude, { observedAt: loc.timestamp, ownerAuthId: owner, sessionKey: observationSession });
         setLocationMode("device");
 
         // Get cities (from cache or fetch)

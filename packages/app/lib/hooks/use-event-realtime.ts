@@ -219,7 +219,9 @@ export function useEventsFeedRealtime(enabled = true): void {
           // holder with the event open must still see it, now as the
           // cancelled-event takeover. The cancel-event edge function notifies
           // attendees server-side; this only changes what discovery shows.
-          if (!isDiscoverableEvent(next as { status?: string | null })) {
+          // An event changed to Spicy must leave any Sweet cache immediately.
+          // Re-fetch mode-aware lists rather than inserting it into the wrong mode.
+          if (next.nsfw === true || !isDiscoverableEvent(next as { status?: string | null })) {
             queryClient.setQueriesData<any[]>(
               { queryKey: eventKeys.all },
               (old) => {
@@ -231,6 +233,7 @@ export function useEventsFeedRealtime(enabled = true): void {
               },
             );
             queryClient.invalidateQueries({ predicate: queryContainsEntity("event", targetId) });
+            queryClient.invalidateQueries({ queryKey: eventKeys.all });
             return;
           }
           queryClient.setQueriesData<any[]>(

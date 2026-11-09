@@ -1,3 +1,5 @@
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { isSpicyPostLocked, useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 import {
   View,
   Text,
@@ -66,6 +68,7 @@ const MIN_DISCOVER_TILE = 120;
 function getSearchPreviewUrls(posts: Post[]) {
   return posts
     .flatMap((post) => {
+      if (isSpicyPostLocked(post)) return [];
       const firstMedia = post.media?.[0];
       const isVideo = isVideoKind(post.type) || isVideoKind(firstMedia?.type);
       const imageUri =
@@ -92,6 +95,7 @@ function PostGridTile({
   router: ReturnType<typeof useRouter>;
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
+  if (useSpicyPostLocked(post)) return <View style={{ width: size }}><SpicyFollowGate author={post.author} height={size} /></View>;
   const firstMedia = post.media?.[0];
   const isTextPost = post.kind === "text";
   const textPostPreview = resolveTextPostPresentation(

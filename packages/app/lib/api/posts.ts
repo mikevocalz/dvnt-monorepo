@@ -2,7 +2,6 @@ import { validatePostCaption } from "@dvnt/app/lib/posts/post-caption";
 import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import type { Post } from "@dvnt/app/lib/types";
-import { getCurrentUserId, getCurrentUserIdSync } from "./auth-helper";
 import { hasAuthenticatedUser, requireBetterAuthToken } from "../auth/identity";
 import { likesApi } from "./likes";
 import {
@@ -278,6 +277,8 @@ export function transformPost(
     timeAgo: formatTimeAgo(dbPost[DB.posts.createdAt]),
     location: dbPost[DB.posts.location],
     isNSFW: dbPost[DB.posts.isNsfw] || false,
+    isSpicyLocked: dbPost.isSpicyLocked,
+    spicyAccessViewerId: dbPost.spicyAccessViewerId,
     thumbnail,
     type: postKind === "text" ? undefined : type,
     hasMultipleImages,
@@ -301,6 +302,23 @@ function formatTimeAgo(dateString: string): string {
   return `${Math.floor(diffDays / 7)}w`;
 }
 
+/** All sensitive reads go through the same verified server projection. */
+async function readProjectedPosts(body: Record<string, unknown>) {
+  const headers = hasAuthenticatedUser()
+    ? { Authorization: `Bearer ${await requireBetterAuthToken()}` }
+    : undefined;
+  const { data, error } = await supabase.functions.invoke("get-posts", { body, headers });
+  if (error || data?.error || !Array.isArray(data?.posts)) {
+    throw new Error(data?.error || error?.message || "Could not load posts");
+  }
+  const likedSet = await fetchViewerLikedPostIds(data.posts.map((p: any) => Number(p.id)));
+  return {
+    posts: data.posts.map((p: any) => transformPost(p, likedSet.has(String(p.id)))) as Post[],
+    nextCursor: data.nextCursor as number | null,
+    hasMore: data.hasMore === true,
+  };
+}
+
 export const postsApi = {
   /**
    * Get feed posts (non-paginated, for backwards compatibility)
@@ -317,185 +335,16 @@ export const postsApi = {
     cursor: number = 0,
     includeNsfw: boolean = false,
   ) {
-    try {
-      console.log(
-        "[Posts] getFeedPostsPaginated, cursor:",
-        cursor,
-        "includeNsfw:",
-        includeNsfw,
-      );
-
-      let query = supabase
-        .from(DB.posts.table)
-        .select(
-          `
-          *,
-          author:users!posts_author_id_users_id_fk(
-            ${DB.users.id},
-            ${DB.users.username},
-            ${DB.users.firstName},
-            ${DB.users.verified},
-            avatar:${DB.users.avatarId}(url)
-          ),
-          media:posts_media(
-            ${DB.postsMedia.type},
-            ${DB.postsMedia.url},
-            ${DB.postsMedia.order},
-            ${DB.postsMedia.mimeType},
-            ${DB.postsMedia.livePhotoVideoUrl},
-            ${DB.postsMedia.thumbnail}
-          )
-        `,
-          { count: "exact" },
-        )
-        .eq(DB.posts.visibility, "public");
-
-      const feedSuppressed = suppressedFeedAuthors();
-      if (feedSuppressed.length > 0) {
-        query = query.not(
-          DB.posts.authorId,
-          "in",
-          `(${feedSuppressed.join(",")})`,
-        );
-      }
-
-      // Strict spicy contract:
-      // ⚠️ POLICY DIVERGENCE — DEFERRED, do not "fix" by copying either side.
-      //   Here (client):        spicy = ALL public spicy posts.
-      //   bootstrap-feed edge:  spicy = only authors you follow, and guests get
-      //                         an empty feed (index.ts ~246-275, ~311).
-      // The edge gate is deliberate (consent/safety), this one is not gated.
-      // Which wins is an adult-content distribution decision, not an
-      // implementation detail — resolve it before touching either filter.
-      //   includeNsfw=false → ONLY safe posts (is_nsfw=false OR NULL)
-      //   includeNsfw=true  → ONLY spicy posts (is_nsfw=true)
-      // Any other path is a data-leak regression.
-      if (includeNsfw) {
-        query = query.eq(DB.posts.isNsfw, true);
-      } else {
-        query = query.or(
-          `${DB.posts.isNsfw}.is.false,${DB.posts.isNsfw}.is.null`,
-        );
-      }
-
-      const {
-        data: posts,
-        error,
-        count,
-      } = await query
-        .order(DB.posts.createdAt, { ascending: false })
-        .range(cursor, cursor + PAGE_SIZE - 1);
-
-      if (error) {
-        console.error("[Posts] getFeedPostsPaginated error:", error);
-        throw error;
-      }
-
-      const hydratedPosts = await hydrateTextPostSlides(posts || []);
-      const postIds = hydratedPosts.map((p: any) => Number(p[DB.posts.id]));
-      const likedSet = await fetchViewerLikedPostIds(postIds);
-
-      const transformed = hydratedPosts.map((p: any) => {
-        const pid = String(p[DB.posts.id]);
-        return transformPost(p, likedSet.has(pid));
-      });
-
-      // Defense-in-depth: re-filter the transformed array in case the DB
-      // contract, row-level security, or a future query change lets a post
-      // of the wrong class slip through. The server-side `.eq` above is
-      // authoritative; this is belt-and-suspenders to guarantee callers
-      // (bootstrap hydration, prefetches, persisted cache) never see a
-      // mixed list for a given includeNsfw value.
-      const strict = includeNsfw
-        ? transformed.filter((p: any) => p?.isNSFW === true)
-        : transformed.filter((p: any) => p?.isNSFW !== true);
-
-      const hasMore = (count || 0) > cursor + PAGE_SIZE;
-      const nextCursor = hasMore ? cursor + PAGE_SIZE : null;
-
-      console.log(
-        "[Posts] getFeedPostsPaginated success, count:",
-        strict.length,
-        "(dropped",
-        transformed.length - strict.length,
-        "wrong-class rows)",
-      );
-
-      return {
-        data: strict,
-        nextCursor,
-        hasMore,
-      };
-    } catch (error) {
-      console.error("[Posts] getFeedPostsPaginated error:", error);
-      return { data: [], nextCursor: null, hasMore: false };
-    }
+    const result = await readProjectedPosts({ mode: "feed", cursor, limit: PAGE_SIZE, includeNsfw });
+    return { data: result.posts, nextCursor: result.nextCursor, hasMore: result.hasMore };
   },
 
   /**
    * Get single post by ID
    */
   async getPostById(id: string): Promise<Post | null> {
-    try {
-      console.log("[Posts] getPostById:", id);
-
-      const { data, error } = await supabase
-        .from(DB.posts.table)
-        .select(
-          `
-          *,
-          author:users!posts_author_id_users_id_fk(
-            ${DB.users.id},
-            ${DB.users.username},
-            ${DB.users.firstName},
-            ${DB.users.verified},
-            avatar:${DB.users.avatarId}(url)
-          ),
-          media:posts_media(
-            ${DB.postsMedia.type},
-            ${DB.postsMedia.url},
-            ${DB.postsMedia.order},
-            ${DB.postsMedia.mimeType},
-            ${DB.postsMedia.livePhotoVideoUrl},
-            ${DB.postsMedia.thumbnail}
-          )
-        `,
-        )
-        .eq(DB.posts.id, id)
-        .maybeSingle();
-
-      if (error) {
-        console.error("[Posts] getPostById error:", error);
-        throw error;
-      }
-
-      if (!data) {
-        return null;
-      }
-
-      let enrichedPost = data;
-
-      if (data?.[DB.posts.postKind] === "text") {
-        const slidesByPostId = await fetchTextPostSlidesViaFunction([id]);
-        const slides = slidesByPostId.get(String(id));
-
-        if (slides) {
-          enrichedPost = {
-            ...data,
-            post_text_slides: slides || [],
-          };
-        }
-      }
-
-      const likedSet = await fetchViewerLikedPostIds([Number(id)]);
-      return transformPost(
-        enrichedPost,
-        likedSet.has(String(enrichedPost[DB.posts.id])),
-      );
-    } catch (error) {
-      console.error("[Posts] getPostById error:", error);
-      return null;
-    }
+    const result = await readProjectedPosts({ mode: "detail", postId: id, limit: 1 });
+    return result.posts[0] || null;
   },
 
   /**
@@ -503,135 +352,8 @@ export const postsApi = {
    * @param userId - Can be auth_id (UUID), internal id (integer), or username
    */
   async getProfilePosts(userId: string): Promise<Post[]> {
-    try {
-      const isUUID =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-          userId,
-        );
-      const isInteger = /^\d+$/.test(userId);
-
-      let postsQuery: any;
-
-      if (isInteger) {
-        // Fast path: integer ID — query posts directly
-        postsQuery = supabase
-          .from(DB.posts.table)
-          .select(
-            `
-            *,
-            author:users!posts_author_id_users_id_fk(
-              ${DB.users.id},
-              ${DB.users.authId},
-              ${DB.users.username},
-              ${DB.users.firstName},
-              ${DB.users.verified},
-              avatar:${DB.users.avatarId}(url)
-            ),
-            media:posts_media(
-              ${DB.postsMedia.type},
-              ${DB.postsMedia.url},
-              ${DB.postsMedia.order},
-              ${DB.postsMedia.mimeType},
-              ${DB.postsMedia.livePhotoVideoUrl},
-            ${DB.postsMedia.thumbnail}
-            )
-          `,
-          )
-          .eq(DB.posts.authorId, parseInt(userId))
-          .order(DB.posts.createdAt, { ascending: false })
-          .limit(50);
-      } else if (isUUID) {
-        // UUID (auth_id): resolve integer id first, then query posts
-        const { data: userRow } = await supabase
-          .from(DB.users.table)
-          .select(DB.users.id)
-          .eq(DB.users.authId, userId)
-          .single();
-        if (!userRow) return [];
-        postsQuery = supabase
-          .from(DB.posts.table)
-          .select(
-            `
-            *,
-            author:users!posts_author_id_users_id_fk(
-              ${DB.users.id},
-              ${DB.users.authId},
-              ${DB.users.username},
-              ${DB.users.firstName},
-              ${DB.users.verified},
-              avatar:${DB.users.avatarId}(url)
-            ),
-            media:posts_media(
-              ${DB.postsMedia.type},
-              ${DB.postsMedia.url},
-              ${DB.postsMedia.order},
-              ${DB.postsMedia.mimeType},
-              ${DB.postsMedia.livePhotoVideoUrl},
-            ${DB.postsMedia.thumbnail}
-            )
-          `,
-          )
-          .eq(DB.posts.authorId, userRow[DB.users.id])
-          .order(DB.posts.createdAt, { ascending: false })
-          .limit(50);
-      } else {
-        // Username: use a join filter on the author FK — single query, no waterfall
-        postsQuery = supabase
-          .from(DB.posts.table)
-          .select(
-            `
-            *,
-            author:users!posts_author_id_users_id_fk!inner(
-              ${DB.users.id},
-              ${DB.users.authId},
-              ${DB.users.username},
-              ${DB.users.firstName},
-              ${DB.users.verified},
-              avatar:${DB.users.avatarId}(url)
-            ),
-            media:posts_media(
-              ${DB.postsMedia.type},
-              ${DB.postsMedia.url},
-              ${DB.postsMedia.order},
-              ${DB.postsMedia.mimeType},
-              ${DB.postsMedia.livePhotoVideoUrl},
-            ${DB.postsMedia.thumbnail}
-            )
-          `,
-          )
-          .eq("author.username", userId)
-          .order(DB.posts.createdAt, { ascending: false })
-          .limit(50);
-      }
-
-      const { data, error } = await postsQuery;
-
-      if (error) {
-        console.error("[Posts] getProfilePosts error:", error);
-        // THROWS. This used to `return []`, which the query cached as a
-        // successful empty result — for five minutes (STALE_TIMES.profilePosts)
-        // and across launches, since "profilePosts" is in the persist
-        // whitelist. One transient failure therefore rendered as "No posts yet"
-        // on a profile whose own counter said 19, and stayed that way.
-        throw new Error(error.message || "Could not load posts");
-      }
-
-      const hydratedPosts = await hydrateTextPostSlides(data || []);
-      const postIds = hydratedPosts.map((p: any) => Number(p[DB.posts.id]));
-      const likedSet = await fetchViewerLikedPostIds(postIds);
-
-      return hydratedPosts.map((p: any) => {
-        const pid = String(p[DB.posts.id]);
-        return transformPost(p, likedSet.has(pid));
-      });
-    } catch (error) {
-      console.error("[Posts] getProfilePosts error:", error);
-      // Rethrow for the same reason: an empty array is an answer about the
-      // account, and a failure is not.
-      throw error instanceof Error
-        ? error
-        : new Error("Could not load posts");
-    }
+    const result = await readProjectedPosts({ mode: "profile", userId, limit: 50 });
+    return result.posts;
   },
 
   /**

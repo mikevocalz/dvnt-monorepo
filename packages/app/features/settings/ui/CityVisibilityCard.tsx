@@ -1,3 +1,5 @@
+import { useExactDistanceConsent } from "@dvnt/app/lib/hooks/use-exact-distance-consent";
+import { EXACT_DISTANCE_COPY } from "@dvnt/app/lib/stores/exact-distance-store";
 /**
  * City discovery visibility — the settings control, native (iOS + Android).
  *
@@ -28,16 +30,16 @@ import {
 
 export function CityVisibilityCard() {
   // Native privacy settings commit explicit publish/revoke while the screen is visible.
-  useSyncMemberProximityPresence();
+  const proximity = useSyncMemberProximityPresence();
+  const exact = useExactDistanceConsent();
   const activeCity = useEventsLocationStore((s) => s.activeCity);
   const durationId = useEventsLocationStore((s) => s.visibilityDurationId);
   const setDuration = useEventsLocationStore((s) => s.setVisibilityDuration);
   const showMeInCity = useEventsLocationStore((s) => s.showMeInCity);
-  const hideMeInCity = useEventsLocationStore((s) => s.hideMeInCity);
+  const hideMeInCity = () => proximity.stop(true);
   const preciseOptIn = useEventsLocationStore((s) => s.preciseProximityGrant);
   const preciseOwner = useEventsLocationStore((s) => s.preciseProximityOwnerAuthId);
   const authId = useAuthStore((s) => s.user?.authId);
-  const setPreciseOptIn = useEventsLocationStore((s) => s.setPreciseProximityGrant);
   const deviceLat = useEventsLocationStore((s) => s.deviceLat);
   const deviceLng = useEventsLocationStore((s) => s.deviceLng);
   const grant = useActiveCityVisibility();
@@ -50,6 +52,17 @@ export function CityVisibilityCard() {
 
   return (
     <View className="mb-6 rounded-xl border border-border bg-card">
+      <View className="p-4">
+        <Text className="text-sm text-muted-foreground">{EXACT_DISTANCE_COPY}</Text>
+        {!exact.enabled && !exact.withdrawalPending && (!grant || !hasDeviceLocation || !preciseOptIn || preciseOwner !== authId || proximity.withdrawalPending) ? (
+          <Text className="mt-2 text-sm text-muted-foreground">To allow exact distances, turn on city visibility and approximate distance sharing below, and make a device location available first. Exact sharing asks separately and gets a fresh location.</Text>
+        ) : null}
+        <Pressable accessibilityRole="button" disabled={exact.busy || (!exact.enabled && !exact.withdrawalPending && (!grant || !hasDeviceLocation || !preciseOptIn || preciseOwner !== authId || proximity.withdrawalPending))}
+          onPress={() => void exact.update(!(exact.enabled || exact.withdrawalPending))} className="mt-3 rounded-full border border-border px-4 py-2">
+          <Text className="text-foreground">{exact.busy ? (exact.withdrawalPending ? "Stopping…" : "Getting a fresh location…") : exact.withdrawalPending ? "Retry Stop exact distances" : exact.enabled ? "Stop exact distances" : "I agree: allow exact distances"}</Text>
+        </Pressable>
+        {exact.error ? <Text accessibilityRole="alert" className="text-red-500">{exact.error}</Text> : null}
+      </View>
       <View className="flex-row items-center justify-between p-4">
         <View className="flex-1 pr-4">
           <Text className="font-semibold text-foreground">
@@ -61,7 +74,7 @@ export function CityVisibilityCard() {
         </View>
         <Switch
           checked={grant != null}
-          disabled={!activeCity && grant == null}
+          disabled={grant == null && (!activeCity || proximity.withdrawalPending)}
           onCheckedChange={onToggle}
         />
       </View>
@@ -139,10 +152,18 @@ export function CityVisibilityCard() {
         </View>
         <Switch
           checked={Boolean(grant && preciseOptIn && preciseOwner === authId)}
-          disabled={(!grant || !hasDeviceLocation) && preciseOwner !== authId}
-          onCheckedChange={(checked) => setPreciseOptIn(checked, authId ?? null)}
+          disabled={proximity.withdrawalPending || ((!grant || !hasDeviceLocation) && preciseOwner !== authId)}
+          onCheckedChange={proximity.setDistanceSharing}
         />
       </View>
+      {proximity.busy ? <Text accessibilityLiveRegion="polite" className="px-4 pb-3 text-sm text-muted-foreground">{proximity.withdrawalPending ? "Stopping distance sharing…" : "Updating distance sharing…"}</Text> : null}
+      {proximity.error ? <Text accessibilityRole="alert" className="px-4 pb-3 text-sm text-red-500">{proximity.error}</Text> : null}
+      {proximity.error || proximity.withdrawalPending ? (
+        <Pressable accessibilityRole="button" disabled={proximity.busy} onPress={() => void proximity.retry()}
+          className="mx-4 mb-4 self-start rounded-full border border-border px-4 py-2">
+          <Text className="text-sm text-foreground">{proximity.withdrawalPending ? "Retry Stop sharing distance" : "Retry distance sharing"}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

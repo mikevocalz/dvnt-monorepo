@@ -1,3 +1,6 @@
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
+import { MemberDistanceBadge } from "@dvnt/app/components/feed/member-distance-badge";
 import { useFeedVideo } from "@dvnt/app/components/feed/use-feed-video.web";
 import { isWebLivePhoto, resolveWebPostMedia } from "@dvnt/app/components/feed/web-post-media";
 import { LivePhotoBadge, LivePhotoMedia, useLivePhoto } from "@dvnt/app/components/feed/live-photo-player.web";
@@ -30,6 +33,7 @@ import {
 import { useWindowDimensions } from "react-native";
 import { useRouter } from "solito/navigation";
 import { CardLink } from "@dvnt/app/components/ui/card-link.web";
+import { useFeedScrollStore } from "@dvnt/app/lib/stores/feed-scroll-store";
 import { useScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
 import { Bookmark, Play, Grid3x3, Plus, Send } from "lucide-react";
 import { useInfiniteFeedPosts, useSyncLikedPosts } from "@dvnt/app/lib/hooks/use-posts";
@@ -224,7 +228,13 @@ export function HomeScreen() {
   // Back from a post lands where you left the feed, not at the top. The
   // feed owns its scroll (it slides under the glass header), so the
   // browser's own restoration never applied to it.
-  useScrollRestoration(parentRef, "feed");
+  const scrollTrigger = useFeedScrollStore((s) => s.scrollToTopTrigger);
+  const consumedScrollTrigger = useFeedScrollStore((s) => s.consumedTrigger);
+  const resetToTop = scrollTrigger > consumedScrollTrigger;
+  useScrollRestoration(parentRef, "feed", true, false, resetToTop, scrollTrigger);
+  useEffect(() => {
+    if (resetToTop) useFeedScrollStore.getState().consumeScrollToTop(scrollTrigger);
+  }, [resetToTop, scrollTrigger]);
   const [measuredW, setMeasuredW] = useState(0);
   useEffect(() => {
     const el = parentRef.current;
@@ -466,7 +476,10 @@ export function HomeScreen() {
 
 export default HomeScreen;
 
-function MasonryCell({
+function MasonryCell(props: { post: Post; fallbackHeight: number }) {
+  return useSpicyPostLocked(props.post) ? <SpicyFollowGate author={props.post.author} height={props.fallbackHeight} /> : <UnlockedMasonryCell {...props} />;
+}
+function UnlockedMasonryCell({
   post,
   fallbackHeight,
 }: {
@@ -617,6 +630,7 @@ function MasonryCell({
           aria-hidden
           className="absolute inset-x-0 bottom-0 h-16 bg-linear-to-t from-black/70 to-transparent"
         />
+        <div className="relative px-2"><MemberDistanceBadge username={post.author?.username} /></div>
         <div className="relative flex flex-wrap items-center justify-between gap-x-1 px-1">
           <PostEngagementCounts
             compact

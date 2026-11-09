@@ -11,6 +11,9 @@ let chromium;
 try { ({ chromium } = require('playwright')); } catch { ({ chromium } = require('@playwright/test')); }
 const ROOT = path.resolve(__dirname, '..');
 const selections = [];
+const notificationFilters = [];
+const bridgeSubjects = [];
+const notificationHeaders = [];
 const row = {
   id: 1, type: 'event_broadcast', entity_type: 'event', entity_id: '90', actor_id: 613,
   actor: { id: 613, username: 'deviantevents', first_name: 'Deviant Events', last_name: null },
@@ -20,14 +23,25 @@ const row = {
 const db = { from(table) {
   const q = {};
   q.select = fields => { selections.push([table, fields]); return q; };
-  for (const method of ['eq', 'in', 'order', 'limit']) q[method] = () => q;
+  for (const method of ['in', 'order', 'limit']) q[method] = () => q;
+  q.eq = (key, value) => { if (table === 'notifications') notificationFilters.push([key, value]); return q; };
+  q.setHeader = (key, value) => { notificationHeaders.push([key, value]); return q; };
   q.then = (ok, fail) => Promise.resolve({ data: table === 'notifications' ? [row] : table === 'events' ? [{ id: 90, title: 'MIAMI Moonlight' }] : [], count: 1 }).then(ok, fail);
   return q;
 } };
+const exportsAccess = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/app/lib/api/notification-access.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
+  exports: exportsAccess,
+  require: name => name.includes('auth/identity') ? { getCurrentUserIdSync: () => 23, getCurrentUserRow: async () => ({ id: 23, authId: 'fixture-notification-viewer' }) }
+    : name.includes('supabase-jwt') ? { ensureSupabaseJwt: async subject => { bridgeSubjects.push(subject); return subject === 'fixture-notification-viewer'; } }
+    : name.includes('session-lifecycle') ? { getSessionLifecycle: () => ({ epoch: 4, ready: true }) }
+    : name.includes('supabase/client') ? { getBridgeRequestEpoch: () => '4' } : {},
+});
 const exportsApi = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/app/lib/api/notifications.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
   exports: exportsApi, console, Date, Map, Set,
   require: name => name.includes('supabase/client') ? { supabase: db }
+    : name.includes('notification-access') ? exportsAccess
     : name.includes('auth-helper') ? { getCurrentUserIdSync: () => 23 }
     : {},
 });
@@ -75,6 +89,9 @@ const boundaries = {
 (async () => {
   assert.ok(fs.existsSync(path.join(ROOT, 'apps/web/src/app/(frontend)/feed/events/[id]/page.tsx')));
   const dto = (await exportsApi.notificationsApiClient.getNotifications()).docs[0];
+  assert.deepEqual(bridgeSubjects, ['fixture-notification-viewer']);
+  assert.deepEqual(notificationFilters, [['recipient_id', 23]]);
+  assert.deepEqual(notificationHeaders, [['x-dvnt-bridge-epoch', '4']]);
   assert.equal(dto.sender.displayName, 'Deviant Events');
   assert.equal(dto.sender.username, 'deviantevents');
   assert.ok(selections.find(([table, fields]) => table === 'notifications' && fields.includes('first_name') && fields.includes('last_name')));
@@ -86,8 +103,9 @@ const boundaries = {
       const activity=notificationToActivity(${JSON.stringify(dto)});window.routes=[];window.profiles=[];
       const props={activity,isFollowed:false,isFollowPending:false,onUserPress:u=>window.profiles.push(u),onPostPress:()=>{},onFollowBack:()=>{}};
       const navigate=route=>{window.routes.push(route);history.pushState({},'',route)};
+      const profile=(username,platform)=>{window.profiles.push(username);history.pushState({},'',(platform==='web'?'/profile/':'/(protected)/profile/')+username)};
       const root=createRoot(document.getElementById('root'));
-      window.render=(normal=false)=>root.render(<><section id="web"><ActivityRow {...props} activity={normal?{...activity,type:'like'}:activity} onActivityPress={a=>navigate(webRouteForActivity(a))}/></section><section id="native"><ActivityItem {...props} activity={normal?{...activity,type:'like'}:activity} onActivityPress={a=>navigate(getRouteForActivity(a))}/></section></>);window.render();`, resolveDir: ROOT, loader: 'tsx' },
+      window.render=(normal=false)=>root.render(<><section id="web"><ActivityRow {...props} onUserPress={u=>profile(u,"web")} activity={normal?{...activity,type:'like'}:activity} onActivityPress={a=>navigate(webRouteForActivity(a))}/></section><section id="native"><ActivityItem {...props} onUserPress={u=>profile(u,"native")} activity={normal?{...activity,type:'like'}:activity} onActivityPress={a=>navigate(getRouteForActivity(a))}/></section></>);window.render();`, resolveDir: ROOT, loader: 'tsx' },
     bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
     nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean),
     define: { 'process.env.NODE_ENV': '"test"', 'process.env.NEXT_PUBLIC_BUNNY_CDN_URL': '""', 'process.env.EXPO_PUBLIC_BUNNY_CDN_URL': '""' },
@@ -115,16 +133,35 @@ const boundaries = {
       const area = page.locator(`#${platform}`);
       const expected = platform === 'web' ? '/feed/events/90' : '/(protected)/events/90';
       assert.match(await area.innerText(), /Deviant Events sent a message to attendees of MIAMI Moonlight/);
-      for (const target of [area.getByText('Deviant Events', { exact: true }), area.getByText('“Venue changed to the new Miami address.”'), area.getByAltText('deviantevents')]) {
+      // The row/body opens the activity; the actor name/avatar opens only
+      // that actor's profile. Repeat both flows and return with Back.
+      for (let repeat = 0; repeat < 2; repeat++) {
         const before = await page.evaluate(() => window.routes.length);
-        await target.click();
+        const profilesBefore = await page.evaluate(() => window.profiles.length);
+        await area.getByText('“Venue changed to the new Miami address.”').click();
         assert.equal(await page.evaluate(() => window.routes.at(-1)), expected);
-        assert.equal(await page.evaluate(() => window.routes.length), before + 1, 'tap navigates once');
+        assert.equal(await page.evaluate(() => window.routes.length), before + 1, 'body navigates once');
+        assert.equal(await page.evaluate(() => window.profiles.length), profilesBefore, 'body does not open actor profile');
         assert.equal(new URL(page.url()).pathname, expected);
         await page.goBack();
+        assert.equal(new URL(page.url()).pathname, '/activity');
+      }
+      for (const target of [area.getByText('Deviant Events', { exact: true }), area.getByAltText('deviantevents')]) {
+        for (let repeat = 0; repeat < 2; repeat++) {
+          const before = await page.evaluate(() => window.routes.length);
+          const profilesBefore = await page.evaluate(() => window.profiles.length);
+          await target.click();
+          assert.equal(await page.evaluate(() => window.profiles.at(-1)), 'deviantevents');
+          assert.equal(await page.evaluate(() => window.profiles.length), profilesBefore + 1, 'actor navigates once');
+          assert.equal(await page.evaluate(() => window.routes.length), before, 'actor tap must not also open event');
+          assert.equal(new URL(page.url()).pathname, platform === 'web' ? '/profile/deviantevents' : '/(protected)/profile/deviantevents');
+          await page.goBack();
+          assert.equal(new URL(page.url()).pathname, '/activity');
+        }
       }
     }
-    assert.deepEqual(await page.evaluate(() => window.profiles), [], 'broadcast name/avatar must not intercept taps to a profile');
+    assert.deepEqual(await page.evaluate(() => window.profiles), Array(8).fill('deviantevents'));
+    await page.evaluate(() => { window.profiles = []; });
     await page.evaluate(() => window.render(true));
     for (const platform of ['web', 'native']) {
       const area = page.locator(`#${platform}`);
@@ -133,6 +170,6 @@ const boundaries = {
     }
     assert.deepEqual(await page.evaluate(() => window.profiles), ['deviantevents','deviantevents']);
     assert.deepEqual(errors, []);
-    console.log('PASS: actual DTO preserves profile name/handle; actual web/native broadcast rows render Deviant Events; body/name/avatar each navigate once to event 90; Back works; normal social profile taps remain unchanged.');
+    console.log('PASS: actual DTO preserves profile name/handle; actual web/native broadcast rows render Deviant Events; body opens event 90; actor name/avatar open only their profile; repeated taps and Back work; normal social profile taps remain unchanged.');
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

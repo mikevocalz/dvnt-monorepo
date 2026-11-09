@@ -68,7 +68,9 @@ export async function viewerMaySeeSpicy(
 }
 
 /**
- * Drop SPICY posts the viewer may not see. Their own posts always stay.
+ * @deprecated Age-only filter, NOT a complete read authorization check.
+ * Service readers must use projectVisiblePosts from post-access.ts.
+ * Drop age-ineligible SPICY posts. Their own posts always stay.
  * Rows need `is_nsfw` and `author_id` selected.
  */
 export function withoutHiddenSpicy<T extends { is_nsfw?: unknown; author_id?: unknown }>(

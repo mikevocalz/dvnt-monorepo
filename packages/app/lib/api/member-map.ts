@@ -5,6 +5,10 @@ export interface LocationSettings {
   eventsMapEnabled: boolean;
   revision: number;
   shareUntil: string | null;
+  /** Non-secret verified session identity. Never persist this or infer a grant from it. */
+  sessionKey?: string;
+  sessionExpiresAt?: string | null;
+  consentVersion?: string | null;
 }
 export interface NearbyMember {
   id: string;
@@ -38,8 +42,8 @@ async function call<T>(body: Record<string, unknown>): Promise<T> {
 }
 export const memberMapApi = {
   settings: (expectedAuthId: string) => call<LocationSettings>({ action: "settings", expectedAuthId }),
-  updateSettings: (expectedAuthId: string, input: { expectedRevision: number; locationEnabled: boolean; eventsMapEnabled: boolean; shareDurationHours?: 1 | 4; consentVersion?: "events-map-v1" }) => call<LocationSettings>({ action: "updateSettings", expectedAuthId, ...input }),
+  updateSettings: (expectedAuthId: string, input: { expectedRevision: number; locationEnabled: boolean; eventsMapEnabled: boolean; shareDurationHours?: 1 | 4; expectedSessionId?: string; consentVersion?: "events-map-v1" | "events-map-session-v2" }) => call<LocationSettings>({ action: "updateSettings", expectedAuthId, ...input }),
   revoke: (expectedAuthId: string, scope: "overall" | "events" = "events") => call<LocationSettings>({ action: "revoke", expectedAuthId, scope }),
-  publish: (expectedAuthId: string, input: { revision: number; latitude: number; longitude: number; observedAt: string }) => call<{ published: true; expiresAt: string }>({ action: "publish", expectedAuthId, ...input }),
+  publish: (expectedAuthId: string, input: { expectedSessionId?: string; revision: number; latitude: number; longitude: number; observedAt: string }) => call<{ published: true; expiresAt: string }>({ action: "publish", expectedAuthId, ...input }),
   nearby: (expectedAuthId: string) => call<NearbyMembers>({ action: "nearby", expectedAuthId }),
 };

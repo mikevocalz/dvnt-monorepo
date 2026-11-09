@@ -14,6 +14,7 @@ on:
       - 'apps/mobile/supabase/functions/event-broadcast-message/**'
       - 'scripts/test-event-notification-browser.cjs'
       - 'scripts/test-activity-*.cjs'
+      - 'scripts/fixtures/notification-access.cjs'
       - '.github/workflows/event-notifications.yml'
 permissions:
   contents: read

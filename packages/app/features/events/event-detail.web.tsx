@@ -933,10 +933,13 @@ export function EventDetailScreen() {
   };
   const liveById = (tid: unknown) =>
     liveList.find((lt) => String(lt.id) === String(tid));
-  // Include authoritative live rows even if the event aggregate is older.
-  // Payload-only rows remain visible but cannot initiate checkout.
+  // A successful catalog read owns membership as well as tier flags. Deleted
+  // rows must not survive in the older event aggregate. Keep display-only
+  // aggregate fallback only before catalog data exists; checkout stays gated
+  // above. Retained successful data stays authoritative during refresh/errors.
+  const hasAuthoritativeCatalog = Array.isArray(ticketTypesQuery.data);
   const displayTiers = [
-    ...tiers,
+    ...tiers.filter((tier) => !hasAuthoritativeCatalog || liveById(tier.id)),
     ...liveList.filter((live) => !tiers.some((t) => String(t.id) === String(live.id))),
   ];
   // A live null start also overrides an older delayed date in the aggregate.

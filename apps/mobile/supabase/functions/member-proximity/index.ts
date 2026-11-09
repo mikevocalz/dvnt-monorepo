@@ -1,35 +1,8 @@
-/**
- * member-proximity
- *
- * Consent-based member proximity without exposing another member's coordinates.
- *
- * POST { action: "publish", latitude, longitude, cityId?, accuracyMeters?, shareUntil }
- * POST { action: "revoke" }
- * POST { action: "distance", targetUsername }
- *
- * Publishing requires an approved adult identity verification. Distance reads
- * are session-authenticated, blocked/private-aware, rate-limited, and return a
- * coarse band or a city-only fallback.
- *
- * Both endpoints of a distance read come from the server. The viewer's own
- * position is their `member_proximity_presence` row, never a number in the
- * request body: a caller who can choose their own coordinates can move it,
- * and a reviewer recovered a target's stored coordinate exactly in 16 calls by
- * trilaterating the 0.1-mile figure this used to return. Both sides therefore
- * need a live grant, and the answer is a band rather than a measurement.
- *
- * Bands can still be intersected. A caller who republishes their own point
- * and watches the band flip at 1, 5, 15 or 50 miles learns where those circles
- * cross, and enough crossings locate the target. What stands in the way is
- * cost, not geometry: a position change is limited to PUBLISH_MOVES_PER_HOUR
- * and PUBLISH_MOVES_PER_DAY in the database-backed limiter, distance reads to
- * 120 per 10 minutes, the caller must be a verified adult with a live grant of
- * their own, and stored points are quantized to ~110 m. That slows a
- * trilateration to days and ties it to a verified identity. It does not make
- * one impossible.
- */
+/** Server-private device positions. Exact distances require reciprocal, explicit
+ * v2 consent for the current live sign-in. Legacy consent remains bands only.
+ * Repeated exact measurements may reveal location; the consent UI discloses it. */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { verifyLocationSession } from "../_shared/location-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 import { resolveVerifiedAdmission } from "../_shared/verified-admission.ts";
 import { consumeDbRateLimit } from "../_shared/db-rate-limit.ts";
@@ -84,11 +57,7 @@ function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number) 
   return 3958.7613 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/**
- * The whole answer a viewer gets. A band has no sub-band structure to solve
- * for, so repeated reads from different positions cannot narrow the target
- * down the way a 0.1-mile figure could.
- */
+/** Legacy grants remain coarse. Bands also carry location-inference risk. */
 type ProximityBand = "under_1" | "1_5" | "5_15" | "15_50" | "far";
 
 const BAND_LABELS: Record<ProximityBand, string> = {
@@ -120,6 +89,17 @@ async function hasAdultVerification(db: any, userId: string) {
   return checkAdultBirthDate(data.date_of_birth).allowed;
 }
 
+async function exactConsent(db: any, userId: string, sessionId?: string) {
+  const { data, error } = await db.from("member_exact_distance_consent")
+    .select("session_id, expires_at, consent_version").eq("user_id", userId).maybeSingle();
+  if (error || data?.consent_version !== 2 || (sessionId && data.session_id !== sessionId) ||
+      !(Date.parse(data.expires_at) > Date.now())) return null;
+  const { data: live, error: sessionError } = await db.from("session")
+    .select("id, userId, expiresAt").eq("id", data.session_id).eq("userId", userId).maybeSingle();
+  if (sessionError || !live || !(Date.parse(live.expiresAt) > Date.now())) return null;
+  return Math.min(Date.parse(live.expiresAt), Date.parse(data.expires_at));
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -133,7 +113,7 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const session = await verifySessionDetailed(db, req);
+  const session = await verifyLocationSession(db, req);
   if (!session.ok) {
     return json({ ok: false, error: "Unauthorized" }, 401);
   }
@@ -143,10 +123,26 @@ Deno.serve(async (req: Request) => {
   const action = typeof body?.action === "string" ? body.action : "";
   if (!action) return json({ ok: false, error: "Missing action" }, 400);
 
+  if (body?.expectedAuthId !== undefined && body.expectedAuthId !== authUserId) {
+    return json({ ok: false, error: "Account changed" }, 409);
+  }
+  if (action === "publish" && body?.exactDistanceVersion === 2 &&
+      (body.expectedAuthId !== authUserId || body.expectedSessionId !== session.sessionId)) {
+    return json({ ok: false, error: "Sign-in changed" }, 409);
+  }
+  if ((action === "consentExact" || action === "revokeExact") && body?.expectedAuthId !== authUserId) {
+    return json({ ok: false, error: "Account changed" }, 409);
+  }
+  if (action === "consentExact" && body?.expectedSessionId !== session.sessionId) {
+    return json({ ok: false, error: "Sign-in changed" }, 409);
+  }
+
   // Withdrawal of location consent must work even when identity verification
   // expired, the account was suspended, or the admission policy changed.
   // A user never has to earn permission to STOP sharing their coordinates.
-  if (action === "revoke") {
+  if (action === "revoke" || action === "revokeExact") {
+    const { error: consentError } = await db.from("member_exact_distance_consent").delete().eq("user_id", authUserId);
+    if (consentError) return json({ ok: false, error: "Could not withdraw exact distance consent" }, 503);
     const { error } = await db.from("member_proximity_presence")
       .delete().eq("user_id", authUserId);
     if (error) {
@@ -164,6 +160,21 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  if (action === "consentExact") {
+    if (body?.consentVersion !== 2 || !(await hasAdultVerification(db, authUserId))) {
+      return json({ ok: false, error: "Explicit v2 adult consent is required" }, 403);
+    }
+    const { data: master, error: masterError } = await db.from("member_map_settings")
+      .select("location_enabled").eq("user_id", authUserId).maybeSingle();
+    if (masterError || master?.location_enabled !== true) return json({ ok: false, error: "Enable location first" }, 403);
+    const { error } = await db.from("member_exact_distance_consent").upsert({
+      user_id: authUserId, session_id: session.sessionId, consent_version: 2,
+      expires_at: session.expiresAt, consented_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+    if (error) return json({ ok: false, error: "Could not save consent" }, 503);
+    return json({ ok: true, data: { expiresAt: session.expiresAt, consentVersion: 2 } });
+  }
+
   if (action === "publish") {
     const adult = await hasAdultVerification(db, authUserId);
     if (!adult) {
@@ -173,6 +184,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const { data: master, error: masterError } = await db.from("member_map_settings")
+      .select("location_enabled").eq("user_id", authUserId).maybeSingle();
+    if (masterError || master?.location_enabled !== true) return json({ ok: false, error: "Enable location first" }, 403);
+    const exactUntil = body?.exactDistanceVersion === 2
+      ? await exactConsent(db, authUserId, session.sessionId) : null;
+    if (body?.exactDistanceVersion === 2 && !exactUntil) return json({ ok: false, error: "Live exact distance consent required" }, 403);
+    const observedAt = typeof body?.observedAt === "string" ? Date.parse(body.observedAt) : NaN;
+    if (exactUntil && (!Number.isFinite(observedAt) || observedAt < Date.now() - 60_000 || observedAt > Date.now() + 5_000)) {
+      return json({ ok: false, error: "Fresh device observation required" }, 400);
+    }
+    const precision = exactUntil ? (n: number) => Math.round(n * 100000) / 100000 : quantize;
     const latitude = finiteCoord(body?.latitude, -90, 90);
     const longitude = finiteCoord(body?.longitude, -180, 180);
     const shareUntil = typeof body?.shareUntil === "string" ? Date.parse(body.shareUntil) : NaN;
@@ -192,16 +214,19 @@ Deno.serve(async (req: Request) => {
     // the same quantized position does not spend the limit.
     const { data: current, error: currentError } = await db
       .from("member_proximity_presence")
-      .select("latitude, longitude")
+      .select("latitude, longitude, exact_observed_at")
       .eq("user_id", authUserId)
       .maybeSingle();
     if (currentError) {
       console.error("[member-proximity] presence read failed:", currentError.code);
       return json({ ok: false, error: "Could not update proximity sharing" }, 503);
     }
+    if (exactUntil && current?.exact_observed_at && observedAt <= Date.parse(current.exact_observed_at)) {
+      return json({ ok: false, error: "A newer device observation is required" }, 409);
+    }
     const moved = !current ||
-      Number(current.latitude) !== quantize(latitude) ||
-      Number(current.longitude) !== quantize(longitude);
+      Number(current.latitude) !== precision(latitude) ||
+      Number(current.longitude) !== precision(longitude);
     if (moved) {
       for (const [action, max, windowSeconds] of [
         ["member-proximity-move-hour", PUBLISH_MOVES_PER_HOUR, 60 * 60],
@@ -220,17 +245,21 @@ Deno.serve(async (req: Request) => {
 
     const cityId = Number(body?.cityId);
     const accuracyMeters = Number(body?.accuracyMeters);
+    const sharedUntil = new Date(Math.min(shareUntil, Date.parse(session.expiresAt),
+      exactUntil ? Math.min(exactUntil, observedAt + 15 * 60_000) : Infinity)).toISOString();
     const { error } = await db.from("member_proximity_presence").upsert(
       {
         user_id: authUserId,
         city_id: Number.isSafeInteger(cityId) && cityId > 0 ? cityId : null,
-        latitude: quantize(latitude),
-        longitude: quantize(longitude),
+        latitude: precision(latitude),
+        longitude: precision(longitude),
         accuracy_meters:
           Number.isFinite(accuracyMeters) && accuracyMeters >= 0
             ? Math.min(accuracyMeters, 50_000)
             : null,
-        share_until: new Date(shareUntil).toISOString(),
+        share_until: sharedUntil,
+        exact_observed_at: exactUntil ? new Date(observedAt).toISOString() : null,
+        exact_session_id: exactUntil ? session.sessionId : null,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },
@@ -239,7 +268,7 @@ Deno.serve(async (req: Request) => {
       console.error("[member-proximity] publish failed:", error.message);
       return json({ ok: false, error: "Could not update proximity sharing" }, 500);
     }
-    return json({ ok: true, data: { sharedUntil: new Date(shareUntil).toISOString() } });
+    return json({ ok: true, data: { sharedUntil } });
   }
 
   if (action !== "distance") {
@@ -286,13 +315,13 @@ Deno.serve(async (req: Request) => {
   }
 
   if (target.is_private) {
-    const { data: follows } = await db
+    const { data: follows, error: followError } = await db
       .from("follows")
       .select("id")
       .eq("follower_id", viewer.id)
       .eq("following_id", target.id)
       .maybeSingle();
-    if (!follows) {
+    if (followError || !follows) {
       return json({ ok: true, data: { kind: "unavailable", label: null } });
     }
   }
@@ -307,6 +336,9 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  const targetAdmission = await resolveVerifiedAdmission(db, String(target.auth_id));
+  if (targetAdmission.state === "blocked") return json({ ok: true, data: { kind: "unavailable", label: null } });
+
   // A pre-migration legacy point does not bypass the overall location master.
   const masters = await Promise.all([authUserId, String(target.auth_id)].map((id) =>
     db.from("member_map_settings").select("location_enabled").eq("user_id", id).maybeSingle()
@@ -317,7 +349,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: targetPresence } = await db
     .from("member_proximity_presence")
-    .select("latitude, longitude, share_until")
+    .select("latitude, longitude, share_until, exact_session_id, exact_observed_at")
     .eq("user_id", target.auth_id)
     .gt("share_until", new Date().toISOString())
     .maybeSingle();
@@ -335,7 +367,7 @@ Deno.serve(async (req: Request) => {
   // the target needed a live row above, and so does the viewer.
   const { data: ownPresence } = await db
     .from("member_proximity_presence")
-    .select("latitude, longitude")
+    .select("latitude, longitude, share_until, exact_session_id, exact_observed_at")
     .eq("user_id", authUserId)
     .gt("share_until", new Date().toISOString())
     .maybeSingle();
@@ -349,14 +381,37 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const band = bandForMiles(
-    haversineMiles(
-      viewerLatitude,
-      viewerLongitude,
-      Number(targetPresence.latitude),
-      Number(targetPresence.longitude),
-    ),
-  );
+  const targetLatitude = finiteCoord(targetPresence.latitude, -90, 90);
+  const targetLongitude = finiteCoord(targetPresence.longitude, -180, 180);
+  const unavailable = () => json({ ok: true, data: { kind: "unavailable", label: null } });
+  if (targetLatitude === null || targetLongitude === null ||
+      !(await hasAdultVerification(db, authUserId))) return unavailable();
+  const now = Date.now();
+  if (!(Date.parse(ownPresence.share_until) > now) || !(Date.parse(targetPresence.share_until) > now)) return unavailable();
+  const hasExactPoint = ownPresence.exact_session_id != null || targetPresence.exact_session_id != null ||
+    ownPresence.exact_observed_at != null || targetPresence.exact_observed_at != null;
+  let exactExpires: number | null = null;
+  if (hasExactPoint) {
+    // Never downgrade a v2 point to a band after its consent or session fails.
+    // Only two independent legacy snapshots may enter the coarse path below.
+    if (!ownPresence.exact_session_id || !targetPresence.exact_session_id ||
+        ownPresence.exact_session_id !== session.sessionId) return unavailable();
+    const observations = [ownPresence, targetPresence].map(p => Date.parse(p.exact_observed_at));
+    if (observations.some(t => !Number.isFinite(t) || t > now + 5_000 || t + 15 * 60_000 <= now)) return unavailable();
+    const [viewerExact, targetExact] = await Promise.all([
+      exactConsent(db, authUserId, session.sessionId),
+      exactConsent(db, String(target.auth_id), targetPresence.exact_session_id),
+    ]);
+    if (!viewerExact || !targetExact) return unavailable();
+    exactExpires = Math.min(viewerExact, targetExact, Date.parse(ownPresence.share_until),
+      Date.parse(targetPresence.share_until), ...observations.map(t => t + 15 * 60_000), now + 30_000);
+  }
+  const miles = haversineMiles(viewerLatitude, viewerLongitude, targetLatitude, targetLongitude);
+  if (exactExpires !== null) {
+    return json({ ok: true, data: { kind: "distance", consentVersion: 2,
+      miles: Number(miles.toFixed(2)), label: `${miles.toFixed(2)} miles away`, expiresAt: new Date(exactExpires).toISOString() } });
+  }
+  const band = bandForMiles(miles);
   return json({
     ok: true,
     data: {

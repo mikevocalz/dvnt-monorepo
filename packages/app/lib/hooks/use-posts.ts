@@ -153,7 +153,7 @@ export function useInfiniteFeedPosts({
     // could be hours old and never refreshed it. Cached pages still render
     // instantly; the refetch lands in the background (stale-while-revalidate).
     // Native keeps false: it has pull-to-refresh and instant back-nav.
-    refetchOnMount: Platform.OS === "web" ? "always" : false,
+    refetchOnMount: "always",
     // Still useful within a session for tab switching.
     refetchOnWindowFocus: Platform.OS === "web",
   });
@@ -166,7 +166,8 @@ export function useProfilePosts(userId: string) {
     queryKey: postKeys.profilePosts(userId),
     queryFn: () => withServerLikeSync(queryClient, () => postsApi.getProfilePosts(userId), (posts) => posts),
     enabled: !!userId,
-    staleTime: STALE_TIMES.profilePosts,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }
 
@@ -192,9 +193,8 @@ export function usePost(id: string) {
     queryKey: postKeys.detail(id),
     queryFn: async () => {
       if (__DEV__) console.log("[usePost] Fetching post:", id);
-      const cachedSnapshot = findCachedPostSnapshot(queryClient, id);
       const fetchedPost = await withServerLikeSync(queryClient, () => postsApi.getPostById(id), (post) => [post]);
-      return fetchedPost ?? cachedSnapshot ?? null;
+      return fetchedPost; // A server denial/deletion must clear a previously authorized snapshot.
     },
     // STRICT VALIDATION: Only enable query if ID is valid format (numeric or UUID)
     // This prevents queries with "undefined", "null", empty strings, etc.
@@ -209,7 +209,8 @@ export function usePost(id: string) {
       ? (previousData) =>
           previousData ?? findCachedPostSnapshot(queryClient, id)
       : undefined,
-    staleTime: STALE_TIMES.postDetail,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { memberDistanceLabel } from "@dvnt/app/lib/location/member-distance-label";
 import { AvatarLightbox } from "./avatar-lightbox.web";
 import { slugify } from "@dvnt/app/lib/slug";
 
@@ -25,6 +26,8 @@ import { slugify } from "@dvnt/app/lib/slug";
  * Local UI state (menu, avatar lightbox) lives in Zustand, never useState.
  */
 
+import { FollowStatusRefresh } from "@dvnt/app/components/feed/follow-status-refresh";
+import { useFollowRequestStatus } from "@dvnt/app/lib/hooks/use-follow-requests";
 import { followButtonLabel } from "@dvnt/app/lib/profile/follow-relationship";
 import { useWindowScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
 import { useCallback, useEffect, useMemo } from "react";
@@ -173,11 +176,11 @@ export function UserProfileScreen() {
   const { data: proximityResult } = useMemberProximity(
     !isOwnProfile ? (user?.username || safeUsername) : null,
   );
-  const proximity = proximityResult?.kind === "distance"
-    ? proximityResult.label
-    : null;
+  const proximity = memberDistanceLabel(proximityResult);
 
-  const isFollowing = user?.isFollowing === true;
+  const followStatus = useFollowRequestStatus(String(user?.authId || user?.id || ""));
+  const isFollowing = followStatus.following === true;
+  const requestPending = followStatus.data === "pending";
   const profileAvatarUrl = resolveAvatarUrl(user?.avatar);
   const displayName = user?.name || user?.username || safeUsername || "";
   const displayPostsCount =
@@ -197,10 +200,10 @@ export function UserProfileScreen() {
     if (!followTargetId || !safeUsername) return;
     followMutate({
       userId: followTargetId,
-      action: isFollowing ? "unfollow" : "follow",
+      action: isFollowing || requestPending ? "unfollow" : "follow",
       username: safeUsername,
     });
-  }, [followMutate, followTargetId, isFollowing, safeUsername]);
+  }, [followMutate, followTargetId, isFollowing, requestPending, safeUsername]);
 
   const handleMessagePress = useCallback(async () => {
     if (!safeUsername) return;
@@ -356,7 +359,7 @@ export function UserProfileScreen() {
         <div className="mt-4 flex gap-2">
           <button
             onClick={handleFollowPress}
-            disabled={isFollowPending || !followTargetId}
+            disabled={isFollowPending || followStatus.isFetching || followStatus.isError || !followTargetId}
             className={`flex-1 rounded-lg py-2.5 font-semibold disabled:opacity-50 ${
               isFollowing ? "bg-white/8 text-white" : "bg-[#3EA4E5] text-white"
             }`}
@@ -368,7 +371,7 @@ export function UserProfileScreen() {
               ? followVars?.action === "follow"
                 ? "Following…"
                 : "Unfollowing…"
-              : followButtonLabel({ isFollowing, followsYou: Boolean(user?.followsYou) })}
+              : requestPending ? "Requested · Cancel" : followButtonLabel({ isFollowing, followsYou: Boolean(user?.followsYou) })}
           </button>
           <button
             onClick={handleMessagePress}
@@ -384,6 +387,8 @@ export function UserProfileScreen() {
             <Share2 size={20} color="#fff" />
           </button>
         </div>
+
+        <FollowStatusRefresh targetId={followTargetId} />
 
         {/* Tab bar — Posts grid + hosted Events, mirroring the logged-in
             profile's tab pattern (events sits right after the images tab). */}

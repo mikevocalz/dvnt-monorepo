@@ -28,11 +28,18 @@ const fixture = {
     export const conversationData=create(()=>({data:conversations,isPending:false,isError:false,refetch(){}}));
     export const messagesApi={sendMessage:async input=>{state.sent.push(input);if(state.releaseSend)await new Promise(resolve=>{state.resolveSend=resolve});if(state.failSend)throw new Error('send refused');return {id:'m1'}}};`,
   "solito/navigation": `import {router} from 'social-fixture';export const useRouter=()=>router;export const useParams=()=>({id:'11'});`,
-  "react-native": `export const useWindowDimensions=()=>({width:375,height:812});`,
+  "react-native": `export const Text=({children})=><span>{children}</span>;export const useWindowDimensions=()=>({width:375,height:812});`,
   "@dvnt/app/components/ui/card-link.web": `export const CardLink=({href,children,className,ariaLabel})=><a href={href} className={className} aria-label={ariaLabel}>{children}</a>;`,
   "@dvnt/app/components/ui/avatar": `export const UserAvatar=({uri,username})=><img src={uri} alt={username}/>;`,
   "@dvnt/app/lib/hooks/use-scroll-restoration.web": `export const useScrollRestoration=()=>{};`,
+  // Follow/adult admission remain network boundaries; the real Spicy component
+  // and viewer-provenance guard are bundled, never replaced with an allow stub.
+  "@dvnt/app/lib/hooks/use-follow": `export const useFollow=()=>({mutate(){throw new Error('unexpected follow write')},isPending:false});`,
+  "@dvnt/app/lib/hooks/use-follow-requests": `export const useFollowRequestStatus=()=>({data:'none',isLoading:false,isError:false});`,
+  "@dvnt/app/lib/hooks/use-age-verification": `export const useVerificationState=()=>({data:{state:'approved'},isError:false});`,
+  "@dvnt/app/lib/hooks/use-verified-admission": `export const useVerifiedAdmission=()=>({data:{state:'allowed'},isError:false});`,
   "@dvnt/app/lib/hooks/use-posts": `import {post} from 'social-fixture';export const usePost=()=>({data:post,isLoading:false});export const useDeletePost=()=>({mutate(){}});export const useInfiniteFeedPosts=()=>({data:{pages:[{data:[post]}]}});export const useSyncLikedPosts=()=>{};`,
+  "@dvnt/app/lib/hooks/use-member-proximity": `export const useMemberProximity=()=>({data:null});`,
   "@dvnt/app/lib/hooks/use-events": `export const useEvents=()=>({data:[]});`,
   "@dvnt/app/lib/hooks/use-feed-realtime": `export const useFeedRealtime=()=>{};`,
   "@dvnt/app/lib/hooks/usePostLikeState": `import {likes} from 'social-fixture';export const usePostLikeState=()=>likes();`,
@@ -41,6 +48,9 @@ const fixture = {
   "@dvnt/app/lib/hooks/use-stories": `import {state} from 'social-fixture';export const useStories=()=>({data:[]});export const useCreateStory=()=>({isPending:false,mutateAsync:async data=>{state.stories.push(data);if(state.releaseStory)await new Promise(resolve=>{state.resolveStory=resolve});if(state.failStory)throw new Error('story refused');return {id:'s1'}}});`,
   "@dvnt/app/lib/stores/app-store": `export const useAppStore=s=>s({feedMode:'all',nsfwEnabled:false,setNsfwEnabled(){}});`,
   "@dvnt/app/lib/hooks/use-verified-gate": `import {state} from 'social-fixture';export const useVerifiedGate=()=> (action,run)=>{if(state.deferGate)state.gate=run;else if(!state.blocked)run()};`,
+  // Keep the real follow-identity/session guards; only the auth-service edge is
+  // offline, as in test-follow-requests-dom.cjs. Never bundle a live DB client.
+  "@dvnt/app/lib/auth/identity": `import {auth} from 'social-fixture';export const getAuthIdFromStore=()=>auth.getState().user?.authId ?? null;`,
   "@dvnt/app/lib/stores/auth-store": `export {auth as useAuthStore} from 'social-fixture';`,
   "@dvnt/app/lib/stores/ui-store": `import {state} from 'social-fixture';const value={showToast:(...args)=>state.toasts.push(args)};export const useUIStore=s=>s(value);useUIStore.getState=()=>value;`,
   "@dvnt/app/lib/hooks/use-messages": `import {conversationData} from 'social-fixture';export const useConversations=()=>conversationData();`,
@@ -68,10 +78,11 @@ const fixture = {
   "@dvnt/app/components/verified-admission-banner.web": `export const VerifiedAdmissionBanner=()=>null;`,
   "@dvnt/app/components/event/FeedEventCard.web": `export const FeedEventCard=()=>null;`,
   "@dvnt/app/components/story-viewer-overlay.web": `export const StoryViewerOverlay=()=>null;`,
-  "@tanstack/react-query": `export const useQuery=()=>({data:null});`,
   "@dvnt/ui": `export {Drawer} from '${ROOT}/packages/ui/src/form/Drawer.web.tsx';export const Dialog=()=>null;`,
 };
 const source = `import React,{act} from 'react';import {createRoot} from 'react-dom/client';
+import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
+const queryClient=new QueryClient({defaultOptions:{queries:{retry:false}}});
 import {MasonryCell} from './packages/app/features/home/screen.web';
 import {PostDetailScreen} from './packages/app/features/post/post-detail.web';
 import {ShareToInboxSheet} from './packages/app/components/share-to-inbox-sheet.web';
@@ -82,7 +93,7 @@ import {useShareSheetStore} from './packages/app/lib/stores/share-sheet-store';
 import {postStoryItem} from './packages/app/lib/posts/share-post';
 import {state,post,auth,likes,conversationData} from 'social-fixture';
 export {act,state,post,auth,likes,conversationData,postStoryItem,useChatStore,useWebPostShareStore,useShareSheetStore,usePostDetailUIStore};
-export function mount(node){const root=createRoot(node);return {render:(detail=false,showSheet=true)=>root.render(<React.StrictMode>{detail?<PostDetailScreen/>:<><MasonryCell post={post} fallbackHeight={220}/>{showSheet&&<ShareToInboxSheet/>}</>}</React.StrictMode>),unmount:()=>root.unmount()};}`;
+export function mount(node){const root=createRoot(node);return {render:(detail=false,showSheet=true)=>root.render(<React.StrictMode><QueryClientProvider client={queryClient}>{detail?<PostDetailScreen/>:<><MasonryCell post={post} fallbackHeight={220}/>{showSheet&&<ShareToInboxSheet/>}</>}</QueryClientProvider></React.StrictMode>),unmount:()=>root.unmount()};}`;
 (async () => {
   const { Window } = await import(
     require.resolve("happy-dom", {
@@ -104,6 +115,7 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
       platform: "node",
       format: "cjs",
       jsx: "automatic",
+      resolveExtensions: [".web.tsx", ".web.ts", ".tsx", ".ts", ".jsx", ".js", ".json"],
       outfile: path.join(dir, "test.cjs"),
       nodePaths: (process.env.NODE_PATH || "")
         .split(path.delimiter)
@@ -140,8 +152,8 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
               }
               if (a.path.startsWith("@dvnt/app/")) {
                 const stem = path.join(ROOT, "packages/app", a.path.slice(10));
-                for (const suffix of ["", ".ts", ".tsx"])
-                  if (fs.existsSync(stem + suffix))
+                for (const suffix of [".web.tsx", ".web.ts", "", ".ts", ".tsx"])
+                  if (fs.existsSync(stem + suffix) && fs.statSync(stem + suffix).isFile())
                     return { path: stem + suffix };
               }
             });
@@ -788,6 +800,20 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
       [],
       "social actions do not navigate away",
     );
+    // Keep the real protection boundary in this social fixture. Legacy Spicy
+    // payloads and another viewer's authorization never mount the media child.
+    f.post.isNSFW = true;
+    f.post.media = [{ type: 'video', url: 'protected.mp4' }];
+    await flush(() => { f.auth.setState({ user: { id: '1', authId: 'auth1' } }); app.render(true); });
+    assert.match(node.textContent, /Request to FOLLOW/);
+    assert.equal(node.querySelector('[data-media]'), null);
+    f.post.isSpicyLocked = false;
+    f.post.spicyAccessViewerId = 'auth1';
+    await flush(() => app.render(true));
+    assert.ok(node.querySelector('[data-media]'), 'only explicit current-viewer projection mounts media');
+    await flush(() => f.auth.setState({ user: { id: '2', authId: 'auth2' } }));
+    assert.match(node.textContent, /Request to FOLLOW/);
+    assert.equal(node.querySelector('[data-media]'), null, 'account change revokes mounted media');
     await flush(() => app.unmount());
     console.log(
       "PASS production social actions: counts, isolated likes tap, inbox metadata, group identity/search/avatars/distinct IDs, stale-selection/unmount/account guards, repeat click, rollback/retry, Escape/signout, story publish/error/gate/no-media",

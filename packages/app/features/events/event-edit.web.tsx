@@ -1,4 +1,5 @@
 "use client";
+import { useQueryClient } from "@tanstack/react-query";
 import { EventLynkSetup } from "./ui/EventLynkSetup.web";
 import { EventFollowupSettings } from "./ui/followup-settings.web";
 import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
@@ -130,6 +131,7 @@ function Section({
 }
 
 export function EventEditScreen() {
+  const queryClient = useQueryClient();
   const params = useParams();
   const router = useRouter();
   const screenMounted = useRef(true);
@@ -596,6 +598,8 @@ export function EventEditScreen() {
       }
 
       saving.assertCurrent();
+      await queryClient.invalidateQueries({ queryKey: ["tickets", "types", id] });
+      await queryClient.invalidateQueries({ queryKey: ["events"] });
       showToast("success", "Saved", "Event updated successfully");
       // Go to the event, not `router.back()`. Back is wherever you came from,
       // and this screen is reachable by direct URL and from the host menu — so

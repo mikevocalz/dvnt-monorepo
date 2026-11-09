@@ -16,14 +16,6 @@
 //     call_signals to "declined" for the decline action); everything else
 //     focuses/opens data.url.
 
-const SUPABASE_URL = "https://npfjanxturvmjyevoyfo.supabase.co";
-// Public anon key, RLS-protected — same key already shipped in the client
-// bundle (packages/supabase/src/client.web.ts). call_signals RLS grants
-// anon full read/write (Better Auth never uses Supabase Auth sessions), so
-// this SW can PATCH a decline without a user JWT.
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmphbnh0dXJ2bWp5ZXZveWZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg0MjA0MjMsImV4cCI6MjA4Mzk5NjQyM30.v88MMGqv2db8hn8llr5aToKbKUDOHz-AxZbZYA5RLGM";
-
 self.addEventListener("install", () => {
   self.skipWaiting();
 });
@@ -67,16 +59,42 @@ self.addEventListener("push", (event) => {
 });
 
 async function declineCallSignal(signalId) {
-  if (!signalId) return;
-  await fetch(`${SUPABASE_URL}/rest/v1/call_signals?id=eq.${signalId}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-    },
-    body: JSON.stringify({ status: "declined" }),
-  }).catch(() => {});
+  // call_signals.id is a positive integer. Accept its JSON number/string forms,
+  // never an arbitrary PostgREST filter from push data.
+  if (typeof signalId === "number") {
+    if (!Number.isSafeInteger(signalId) || signalId <= 0) return;
+    signalId = String(signalId);
+  }
+  if (typeof signalId !== "string" || !/^[1-9]\d{0,18}$/.test(signalId)) return;
+  try {
+    // Static public assets do not receive Next environment substitution. Get
+    // the validated public pair from this deployment, with no fallback/cache.
+    const response = await fetch("/api/pwa/backend", {
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return;
+    const { supabaseUrl, supabaseAnonKey } = await response.json();
+    const backend = new URL(supabaseUrl);
+    const local = ["localhost", "127.0.0.1", "[::1]"].includes(backend.hostname);
+    if (backend.origin !== supabaseUrl ||
+        (backend.protocol !== "https:" && !(backend.protocol === "http:" && local)) ||
+        typeof supabaseAnonKey !== "string" || !supabaseAnonKey ||
+        supabaseAnonKey !== supabaseAnonKey.trim()) return;
+    await fetch(`${backend.origin}/rest/v1/call_signals?id=eq.${encodeURIComponent(signalId)}`, {
+      method: "PATCH",
+      redirect: "error",
+      credentials: "omit",
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        "Content-Type": "application/json",
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({ status: "declined" }),
+    });
+  } catch { /* Missing/invalid configuration must never fall back to production. */ }
 }
 
 self.addEventListener("notificationclick", (event) => {

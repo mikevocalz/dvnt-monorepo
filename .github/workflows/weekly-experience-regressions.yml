@@ -1,0 +1,145 @@
+name: weekly experience regressions
+
+on:
+  pull_request:
+    paths:
+      - "packages/app/**"
+      - "apps/web/src/components/site-chrome.tsx"
+      - "apps/mobile/supabase/functions/**"
+      - "apps/web/src/app/(frontend)/feed/[username]/post/[id]/**"
+      - "apps/web/src/app/(frontend)/p/[id]/**"
+      - "apps/mobile/supabase/migrations/**"
+      - "docs/security/users-identity-write-prerequisite.sql"
+      - "docs/security/notification-privacy-draft.sql"
+      - "docs/security/private-follow-preservation-cutover.sql"
+      - "scripts/test-*.cjs"
+      - ".github/workflows/weekly-experience-regressions.yml"
+  push:
+    branches: [master, main]
+    paths:
+      - "packages/app/**"
+      - "apps/web/src/components/site-chrome.tsx"
+      - "apps/mobile/supabase/functions/**"
+      - "apps/web/src/app/(frontend)/feed/[username]/post/[id]/**"
+      - "apps/web/src/app/(frontend)/p/[id]/**"
+      - "apps/mobile/supabase/migrations/**"
+      - "docs/security/users-identity-write-prerequisite.sql"
+      - "docs/security/notification-privacy-draft.sql"
+      - "docs/security/private-follow-preservation-cutover.sql"
+      - "scripts/test-*.cjs"
+      - ".github/workflows/weekly-experience-regressions.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  follow-preservation-postgres:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16.6
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: fixture-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install isolated PostgreSQL fixture driver
+        run: npm install --prefix "$RUNNER_TEMP/follow-postgres" --ignore-scripts --no-audit --no-fund --no-save pg@8.16.3
+      - name: Exercise real multi-connection preservation races
+        env:
+          NODE_PATH: ${{ runner.temp }}/follow-postgres/node_modules
+          FOLLOW_FIXTURE_DATABASE_URL: postgres://postgres:fixture-only@127.0.0.1:5432/postgres
+        run: node --test scripts/test-follow-preservation-postgres.cjs
+
+  isolated-regressions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install isolated fixture tools
+        run: >-
+          npm install --prefix "$RUNNER_TEMP/weekly" --ignore-scripts --no-audit --no-fund --no-save
+          typescript@5.9.3 esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
+          zustand@5.0.14 @tanstack/react-query@5.90.16 happy-dom@20.0.11
+          @electric-sql/pglite@0.3.14
+      - name: Settings, event, location and navigation regressions
+        env:
+          NODE_PATH: ${{ runner.temp }}/weekly/node_modules
+        run: |
+          node --test apps/mobile/supabase/functions/user-settings/index.test.cjs
+          node scripts/test-user-settings-account-switch.cjs
+          node --test apps/mobile/supabase/functions/toggle-follow/index.test.cjs
+          node --test packages/app/lib/api/follows-account.test.ts
+          node --test apps/mobile/supabase/functions/create-event/index.test.cjs
+          node --test packages/app/lib/events/*.test.ts packages/app/features/events/create/event-form.test.ts
+          node --test packages/app/lib/api/ticket-types-read.test.ts
+          node --test packages/app/lib/location/*.test.ts packages/app/features/events/ui/nearby-event-pins.test.ts
+          node --test packages/app/lib/activity/event-activity.test.ts packages/app/lib/posts/text-post-layout.test.ts
+          node scripts/test-weekly-event-visibility-sql.cjs
+          node scripts/test-weekly-post-follow-sql.cjs
+          node scripts/test-weekly-post-share-metadata.cjs
+          node scripts/test-private-follow-requests-sql.cjs
+          node scripts/test-spicy-follow-server.cjs
+          node scripts/test-follow-hook.cjs
+          node scripts/test-follow-requests-dom.cjs
+          node scripts/test-weekly-spicy-ui.cjs
+          node scripts/test-member-map-session-sql.cjs
+          node scripts/test-member-map-session-dom.cjs
+          node scripts/test-exact-distance-sql.cjs
+          node scripts/test-exact-distance-hooks.cjs
+          node --test scripts/test-member-proximity-settings-dom.cjs
+          node scripts/test-proximity-observation-hooks.cjs
+          node --test apps/mobile/supabase/functions/member-proximity/exact-consent.test.cjs apps/mobile/supabase/functions/_shared/location-session.test.ts
+          node scripts/test-weekly-location-dom.cjs
+          node scripts/test-weekly-location-consent-dom.cjs
+          node scripts/test-weekly-home-reset.cjs
+          node scripts/test-weekly-logo-actions.cjs
+          node scripts/test-ticket-notification-dom.cjs
+
+  web-browser-regressions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install isolated browser tools
+        run: >-
+          npm install --prefix "$RUNNER_TEMP/weekly-web" --ignore-scripts --no-audit --no-fund --no-save
+          esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
+          zustand@5.0.14 @tanstack/react-query@5.90.16 playwright@1.58.2 react-native-web@0.21.2 lucide-react@1.30.0 tailwindcss@4.3.0
+      - name: Install Chromium
+        run: $RUNNER_TEMP/weekly-web/node_modules/.bin/playwright install --with-deps chromium
+      - name: Production web components in Chromium with synthetic service boundaries
+        env:
+          NODE_PATH: ${{ runner.temp }}/weekly-web/node_modules
+        run: node scripts/test-weekly-web-browser.cjs
+      - name: Production web location and distance in Chromium
+        if: ${{ !cancelled() }}
+        env:
+          NODE_PATH: ${{ runner.temp }}/weekly-web/node_modules
+        run: node scripts/test-weekly-location-browser.cjs
+      - name: Production web navigation and text in Chromium
+        if: ${{ !cancelled() }}
+        env:
+          NODE_PATH: ${{ runner.temp }}/weekly-web/node_modules
+        run: node scripts/test-weekly-navigation-browser.cjs
+      - name: Production Settings with marketing and app shells in Chromium
+        if: ${{ !cancelled() }}
+        env:
+          NODE_PATH: ${{ runner.temp }}/weekly-web/node_modules
+        run: node scripts/test-settings-shell-browser.cjs

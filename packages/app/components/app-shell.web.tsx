@@ -37,6 +37,7 @@ import { WebTopBar } from "./web-top-bar.web";
 import { UnreadBadge } from "./unread-badge";
 import { useBadges } from "@dvnt/app/lib/hooks/use-notifications-query";
 import { useUnreadMessageCount } from "@dvnt/app/lib/hooks/use-messages";
+import { routeOwnsHeader } from "@dvnt/app/lib/web-chrome";
 import { unreadAccessibilityLabel } from "@dvnt/app/lib/badges/unread-badge";
 
 const ACCENT = "#379ED8"; // teal-blue (refined brand)
@@ -184,7 +185,9 @@ export function AppShell({
            {children} below ALWAYS stays in the same <main> slot so resizing
            across the breakpoint never remounts the page. ── */}
       {isMobile ? (
-        <WebTopBar />
+        // A pushed page supplies its own sticky title/Close row. Retain the
+        // bottom tabs and desktop rail, but never stack two top-0 headers.
+        routeOwnsHeader(pathname) ? null : <WebTopBar />
       ) : (
       <nav
         aria-label="Primary"

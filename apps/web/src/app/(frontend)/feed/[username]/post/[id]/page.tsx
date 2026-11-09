@@ -6,8 +6,8 @@ type Params = { username: string; id: string };
 /**
  * Server-rendered OG/Twitter metadata so SHARED post links show a rich preview
  * (image + caption) in iMessage / social / crawlers — the interactive UI still
- * loads client-side. Best-effort fetch of the post via Supabase REST; falls back
- * to generic DVNT metadata if it's unavailable.
+ * loads client-side. Only the server's public-safe projection may provide
+ * previews. Private or Spicy posts always use generic metadata.
  */
 export async function generateMetadata({
   params,
@@ -27,24 +27,22 @@ export async function generateMetadata({
     const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
     if (url && key) {
       const res = await fetch(
-        `${url}/rest/v1/posts?id=eq.${encodeURIComponent(
-          id,
-        )}&select=content,media:posts_media(url,type,_order)`,
+        `${url}/rest/v1/rpc/public_post_share_preview`,
         {
-          headers: { apikey: key, Authorization: `Bearer ${key}` },
-          next: { revalidate: 300 },
+          method: 'POST',
+          headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_post_id: id }),
+          // A previous public response must not outlive a privacy change.
+          cache: 'no-store',
         },
       );
       if (res.ok) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const post = (await res.json())?.[0] as any;
-        if (post?.content) description = String(post.content).slice(0, 200);
-        const imgs = (post?.media ?? [])
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .filter((m: any) => m?.url && m?.type !== 'video')
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .sort((a: any, b: any) => (a._order ?? 0) - (b._order ?? 0));
-        image = imgs[0]?.url;
+        const preview: unknown = await res.json();
+        if (preview && typeof preview === 'object' && !Array.isArray(preview)) {
+          const value = preview as { description?: unknown; image?: unknown };
+          if (typeof value.description === 'string' && value.description) description = value.description.slice(0, 200);
+          if (typeof value.image === 'string' && /^https?:\/\//.test(value.image)) image = value.image;
+        }
       }
     }
   } catch {

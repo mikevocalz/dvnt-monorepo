@@ -1,3 +1,4 @@
+import { projectVisiblePosts } from "../_shared/post-access.ts";
 /**
  * Bootstrap Notifications Edge Function
  *
@@ -42,7 +43,9 @@ Deno.serve(async (req: Request) => {
   const t0 = Date.now();
 
   try {
-    const { limit = 50 } = await req.json();
+    const body = await req.json();
+    const limit = typeof body.limit === "number" && Number.isInteger(body.limit)
+      ? Math.max(1, Math.min(100, body.limit)) : 50;
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -93,6 +96,7 @@ Deno.serve(async (req: Request) => {
         )
         .eq("recipient_id", intUserId)
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(limit),
 
       // 2. Unread count
@@ -103,9 +107,10 @@ Deno.serve(async (req: Request) => {
         .is("read_at", null),
     ]);
 
-    if (notificationsResult.error || unreadCountResult.error) {
-      console.warn("[bootstrap-notifications] activity query unavailable");
-      return new Response(JSON.stringify({ error: "Could not load activity. Please retry." }), {
+    if (notificationsResult.error || unreadCountResult.error || unreadCountResult.count == null) {
+      // Never cache a permission/schema/network failure as an empty private feed.
+      console.warn("[bootstrap-notifications] private feed unavailable");
+      return new Response(JSON.stringify({ error: "Could not load private activity. Please retry." }), {
         status: 503, headers: responseHeaders,
       });
     }
@@ -251,12 +256,20 @@ Deno.serve(async (req: Request) => {
       ),
     ];
 
-    const postThumbnailById: Record<string, string> = {};
+    const visiblePostIds = new Set<string>();
     if (resolvedPostIds.length > 0) {
+      const result = await supabase.from("posts").select("id, author_id, visibility, is_nsfw").in("id", resolvedPostIds);
+      if (!result.error) {
+        const visible = await projectVisiblePosts(supabase, result.data || [], { authId: sessionUserId, userId: intUserId });
+        for (const post of visible) visiblePostIds.add(String(post.id));
+      }
+    }
+    const postThumbnailById: Record<string, string> = {};
+    if (visiblePostIds.size > 0) {
       const { data: mediaRows } = await supabase
         .from("posts_media")
         .select("_parent_id, type, url, _order")
-        .in("_parent_id", resolvedPostIds)
+        .in("_parent_id", [...visiblePostIds])
         .order("_order", { ascending: true });
 
       for (const row of mediaRows || []) {
@@ -345,8 +358,8 @@ Deno.serve(async (req: Request) => {
           n.entity_type === "comment" && n.entity_id
             ? String(n.entity_id)
             : commentContext?.commentId,
-        commentText: commentContext?.content || undefined,
-        payload: n.entity_payload ?? null,
+        commentText: resolvedPostId && visiblePostIds.has(resolvedPostId) ? commentContext?.content || undefined : undefined,
+        payload: resolvedPostId && !visiblePostIds.has(resolvedPostId) ? null : n.entity_payload ?? null,
         event:
           (n.entity_type === "event" || n.type === "event_invite" || n.type === "event_update") && n.entity_id
             ? {
@@ -380,7 +393,7 @@ Deno.serve(async (req: Request) => {
   } catch (err: any) {
     console.error("[bootstrap-notifications] request unavailable");
     return new Response(
-      JSON.stringify({ error: "Could not load activity. Please retry." }),
+      JSON.stringify({ error: "Could not load private activity. Please retry." }),
       { status: 500, headers: responseHeaders },
     );
   }

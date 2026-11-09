@@ -1,5 +1,6 @@
 "use client";
 
+import { FollowRequestsSetting } from "./follow-requests-setting";
 import { useRouter } from "solito/navigation";
 import {
   Archive,
@@ -155,6 +156,7 @@ export function SettingsHomeScreen() {
             onClick={go("/settings/account")}
           />
           <NavRow icon={<Lock size={20} />} label="Privacy" onClick={go("/settings/privacy")} />
+          <FollowRequestsSetting />
           <NavRow
             icon={<Eye size={20} />}
             label="Close Friends"

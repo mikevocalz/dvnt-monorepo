@@ -1,5 +1,10 @@
 "use client";
 
+import { useSyncMemberProximityPresence } from "@dvnt/app/lib/hooks/use-member-proximity";
+import { useExactDistanceConsent } from "@dvnt/app/lib/hooks/use-exact-distance-consent";
+import { EXACT_DISTANCE_COPY } from "@dvnt/app/lib/stores/exact-distance-store";
+import { FollowRequestsPanel } from "./follow-requests-panel";
+
 import { useRouter } from "solito/navigation";
 import { X } from "lucide-react";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
@@ -27,11 +32,6 @@ type ToggleRow = {
 };
 
 const TOGGLES: ToggleRow[] = [
-  {
-    key: "privateAccount",
-    label: "Private Account",
-    description: "Only approved followers can see your posts",
-  },
   {
     key: "activityStatus",
     label: "Activity Status",
@@ -86,20 +86,24 @@ function Switch({
  * duration the member picks, revocable in one click, and carrying a city name
  * rather than coordinates, an event or a ticket.
  */
-function CityVisibilitySection() {
+export function CityVisibilitySection() {
+  const proximity = useSyncMemberProximityPresence();
+  const exact = useExactDistanceConsent();
   const activeCity = useEventsLocationStore((s) => s.activeCity);
   const durationId = useEventsLocationStore((s) => s.visibilityDurationId);
   const setDuration = useEventsLocationStore((s) => s.setVisibilityDuration);
   const showMeInCity = useEventsLocationStore((s) => s.showMeInCity);
-  const hideMeInCity = useEventsLocationStore((s) => s.hideMeInCity);
+  const hideMeInCity = () => proximity.stop(true);
   const preciseOptIn = useEventsLocationStore((s) => s.preciseProximityGrant);
-  const preciseOwner = useEventsLocationStore((s) => s.preciseProximityOwnerAuthId);
+  const preciseOwner = useEventsLocationStore(
+    (s) => s.preciseProximityOwnerAuthId,
+  );
   const authId = useAuthStore((s) => s.user?.authId);
-  const setPreciseOptIn = useEventsLocationStore((s) => s.setPreciseProximityGrant);
   const deviceLat = useEventsLocationStore((s) => s.deviceLat);
   const deviceLng = useEventsLocationStore((s) => s.deviceLng);
   const grant = useActiveCityVisibility();
-  const hasDeviceLocation = Number.isFinite(deviceLat) && Number.isFinite(deviceLng);
+  const hasDeviceLocation =
+    Number.isFinite(deviceLat) && Number.isFinite(deviceLng);
 
   const onToggle = (next: boolean) => {
     if (!next) return hideMeInCity();
@@ -122,15 +126,13 @@ function CityVisibilitySection() {
           <Switch
             label={COPY.toggleLabel}
             checked={grant != null}
-            disabled={!activeCity && grant == null}
+            disabled={grant == null && (!activeCity || proximity.withdrawalPending)}
             onChange={onToggle}
           />
         </div>
 
         <div className="py-4">
-          <p className="text-sm font-medium text-white">
-            {COPY.durationLabel}
-          </p>
+          <p className="text-sm font-medium text-white">{COPY.durationLabel}</p>
           <div className="mt-3 flex gap-2" role="radiogroup">
             {VISIBILITY_DURATIONS.map((d) => {
               const selected = d.id === durationId;
@@ -174,6 +176,17 @@ function CityVisibilitySection() {
             </p>
           )}
         </div>
+        <div className="border-t border-white/8 py-4">
+          <p className="text-sm text-white/60">{EXACT_DISTANCE_COPY}</p>
+          {!exact.enabled && !exact.withdrawalPending && (!grant || !hasDeviceLocation || !preciseOptIn || preciseOwner !== authId || proximity.withdrawalPending) ? (
+            <p className="mt-2 text-sm text-white/60">To allow exact distances, turn on city visibility and approximate distance sharing, and make a device location available first. Exact sharing asks separately and gets a fresh location.</p>
+          ) : null}
+          <button type="button" disabled={exact.busy || (!exact.enabled && !exact.withdrawalPending && (!grant || !hasDeviceLocation || !preciseOptIn || preciseOwner !== authId || proximity.withdrawalPending))}
+            onClick={() => void exact.update(!(exact.enabled || exact.withdrawalPending))} className="mt-3 rounded-full border border-white/15 px-4 py-2 text-white">
+            {exact.busy ? (exact.withdrawalPending ? "Stopping…" : "Getting a fresh location…") : exact.withdrawalPending ? "Retry Stop exact distances" : exact.enabled ? "Stop exact distances" : "I agree: allow exact distances"}
+          </button>
+          {exact.error ? <p role="alert" className="mt-2 text-sm text-red-400">{exact.error}</p> : null}
+        </div>
         <div className="flex items-center justify-between gap-4 border-t border-white/8 py-4">
           <div className="flex-1 pr-4">
             <p className="font-semibold text-white">
@@ -183,16 +196,26 @@ function CityVisibilitySection() {
               {PROXIMITY_COPY.toggleDescription}
             </p>
             {!grant || !hasDeviceLocation ? (
-              <p className="mt-2 text-xs text-white/45">{PROXIMITY_COPY.unavailable}</p>
+              <p className="mt-2 text-xs text-white/45">
+                {PROXIMITY_COPY.unavailable}
+              </p>
             ) : null}
           </div>
           <Switch
             label={PROXIMITY_COPY.toggleLabel}
             checked={Boolean(grant && preciseOptIn && preciseOwner === authId)}
-            disabled={(!grant || !hasDeviceLocation) && preciseOwner !== authId}
-            onChange={(checked) => setPreciseOptIn(checked, authId ?? null)}
+            disabled={proximity.withdrawalPending || ((!grant || !hasDeviceLocation) && preciseOwner !== authId)}
+            onChange={proximity.setDistanceSharing}
           />
         </div>
+        {proximity.busy ? <p role="status" className="pb-3 text-sm text-white/60">{proximity.withdrawalPending ? "Stopping distance sharing…" : "Updating distance sharing…"}</p> : null}
+        {proximity.error ? <p role="alert" className="pb-3 text-sm text-red-400">{proximity.error}</p> : null}
+        {proximity.error || proximity.withdrawalPending ? (
+          <button type="button" disabled={proximity.busy} onClick={() => void proximity.retry()}
+            className="mb-4 rounded-full border border-white/15 px-4 py-2 text-sm text-white">
+            {proximity.withdrawalPending ? "Retry Stop sharing distance" : "Retry distance sharing"}
+          </button>
+        ) : null}
       </div>
     </>
   );
@@ -206,7 +229,7 @@ function CityVisibilitySection() {
  */
 export function PrivacyScreen() {
   const router = useRouter();
-  const { data: settings, isLoading } = usePrivacySettings();
+  const { data: settings, isLoading, error, refetch } = usePrivacySettings();
   const updateMutation = useUpdatePrivacySettings();
 
   const handleToggle = (key: keyof PrivacySettings, value: boolean) => {
@@ -235,8 +258,44 @@ export function PrivacyScreen() {
           <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
           <p className="mt-4 text-sm text-white/60">Loading settings...</p>
         </div>
+      ) : error || !settings ? (
+        <div role="alert" className="p-6">
+          Could not load privacy settings.{" "}
+          <button onClick={() => refetch()}>Retry</button>
+        </div>
       ) : (
         <main className="mx-auto w-full max-w-xl px-4 py-6">
+          <section className="mb-6 rounded-2xl border border-white/10 p-4">
+            <h2 className="font-semibold">Page visibility</h2>
+            <div
+              role="radiogroup"
+              aria-label="Page visibility"
+              className="my-3 flex gap-3"
+            >
+              {[false, true].map((isPrivate) => (
+                <button
+                  key={String(isPrivate)}
+                  type="button"
+                  role="radio"
+                  aria-checked={settings.privateAccount === isPrivate}
+                  disabled={updateMutation.isPending}
+                  onClick={() => handleToggle("privateAccount", isPrivate)}
+                  className="rounded-full border border-white/25 px-4 py-2 aria-checked:border-[#3FDCFF] aria-checked:text-[#3FDCFF] disabled:opacity-40"
+                >
+                  {isPrivate ? "Private" : "Public"}
+                </button>
+              ))}
+            </div>
+            <p className="text-sm text-white/65">
+              Public: eligible adults must follow to see Spicy posts. Private:
+              you must approve their follow request first. Age and access checks
+              always apply.
+            </p>
+            {updateMutation.isError && (
+              <p role="alert">Could not save visibility. Please try again.</p>
+            )}
+          </section>
+          <FollowRequestsPanel />
           <div className="rounded-2xl bg-white/4 border border-white/10 px-4">
             {TOGGLES.map((row) => (
               <div
@@ -245,7 +304,9 @@ export function PrivacyScreen() {
               >
                 <div className="flex-1 pr-4">
                   <p className="font-semibold text-white">{row.label}</p>
-                  <p className="mt-1 text-sm text-white/60">{row.description}</p>
+                  <p className="mt-1 text-sm text-white/60">
+                    {row.description}
+                  </p>
                 </div>
                 <Switch
                   label={row.label}
@@ -261,7 +322,7 @@ export function PrivacyScreen() {
 
           <div className="mt-4 rounded-2xl border border-[#3FDCFF]/20 bg-[#3FDCFF]/5 p-4">
             <p className="text-sm text-white/60">
-              Changes are saved automatically and will apply immediately.
+              Changes apply after the server confirms they were saved.
             </p>
           </div>
         </main>

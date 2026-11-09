@@ -1,3 +1,4 @@
+import { useFeedScrollStore } from "@dvnt/app/lib/stores/feed-scroll-store";
 import { View, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
@@ -19,7 +20,7 @@ export default function PublicTabsLayout() {
       blurEffect="systemChromeMaterialDark"
       tintColor="#FFFFFF"
     >
-        <NativeTabs.Trigger name="index">
+        <NativeTabs.Trigger name="index" listeners={{ tabPress: () => useFeedScrollStore.getState().triggerScrollToTop() }}>
           <NativeTabs.Trigger.Icon
             sf={{ default: "house", selected: "house.fill" }}
             md="home"

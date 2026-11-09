@@ -1,4 +1,7 @@
 "use client";
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
+
 
 import { parseCaptionHashtags } from "@dvnt/app/lib/posts/post-caption";
 
@@ -91,7 +94,10 @@ function coverFor(post: Post): string {
 }
 
 // ── Post grid tile (Explore / search posts / hashtag) ───────────────
-function PostTile({ post, big = false }: { post: Post; big?: boolean }) {
+function PostTile(props: { post: Post; big?: boolean }) {
+  return useSpicyPostLocked(props.post) ? <SpicyFollowGate author={props.post.author} /> : <UnlockedPostTile {...props} />;
+}
+function UnlockedPostTile({ post, big = false }: { post: Post; big?: boolean }) {
   const router = useRouter();
   const media = post.media?.[0];
   const isVideo = isVideoKind(post.type) || isVideoKind(media?.type);

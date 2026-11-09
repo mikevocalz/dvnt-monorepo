@@ -151,7 +151,7 @@ function ViewTicketUpgradeScreenContent() {
   React.useEffect(() => {
     if (!dbTicket?.event_id) return;
     let cancelled = false;
-    ticketTypesApi.getByEvent(String(dbTicket.event_id)).then((tiers) => {
+    ticketTypesApi.getByEvent(String(dbTicket.event_id), true).then((tiers) => {
       if (!cancelled) setAllTiers(tiers);
     });
     return () => {

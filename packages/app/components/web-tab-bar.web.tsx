@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { Pressable, Text, View, StyleSheet, useWindowDimensions } from "react-native";
 import { useRouter, usePathname } from "solito/navigation";
 import { Home, Calendar, Plus, Heart, User } from "lucide-react";
+import { useFeedScrollStore } from "@dvnt/app/lib/stores/feed-scroll-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useVisualViewportBottom } from "./use-visual-viewport-bottom.web";
 import { routeUsesVisualViewportBottom } from "@dvnt/app/lib/web-chrome";
@@ -94,11 +95,19 @@ export function WebTabBar() {
     >
       <View style={[styles.bar, isMobile && styles.barMobile]}>
         {LEFT.map((t) => (
-          <TabItem key={t.href} {...t} active={pathname === t.href} activityUnread={activityUnread} onPress={() => router.push(t.href)} />
+          <TabItem key={t.href} {...t} active={pathname === t.href} activityUnread={activityUnread} onPress={() => {
+            if (t.href === "/feed" && pathname === "/feed") {
+              useFeedScrollStore.getState().triggerScrollToTop();
+            } else if (pathname !== t.href) router.push(t.href);
+          }} />
         ))}
         <CenterButton Icon={Plus} onPress={() => router.push("/feed/create")} />
         {RIGHT.map((t) => (
-          <TabItem key={t.href} {...t} active={pathname === t.href} activityUnread={activityUnread} onPress={() => router.push(t.href)} />
+          <TabItem key={t.href} {...t} active={pathname === t.href} activityUnread={activityUnread} onPress={() => {
+            if (t.href === "/feed" && pathname === "/feed") {
+              useFeedScrollStore.getState().triggerScrollToTop();
+            } else if (pathname !== t.href) router.push(t.href);
+          }} />
         ))}
       </View>
     </nav>,

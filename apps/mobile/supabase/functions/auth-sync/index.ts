@@ -7,7 +7,7 @@
  * Flow:
  * 1. Verify Better Auth token
  * 2. Check if user exists by auth_id
- * 3. If not, check by email and update auth_id
+ * 3. If not, link an unlinked profile only with server-verified email ownership
  * 4. If not, create new user row
  * 5. Return the user row
  */
@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
     // Fetch email and name from Better Auth user table (needed for user creation/sync)
     const { data: baUser, error: baUserError } = await supabaseAdmin
       .from("user")
-      .select("id, email, name, image, username")
+      .select("id, email, emailVerified, name, image, username")
       .eq("id", authId)
       .single();
 
@@ -199,7 +199,11 @@ Deno.serve(async (req) => {
       `,
       )
       .eq("auth_id", authId)
-      .single();
+      .maybeSingle();
+
+    if (findError) {
+      return errorResponse("internal_error", "Failed to sync user");
+    }
 
     if (existingUser) {
       console.log("[Edge:auth-sync] Found user by auth_id:", existingUser.id);
@@ -213,7 +217,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 5. Try to find by email and update auth_id
+    // 5. Match by email, but only trusted verified ownership can claim an unlinked row
     const { data: userByEmail, error: emailError } = await supabaseAdmin
       .from("users")
       .select(
@@ -240,29 +244,56 @@ Deno.serve(async (req) => {
       `,
       )
       .eq("email", email)
-      .single();
+      .maybeSingle();
+
+    if (emailError) {
+      return errorResponse("internal_error", "Failed to sync user");
+    }
 
     if (userByEmail) {
-      console.log(
-        "[Edge:auth-sync] Found user by email, updating auth_id:",
-        userByEmail.id,
-      );
-
-      // Update auth_id
-      const { error: updateError } = await supabaseAdmin
-        .from("users")
-        .update({ auth_id: authId, updated_at: new Date().toISOString() })
-        .eq("id", userByEmail.id);
-
-      if (updateError) {
-        console.error(
-          "[Edge:auth-sync] Failed to update auth_id:",
-          updateError,
-        );
-        return errorResponse("internal_error", "Failed to sync user");
+      // Preserve established identity mappings. Email matching alone must never
+      // replace a different account's existing link. Established logins above
+      // never acquire a new verification requirement.
+      if (userByEmail.auth_id != null && userByEmail.auth_id !== authId) {
+        return errorResponse("unauthorized", "Unable to sync account");
       }
 
-      const syncedUser = { ...userByEmail, auth_id: authId };
+      let syncedUser = userByEmail;
+      if (userByEmail.auth_id == null) {
+        // Trust only the server-read Better Auth boolean for this same email.
+        // Client body/metadata and truthy strings are not ownership evidence.
+        // No prompt, re-authentication or mutation of existing linked users.
+        if (baUser.emailVerified !== true) {
+          return errorResponse("unauthorized", "Unable to sync account");
+        }
+        // Compare-and-set: a concurrent sync may have linked this row since lookup.
+        const { data: linked, error: updateError } = await supabaseAdmin
+          .from("users")
+          .update({ auth_id: authId, updated_at: new Date().toISOString() })
+          .eq("id", userByEmail.id)
+          .eq("email", email)
+          .is("auth_id", null)
+          .select("id")
+          .maybeSingle();
+
+        if (updateError) {
+          return errorResponse("internal_error", "Failed to sync user");
+        }
+        if (!linked) {
+          const { data: winner, error: winnerError } = await supabaseAdmin
+            .from("users")
+            .select("auth_id")
+            .eq("id", userByEmail.id)
+            .maybeSingle();
+          if (winnerError) {
+            return errorResponse("internal_error", "Failed to sync user");
+          }
+          if (!winner || winner.auth_id !== authId) {
+            return errorResponse("unauthorized", "Unable to sync account");
+          }
+        }
+        syncedUser = { ...userByEmail, auth_id: authId };
+      }
       await applyBrandOnboarding(supabaseAdmin, syncedUser);
       return jsonResponse({
         ok: true,

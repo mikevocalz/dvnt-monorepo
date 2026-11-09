@@ -40,6 +40,22 @@ EXPO_PUBLIC_AUTH_SAME_ORIGIN=true
 NODE_ENV=production
 ```
 
+**Next web backend routing:**
+`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` take precedence over
+`EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY`. Configure the URL and
+public key together for an isolated backend. Blank or malformed explicit values
+fail the build; only absent configuration uses the existing production defaults.
+Never put a service-role or secret key in a public variable.
+
+Next uses the resolved backend for browser data/uploads and `/api/fn/*`.
+Auth defaults to that backend's `/functions/v1/auth`; an explicit
+`NEXT_PUBLIC_AUTH_URL` takes precedence over `EXPO_PUBLIC_AUTH_URL`.
+Different Supabase project origins are rejected. Explicit HTTPS custom auth
+domains remain supported, but their upstream project must be independently
+verified before preview testing. A preview hostname alone does not isolate data:
+server/CMS configuration, deployed handlers and schema also require verification.
+No deployment or environment changes are performed by these source defaults.
+
 **Custom Domain:**
 Add `blog.dvntapp.live` in Vercel project settings → Domains
 

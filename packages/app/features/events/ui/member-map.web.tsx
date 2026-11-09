@@ -1,4 +1,5 @@
 "use client";
+import { nearbyEventPins } from "./nearby-event-pins";
 import { getGoogleMapsPublicKey } from "@dvnt/ui/google-maps-public-config";
 
 import { useEffect, useState, useRef } from "react";
@@ -8,7 +9,7 @@ import { RoundedMapMarker } from "./rounded-map-marker.web";
 import { useRouter } from "solito/navigation";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { savedMapArea } from "./member-map-area";
-import { MapSharingConsent } from "./map-sharing-consent";
+import { MapSharingConsent } from "../map-sharing-consent";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dvnt/app/lib/hooks/use-member-map";
 import { mapAvatarUrl, mapMemberInitials, mapMemberProfilePath, visibleMapMembers, type MapMember } from "./member-map-render-policy";
@@ -49,6 +50,10 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
   const center = sharing && !nearby.isError && leaseLive ? nearby.data?.center : null;
   const selectedEvent = eventPins.find(pin => pin.id === selectedEventId);
   const ownArea = presence.area || center;
+  const freshArea = presence.area || (center && nearby.data?.expiresAt
+    ? { ...center, expiresAt: nearby.data.expiresAt } : null);
+  const nearEvents = nearbyEventPins(eventPins, freshArea, now);
+  const nearMembers = members.filter(member => member.id !== nearby.data?.self?.id);
   const mapCenter = selectedEvent || ownArea || savedArea || { latitude: 39.5, longitude: -98.35 };
   const mapZoom = selectedEvent || ownArea ? 12 : savedArea ? 8 : 3;
   const open = (member: MapMember) => router.push(mapMemberProfilePath(member.username));
@@ -76,8 +81,14 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
           <p className="text-sm text-white/65">Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</p>
           <MapSharingConsent active={ready} />
           <p role="status" className="text-sm text-white/60">{members.length ? `${members.length} ${members.length === 1 ? 'avatar' : 'avatars'} sharing an approximate area` : sharing ? 'Your avatar will appear when a fresh permitted location is available.' : 'Turn on avatar sharing to show yourself and nearby members.'}</p>
+          <h2 className="text-lg font-semibold">Near You</h2>
+          <p className="text-sm text-white/60">{freshArea ? 'Public events within about 25 miles of your approximate area.' : 'Allow device location to find events near you. A saved city is not your current location.'}</p>
+          {freshArea && nearEvents.length === 0 ? <p role="status">No public events within about 25 miles in the current event list.</p> : null}
+          <ul aria-label="Events near you" className="space-y-2">{nearEvents.map(pin => <li key={pin.id}><button type="button" className="min-h-11 w-full rounded-xl border border-white/15 p-3 text-left" onClick={() => { onSelectEvent?.(pin.id); onOpenEvent?.(pin.id); }}>{pin.title}</button></li>)}</ul>
+          <h3 className="font-semibold">People near you</h3>
+          {sharing && nearMembers.length === 0 ? <p role="status" className="text-sm text-white/60">No other members are sharing a fresh approximate location nearby.</p> : null}
           <ul aria-label="Nearby members" className="grid sm:grid-cols-2 gap-2">
-            {members.map((member) => (
+            {nearMembers.map((member) => (
               <li key={member.id} className="min-w-0"><button className="w-full min-h-14 rounded-xl border border-white/15 p-3 flex items-center gap-3 text-left" onClick={() => open(member)}><Avatar member={member} /><span className="min-w-0 break-words"><span className="block font-semibold">{member.displayName || member.username}</span><span className="block text-sm text-white/60">@{member.username} · approximate area</span></span></button></li>
             ))}
           </ul>

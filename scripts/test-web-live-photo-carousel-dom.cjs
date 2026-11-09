@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { postMediaAuthFixture } = require('./fixtures/post-media-auth.cjs');
 const { build } = require('esbuild');
 
 (async () => {
@@ -44,6 +45,8 @@ const { build } = require('esbuild');
   try {
     await build({ stdin: { contents: `
       import React, { act } from 'react'; import { createRoot } from 'react-dom/client';
+      import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
+      export { useAuthStore };
       import { PostMediaCarousel } from './packages/app/components/feed/post-media-carousel.web';
       import { Lightbox } from './packages/app/components/lightbox.web';
       import { useStoryViewerStore } from './packages/app/lib/stores/story-viewer-store';
@@ -54,8 +57,8 @@ const { build } = require('esbuild');
         render: (id,media) => root.render(<React.StrictMode><PostMediaCarousel key={id} media={media} caption="Carousel test"/><Lightbox/></React.StrictMode>),
         unmount: () => root.unmount(),
       }; }
-    `, resolveDir: root, loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', outfile: path.join(dir, 'fixture.cjs'), alias: { '@dvnt/app': path.join(root, 'packages/app') }, nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean) });
-    const { act, mount, useStoryViewerStore, useLightboxStore, useCarouselStore } = require(path.join(dir, 'fixture.cjs'));
+    `, resolveDir: root, loader: 'tsx' }, bundle: true, plugins: [postMediaAuthFixture(root)], platform: 'node', format: 'cjs', jsx: 'automatic', outfile: path.join(dir, 'fixture.cjs'), alias: { '@dvnt/app': path.join(root, 'packages/app') }, nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean) });
+    const { act, mount, useStoryViewerStore, useLightboxStore, useCarouselStore, useAuthStore } = require(path.join(dir, 'fixture.cjs'));
     const motionQuery = { matches: false, listeners: new Set(), addEventListener(_, l) { this.listeners.add(l); }, removeEventListener(_, l) { this.listeners.delete(l); } };
     window.matchMedia = () => motionQuery;
     const reduceMotion = async value => act(async () => { motionQuery.matches = value; motionQuery.listeners.forEach(l => l()); });
@@ -239,11 +242,17 @@ const { build } = require('esbuild');
     await swipe(3); await visible(true);
     assert.equal(!!autoplay()[0].isPlaying, true); assert.equal(!!clips()[0].isPlaying, false);
     await swipe(0); assert.equal(!!autoplay()[0].isPlaying, false); assert.equal(!!clips()[0].isPlaying, true);
+    // The production revocation subscriber remains active with fixture auth.
+    await act(async () => useLightboxStore.getState().openAt([{ type: 'image', url: 'restricted.jpg' }], 0));
+    assert.equal(useLightboxStore.getState().open, true);
+    await act(async () => useAuthStore.setState({ user: { id: 'other', authId: 'other' } }));
+    assert.equal(useLightboxStore.getState().open, false, 'account switch closes retained media');
+    assert.deepEqual(useLightboxStore.getState().items, [], 'account switch erases retained media URLs');
     const detached = [...clips(), ...autoplay()];
     await act(async () => app.unmount());
     assert.ok(detached.every(v => !v.isPlaying), 'unmount leaves nothing playing');
     assert.ok(observers.every(o => o.disconnected));
-    console.log('PASS actual web carousel/lightbox Live Photos: the visible selected slide autoplays from 0 and loops, neighbours never play, swipes move playback, late play() cannot resurrect, out of view/background/story/lightbox stop and resume, hover/hold keep the playing clip, reduced motion stops autoplay while hold and badge still play, a tap opens the lightbox whose Live Photo autoplays and loops, a hold does not open, blocked autoplay tried once, pair replacement, missing pairs, mixed media (mocked media/viewport).');
+    console.log('PASS actual web carousel/lightbox Live Photos: the visible selected slide autoplays from 0 and loops, neighbours never play, swipes move playback, late play() cannot resurrect, out of view/background/story/lightbox stop and resume, hover/hold keep the playing clip, reduced motion stops autoplay while hold and badge still play, a tap opens the lightbox whose Live Photo autoplays and loops, a hold does not open, blocked autoplay tried once, pair replacement, missing pairs, mixed media and account-switch media erasure (mocked media/viewport).');
   } finally {
     window.happyDOM.abort(); fs.rmSync(dir, { recursive: true, force: true });
   }

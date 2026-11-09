@@ -1,6 +1,6 @@
 /** Explicit, expiring approximate avatar-map sharing. Never event attendance. */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.2";
-import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { verifyLocationSession } from "../_shared/location-session.ts";
 import { resolveVerifiedAdmission } from "../_shared/verified-admission.ts";
 import { consumeDbRateLimit } from "../_shared/db-rate-limit.ts";
 const cors = {
@@ -18,7 +18,7 @@ Deno.serve(async(req: Request) => {
   const url=Deno.env.get("SUPABASE_URL"), key=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if(!url||!key) return json({ok:false,error:"Map sharing is unavailable"},503);
   const db=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
-  const session=await verifySessionDetailed(db,req);
+  const session=await verifyLocationSession(db,req);
   if(!session.ok) return json({ok:false,error:"Sign in to manage map sharing"},401);
   const body=await req.json().catch(()=>null);
   if(!body||typeof body!=="object"||Array.isArray(body)) return json({ok:false,error:"Invalid request"},400);
@@ -41,21 +41,24 @@ Deno.serve(async(req: Request) => {
     if(!rate.allowed) return json({ok:false,error:"Too many map requests. Try again shortly."},429);
   }
   let name:string, args:Record<string,unknown>={p_user_id:userId};
-  if(action==="settings") name="member_map_get_settings";
+  if(action==="settings") { name="member_map_session_settings"; args={...args,p_session_id:session.sessionId}; }
   else if(action==="revoke") {
     if(body.scope!=null && body.scope!=="overall" && body.scope!=="events") return json({ok:false,error:"Invalid revoke scope"},400);
     name="member_map_revoke"; args={...args,p_disable_overall:body.scope==="overall"};
-  } else if(action==="nearby") name="member_map_nearby";
+  } else if(action==="nearby") { name="member_map_nearby_session"; args={...args,p_session_id:session.sessionId}; }
   else if(action==="updateSettings") {
     if(typeof body.locationEnabled!=="boolean"||typeof body.eventsMapEnabled!=="boolean"||
        !Number.isSafeInteger(body.expectedRevision)||body.expectedRevision<0)
       return json({ok:false,error:"Valid settings and revision required"},400);
     if(body.shareDurationHours!==undefined && body.shareDurationHours!==1 && body.shareDurationHours!==4)
       return json({ok:false,error:"Map sharing duration must be 1 or 4 hours"},400);
+    if(body.consentVersion==="events-map-session-v2" && body.expectedSessionId!==session.sessionId)
+      return json({ok:false,error:"Your sign-in changed. Reopen the location agreement.",code:"session_changed"},409);
     // Older builds confirmed one hour; only new explicit opt-ins request four.
-    name=body.shareDurationHours===4?"member_map_update_settings_four_hours":"member_map_update_settings";
+    name=body.consentVersion==="events-map-session-v2"?"member_map_update_session":body.shareDurationHours===4?"member_map_update_settings_four_hours":"member_map_update_settings";
     args={...args,p_expected_revision:body.expectedRevision,p_location_enabled:body.locationEnabled,
       p_events_map_enabled:body.eventsMapEnabled,p_consent_version:typeof body.consentVersion==="string"?body.consentVersion:null};
+    if(name==="member_map_update_session") args.p_session_id=session.sessionId;
   } else {
     if(typeof body.latitude!=="number"||!Number.isFinite(body.latitude)||Math.abs(body.latitude)>85||
        typeof body.longitude!=="number"||!Number.isFinite(body.longitude)||Math.abs(body.longitude)>180||
@@ -75,8 +78,13 @@ Deno.serve(async(req: Request) => {
         if(!movement.allowed) return json({ok:false,error:"Location changed too often. Try again later."},429);
       }
     }
-    name="member_map_publish";
+    const grant=await db.from("member_map_settings").select("consent_version,consent_session_id").eq("user_id",userId).maybeSingle();
+    if(grant.error) return json({ok:false,error:"Map sharing is unavailable"},503);
+    const sessionBound=grant.data?.consent_version==="events-map-session-v2";
+    if(sessionBound && (grant.data.consent_session_id!==session.sessionId || body.expectedSessionId!==session.sessionId)) return json({ok:false,error:"Allow map sharing for this sign-in first"},403);
+    name=sessionBound?"member_map_publish_session":"member_map_publish";
     args={...args,p_revision:body.revision,p_latitude:body.latitude,p_longitude:body.longitude,p_observed_at:body.observedAt};
+    if(sessionBound) args.p_session_id=session.sessionId;
   }
   const {data,error}=await db.rpc(name,args);
   if(error) {
@@ -84,6 +92,11 @@ Deno.serve(async(req: Request) => {
     return json({ok:false,code:conflict?"settings_changed":forbidden?"map_consent_required":invalid?"invalid_location":"map_unavailable",
       error:conflict?"Settings changed. Refresh and retry.":forbidden?"Map sharing is off, expired, or requires a verified public adult profile.":invalid?"A fresh valid location is required.":"Could not update map sharing. Please retry."},
       conflict?409:forbidden?403:invalid?400:503);
+  }
+  if(action==="updateSettings" || action==="revoke") {
+    const scoped=await db.rpc("member_map_session_settings",{p_user_id:userId,p_session_id:session.sessionId});
+    if(scoped.error) return json({ok:false,error:"Could not confirm session location settings"},503);
+    return json({ok:true,data:scoped.data});
   }
   return json({ok:true,data});
 });

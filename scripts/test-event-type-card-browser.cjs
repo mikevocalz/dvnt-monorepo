@@ -43,11 +43,11 @@ const selector = editor.slice(editor.indexOf('          <FormField label="Event 
     const select=page.getByRole('combobox',{name:'Event Type'});
     assert.equal(await select.inputValue(),'music');
     const values=await select.locator('option').evaluateAll(nodes=>nodes.map(n=>n.value).filter(Boolean));
-    assert.equal(values.length,28); // 27 canonical plus preserved legacy Music
+    assert.equal(values.length,31); // 30 canonical plus preserved legacy Music
     for (const value of values.filter(v=>v!=='music')) {await select.selectOption(value);assert.equal(await select.inputValue(),value);}
     await select.selectOption('game_night');await select.selectOption('party');await select.selectOption('game_night');
     assert.equal(await select.inputValue(),'game_night');
     assert.deepEqual(errors,[]);
-    console.log('PASS: actual large-card markup: paid $25/$35, free RSVP, Ended; friendly types; four card navigations; actual web editor selector: legacy retention, all 27 choices and repeated changes.');
+    console.log('PASS: actual large-card markup: paid $25/$35, free RSVP, Ended; friendly types; four card navigations; actual web editor selector: legacy retention, all 30 choices and repeated changes.');
   } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

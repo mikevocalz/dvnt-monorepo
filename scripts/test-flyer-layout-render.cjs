@@ -29,6 +29,8 @@ const adapters = {
   react: React,
   "react/jsx-runtime": jsxRuntime,
   "react-native": {
+    Platform: { OS: "web" },
+    StyleSheet: { flatten: flattenStyle },
     View({ style, children }) {
       const domStyle = { ...flattenStyle(style) };
       for (const key of ["shadowColor", "shadowOffset", "shadowOpacity", "shadowRadius"])
@@ -50,7 +52,11 @@ const adapters = {
     color: { inkDeep: "#080a12", violet: "#8a40cf", text: "#ffffff" },
   },
   "@dvnt/app/components/ui/hashtag-text": {
-    HashtagText: ({ text }) => React.createElement("div", null, text),
+    HashtagText: ({ text, textStyle, numberOfLines, adjustsFontSizeToFit }) => React.createElement("div", {
+      style: textStyle,
+      "data-number-of-lines": numberOfLines,
+      "data-adjusts-font-size": adjustsFontSizeToFit,
+    }, text),
   },
   "./TextPostBadgeLogo": {
     TextPostBadgeLogo: () => React.createElement("span", { "aria-label": "Text post logo" }, "LOGO"),
@@ -59,6 +65,7 @@ const adapters = {
 const sourceModules = {
   "@dvnt/app/lib/events/flyer-layout": "packages/app/lib/events/flyer-layout.ts",
   "@dvnt/app/lib/posts/text-post": "packages/app/lib/posts/text-post.ts",
+  "@dvnt/app/lib/posts/text-post-layout": "packages/app/lib/posts/text-post-layout.ts",
 };
 
 function loadSource(relative, sourceOverride) {
@@ -152,6 +159,11 @@ for (const variant of ["composer", "feed", "detail", "grid"]) {
       text: "My own message #hello", variant,
     }));
     assert.match(html, /My own message #hello/);
+    assert.match(html, /text-align:left/);
+    assert.match(html, /overflow-wrap:anywhere/);
+    assert.match(html, /max-width:100%/);
+    assert.match(html, /data-adjusts-font-size="true"/);
+    if (variant === "grid") assert.match(html, /data-number-of-lines="[1-9][0-9]*"/);
     assert.doesNotMatch(html, /Let.s connect, share and build community/);
   });
 }

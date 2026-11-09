@@ -71,6 +71,8 @@ export type Post = {
   createdAt?: string;
   location?: string;
   isNSFW?: boolean;
+  isSpicyLocked?: boolean;
+  spicyAccessViewerId?: string | null;
   thumbnail?: string; // First media thumbnail for grid display
   type?: MediaKind; // Primary media type
   hasMultipleImages?: boolean; // Has carousel/multiple media

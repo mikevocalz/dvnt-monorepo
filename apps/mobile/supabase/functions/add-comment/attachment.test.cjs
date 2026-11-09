@@ -17,12 +17,15 @@ function setup(options = {}) {
         if (table === 'posts') return { data: { author_id: 2 } };
         return { data: null };
       },
+      async maybeSingle() { return this.single(); },
       insert(value) { inserted = value; writes.push({ table, value }); return this; },
       then(resolve) { resolve({ data: [] }); },
     };
     return query;
   } };
   const deps = {
+    // Access projection is exercised with real policy fixtures in test-spicy-follow-server.cjs.
+    projectVisiblePosts: async (_db, rows) => rows,
     createClient: () => client,
     verifySessionDetailed: async () => options.auth === false ? { ok: false } : { ok: true, userId: 'auth-user' },
     resolveOrProvisionUser: async () => ({ id: 1, username: 'test' }),

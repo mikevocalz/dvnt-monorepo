@@ -1,4 +1,5 @@
 "use client";
+import "@dvnt/app/lib/posts/revoke-post-overlays";
 
 import { useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";

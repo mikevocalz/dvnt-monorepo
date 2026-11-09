@@ -23,7 +23,7 @@ import { memberEventRoute } from '@dvnt/app/lib/auth/member-event-route';
 import { useGuestCheckoutStore } from '@dvnt/app/lib/stores/guest-checkout-store';
 import { useAuthStore } from '@dvnt/app/lib/stores/auth-store';
 import { AppShell } from '@dvnt/app/components/app-shell';
-import { routeIsImmersive } from '@dvnt/app/lib/web-chrome';
+import { routeIsImmersive, routeOwnsHeader } from '@dvnt/app/lib/web-chrome';
 import { ChromeErrorBoundary } from '@/components/chrome-error-boundary';
 
 const GlassHeader = dynamic(
@@ -141,7 +141,9 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   // the old resize-time worklet crash class is gone — DVNT-WEB-6.)
   return (
     <>
-      {!hideMarketingChrome && <ChromeErrorBoundary label="header">
+      {/* Pushed screens own their title/Close row, even before auth hydrates.
+          Keep the footer and the content slot; do not overlay a second header. */}
+      {!hideMarketingChrome && !routeOwnsHeader(pathname) && <ChromeErrorBoundary label="header">
         <GlassHeader webWindowScroll={pathname === '/'} />
       </ChromeErrorBoundary>}
       {children}

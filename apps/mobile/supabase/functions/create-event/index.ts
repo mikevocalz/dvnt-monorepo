@@ -116,6 +116,9 @@ function normalizeEventType(value: unknown): string | null {
     "bate_session",
     "sex_party",
     "kink_fetish_party",
+    "glory_hole",
+    "cruising",
+    "cum_dump",
     "training",
     "cooking_class",
     "mixology",
@@ -377,6 +380,10 @@ Deno.serve(async (req) => {
     if (hostedUrl(body.flyerImageUrl)) insertPayload.flyer_image_url = hostedUrl(body.flyerImageUrl);
     if (hostedUrl(body.videoFlyerUrl)) insertPayload.video_flyer_url = hostedUrl(body.videoFlyerUrl);
     if (typeof body.nsfw === "boolean") insertPayload.nsfw = body.nsfw;
+    // Do not allow a stale or modified client to publish an adult type as Sweet.
+    if (["bate_session", "kink_fetish_party", "sex_party", "glory_hole", "cruising", "cum_dump"].includes(eventType || "")) {
+      insertPayload.nsfw = true;
+    }
 
     const { data: event, error } = await supabaseAdmin
       .from("events")

@@ -1,3 +1,5 @@
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
  * Post detail — WEB (@dvnt/app/features/post/post-detail). Instagram-style URL
  * /feed/{username}/post/{id}; id read from Solito route params. The native post
@@ -58,6 +60,14 @@ const ShareToInboxSheet = lazy(() => import("@dvnt/app/components/share-to-inbox
 
 
 export function PostDetailScreen() {
+  const params = useParams();
+  const router = useRouter();
+  const { data: post } = usePost(String((params as any)?.id ?? ""));
+  const locked = useSpicyPostLocked(post ?? {});
+  if (post && locked) return <main className="min-h-screen bg-[#06070d] p-4 text-white"><button type="button" onClick={() => router.back()}>Back</button><SpicyFollowGate author={post.author} /></main>;
+  return <UnlockedPostDetailScreen />;
+}
+function UnlockedPostDetailScreen() {
   const params = useParams();
   const router = useRouter();
   const id = String((params as any)?.id ?? "");

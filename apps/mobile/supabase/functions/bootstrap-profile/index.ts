@@ -18,7 +18,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
-import { viewerMaySeeSpicy } from "../_shared/spicy-access.ts";
+import { projectVisiblePosts } from "../_shared/post-access.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -89,32 +89,7 @@ Deno.serve(async (req: Request) => {
     const viewerUserId = await resolveUserId(sessionUserId);
     const isOwnProfile = !viewerUserId || viewerUserId === profileUserId;
 
-    // ── NSFW gate ─────────────────────────────────────────────────
-    // Spicy posts from a profile go to its owner, or to a signed-in viewer
-    // who follows the owner. Force safe mode otherwise.
-    // isOwnProfile is also true for a guest (it gates the follow-state reads
-    // below), so the owner check here needs a real signed-in viewer.
-    const viewerOwnsProfile = viewerUserId !== null && viewerUserId === profileUserId;
-    let effectiveIncludeNsfw = Boolean(include_nsfw);
-    if (effectiveIncludeNsfw && !viewerOwnsProfile) {
-      if (!viewerUserId) {
-        // Guest — never allow spicy
-        effectiveIncludeNsfw = false;
-      } else if (!(await viewerMaySeeSpicy(supabase, sessionUserId))) {
-        // Signed out, or an under-18 ID on file (spicy-access.ts).
-        effectiveIncludeNsfw = false;
-      } else {
-        const { data: followRow } = await supabase
-          .from("follows")
-          .select("id")
-          .eq("follower_id", viewerUserId)
-          .eq("following_id", profileUserId)
-          .maybeSingle();
-        if (!followRow) {
-          effectiveIncludeNsfw = false;
-        }
-      }
-    }
+    const effectiveIncludeNsfw = Boolean(include_nsfw);
 
     // ── Fire ALL queries in parallel ──────────────────────────────
 
@@ -122,7 +97,7 @@ Deno.serve(async (req: Request) => {
       .from("posts")
       .select(
         `
-          id, created_at, content, post_kind, text_theme, is_nsfw, likes_count,
+          id, author_id, visibility, created_at, content, post_kind, text_theme, is_nsfw, likes_count,
           media:posts_media(type, url, _order)
         `,
       )
@@ -199,7 +174,8 @@ Deno.serve(async (req: Request) => {
     const p = profileResult.data;
     const avatarUrl = typeof p.avatar === "object" ? p.avatar?.url : null;
 
-    const posts = (postsResult.data || []).map((post: any) => {
+    const visiblePosts = await projectVisiblePosts(supabase, postsResult.data || [], { authId: sessionUserId, userId: viewerUserId }, { placeholders: true });
+    const posts = visiblePosts.map((post: any) => {
       const media = (post.media || []).sort(
         (a: any, b: any) => (a._order || 0) - (b._order || 0),
       );
@@ -224,6 +200,8 @@ Deno.serve(async (req: Request) => {
         type: firstMedia?.type || "image",
         likesCount: post.likes_count || 0,
         isNSFW: post.is_nsfw || false,
+        isSpicyLocked: post.isSpicyLocked === true,
+        spicyAccessViewerId: post.spicyAccessViewerId ?? null,
       };
     });
 
@@ -256,7 +234,7 @@ Deno.serve(async (req: Request) => {
       status: 200,
       headers: {
         "Content-Type": "application/json",
-        "Cache-Control": "private, max-age=60",
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (err: any) {

@@ -106,6 +106,8 @@ function hydrateFromProfileBootstrap(
         timeAgo: "",
         location: undefined,
         isNSFW: post.isNSFW || false,
+        isSpicyLocked: post.isSpicyLocked,
+        spicyAccessViewerId: post.spicyAccessViewerId,
         thumbnail: !isTextPost ? post.thumbnailUrl || undefined : undefined,
         type: !isTextPost ? (post.type as any) || "image" : undefined,
         hasMultipleImages: !isTextPost && media.length > 1,
@@ -193,8 +195,9 @@ export function useBootstrapProfile() {
       });
     }
 
+    const requestAuthId = useAuthStore.getState().user?.authId;
     bootstrapApi.profile({ userId, includeNSFW: nsfwEnabled }).then((data) => {
-      if (!data) return;
+      if (!data || useAuthStore.getState().user?.id !== userId || useAuthStore.getState().user?.authId !== requestAuthId || useAppStore.getState().nsfwEnabled !== nsfwEnabled) return;
       hydrateFromProfileBootstrap(queryClient, userId, data);
       void hydrateBootstrapProfileTextPosts(queryClient, userId, data.posts);
       trace.markUsable();

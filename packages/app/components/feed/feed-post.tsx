@@ -1,3 +1,6 @@
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
+import { MemberDistanceBadge } from "./member-distance-badge";
 /**
  * FeedPost — DVNT feed post item (immersive overlay redesign)
  *
@@ -126,6 +129,8 @@ interface FeedPostProps {
   timeAgo: string;
   location?: string;
   isNSFW?: boolean;
+  isSpicyLocked?: boolean;
+  spicyAccessViewerId?: string | null;
   onShowLikes?: (postId: string) => void;
   guestMode?: boolean;
   onGuestGate?: (reason: PublicGateReason) => void;
@@ -816,6 +821,7 @@ function FeedPostComponent({
                   >
                     {author?.username}
                   </Text>
+                  <MemberDistanceBadge username={guestMode ? null : author?.username} />
                   <Text
                     numberOfLines={1}
                     style={{
@@ -1203,6 +1209,7 @@ function FeedPostComponent({
                   >
                     {author?.username}
                   </Text>
+                  <MemberDistanceBadge username={guestMode ? null : author?.username} />
                   {location ? (
                     <Text
                       numberOfLines={1}
@@ -1389,4 +1396,6 @@ function FeedPostComponent({
   );
 }
 
-export const FeedPost = memo(FeedPostComponent);
+export const FeedPost = memo(function FeedPost(props: FeedPostProps) {
+  return useSpicyPostLocked(props) ? <SpicyFollowGate author={props.author} /> : <FeedPostComponent {...props} />;
+});

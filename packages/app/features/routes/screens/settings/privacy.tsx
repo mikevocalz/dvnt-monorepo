@@ -1,3 +1,4 @@
+import { FollowRequestsPanel } from "@dvnt/app/features/settings/follow-requests-panel";
 import {
   View,
   Text,
@@ -64,6 +65,18 @@ export default function PrivacyScreen() {
     );
   }
 
+  if (error || !settings)
+    return (
+      <View className="flex-1 bg-background p-6">
+        <Text className="text-foreground">
+          Could not load privacy settings.
+        </Text>
+        <Pressable onPress={() => refetch()}>
+          <Text className="text-primary">Retry</Text>
+        </Pressable>
+      </View>
+    );
+
   return (
     <View className="flex-1 bg-background">
       <Main className="flex-1">
@@ -75,22 +88,43 @@ export default function PrivacyScreen() {
             <View className="flex-row items-center justify-between p-4">
               <View className="flex-1 pr-4">
                 <Text className="font-semibold text-foreground">
-                  Private Account
+                  Page visibility
                 </Text>
                 <Text className="mt-1 text-sm text-muted-foreground">
-                  Only approved followers can see your posts
+                  Public: eligible adults must follow to see Spicy posts.
+                  Private: you must approve their follow request first. Age and
+                  access checks always apply.
                 </Text>
               </View>
-              <Switch
-                checked={settings?.privateAccount ?? false}
-                onCheckedChange={(value) =>
-                  handleToggle("privateAccount", value)
-                }
-              />
+              <View accessibilityRole="radiogroup">
+                {[false, true].map((isPrivate) => (
+                  <Pressable
+                    key={String(isPrivate)}
+                    accessibilityRole="radio"
+                    accessibilityState={{
+                      checked: settings.privateAccount === isPrivate,
+                      disabled: updateMutation.isPending,
+                    }}
+                    disabled={updateMutation.isPending}
+                    onPress={() => handleToggle("privateAccount", isPrivate)}
+                    className="rounded-xl border border-border p-3"
+                  >
+                    <Text
+                      className={
+                        settings.privateAccount === isPrivate
+                          ? "text-primary font-bold"
+                          : "text-foreground"
+                      }
+                    >
+                      {isPrivate ? "Private" : "Public"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
-
-            <View className="mx-4 h-px bg-border" />
-
+          </View>
+          <FollowRequestsPanel />
+          <View className="mb-6 rounded-xl border border-border bg-card">
             <View className="flex-row items-center justify-between p-4">
               <View className="flex-1 pr-4">
                 <Text className="font-semibold text-foreground">
@@ -147,11 +181,16 @@ export default function PrivacyScreen() {
             {CITY_VISIBILITY_COPY.sectionTitle}
           </Text>
           <CityVisibilityCard />
+          {updateMutation.isError && (
+            <Text accessibilityRole="alert" className="text-foreground">
+              Could not save visibility. Please try again.
+            </Text>
+          )}
           <LocationControls />
 
           <View className="mt-2 rounded-xl border border-primary/20 bg-primary/5 p-4">
             <Text className="text-sm text-muted-foreground">
-              Changes are saved automatically and will apply immediately.
+              Changes apply after the server confirms they were saved.
             </Text>
           </View>
         </ScrollView>

@@ -2,6 +2,7 @@
  * Edge Function: toggle-follow
  * Explicit follow/unfollow a user with Better Auth verification.
  * Accepts `action: "follow" | "unfollow"` for idempotent, race-free mutations.
+ * Older clients may omit action for a serialized follow/request toggle.
  * Returns authoritative counts + viewerFollows + target username.
  *
  * Deploy: supabase functions deploy toggle-follow --no-verify-jwt --project-ref npfjanxturvmjyevoyfo
@@ -82,40 +83,53 @@ Deno.serve(async (req) => {
 
     const authUserId = sessionResult.userId;
 
-    // Rate limit check
-    const rl = checkRateLimit(authUserId, "toggle-follow", WRITE_LIMIT);
-    if (!rl.allowed) {
-      return errorResponse(
-        "rate_limited",
-        "Too many requests. Try again shortly.",
-      );
-    }
-
     let body: {
       targetUserId?: number;
       targetAuthId?: string;
-      action?: "follow" | "unfollow";
+      expectedAuthId?: string;
+      action?: "follow" | "unfollow" | "approve" | "decline" | "status" | "requests";
     };
     try {
       body = await req.json();
     } catch {
       return errorResponse("validation_error", "Invalid JSON body");
     }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return errorResponse("validation_error", "Invalid JSON body");
+    }
+
+    // New clients bind intent to the original sign-in. The verified token
+    // remains authoritative; an expected owner can only restrict it.
+    if (Object.prototype.hasOwnProperty.call(body, "expectedAuthId") && body.expectedAuthId !== authUserId) {
+      return errorResponse("unauthorized", "Account changed. Reload before trying again.");
+    }
 
     let { targetUserId } = body;
-    const { targetAuthId, action } = body;
+    const { targetAuthId } = body;
 
-    // Validate action — explicit follow/unfollow required
-    // Legacy callers without action fall back to toggle behavior
-    const explicitAction =
-      action === "follow" || action === "unfollow" ? action : null;
-
-    if (!targetUserId && !targetAuthId) {
-      return errorResponse(
-        "validation_error",
-        "targetUserId or targetAuthId is required",
-      );
+    // Only omitted actions use the legacy contract. Malformed/unknown explicit
+    // actions must never become an accidental mutation (including "toggle").
+    const legacyToggle = !Object.prototype.hasOwnProperty.call(body, "action");
+    if (!legacyToggle && !["follow", "unfollow", "approve", "decline", "status", "requests"].includes(body.action || "")) {
+      return errorResponse("validation_error", "Invalid follow action");
     }
+    // Resolve the old toggle inside the same locked transaction as the write,
+    // never by reading the current relationship in this Edge handler.
+    const action = legacyToggle ? "toggle" : body.action;
+    const readOnly = action === "status" || action === "requests";
+    const rl = checkRateLimit(authUserId, readOnly ? "follow-requests-read" : "toggle-follow", readOnly ? { maxRequests: 120, windowMs: 60_000 } : WRITE_LIMIT);
+    if (!rl.allowed) return errorResponse("rate_limited", "Too many requests. Try again shortly.");
+    const callerData = await resolveOrProvisionUser(supabaseAdmin, authUserId, "id");
+    if (!callerData) return errorResponse("not_found", "Caller user not found");
+    const userId = callerData.id;
+    if (action === "requests") {
+      const { data: requests, error } = await supabaseAdmin.from("follow_requests")
+        .select("follower_id, created_at, requester:users!follow_requests_follower_id_fkey(username)")
+        .eq("following_id", userId).eq("status", "pending").order("created_at", { ascending: true }).limit(100);
+      if (error) return errorResponse("internal_error", "Could not load follow requests");
+      return jsonResponse({ ok: true, data: { requests } });
+    }
+    if (!targetUserId && !targetAuthId) return errorResponse("validation_error", "Target member is required");
 
     // Resolve targetAuthId → integer ID (auto-provision if needed)
     if (!targetUserId && targetAuthId) {
@@ -140,97 +154,19 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Resolve caller's integer ID (auto-provision if needed)
-    const callerData = await resolveOrProvisionUser(
-      supabaseAdmin,
-      authUserId,
-      "id",
-    );
-    if (!callerData) return errorResponse("not_found", "Caller user not found");
-    const userId = callerData.id;
-
-    // Can't follow yourself
-    if (userId === targetUserId) {
-      return errorResponse("validation_error", "Cannot follow yourself");
+    if (!Number.isSafeInteger(targetUserId) || targetUserId <= 0 || userId === targetUserId) {
+      return errorResponse("validation_error", "Invalid target member");
     }
-
-    // Check current state
-    const { data: existingFollow } = await supabaseAdmin
-      .from("follows")
-      .select("id")
-      .eq("follower_id", userId)
-      .eq("following_id", targetUserId)
-      .maybeSingle();
-
-    const currentlyFollowing = !!existingFollow;
-
-    // Determine desired state
-    let wantFollow: boolean;
-    if (explicitAction) {
-      wantFollow = explicitAction === "follow";
-    } else {
-      // Legacy toggle behavior
-      wantFollow = !currentlyFollowing;
+    const { data: relationship, error: mutationError } = await supabaseAdmin.rpc("mutate_follow_relationship", {
+      p_actor: userId, p_target: targetUserId, p_action: action,
+    });
+    if (mutationError || !relationship) return errorResponse("internal_error", "Could not update follow relationship");
+    if (action === "approve" || action === "decline" || action === "status") {
+      return jsonResponse({ ok: true, data: relationship });
     }
-
-    console.log(
-      `[Edge:toggle-follow] ${correlationId} user=${userId} target=${targetUserId} ` +
-        `current=${currentlyFollowing} want=${wantFollow} action=${explicitAction || "toggle"}`,
-    );
-
-    let following: boolean;
-
-    // Idempotent: if already in desired state, skip write
-    if (wantFollow === currentlyFollowing) {
-      following = currentlyFollowing;
-      console.log(
-        `[Edge:toggle-follow] ${correlationId} idempotent — already ${following ? "following" : "not following"}`,
-      );
-    } else if (wantFollow) {
-      // FOLLOW — insert (ON CONFLICT DO NOTHING for idempotency)
-      const { error: insertError } = await supabaseAdmin
-        .from("follows")
-        .upsert(
-          { follower_id: userId, following_id: targetUserId },
-          { onConflict: "follower_id,following_id", ignoreDuplicates: true },
-        );
-
-      if (insertError) {
-        console.error(
-          `[Edge:toggle-follow] ${correlationId} insert_error:`,
-          insertError,
-        );
-        return errorResponse("internal_error", "Failed to follow");
-      }
-
-      // follow counts synced by trigger on follows table
-      following = true;
-
-      // ── Send follow notification (fire-and-forget) ──
-      sendFollowNotification(supabaseAdmin, userId, targetUserId).catch((err) =>
-        console.error(
-          `[Edge:toggle-follow] ${correlationId} notification_error:`,
-          err,
-        ),
-      );
-    } else {
-      // UNFOLLOW — delete (idempotent: no error if not found)
-      const { error: deleteError } = await supabaseAdmin
-        .from("follows")
-        .delete()
-        .eq("follower_id", userId)
-        .eq("following_id", targetUserId);
-
-      if (deleteError) {
-        console.error(
-          `[Edge:toggle-follow] ${correlationId} delete_error:`,
-          deleteError,
-        );
-        return errorResponse("internal_error", "Failed to unfollow");
-      }
-
-      // follow counts synced by trigger on follows table
-      following = false;
+    const following = relationship.following === true;
+    if (relationship.notifyFollow === true) {
+      sendFollowNotification(supabaseAdmin, userId, targetUserId).catch(console.error);
     }
 
     // ── Read authoritative counts + target username in ONE query ──
@@ -257,6 +193,7 @@ Deno.serve(async (req) => {
       ok: true,
       data: {
         following,
+        followRequestStatus: relationship.followRequestStatus,
         targetUserId: String(targetUserId),
         targetUsername: targetUser?.username || "",
         viewerFollows: following,

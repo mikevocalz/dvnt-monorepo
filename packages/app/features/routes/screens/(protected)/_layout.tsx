@@ -1,3 +1,4 @@
+import { MapSharingConsent } from "@dvnt/app/features/events/map-sharing-consent";
 import { useEffect } from "react";
 import { usePathname, useRouter } from "expo-router";
 import { View, Text, Pressable, Platform } from "react-native";
@@ -570,6 +571,7 @@ export default function ProtectedLayout() {
           verified-only action, or by a participation rail's refusal. Renders
           nothing while closed, and never opens while enforcement is off. */}
       <VerifiedOnlyPopup />
+      <MapSharingConsent active={Boolean(memberAccountKey) && memberPath === "/"} promptOnly />
       {/* Passive payout setup nudge. Never blocks purchases or sign-in. */}
       <PayoutSetupReminderNative />
       {/* PERSISTENT: Weather overlay — renders ON TOP of screens.

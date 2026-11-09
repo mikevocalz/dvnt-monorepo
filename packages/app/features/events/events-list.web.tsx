@@ -44,7 +44,7 @@ import {
   usePromotedEventIds,
 } from "@dvnt/app/lib/hooks/use-promotions";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
-import { MapSharingConsent } from "@dvnt/app/features/events/ui/map-sharing-consent";
+import { MapSharingConsent } from "@dvnt/app/features/events/map-sharing-consent";
 // Resolves to `use-responsive-grid.web.ts` (webpack `.web.ts` extension order),
 // which reads the viewport with a `resize` listener instead of react-native's
 // `useWindowDimensions`. Same `resolveResponsiveGrid` maths as native.
@@ -130,12 +130,13 @@ export function EventsListScreen() {
   // Phase 2 — live propagation: patch any event card in place when its row
   // changes elsewhere (host edit / cancel), no refetch/flicker.
   useEventsFeedRealtime();
-  const { data: events, isLoading } = useEvents();
+  const nsfwFilter = useEventsScreenStore((s) => s.nsfwFilter);
+  const { data: events, isLoading } = useEvents({ nsfw: nsfwFilter === true });
   // Personalized "For You" feed — separate query (15min cache native-side).
   const { data: forYouEvents, isLoading: forYouLoading } = useForYouEvents();
   // Past tab needs its own query: get_events_home drops anything >24h old,
   // so filtering `all` client-side could only ever surface yesterday.
-  const { data: pastEvents, isLoading: pastLoading } = usePastEvents();
+  const { data: pastEvents, isLoading: pastLoading } = usePastEvents(nsfwFilter === true);
   const { data: spotlight } = useSpotlightFeed();
   // Promoted/sponsored event IDs — boost to top + badge them.
   const { data: promotedIds } = usePromotedEventIds();
@@ -150,7 +151,6 @@ export function EventsListScreen() {
   const activeFilters = useEventsScreenStore((s) => s.activeFilters) as any[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const toggleFilter = useEventsScreenStore((s) => s.toggleFilter) as any;
-  const nsfwFilter = useEventsScreenStore((s) => s.nsfwFilter);
   const setNsfwFilter = useEventsScreenStore((s) => s.setNsfwFilter);
   const filterOpen = useEventsScreenStore((s) => s.filterSheetVisible);
   const setFilterOpen = useEventsScreenStore((s) => s.setFilterSheetVisible);
@@ -173,7 +173,7 @@ export function EventsListScreen() {
   // Whether the user is actively searching/filtering — native falls back to the
   // filtered "All Events" set on the For You tab when this is true so pills +
   // search always apply.
-  const hasActiveFilters = q.length > 0 || activeFilters.length > 0;
+  const hasActiveFilters = q.length > 0 || activeFilters.length > 0 || nsfwFilter === true;
 
   // Merge the is_promoted flag from usePromotedEventIds into every event, then
   // boost promoted events to the top (native's promoted/sponsored ordering).
@@ -281,7 +281,7 @@ export function EventsListScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [all]);
 
-  const browsing = q.length > 0 || activeFilters.length > 0 || activeTab !== 0;
+  const browsing = q.length > 0 || activeFilters.length > 0 || activeTab !== 0 || nsfwFilter === true;
   const today = now.toLocaleDateString(undefined, {
     weekday: "long",
     month: "short",

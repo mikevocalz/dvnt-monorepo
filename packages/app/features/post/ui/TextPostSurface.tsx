@@ -1,9 +1,10 @@
-import { memo } from "react";
-import { View, type StyleProp, type ViewStyle } from "react-native";
+import { memo, useState } from "react";
+import { View, Platform, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { HashtagText } from "@dvnt/app/components/ui/hashtag-text";
 import { TextPostBadgeLogo } from "./TextPostBadgeLogo";
 import { resolveTextPostTheme, truncateTextPost } from "@dvnt/app/lib/posts/text-post";
+import { fitTextPostFontSize } from "@dvnt/app/lib/posts/text-post-layout";
 import type { TextPostThemeKey } from "@dvnt/app/lib/types";
 
 type TextPostSurfaceVariant = "composer" | "feed" | "detail" | "grid";
@@ -64,6 +65,7 @@ function TextPostSurfaceComponent({
   style,
 }: TextPostSurfaceProps) {
   const metrics = SURFACE_METRICS[variant];
+  const [width, setWidth] = useState(0);
   const palette = resolveTextPostTheme(theme);
   const content = (text || "").trim();
   const fallback =
@@ -75,11 +77,20 @@ function TextPostSurfaceComponent({
       ? truncateTextPost(content || fallback, 140)
       : content || fallback;
 
+  const fontSize = fitTextPostFontSize(displayText, width - metrics.padding * 2, metrics.fontSize);
+  const lineHeight = Math.ceil(fontSize * 1.28);
+  const height = StyleSheet.flatten(style)?.height;
+  const gridLines = Math.max(1, Math.floor(((typeof height === "number" ? height : metrics.minHeight) - metrics.padding * 2 - 38) / lineHeight));
+
   return (
     <View
+      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
       style={[
         {
           minHeight: metrics.minHeight,
+          width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
           borderRadius: metrics.radius,
           overflow: "hidden",
           borderWidth: 1,
@@ -153,11 +164,18 @@ function TextPostSurfaceComponent({
 
           <HashtagText
             text={displayText}
-            numberOfLines={numberOfLines}
+            numberOfLines={numberOfLines ?? (variant === "grid" ? gridLines : undefined)}
+            adjustsFontSizeToFit
+            color={palette.textPrimary}
             textStyle={{
               color: palette.textPrimary,
-              fontSize: metrics.fontSize,
-              lineHeight: metrics.lineHeight,
+              fontSize,
+              lineHeight,
+              textAlign: "left",
+              width: "100%",
+              minWidth: 0,
+              flexShrink: 1,
+              ...(Platform.OS === "web" ? { overflowWrap: "anywhere", wordBreak: "break-word" } : {}),
               fontWeight: variant === "grid" ? "700" : "800",
               letterSpacing: -0.6,
             }}

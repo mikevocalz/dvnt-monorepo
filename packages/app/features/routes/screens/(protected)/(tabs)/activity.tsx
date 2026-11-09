@@ -375,11 +375,10 @@ export const ActivityItem = memo(
         </View>
       ) : (
       <Pressable
-        onPress={() =>
-          activity.type === "event_broadcast"
-            ? onActivityPress(activity)
-            : onUserPress(activity.user.username, activity.user.avatar)
-        }
+        onPress={(e) => {
+          e.stopPropagation();
+          onUserPress(activity.user.username, activity.user.avatar);
+        }}
         style={{ overflow: "visible", marginRight: 4 }}
       >
         <View style={{ overflow: "visible", width: 48, height: 48 }}>
@@ -404,11 +403,10 @@ export const ActivityItem = memo(
           {activity.type === "system" ? null : (
             <Text
               className="font-semibold text-foreground"
-              onPress={() =>
-                activity.type === "event_broadcast"
-                  ? onActivityPress(activity)
-                  : onUserPress(activity.user.username, activity.user.avatar)
-              }
+              onPress={(e) => {
+                e.stopPropagation();
+                onUserPress(activity.user.username, activity.user.avatar);
+              }}
             >
               {activitySenderLabel(activity)}
             </Text>
@@ -440,12 +438,12 @@ export const ActivityItem = memo(
       </View>
 
       {activity.post && (
-        <Pressable onPress={() => onPostPress(activity.post!.id)}>
+        <View>
           <Image
             source={{ uri: activity.post.thumbnail }}
             className="w-12 h-12 rounded-lg ml-3"
           />
-        </Pressable>
+        </View>
       )}
 
       {activity.type === "follow" && (
@@ -903,7 +901,7 @@ function ActivityScreenContent() {
         entityType: activity.entityType,
         entityId: activity.entityId,
       });
-      router.push(route as any);
+      if (route) router.push(route as any);
     },
     [markActivityAsRead, queryClient, viewerId, router, showToast],
   );
@@ -916,7 +914,7 @@ function ActivityScreenContent() {
       }
 
       const route = getRouteForLikedActivity(item);
-      router.push(route as any);
+      if (route) router.push(route as any);
     },
     [router, queryClient],
   );

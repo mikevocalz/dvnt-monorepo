@@ -28,6 +28,8 @@ export interface BootstrapPost {
   textSlides?: TextPostSlide[];
   createdAt: string;
   isNSFW: boolean;
+  isSpicyLocked?: boolean;
+  spicyAccessViewerId?: string | null;
   location: string | null;
   likes: number;
   commentsCount: number;
@@ -89,6 +91,8 @@ export interface BootstrapProfileResponse {
     type: string;
     likesCount: number;
     isNSFW?: boolean;
+    isSpicyLocked?: boolean;
+    spicyAccessViewerId?: string | null;
   }[];
   nextCursor: number | null;
   hasMore: boolean;

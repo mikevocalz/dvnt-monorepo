@@ -116,6 +116,8 @@ const AnimatedFeedPost = memo(function AnimatedFeedPost({
         timeAgo={item.timeAgo || ""}
         location={item.location}
         isNSFW={item.isNSFW}
+        isSpicyLocked={item.isSpicyLocked}
+        spicyAccessViewerId={item.spicyAccessViewerId}
         onShowLikes={onShowLikes}
         guestMode={guestMode}
         onGuestGate={onGuestGate}
@@ -323,9 +325,10 @@ export function Feed({
   const scrollToTopTrigger = useFeedScrollStore((s) => s.scrollToTopTrigger);
 
   useEffect(() => {
-    if (scrollToTopTrigger > 0 && listRef.current) {
+    if (scrollToTopTrigger > useFeedScrollStore.getState().consumedTrigger && listRef.current) {
       listRef.current.scrollToOffset?.({ offset: 0, animated: true });
       resetFeedScroll();
+      useFeedScrollStore.getState().consumeScrollToTop(scrollToTopTrigger);
     }
   }, [scrollToTopTrigger]);
 

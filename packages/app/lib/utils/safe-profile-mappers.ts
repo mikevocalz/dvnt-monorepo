@@ -1,3 +1,4 @@
+import { isSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
  * Safe Profile Mappers
  *
@@ -32,6 +33,10 @@ export interface SafeProfileData {
  * Safe grid tile with guaranteed structure
  */
 export interface SafeGridTile {
+  isNSFW?: boolean;
+  isSpicyLocked?: boolean;
+  spicyAccessViewerId?: string | null;
+  author?: { id?: string; username?: string };
   id: string;
   kind:
     | "image"
@@ -153,6 +158,11 @@ export function safeGridTile(post: any): SafeGridTile {
       };
     }
 
+    if (isSpicyPostLocked(post)) return {
+      id: String(postId), kind: "image", coverUrl: null, videoUrl: null,
+      mediaCount: 0, text: "", textSlides: [], textSlideCount: 0,
+      isNSFW: true, isSpicyLocked: true, author: post.author, _isValid: true,
+    };
     const media = Array.isArray(post.media) ? post.media : [];
     const mediaCount = media.length;
 
@@ -241,6 +251,7 @@ export function safeGridTile(post: any): SafeGridTile {
 
     return {
       id: String(postId),
+      isNSFW: post.isNSFW, isSpicyLocked: post.isSpicyLocked, spicyAccessViewerId: post.spicyAccessViewerId, author: post.author,
       kind,
       coverUrl,
       videoUrl,

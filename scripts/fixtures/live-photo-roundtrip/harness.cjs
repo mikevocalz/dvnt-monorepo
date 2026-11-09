@@ -57,6 +57,53 @@ async function createHarness() {
   }, { Deno: { serve: fn => { edgeHandler = fn; }, env: { get: name => ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'].includes(name) ? 'synthetic-fixture-only' : undefined } } });
   assert.equal(typeof edgeHandler, 'function');
 
+  // Exercise the real get-posts handler and authorization projection, rather
+  // than retaining a legacy direct PostgREST transport after the API changed.
+  const readAdmin = { from(table) {
+    assert.ok(['users', 'posts', 'follows', 'follow_requests', 'user_settings', 'blocks'].includes(table), `Unexpected read table ${table}`);
+    const filters = []; let single = false; let start = 0; let end = Infinity;
+    const query = {
+      select(columns) {
+        if (table === 'posts') assert.ok(columns.includes('live_photo_video_url') && columns.includes('_order'), 'real post read must request both pairing and order');
+        return query;
+      },
+      eq(key, value) { filters.push(row => String(row[key]) === String(value)); return query; },
+      in(key, values) { filters.push(row => values.map(String).includes(String(row[key]))); return query; },
+      or() { return query; }, order() { return query; },
+      range(a, b) { start = a; end = b; return query; },
+      maybeSingle() { single = true; return query; },
+      async then(resolve, reject) {
+        try {
+          let rows = table === 'users' || table === 'posts' ? (await db.query(`SELECT * FROM public.${table}`)).rows : [];
+          if (table === 'users') rows = rows.map(row => ({ ...row, auth_id: 'fixture-owner', is_private: false }));
+          rows = rows.filter(row => filters.every(filter => filter(row)));
+          const count = rows.length;
+          rows = rows.slice(start, end + 1);
+          if (table === 'posts') rows = await Promise.all(rows.map(async row => ({
+            ...row,
+            // Reversed SQL results ensure transformPost still honors _order.
+            media: (await db.query('SELECT * FROM public.posts_media WHERE _parent_id = $1 ORDER BY _order DESC', [row.id])).rows,
+            post_text_slides: (await db.query('SELECT * FROM public.post_text_slides WHERE post_id = $1', [row.id])).rows,
+            author: { id: 1, username: 'fixture', first_name: 'Fixture' },
+          })));
+          return resolve({ data: single ? rows[0] || null : rows, count, error: null });
+        } catch (error) { return reject(error); }
+      },
+    };
+    return query;
+  } };
+  const spicyAccess = loadTs('apps/mobile/supabase/functions/_shared/spicy-access.ts', {});
+  const postAccess = loadTs('apps/mobile/supabase/functions/_shared/post-access.ts', { './spicy-access.ts': spicyAccess });
+  let readHandler;
+  loadTs('apps/mobile/supabase/functions/get-posts/index.ts', {
+    'https://esm.sh/@supabase/supabase-js@2': { createClient: () => readAdmin },
+    '../_shared/verify-session.ts': { verifySession: async (_db, request) => {
+      assert.equal(request.headers.get('Authorization'), 'Bearer fixture-token');
+      return 'fixture-owner';
+    } },
+    '../_shared/post-access.ts': postAccess,
+  }, { Deno: { serve: fn => { readHandler = fn; }, env: { get: () => 'synthetic-fixture-only' } } });
+
   async function handle(request) {
     const url = new URL(request.url);
     if (url.pathname === '/functions/v1/media-upload') {
@@ -88,20 +135,13 @@ async function createHarness() {
       }
       return result;
     }
-    if (url.pathname === '/rest/v1/posts') {
-      assert.equal(request.method, 'GET');
-      const select = url.searchParams.get('select');
-      assert.ok(select.includes('live_photo_video_url') && select.includes('_order'), 'real post read must request both pairing and order');
-      state.reads.push(url.search);
-      const id = url.searchParams.get('id');
-      assert.match(id, /^eq\.\d+$/);
-      const posts = await db.query('SELECT * FROM public.posts WHERE id = $1', [id.slice(3)]);
-      if (!posts.rows.length) return json(null);
-      const row = posts.rows[0];
-      // Deliberately reversed SQL results test that transformPost honors _order,
-      // not array position returned by PostgREST.
-      const media = await db.query('SELECT * FROM public.posts_media WHERE _parent_id = $1 ORDER BY _order DESC', [row.id]);
-      return json({ ...row, media: media.rows, author: { id: 1, username: 'fixture', first_name: 'Fixture' } });
+    if (url.pathname === '/functions/v1/get-posts') {
+      assert.equal(request.method, 'POST');
+      const body = await request.clone().json();
+      assert.equal(body.mode, 'detail');
+      assert.match(String(body.postId), /^\d+$/);
+      state.reads.push(body);
+      return readHandler(request);
     }
     const object = state.objects.get(url.pathname);
     if (object) return new Response(object.bytes, { headers: { 'Content-Type': object.mime, 'Content-Length': String(object.bytes.length), 'Accept-Ranges': 'bytes' } });
@@ -119,6 +159,7 @@ function clientAdapters() {
   return { name: 'live-photo-isolation', setup(build) {
     build.onResolve({ filter: /./ }, args => {
       const name = args.path;
+      if (name === '@dvnt/app/lib/stores/auth-store') return { path: 'auth-store', namespace: 'fixture' };
       if (name === 'expo-file-system/legacy') return { path: 'native-files', namespace: 'fixture' };
       if (name === 'react-native') return { path: 'platform', namespace: 'fixture' };
       if (name === '@dvnt/app/lib/auth-client') return { path: 'auth', namespace: 'fixture' };
@@ -130,6 +171,7 @@ function clientAdapters() {
       }
     });
     build.onLoad({ filter: /./, namespace: 'fixture' }, args => ({ resolveDir: root, contents: {
+      'auth-store': 'import {create} from "zustand"; export const useAuthStore=create(()=>({user:{id:"1",authId:"fixture-owner"}}));',
       'native-files': 'export const cacheDirectory = null;',
       platform: 'export const Platform = { OS: "web" };',
       auth: 'export const getAuthToken = async () => "fixture-token"; export const requireBetterAuthToken = getAuthToken; export const getCurrentUserId = async () => 1; export const getCurrentUserIdSync = () => 1; export const hasAuthenticatedUser = () => true;',

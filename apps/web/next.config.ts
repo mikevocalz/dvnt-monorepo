@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { resolveNextWebBackend } from '../../packages/supabase/src/web-backend.cjs';
 import path from 'path';
 import type { NextConfig } from 'next';
 import type { Compiler, Compilation } from 'webpack';
@@ -30,6 +31,10 @@ class CopySkiaPlugin {
     });
   }
 }
+
+// Resolve once so browser data, SSR auth and both proxies target one backend.
+// Invalid explicit overrides fail the build instead of falling back to production.
+const webBackend = resolveNextWebBackend(process.env);
 
 const nextConfig: NextConfig = {
   // reactStrictMode left at the Next default (true). The reanimated 4.4.1
@@ -65,6 +70,11 @@ const nextConfig: NextConfig = {
    * come through here.
    */
   env: {
+    NEXT_PUBLIC_SUPABASE_URL: webBackend.supabaseUrl,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: webBackend.supabaseAnonKey,
+    EXPO_PUBLIC_SUPABASE_URL: webBackend.supabaseUrl,
+    EXPO_PUBLIC_SUPABASE_ANON_KEY: webBackend.supabaseAnonKey,
+    EXPO_PUBLIC_AUTH_URL: webBackend.authUrl,
     // Reuse the public Maps build configuration used by shared Expo code.
     // No server-only, Places, or native manifest credential fallback.
     EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
@@ -168,9 +178,7 @@ const nextConfig: NextConfig = {
   // cookie FIRST-party. Pairs with EXPO_PUBLIC_AUTH_SAME_ORIGIN + the web auth
   // client pointing its baseURL at window.location.origin + basePath /api/auth.
   async rewrites() {
-    const authUrl =
-      process.env.EXPO_PUBLIC_AUTH_URL ??
-      'https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/auth';
+    const authUrl = webBackend.authUrl;
     return [
       { source: '/api/auth/:path*', destination: `${authUrl}/api/auth/:path*` },
       // Same-origin EDGE-FUNCTION proxy. Browser calls to
@@ -183,8 +191,7 @@ const nextConfig: NextConfig = {
       // Sentry /monitoring tunnel.
       {
         source: '/api/fn/:path*',
-        destination:
-          'https://npfjanxturvmjyevoyfo.supabase.co/functions/v1/:path*',
+        destination: `${webBackend.supabaseUrl}/functions/v1/:path*`,
       },
     ];
   },
@@ -425,17 +432,17 @@ const nextConfig: NextConfig = {
         global: 'globalThis',
         'process.env.EXPO_OS': JSON.stringify('web'),
         'process.env.EXPO_PUBLIC_SUPABASE_URL': JSON.stringify(
-          process.env.EXPO_PUBLIC_SUPABASE_URL ?? '',
+          webBackend.supabaseUrl,
         ),
         'process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY': JSON.stringify(
-          process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '',
+          webBackend.supabaseAnonKey,
         ),
         'process.env.EXPO_PUBLIC_AUTH_URL': JSON.stringify(
-          process.env.EXPO_PUBLIC_AUTH_URL ?? '',
+          webBackend.authUrl,
         ),
         // Web auth client routes through the same-origin /api/auth proxy above.
         'process.env.EXPO_PUBLIC_AUTH_SAME_ORIGIN': JSON.stringify(
-          process.env.EXPO_PUBLIC_AUTH_SAME_ORIGIN ?? 'true',
+          'true',
         ),
       }),
     ];

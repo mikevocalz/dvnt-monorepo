@@ -135,6 +135,13 @@ export function clearAllCachedData() {
 
 export async function handleSignOut(reason: SignOutReason = "USER_REQUESTED") {
   logAuth("AUTH_SIGNOUT_TRIGGERED", { reason });
+  // Withdraw while this sign-in's credentials still exist. Never block local
+  // sign-out indefinitely when offline; the helper preserves denial intent.
+  try {
+    const { revokeLocationOnSignOut } = await import("./location/revoke-location-on-signout");
+    await revokeLocationOnSignOut();
+  } catch { /* Session deletion and stale-point expiry remain server safeguards. */ }
+
   invalidateTokenCache();
   try { await signOut(); } catch (e) { console.warn("[Auth] Server sign-out failed:", e); }
   clearAllCachedData();

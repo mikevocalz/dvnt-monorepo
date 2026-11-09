@@ -10,6 +10,7 @@ let chromium;
 try { ({ chromium } = require('@playwright/test')); }
 catch { ({ chromium } = require('playwright')); }
 const ROOT = path.resolve(__dirname, '..');
+const buildOnly = process.argv.includes('--build-only');
 const ANON = 'fixture-anon-key';
 const jwt = (sub, lifetime = 3600) => `${Buffer.from('{"alg":"HS256"}').toString('base64url')}.${Buffer.from(JSON.stringify({ sub, role: 'authenticated', exp: Math.floor(Date.now() / 1000) + lifetime })).toString('base64url')}.fixture-signature`;
 const decode = token => { try { return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).sub; } catch { return null; } };
@@ -17,6 +18,9 @@ let state;
 const reset = patch => { state = { account: 'A', failSession: false, failMint: false, failLogout: false, lifetimeA: 3600, holdA: false, held: [], calls: [], ...patch }; };
 reset();
 const boundaries = {
+  // Location-store/transport teardown is covered by the dedicated location
+  // suites. Keep this account-token fixture free of native storage adapters.
+  './location/revoke-location-on-signout': `export const revokeLocationOnSignOut=async()=>{};`,
   '@dvnt/auth': `const io=async(path,body)=>{const r=await fetch('/fixture/auth/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const result=await r.json();if(path==='session'&&window.fixture)window.fixture.sessionReads++;return result}; export const authClient={getSession:()=>io('session'),signIn:{email:args=>io('login',args)},signUp:{email:args=>io('login',args)},signOut:()=>io('logout'),useSession:()=>({})};`,
   'fixture-store': `let user={id:'1',authId:'A',email:'a@example.test'};const listeners=new Set();export const useAuthStore={getState:()=>({user}),subscribe:f=>{listeners.add(f);return()=>listeners.delete(f)}};export function setUser(next){user=next;for(const f of listeners)f()}`,
   'react-native': `export const Platform={OS:'web'};`,
@@ -57,8 +61,8 @@ const boundaries = {
     res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
     res.end('<!doctype html><title>Account bridge regression</title><script src="/bundle.js"></script>');
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  if (!buildOnly) await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = buildOnly ? 'http://127.0.0.1:4000' : `http://127.0.0.1:${server.address().port}`;
   let browser;
   try {
     const built = await esbuild.build({
@@ -92,6 +96,7 @@ const boundaries = {
       } }],
     });
     bundle = built.outputFiles[0].contents;
+    if (buildOnly) { console.log('PASS: account bridge browser fixture bundles with isolated platform boundaries'); return; }
     browser = await chromium.launch({ headless: true, ...(fs.existsSync('/usr/bin/chromium') ? { executablePath: '/usr/bin/chromium' } : {}), args: ['--no-sandbox', '--disable-dev-shm-usage'] });
     const unexpected = [];
     const errors = [];
@@ -246,7 +251,7 @@ const boundaries = {
   } finally {
     state.held.splice(0).forEach(release => release());
     await browser?.close();
-    await new Promise(resolve => server.close(resolve));
+    if (server.listening) await new Promise(resolve => server.close(resolve));
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 async function waitFor(test) { const until = Date.now() + 5000; while (!test()) { if (Date.now() > until) throw new Error('Fixture condition timed out'); await new Promise(resolve => setTimeout(resolve, 10)); } }

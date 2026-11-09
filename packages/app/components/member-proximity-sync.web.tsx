@@ -1,5 +1,7 @@
 "use client";
 
+import { usePathname } from "next/navigation";
+import { MapSharingConsent } from "@dvnt/app/features/events/map-sharing-consent";
 import { useSyncMemberProximityPresence } from "@dvnt/app/lib/hooks/use-member-proximity";
 
 /**
@@ -13,5 +15,6 @@ import { useSyncMemberProximityPresence } from "@dvnt/app/lib/hooks/use-member-p
  */
 export function MemberProximitySync() {
   useSyncMemberProximityPresence();
-  return null;
+  const pathname = usePathname();
+  return <MapSharingConsent active={pathname === "/feed"} promptOnly />;
 }

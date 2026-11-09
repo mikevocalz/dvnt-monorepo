@@ -8,7 +8,7 @@ const member={id:'self',username:'fixture',displayName:'Fixture',avatarUrl:'http
 const event={id:1,title:'Party',image:'https://fixture.example/flyer.png'};
 const row={id:1,title:'Party',visibility:'public',is_hidden:false,publish_at:null,status:'active',is_online:false,location_type:'venue',location:'Public venue',location_name:null,location_lat:33.78,location_lng:-84.41};
 const mocks={
- './map-sharing-consent': `import React from 'react';export const MapSharingConsent=({active})=>React.createElement('button',{onClick:()=>{window.fixture.sharing=false;window.renderFixture()},disabled:!active},'Stop sharing');`,
+ '../map-sharing-consent': `import React from 'react';export const MapSharingConsent=({active})=>React.createElement('button',{onClick:()=>{window.fixture.sharing=false;window.renderFixture()},disabled:!active},'Stop sharing');`,
  '@shopify/react-native-skia':require('./fixtures/native-map-icon-boundary.cjs'),
  'react-native':`import React from 'react';export const Platform={OS:window.fixture.platform};const Box=({children,accessibilityLabel})=>React.createElement('div',{'aria-label':accessibilityLabel},children);export const View=Box,Text=Box,ScrollView=Box,ActivityIndicator=()=>null;export const Modal=({visible,children})=>visible?React.createElement("div",{role:"dialog"},children):null;export const Pressable=({children,onPress,accessibilityLabel,disabled})=>React.createElement('button',{onClick:onPress,'aria-label':accessibilityLabel,disabled},children);export const Image=()=>null;`,
  'expo-router':`export const useRouter=()=>({push:p=>window.fixture.route=p});`,
@@ -65,11 +65,11 @@ const mocks={
   await page.locator('[data-marker="event:1"]').click();assert.equal(await page.evaluate(()=>window.fixture.eventRoute),'1');
   await page.locator('[data-marker="member:self"]').click();assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture');
   const loadedPhoto=await page.locator('[data-marker="member:self"]').getAttribute('data-image');
-  await page.evaluate(()=>{window.fixture.failRaster=true;window.fixture.data.self.avatarUrl='https://fixture.example/allocation-failure.png';window.renderFixture()});
+  await page.evaluate(()=>{window.fixture.data.members=[{...window.fixture.data.self,id:'fallback-peer',username:'fallbackpeer',displayName:'Fallback Peer',latitude:40.72}];window.fixture.failRaster=true;window.fixture.data.self.avatarUrl='https://fixture.example/allocation-failure.png';window.renderFixture()});
   await page.locator('[data-marker="member:self"]').waitFor({state:'detached'});
-  await page.getByRole('button',{name:"Open Fixture's profile",exact:true}).click();
-  assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture','raster failure keeps list navigation without passing null to Expo image loader');
-  await page.evaluate(()=>{window.fixture.failRaster=false;window.fixture.data.self.avatarUrl='https://fixture.example/recovered.png';window.renderFixture()});
+  await page.getByRole('button',{name:"Open Fallback Peer's profile",exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fallbackpeer','raster failure keeps list navigation without passing null to Expo image loader');
+  await page.evaluate(()=>{window.fixture.data.members=[];window.fixture.failRaster=false;window.fixture.data.self.avatarUrl='https://fixture.example/recovered.png';window.renderFixture()});
   await page.waitForFunction(expected=>document.querySelector('[data-marker="member:self"]')?.getAttribute('data-image')===expected,loadedPhoto);
 
   await page.evaluate(()=>{window.fixture.data.self.avatarUrl='https://fixture.example/broken.png';window.renderFixture()});
