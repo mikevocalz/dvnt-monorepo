@@ -28,75 +28,22 @@ export async function projectVisiblePosts(
         ),
       ];
       if (authorIds.length > 0) {
-        const [authors, follows, approvals, blocks] = await Promise.all([
-          db
-            .from("users")
-            .select("id, auth_id, is_private")
-            .in("id", authorIds),
-          viewer.userId !== null
-            ? db
-                .from("follows")
-                .select("following_id")
-                .eq("follower_id", viewer.userId)
-                .in("following_id", authorIds)
-            : { data: [], error: null },
-          viewer.userId !== null
-            ? db
-                .from("follow_requests")
-                .select("following_id")
-                .eq("follower_id", viewer.userId)
-                .eq("status", "approved")
-                .in("following_id", authorIds)
-            : { data: [], error: null },
-          viewer.userId !== null
-            ? db
-                .from("blocks")
-                .select("blocker_id, blocked_id")
-                .or(
-                  `blocker_id.eq.${viewer.userId},blocked_id.eq.${viewer.userId}`,
-                )
-            : { data: [], error: null },
-        ]);
-        if (authors.error || follows.error || approvals.error || blocks.error)
-          throw new Error("Relationship lookup failed");
-        const authIds = (authors.data || [])
-          .map((a: any) => a.auth_id)
-          .filter(Boolean);
-        const settings =
-          authIds.length > 0
-            ? await db
-                .from("user_settings")
-                .select("auth_id, settings")
-                .in("auth_id", authIds)
-            : { data: [], error: null };
-        if (settings.error) throw new Error("Privacy lookup failed");
-        const settingsByAuth = new Map(
-          (settings.data || []).map((s: any) => [s.auth_id, s.settings]),
-        );
-        const followed = new Set(
-          (follows.data || []).map((f: any) => Number(f.following_id)),
-        );
-        const approved = new Set(
-          (approvals.data || []).map((f: any) => Number(f.following_id)),
-        );
-        for (const author of authors.data || []) {
-          const id = Number(author.id);
+        const { data: relationships, error } = await db.rpc("post_relationship_access", {
+          p_viewer: viewer.userId,
+          p_authors: authorIds,
+        });
+        if (error || !Array.isArray(relationships))
+          throw new Error("Relationship preservation lookup failed");
+        for (const relationship of relationships) {
+          const id = Number(relationship.author_id);
           knownAuthors.add(id);
-          const preference: any = settingsByAuth.get(author.auth_id);
-          const pref = preference?.privacy?.privateAccount;
-          const isPrivate =
-            author.is_private === true ||
-            (pref != null && pref !== false && pref !== "false");
-          if (isPrivate) privateAuthors.add(id);
-          if (followed.has(id) && (!isPrivate || approved.has(id)))
+          // During additive rollout, preserve the old read boundary until the
+          // database atomically captures all follows and activates the gate.
+          if (relationship.enforcement_ready !== false && relationship.is_private === true)
+            privateAuthors.add(id);
+          if (relationship.enforcement_ready === false || relationship.is_following === true)
             allowedAuthors.add(id);
-        }
-        for (const block of blocks.data || []) {
-          blockedAuthors.add(
-            Number(block.blocker_id) === viewer.userId
-              ? Number(block.blocked_id)
-              : Number(block.blocker_id),
-          );
+          if (relationship.is_blocked === true) blockedAuthors.add(id);
         }
         relationshipsLoaded = true;
       }

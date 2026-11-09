@@ -135,9 +135,13 @@ test('actual legacy handler round-trips the real SQL mutation for public and pri
     await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
       CREATE TABLE users(id bigint PRIMARY KEY,auth_id text UNIQUE,is_private boolean);
       CREATE TABLE user_settings(auth_id text PRIMARY KEY,settings jsonb);
-      CREATE TABLE follows(follower_id bigint,following_id bigint,UNIQUE(follower_id,following_id));
+      CREATE TABLE follows(id serial PRIMARY KEY,follower_id bigint,following_id bigint,UNIQUE(follower_id,following_id)); CREATE TABLE blocks(blocker_id bigint,blocked_id bigint);
       INSERT INTO users VALUES(1,'actor',false),(2,'private',true),(3,'public',false),(4,'outsider',false);`);
     await db.exec(fs.readFileSync(__dirname + '/../../migrations/20261109110000_private_follow_requests.sql', 'utf8'));
+    await db.exec(`UPDATE follow_access_cutovers SET read_gate_version=1; CREATE FUNCTION post_follow_hidden(bigint) RETURNS boolean LANGUAGE sql AS $$SELECT false$$;
+      CREATE FUNCTION fixture_privacy_sync() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RETURN NEW; END$$;
+      CREATE TRIGGER user_settings_sync_account_privacy AFTER UPDATE ON user_settings FOR EACH ROW EXECUTE FUNCTION fixture_privacy_sync();`);
+    await db.exec(fs.readFileSync(__dirname + '/../../../../../docs/security/private-follow-preservation-cutover.sql', 'utf8'));
     await db.exec('SET ROLE service_role');
     const mutation = async ({ p_actor, p_target, p_action }) =>
       (await db.query('SELECT mutate_follow_relationship($1,$2,$3) AS result', [p_actor, p_target, p_action])).rows[0].result;

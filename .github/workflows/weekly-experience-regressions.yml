@@ -10,6 +10,7 @@ on:
       - "apps/mobile/supabase/migrations/**"
       - "docs/security/users-identity-write-prerequisite.sql"
       - "docs/security/notification-privacy-draft.sql"
+      - "docs/security/private-follow-preservation-cutover.sql"
       - "scripts/test-*.cjs"
       - ".github/workflows/weekly-experience-regressions.yml"
   push:
@@ -22,6 +23,7 @@ on:
       - "apps/mobile/supabase/migrations/**"
       - "docs/security/users-identity-write-prerequisite.sql"
       - "docs/security/notification-privacy-draft.sql"
+      - "docs/security/private-follow-preservation-cutover.sql"
       - "scripts/test-*.cjs"
       - ".github/workflows/weekly-experience-regressions.yml"
   workflow_dispatch:
@@ -30,6 +32,35 @@ permissions:
   contents: read
 
 jobs:
+  follow-preservation-postgres:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16.6
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: fixture-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install isolated PostgreSQL fixture driver
+        run: npm install --prefix "$RUNNER_TEMP/follow-postgres" --ignore-scripts --no-audit --no-fund --no-save pg@8.16.3
+      - name: Exercise real multi-connection preservation races
+        env:
+          NODE_PATH: ${{ runner.temp }}/follow-postgres/node_modules
+          FOLLOW_FIXTURE_DATABASE_URL: postgres://postgres:fixture-only@127.0.0.1:5432/postgres
+        run: node --test scripts/test-follow-preservation-postgres.cjs
+
   isolated-regressions:
     runs-on: ubuntu-24.04
     steps:

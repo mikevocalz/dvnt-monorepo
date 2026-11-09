@@ -1,4 +1,4 @@
--- Source-only. Requires reviewed private-follow approval schema and the existing
+-- Source-only. Requires the additive follow-preservation schema and the existing
 -- users client-write lockdown. This file does not apply itself to any database.
 BEGIN;
 
@@ -8,8 +8,11 @@ BEGIN;
 DO $$
 DECLARE role_name text; column_name text;
 BEGIN
-  IF to_regclass('public.follow_requests') IS NULL THEN
-    RAISE EXCEPTION 'Apply private follow requests before the post read gate';
+  IF to_regclass('public.follow_access_cutovers') IS NULL THEN
+    RAISE EXCEPTION 'Apply follow preservation before the post read gate';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM public.follow_access_cutovers WHERE batch_id='private-follow-v1') THEN
+    RAISE EXCEPTION 'Follow compatibility schema is not ready';
   END IF;
   FOREACH role_name IN ARRAY ARRAY['anon','authenticated'] LOOP
     IF has_table_privilege(role_name, 'public.users', 'INSERT,UPDATE,DELETE,TRUNCATE') THEN
@@ -64,6 +67,9 @@ DECLARE
   private_author boolean;
 BEGIN
   IF COALESCE(auth.jwt()->>'role','')='service_role' THEN RETURN false; END IF;
+  -- Staged policies add no restriction before the atomic preservation switch.
+  -- Existing age/admission/content RLS still applies unchanged.
+  IF EXISTS(SELECT 1 FROM public.follow_access_cutovers WHERE batch_id='private-follow-v1' AND NOT ready) THEN RETURN false; END IF;
   SELECT p.author_id, p.is_nsfw IS TRUE,
     u.is_private IS TRUE OR COALESCE(us.settings#>>'{privacy,privateAccount}','false') <> 'false'
     INTO author_id, spicy, private_author
@@ -83,8 +89,7 @@ BEGIN
   IF viewer_id IS NULL THEN RETURN true; END IF;
   IF NOT EXISTS (SELECT 1 FROM public.follows f
     WHERE f.follower_id=viewer_id AND f.following_id=author_id) THEN RETURN true; END IF;
-  IF private_author AND NOT EXISTS (SELECT 1 FROM public.follow_requests r
-    WHERE r.follower_id=viewer_id AND r.following_id=author_id AND r.status='approved') THEN
+  IF private_author AND NOT public.private_follow_authorized(viewer_id,author_id) THEN
     RETURN true;
   END IF;
   RETURN false;
@@ -142,5 +147,7 @@ $$;
 REVOKE ALL ON FUNCTION public.public_post_share_preview(bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.public_post_share_preview(bigint) TO anon, authenticated, service_role;
 
+-- Mark only after the matching helper, policies and privacy trigger exist.
+UPDATE public.follow_access_cutovers SET read_gate_version=1 WHERE batch_id='private-follow-v1';
 COMMIT;
 NOTIFY pgrst, 'reload schema';

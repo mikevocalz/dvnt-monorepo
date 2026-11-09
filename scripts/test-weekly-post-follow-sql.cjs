@@ -8,7 +8,10 @@ const followMigration = fs.readFileSync(path.join(migrations, '20261109110000_pr
 const gate = fs.readFileSync(path.join(migrations, '20261109114000_post_follow_read_gate.sql'), 'utf8');
 const existingAgeGate = fs.readFileSync(path.join(migrations, '20261003170200_spicy_viewing_excludes_minors.sql'), 'utf8');
 
-async function fixture() {
+const cutover=fs.readFileSync(path.join(__dirname,'../docs/security/private-follow-preservation-cutover.sql'),'utf8');
+async function activate(db) { await db.exec(gate); await db.exec(cutover); }
+
+async function fixture(preserve = false) {
   const db = new PGlite();
   await db.exec(`
     CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
@@ -24,7 +27,7 @@ async function fixture() {
     CREATE TABLE posts_media(id bigint PRIMARY KEY,_parent_id bigint,url text,type text DEFAULT 'image',_order integer DEFAULT 0);
     CREATE TABLE post_text_slides(id bigint PRIMARY KEY,post_id bigint,content text);
     CREATE TABLE comments(id bigint PRIMARY KEY,post_id bigint,content text);
-    CREATE TABLE follows(follower_id bigint,following_id bigint,PRIMARY KEY(follower_id,following_id));
+    CREATE TABLE follows(id serial PRIMARY KEY,follower_id bigint,following_id bigint,UNIQUE(follower_id,following_id));
     CREATE TABLE blocks(blocker_id bigint,blocked_id bigint);
     CREATE TABLE identity_verifications(user_id text,date_of_birth date);
     CREATE FUNCTION viewer_user_id() RETURNS integer LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public AS $$
@@ -59,6 +62,7 @@ async function fixture() {
     INSERT INTO post_text_slides VALUES(99,999,'orphan secret');
     INSERT INTO identity_verifications VALUES('minor',CURRENT_DATE-INTERVAL '15 years');
   `);
+  if(preserve) await db.exec('INSERT INTO follows(follower_id,following_id) VALUES(2,1),(2,3),(2,4),(5,1),(5,3)');
   await db.exec(followMigration);
   await db.exec(existingAgeGate);
   await db.exec(`CREATE POLICY spicy_requires_verified_viewer ON posts_media AS RESTRICTIVE FOR SELECT TO anon,authenticated USING(NOT post_spicy_hidden(_parent_id));
@@ -79,8 +83,8 @@ test('real restrictive post and child gates enforce follows, approval and existi
   const db = await fixture();
   try {
     assert.ok((await visible(db, 'viewer')).posts.includes(11), 'old signed-in policy permits unfollowed spicy');
-    await db.exec(gate);
-    await db.exec(gate);
+    await activate(db);
+    await activate(db);
     const expected = ids => ({ posts: ids, media: ids, slides: ids, comments: ids });
     assert.deepEqual(await visible(db, null, 'anon'), expected([12]));
     for (const id of [11,31,32,41,42,71]) {
@@ -91,12 +95,12 @@ test('real restrictive post and child gates enforce follows, approval and existi
     assert.deepEqual(await visible(db, 'viewer'), expected([12]));
     assert.deepEqual(await visible(db, 'author-public'), expected([11, 12]));
     assert.deepEqual(await visible(db, 'author-private'), expected([12, 31, 32]));
-    await db.exec('INSERT INTO follows VALUES(2,1),(2,3),(2,4),(2,7),(5,1)');
+    await db.exec('INSERT INTO follows(follower_id,following_id) VALUES(2,1),(2,3),(2,4),(2,7),(5,1)');
     assert.deepEqual(await visible(db, 'viewer'), expected([11,12]), 'legacy private follows are not implicit approval');
-    await db.exec("INSERT INTO follow_requests(follower_id,following_id,status) VALUES(2,3,'pending'),(2,4,'approved'),(2,7,'approved')");
+    await db.query("SELECT mutate_follow_relationship(4,2,'approve'),mutate_follow_relationship(7,2,'approve')");
     assert.deepEqual(await visible(db, 'viewer'), expected([11,12,41,42,71]));
     assert.deepEqual(await visible(db, 'minor'), expected([12]), 'following does not bypass the existing age gate');
-    await db.exec("UPDATE follow_requests SET status='approved' WHERE following_id=3");
+    await db.query("SELECT mutate_follow_relationship(3,2,'approve')");
     assert.deepEqual(await visible(db, 'viewer'), expected([11,12,31,32,41,42,71]));
     await db.exec('DELETE FROM follows WHERE follower_id=2 AND following_id=3');
     assert.deepEqual(await visible(db, 'viewer'), expected([11,12,41,42,71]), 'approval alone cannot survive unfollow');
@@ -128,7 +132,7 @@ test('legacy SQL toggles preserve actual private, block and age read gates', { t
     } finally { await db.exec('RESET ROLE'); }
   };
   try {
-    await db.exec(gate);
+    await activate(db);
     await mutate(2, 1);
     assert.deepEqual(await visible(db, 'viewer'), expected([11, 12]));
     await mutate(2, 1);
@@ -200,7 +204,7 @@ test('actual identity prerequisite composes with private post approvals and opti
         await assert.rejects(db.exec(sql), error => error.code === '42501');
       }
     });
-    await db.exec(gate); await db.exec(gate);
+    await activate(db); await activate(db);
     const expected = ids => ({ posts: ids, media: ids, slides: ids, comments: ids });
     assert.deepEqual(await visible(db, 'viewer'), expected([12]));
     const mutate = (actor, target, action) => as('service_role', '', async () =>
@@ -238,4 +242,28 @@ test('actual identity prerequisite composes with private post approvals and opti
     await as('anon', '', () => assert.rejects(db.exec('SELECT * FROM notifications'), error => error.code === '42501'));
     assert.deepEqual(await visible(db, 'viewer'), expected([12,32]));
   } finally { await db.close(); }
+});
+
+
+test('preserved relationship status, one-snapshot service projection, RLS and child gates agree', async () => {
+ const db=await fixture(true); const expected=ids=>({posts:ids,media:ids,slides:ids,comments:ids});
+ try {
+  await activate(db);
+  assert.deepEqual(await visible(db,'viewer'),expected([11,12,31,32,41,42]));
+  assert.deepEqual(await visible(db,'minor'),expected([12,32]),'legacy never bypasses existing age gate');
+  const relation=async()=> (await db.query('SELECT * FROM post_relationship_access(2,ARRAY[1,3,4]::bigint[]) ORDER BY author_id')).rows;
+  assert.ok((await relation()).every(x=>x.is_following && !x.is_blocked));
+  await db.exec('UPDATE users SET is_private=true WHERE id=1');
+  assert.deepEqual(await visible(db,'viewer'),expected([11,12,31,32,41,42]));
+  assert.equal((await db.query("SELECT (mutate_follow_relationship(2,1,'status')->>'following')::boolean f")).rows[0].f,true);
+  for(const pair of ['1,2','2,1']) {
+   await db.exec(`INSERT INTO blocks VALUES(${pair})`);
+   assert.equal((await relation())[0].is_blocked,true);
+   assert.deepEqual(await visible(db,'viewer'),expected([31,32,41,42]));
+   await db.exec('DELETE FROM blocks');
+  }
+  await db.exec('DELETE FROM follows WHERE follower_id=2 AND following_id=1; INSERT INTO follows(follower_id,following_id) VALUES(2,1)');
+  assert.equal((await relation())[0].is_following,false);
+  assert.deepEqual(await visible(db,'viewer'),expected([31,32,41,42]));
+ }finally{await db.close();}
 });

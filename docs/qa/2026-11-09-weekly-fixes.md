@@ -3,13 +3,16 @@
 ## Agreed behavior
 
 - Every Spicy post requires following its author, including on Public pages.
-  Private pages require an approved follow request. Existing age/admission and
+  Private pages require owner approval, retained legacy access, or acceptance
+  while Public for that exact live follow. Existing age/admission and
   bilateral-block restrictions still apply. Nonfollowers see a follow placeholder,
   not hidden originals embedded beneath a blur. Private safe posts are protected
   too. The author retains access to their own posts.
 - Public/Private settings preserve sibling settings and concurrent updates.
   Private follow requests can be requested, cancelled, approved, or declined.
-  Historic raw follow rows are not silently treated as private approvals.
+  All existing follows are preserved separately from approval. Public followers
+  also retain access when an owner later switches Private; new Private follows
+  remain pending. Unfollow/removal permanently retires that relationship access.
   Older clients may omit a follow action; the server resolves that toggle inside
   the locked relationship transaction. Settings and follow operations stay bound
   to the account that initiated them, including rapid sign-out/sign-in changes.
@@ -38,8 +41,8 @@ or certify production behavior. Those actions need separate release authorizatio
 1. Rehearse the pinned source, migrations and supported client versions on an
    approved nonproduction project. Establish installed-native compatibility for
    service-only profile writes, follow requests and the approval UI. Current
-   source tests do not prove compatibility of older installed binaries. No
-   historic private follows are auto-approved; review that transition explicitly.
+   source tests do not prove compatibility of older installed binaries. Existing follows are preserved through separate incarnation-bound legacy grants,
+   including Public accounts later made Private; none are labeled owner-approved.
 2. Prepare the trusted-users prerequisite tracked in PR #210. The weekly gate
    refuses ANY effective client users INSERT/UPDATE column grant, including
    nonidentity profile columns. Preserve SELECT and verified service writes.
@@ -58,27 +61,35 @@ or certify production behavior. Those actions need separate release authorizatio
    BEFORE the privacy sync trigger. An older handler could otherwise carry a
    stale Public flag during an unrelated edit and make a legacy Private account
    public. Do not bypass either prerequisite or mix these handler versions.
-4. Apply `20261109050000_member_map_session_consent.sql` and then
-   `20261109110000_private_follow_requests.sql`. Deploy the guarded service-role
-   readers from the tested source: `bootstrap-feed`, `bootstrap-profile`,
+4. Apply `20261109050000_member_map_session_consent.sql`, then the additive
+   `20261109110000_private_follow_requests.sql` with `ready=false`. This captures
+   no relationships and leaves old follow behavior available. Deploy and verify
+   compatible service readers: `bootstrap-feed`, `bootstrap-profile`,
    `bootstrap-notifications`, `get-posts`, `get-bookmarks`, `get-liked-activity`,
-   `get-post-comments`, `get-text-post-slides`, `live-surface`, and `add-comment`.
-   Deploy matching `toggle-follow` as well. Verify every version and drain old
-   invocations before installing the post gate. The new projection needs the
-   follow-request schema. `get-posts` verifies Better Auth itself and is configured
-   with `verify_jwt=false`.
-5. Apply `20261109114000_post_follow_read_gate.sql`, then
-   `20261109120000_weekly_event_visibility.sql` and
-   `20261109143000_member_exact_distance_consent.sql` through the reviewed database
-   release process. Old service-role readers bypass the restrictive RLS gate,
-   so protection is not active until BOTH database and complete reader inventory
-   are verified. If version draining or traffic control cannot be established,
-   stop the rollout instead of assuming an atomic deployment. Check schema and
-   the migration ledger after any uncertain outcome before retrying: migrations
-   commit separately, and the location CREATE/ADD steps are not idempotent.
-   A failed post-COMMIT schema notification does not imply rollback. The event
-   migration includes a live-data classification backfill. Location migrations do not
-   upgrade old grants to longer duration or precise sharing.
+   `get-post-comments`, `get-text-post-slides`, `live-surface`, and `add-comment`,
+   plus matching `toggle-follow`. These readers preserve compatibility before
+   activation. Never use the earlier approved-only weekly reader. `get-posts`
+   verifies Better Auth itself and uses `verify_jwt=false`. Drain every old Edge
+   invocation AND outstanding database request/transaction. If this cannot be
+   proved, stop at compatibility mode; do not activate or assume atomic deployment.
+5. Apply `20261109114000_post_follow_read_gate.sql` to stage the privacy trigger,
+   gate policies and protocol version. New follow restrictions remain inactive
+   until cutover. Follow the [staged preservation procedure](../workstreams/15-private-follow-requests.md):
+   record reviewed commit/source hashes, project/operator approval and drain
+   evidence; verify all new reader/writer versions; then obtain separate approval
+   for `docs/security/private-follow-preservation-cutover.sql`. That bounded
+   transaction captures ALL current follow incarnations, closes direct client
+   follow writes and flips readiness atomically without rewriting follows/counts
+   or inventing owner approval. Every subsequent Public follow also retains
+   acceptance across a later Private choice; new Private follows are pending.
+   Check batch/count, protocol, permissions, preservation, revocation and parity
+   after commit. A timeout rolls back to compatibility; a committed batch must
+   never be deleted or recaptured. Check the migration ledger/batch after any
+   uncertain result; post-COMMIT schema notification failure is not rollback.
+   Only then apply `20261109120000_weekly_event_visibility.sql` and
+   `20261109143000_member_exact_distance_consent.sql` through the separately
+   reviewed release process. Event classification includes a live-data backfill.
+   Location migrations do not upgrade existing duration or precision grants.
 6. Deploy matching `create-event`, `member-map`, and `member-proximity` before
    clients. Missing approval/location RPCs fail closed; do not add legacy read
    fallbacks. Ship matching web/native clients only after staging/device approval,
@@ -86,8 +97,8 @@ or certify production behavior. Those actions need separate release authorizatio
    Confirm logout, account switch, unfollow, denied requests, revocation, and expiry
    erase displayed media/location immediately and reject late responses.
 
-Do not run an unreviewed bulk database push: the handler changes and drain checks
-between migrations are intentional. A rollback must not restore broad client
+Do not run an unreviewed bulk database push: the compatibility deploy/drain and separate activation boundary
+are intentional. A rollback must not restore broad client
 identity writes, old service readers or permissive post reads. Keep protection
 in place and repair forward, or use an explicitly approved traffic hold. Public
 URL/media revocation is outside these database rollback guarantees.
@@ -112,7 +123,8 @@ not physical-device or visual-browser QA.
 Run these checks in staging before release on web, iOS, and Android. After
 deployment, repeat only the separately approved synthetic-account smoke checks:
 
-- Public nonfollower, public follower, private pending/approved/rejected follower,
+- Public nonfollower, accepted Public follower later made Private, preserved
+  historical follower, private pending/approved/rejected follower,
   minor/ineligible viewer, blocked pair, and author across feed, profile, grids,
   search, direct links, notifications, bookmarks, comments, and text slides.
 - Unfollow/account switch while a lightbox or share overlay is open and while a

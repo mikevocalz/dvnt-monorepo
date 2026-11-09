@@ -71,6 +71,18 @@ function fixture(options = {}) {
   };
   const calls = [];
   const db = {
+    rpc(name, args) {
+      assert.equal(name, "post_relationship_access");
+      const pref = options.preference ?? false;
+      const isPrivate = options.private === true || (pref !== false && pref !== "false");
+      return Promise.resolve({
+        data: args.p_authors.map(id => ({ author_id: id, is_private: isPrivate,
+          is_following: args.p_viewer != null && tables.follows.some(f => f.follower_id === args.p_viewer && f.following_id === id) && (!isPrivate || tables.follow_requests.some(f => f.following_id === id && f.status === "approved") || !!options.legacy),
+          is_blocked: args.p_viewer != null && !!options.block, enforcement_ready: options.ready !== false })),
+        error: options.notReady || ["users", "follows", "follow_requests", "blocks", "user_settings"].includes(options.errorTable)
+          ? { message: "preservation unavailable" } : null,
+      });
+    },
     from(table) {
       calls.push(table);
       let rows = tables[table] || [],
@@ -227,7 +239,17 @@ function fixture(options = {}) {
 }
 for (const [label, options, expected] of [
   ["public nonfollower", {}, "locked"],
+  ["staged compatible private read retains old visibility", { ready: false, private: true }, "visible"],
+  ["staged compatible spicy read retains old visibility", { ready: false }, "visible"],
+  ["staged mode still respects block", { ready: false, block: true }, "hidden"],
+  ["staged mode still respects age", { ready: false, minor: true }, "hidden"],
   ["public follower", { follow: true }, "visible"],
+  ["private retained legacy follower", { private: true, follow: true, legacy: true }, "visible"],
+  ["legacy cannot replace live follow", { private: true, legacy: true }, "locked"],
+  ["legacy still respects block", { private: true, follow: true, legacy: true, block: true }, "hidden"],
+  ["legacy still respects age", { private: true, follow: true, legacy: true, minor: true }, "hidden"],
+  ["legacy still respects admission", { private: true, follow: true, legacy: true, denied: true }, "hidden"],
+  ["missing readiness fails closed", { private: true, follow: true, legacy: true, notReady: true }, "hidden"],
   ["private raw follower", { private: true, follow: true }, "locked"],
   [
     "private approved follower",
