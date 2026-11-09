@@ -130,7 +130,9 @@ const entry = `import React from 'react';import {createRoot} from 'react-dom/cli
   const screens={web:Web,native:Native,'web-status':WebProfileStatus,'native-status':NativeProfileStatus,'web-feed':WebFeed,'native-feed':NativeFeed,'native-privacy':NativePrivacy,'web-settings':WebSettings,'ios-settings':IOSSettings,'android-settings':AndroidSettings,'web-gate':WebGate,'native-gate':NativeGate};
   export const mount=(node)=>{const root=createRoot(node);const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0}}});let mounted=true;return {client,render:screen=>{const Screen=screens[screen];root.render(<React.StrictMode><QueryClientProvider client={client}><Screen author={{id:'target',username:'Target'}}/></QueryClientProvider></React.StrictMode>);},unmount:()=>{if(mounted){mounted=false;root.unmount();client.clear();}}};};`;
 
-(async () => {
+module.exports = { fixtures, entry };
+
+if (require.main === module) (async () => {
   const { Window } = await import(resolve("happy-dom"));
   const window = new Window({ url: "https://fixture.invalid" });
   Object.assign(global, {

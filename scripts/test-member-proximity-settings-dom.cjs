@@ -21,9 +21,14 @@ const mocks = {
   './follow-requests-panel': `export const FollowRequestsPanel=()=>null;`,
 };
 let bundle;
+async function buildBrowserFixture() {
+  if(!bundle) bundle=(await build({stdin:{contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {flushSync} from 'react-dom';import {CityVisibilitySection} from './packages/app/features/settings/privacy.web';import {CityVisibilityCard} from './packages/app/features/settings/ui/CityVisibilityCard';import {useSyncMemberProximityPresence} from './packages/app/lib/hooks/use-member-proximity';import {useEventsLocationStore} from './packages/app/lib/stores/events-location-store';import {useExactDistanceStore} from './packages/app/lib/stores/exact-distance-store';import {useMemberProximitySyncStore} from './packages/app/lib/stores/member-proximity-sync-store';window.events=useEventsLocationStore;window.exact=useExactDistanceStore;window.sync=useMemberProximitySyncStore;window.originalTime=Date.now();useEventsLocationStore.setState({activeCity:{id:1,name:'Test City'},deviceLat:40,deviceLng:-73,deviceObservation:{ownerAuthId:'a',sessionKey:'s1',observedAt:window.originalTime}});function FeedSync(){useSyncMemberProximityPresence();return null}const root=createRoot(document.getElementById('root'));window.render=({show=true,duplicate=window.duplicate,native=window.native}={})=>flushSync(()=>root.render(<React.StrictMode>{show?(native?<CityVisibilityCard/>:<CityVisibilitySection/>):null}{duplicate?<FeedSync/>:null}</React.StrictMode>));window.closeRoot=()=>flushSync(()=>root.unmount());window.render();`,resolveDir:root,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),plugins:[{name:'mocks',setup(b){b.onResolve({filter:/.*/},a=>mocks[a.path]?{path:a.path,namespace:'mock'}:undefined);b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:mocks[a.path],resolveDir:root,loader:'tsx'}));}}]})).outputFiles[0].text;
+  return bundle;
+}
+module.exports = { buildBrowserFixture };
 async function fixture({native=false,duplicate=false,saved={},failRead=false}={}) {
   const {Window}=await import(require.resolve('happy-dom'));
-  if(!bundle) bundle=(await build({stdin:{contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {flushSync} from 'react-dom';import {CityVisibilitySection} from './packages/app/features/settings/privacy.web';import {CityVisibilityCard} from './packages/app/features/settings/ui/CityVisibilityCard';import {useSyncMemberProximityPresence} from './packages/app/lib/hooks/use-member-proximity';import {useEventsLocationStore} from './packages/app/lib/stores/events-location-store';import {useExactDistanceStore} from './packages/app/lib/stores/exact-distance-store';import {useMemberProximitySyncStore} from './packages/app/lib/stores/member-proximity-sync-store';window.events=useEventsLocationStore;window.exact=useExactDistanceStore;window.sync=useMemberProximitySyncStore;window.originalTime=Date.now();useEventsLocationStore.setState({activeCity:{id:1,name:'Test City'},deviceLat:40,deviceLng:-73,deviceObservation:{ownerAuthId:'a',sessionKey:'s1',observedAt:window.originalTime}});function FeedSync(){useSyncMemberProximityPresence();return null}const root=createRoot(document.getElementById('root'));window.render=({show=true,duplicate=window.duplicate,native=window.native}={})=>flushSync(()=>root.render(<React.StrictMode>{show?(native?<CityVisibilityCard/>:<CityVisibilitySection/>):null}{duplicate?<FeedSync/>:null}</React.StrictMode>));window.closeRoot=()=>flushSync(()=>root.unmount());window.render();`,resolveDir:root,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),plugins:[{name:'mocks',setup(b){b.onResolve({filter:/.*/},a=>mocks[a.path]?{path:a.path,namespace:'mock'}:undefined);b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:mocks[a.path],resolveDir:root,loader:'tsx'}));}}]})).outputFiles[0].text;
+  const bundle = await buildBrowserFixture();
   const w=new Window({url:'https://fixture.invalid',console});
   Object.assign(w,{saved,failRead,native,duplicate,calls:[],samples:0,active:0,maxConcurrent:0});
   w.document.body.innerHTML='<div id="root"></div>';w.eval(bundle);await tick();await tick();return w;
@@ -36,6 +41,7 @@ const switches=w=>[...w.document.querySelectorAll('[role=switch]')];
 const calls=(w,action)=>w.calls.filter(c=>c.action===action);
 async function enable(w){switches(w)[0].click();await tick();switches(w)[1].click();await wait(()=>calls(w,'publish').length>0);await tick()}
 async function close(w){w.closeRoot();await w.happyDOM.close()}
+if (require.main === module) {
 for(const native of [false,true])test(`${native?'native':'web'} direct Settings publishes only explicit distance consent, grants exact with fresh observation, and stops both`,async()=>{
  const w=await fixture({native});try{
   assert.match(w.document.body.textContent,/To allow exact distances/);assert.equal(button(w,'I agree: allow exact distances').disabled,true);
@@ -99,3 +105,5 @@ for(const native of [false,true])test(`${native?'native':'web'} confirmed ordina
   w.exact.getState().beginWithdrawal('a');await tick();assert.doesNotMatch(w.document.body.textContent,/Could not confirm withdrawal/,'a later withdrawal cannot resurrect the resolved operation error');
  }finally{await close(w)}
 });
+
+}

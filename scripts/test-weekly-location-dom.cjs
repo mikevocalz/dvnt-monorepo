@@ -1,8 +1,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { build } = require('esbuild');
-(async () => {
-  const { Window } = await import(require.resolve('happy-dom'));
+async function buildBrowserFixture({realWebHost=false}={}) {
   const root = path.resolve(__dirname, '..');
   const mocks = {
     '@dvnt/app/lib/stores/member-proximity-sync-store': 'export const proximityStorageError=()=>null;export const useMemberProximitySyncStore=()=>({});',
@@ -15,8 +14,10 @@ const { build } = require('esbuild');
     '@dvnt/app/lib/hooks/use-age-verification': 'export const useVerificationState=()=>({});',
     '@dvnt/app/lib/api/member-proximity': `export const memberProximityApi={distance:async()=>{window.fixture.calls++;if(window.fixture.fail)throw Error('Unavailable');return window.fixture.reply;}};`,
   };
+  if (realWebHost) delete mocks['react-native'];
   const output = await build({nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),
     stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';import {MemberDistanceBadge} from './packages/app/components/feed/member-distance-badge.tsx';const query=new QueryClient({defaultOptions:{queries:{retry:false}}});window.fixture.query=query;const root=createRoot(document.getElementById('root'));window.fixture.unmount=()=>root.unmount();root.render(<QueryClientProvider client={query}><MemberDistanceBadge username="target"/><MemberDistanceBadge username="target"/></QueryClientProvider>);`, resolveDir: root, loader: 'tsx' },
+    alias: realWebHost ? {'react-native':'react-native-web'} : {},
     bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic',
     plugins: [{ name: 'fixtures', setup(b) {
       b.onResolve({ filter: /.*/ }, a => {
@@ -26,12 +27,18 @@ const { build } = require('esbuild');
       b.onLoad({ filter: /.*/, namespace: 'mock' }, a => ({ contents: mocks[a.path], loader: 'tsx', resolveDir: root }));
     }}],
   });
+  return output.outputFiles[0].text;
+}
+module.exports = { buildBrowserFixture };
+if (require.main === module) (async () => {
+  const { Window } = await import(require.resolve('happy-dom'));
+  const bundle = await buildBrowserFixture();
   const win = new Window({ url: 'https://fixture.test', console, settings: { enableJavaScriptEvaluation: true } });
   win.document.body.innerHTML = '<div id="root"></div>';
   win.fixture = { user: { authId: 'viewer', username: 'viewer' }, access: { owner: 'viewer', hydrationReady: true, blocked: false, settings: { locationEnabled: true, sessionKey: 'signin-a' } }, location: { preciseProximityGrant: true, preciseProximityOwnerAuthId: 'viewer', cityVisibility: { cityId: 1, cityName: 'City', expiresAt: Date.now()+3600000 } }, exact: {owner:null,sessionKey:null,expiresAt:0,generation:0}, calls: 0, fail: false, reply: { kind: 'distance', band: 'under_1', label: '0.01 miles away' } };
   const wait = async predicate => { for (let i=0;i<100;i++) { if (predicate()) return; await new Promise(r=>setTimeout(r,10)); } assert.ok(predicate(),win.document.body.textContent); };
   try {
-    win.eval(output.outputFiles[0].text);
+    win.eval(bundle);
     await wait(()=>win.document.body.textContent.includes('Less than a mile away'));
     assert.equal(win.fixture.calls,1,'same author cards share one server query');
     assert.doesNotMatch(win.document.body.textContent,/0.01/,'never displays unsupported precise mileage');
