@@ -99,6 +99,19 @@ test('legacy positive coordinate consent never restores and corrupt denial stora
 test('city expiry while Settings remains mounted revokes once and disables both switches',async()=>{
  const w=await fixture({duplicate:true});try{await enable(w);w.events.setState({cityVisibility:{cityId:1,cityName:'Test City',expiresAt:Date.now()+100}});await tick();const before=calls(w,'revoke').length;await wait(()=>calls(w,'revoke').length===before+1);await tick();assert.equal(switches(w)[0].getAttribute('aria-checked'),'false');assert.equal(switches(w)[1].getAttribute('aria-checked'),'false');assert.equal(w.maxConcurrent,1);}finally{await close(w)}
 });
+test('city expiry during an in-flight publication drains a withdrawal after it settles',async()=>{
+ const w=await fixture({duplicate:true});try{
+  await enable(w);w.hold='publish';
+  w.events.setState({cityVisibility:{cityId:1,cityName:'Test City',expiresAt:Date.now()+200}});
+  await wait(()=>!!w.release);const before=calls(w,'revoke').length;
+  await new Promise(resolve=>setTimeout(resolve,400));
+  assert.equal(calls(w,'revoke').length,before,'withdrawal must wait for the publication');
+  w.hold=null;w.release();await wait(()=>calls(w,'revoke').length===before+1);await tick();
+  assert.equal(switches(w)[0].getAttribute('aria-checked'),'false');
+  assert.equal(switches(w)[1].getAttribute('aria-checked'),'false');
+  assert.equal(w.maxConcurrent,1);
+ }finally{await close(w)}
+});
 test('ordinary Stop still reaches the server when device writes fail and does not persist positive consent',async()=>{
  const w=await fixture();try{await enable(w);w.failStorage=true;switches(w)[1].click();await wait(()=>!w.sync.getState().pendingWithdrawals.a);await tick();assert.equal(calls(w,'revoke').length,2);assert.equal(w.events.getState().preciseProximityGrant,false);assert.match(w.document.body.textContent,/Could not save your stop on this device/);assert.equal(w.saved['events-location'].state.preciseProximityGrant,undefined);}finally{await close(w)}
 });

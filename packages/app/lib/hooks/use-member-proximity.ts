@@ -49,7 +49,8 @@ function syncPresence(authId: string): Promise<void> {
   const readIntent = () => {
     const live = useEventsLocationStore.getState();
     const accessNow = useLocationAccessStore.getState();
-    return JSON.stringify([live.cityVisibility, live.preciseProximityGrant, live.preciseProximityOwnerAuthId,
+    return JSON.stringify([live.cityVisibility, !!readCityVisibility(live.cityVisibility, Date.now()),
+    live.preciseProximityGrant, live.preciseProximityOwnerAuthId,
     live.deviceLat, live.deviceLng, live.deviceObservation, accessNow.blocked, accessNow.settings?.locationEnabled,
     useExactDistanceStore.getState().generation, [...scopes.values()].filter((value) => value.authId === authId)]);
   };
