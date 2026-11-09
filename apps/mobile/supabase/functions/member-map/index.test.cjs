@@ -12,7 +12,7 @@ function harness({auth=true,blocked=false,rateError=false,rpcError=null,presence
    from:()=>{const q={select:()=>q,eq:()=>q,maybeSingle:async()=>({data:presence})};return q;},
    rpc:async(name,args)=>{calls.push({name,args});return {data:rpcData,error:rpcError};}
   })}
-  :name.includes('verify-session')?{verifySessionDetailed:async()=>auth?{ok:true,userId:'signed-in-viewer'}:{ok:false}}
+  :name.includes('location-session')?{verifyLocationSession:async()=>auth?{ok:true,userId:'signed-in-viewer',sessionId:'current-session',expiresAt:'2099-01-01T00:00:00Z'}:{ok:false}}
   :name.includes('verified-admission')?{resolveVerifiedAdmission:async()=>({state:blocked?'blocked':'allowed',message:'Verify'})}
   :name.includes('db-rate-limit')?{consumeDbRateLimit:async(...args)=>{rates.push(args);return {allowed:!rateError&&!(movementDenied&&String(args[2]).includes('move-')),error:rateError?'fixture':null};}}:{},
  });
@@ -26,13 +26,13 @@ test('all actions authenticate, no user ID/center spoof reaches RPC',async()=>{
   const h=harness({auth:false});assert.equal((await h.call({action})).status,401);assert.equal(h.calls.length,0);
  }
  const h=harness();await h.call({action:'nearby',userId:'victim',latitude:0,longitude:0,targetUsername:'victim'});
- assert.deepEqual(JSON.parse(JSON.stringify(h.calls[0])),{name:'member_map_nearby',args:{p_user_id:'signed-in-viewer'}});
+ assert.deepEqual(JSON.parse(JSON.stringify(h.calls[0])),{name:'member_map_nearby_session',args:{p_user_id:'signed-in-viewer',p_session_id:'current-session'}});
 });
-test('events and overall withdrawal bypass verification/rate failures and never require settings read',async()=>{
+test('events and overall withdrawal bypass verification/rate failures and complete withdrawal before refreshing session settings',async()=>{
  for(const scope of ['events','overall']) {
   const h=harness({blocked:true,rateError:true});const result=await h.call({action:'revoke',scope});
   assert.equal(result.status,200);assert.equal(h.rates.length,0);
-  assert.deepEqual(JSON.parse(JSON.stringify(h.calls)),[{name:'member_map_revoke',args:{p_user_id:'signed-in-viewer',p_disable_overall:scope==='overall'}}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls)),[{name:'member_map_revoke',args:{p_user_id:'signed-in-viewer',p_disable_overall:scope==='overall'}},{name:'member_map_session_settings',args:{p_user_id:'signed-in-viewer',p_session_id:'current-session'}}]);
   assert.match(result.cache,/no-store/);
  }
 });
@@ -85,4 +85,15 @@ test('four-hour duration requires explicit bounded request; old clients retain o
  for(const duration of [null,0,2,24,'4',true]) {
   const h=harness();assert.equal((await h.call({...base,shareDurationHours:duration})).status,400);assert.equal(h.calls.length,0);
  }
+});
+
+test('session consent requires current sign-in and binds settings RPC to verified session',async()=>{
+ const base={action:'updateSettings',expectedRevision:0,locationEnabled:true,eventsMapEnabled:true,consentVersion:'events-map-session-v2'};
+ for(const expectedSessionId of [undefined,'previous-session']) {
+  const h=harness();assert.equal((await h.call({...base,expectedSessionId})).status,409);assert.equal(h.calls.length,0);
+ }
+ const h=harness();assert.equal((await h.call({...base,expectedSessionId:'current-session'})).status,200);
+ assert.equal(h.calls[0].name,'member_map_update_session');
+ assert.equal(h.calls[0].args.p_session_id,'current-session');
+ assert.equal(h.calls[0].args.p_user_id,'signed-in-viewer');
 });

@@ -11,8 +11,10 @@ const resolve = name => require.resolve(name, { paths: [root, ...nodePaths] });
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 const options = file => [...read(file).matchAll(/export const [A-Z_]+[^=]*= \[[\s\S]*?\n\];/g)].map(m => m[0]).join('\n');
 const mocks = {
+  // Cache is an explicit offline boundary; verify save invalidations below.
+  '@tanstack/react-query': `import {state} from 'fixture';const client={invalidateQueries:async input=>{state.invalidations.push(input)}};export const useQueryClient=()=>client;`,
   '@dvnt/supabase': `export const supabase={};`,
-  'fixture': `export const state={creates:[],updates:[],events:[],routes:[],toasts:[]};export const event={id:'fixture-event',hostId:'fixture-owner',title:'Fixture edit event',startDate:'2099-12-31T20:00:00Z',event_tz:'UTC',location:'Test venue',category:'party',price:0,visibility:'public',ticketingEnabled:true};export const tier={id:'fixture-service-tier',name:'Coat check',category:'service',price_cents:1000,quantity_total:100,quantity_sold:0,max_per_user:10,tier_type:'ga',tier:'ga',is_active:true};`,
+  'fixture': `export const state={creates:[],updates:[],events:[],routes:[],toasts:[],invalidations:[]};export const event={id:'fixture-event',hostId:'fixture-owner',title:'Fixture edit event',startDate:'2099-12-31T20:00:00Z',event_tz:'UTC',location:'Test venue',category:'party',price:0,visibility:'public',ticketingEnabled:true};export const tier={id:'fixture-service-tier',name:'Coat check',category:'service',price_cents:1000,quantity_total:100,quantity_sold:0,max_per_user:10,tier_type:'ga',tier:'ga',is_active:true};`,
   'solito/navigation': `import {state} from 'fixture'; export const usePathname=()=>'/feed/events/create';export const useParams=()=>({id:'fixture-event'});export const useRouter=()=>({push:p=>state.routes.push(p),replace:p=>state.routes.push(p),back:()=>{}});`,
   '@dvnt/app/lib/stores/auth-store': `const state={user:{id:'fixture-owner',username:'member'},isAuthenticated:true,_hasHydrated:true};export const useAuthStore=selector=>selector(state);useAuthStore.getState=()=>state;useAuthStore.subscribe=()=>()=>{};`,
   '@dvnt/app/lib/stores/ui-store': `import {state} from 'fixture';export const useUIStore=selector=>selector({showToast:(...x)=>state.toasts.push(x)});`,
@@ -73,6 +75,7 @@ const mocks = {
   await click('Admission');assert.ok(button('GA'));assert.ok(button('ga'));
   await click('Service');assertService();await click('Save changes');await flush();
   assert.equal(f.state.updates.length,1);assert.equal(f.state.updates[0].category,'service');assert.equal(f.state.updates[0].price_cents,1000);assert.equal(f.state.updates[0].max_per_user,10);assert.equal(f.state.updates[0].tier_type,'ga');
+  assert.deepEqual(f.state.invalidations,[{queryKey:['tickets','types','fixture-event']},{queryKey:['events']}],'successful tier edits refresh public tiers and event lists');
   await flush(()=>renderer.render(null));
   await flush(()=>{
    f.createStore.getState().resetDraft();f.createStore.setState({title:'Fixture service event',eventType:'party',eventDate:'2099-12-31T20:00:00',eventTz:'UTC',isOnline:true,ticketingEnabled:true,agreementAccepted:true,ticketTiers:[{id:'fixture-draft-tier',name:'Coat check',category:'admission',priceCents:1000,quantity:100,maxPerUser:10,description:'',saleStart:'',saleEnd:'',tierType:'ga',visibility:'public',unlockCode:'',priceSchedule:[],subAllocations:[]}]});renderer.render(f.React.createElement(f.Create));

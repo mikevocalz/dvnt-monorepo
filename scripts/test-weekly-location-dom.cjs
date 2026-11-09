@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { build } = require('esbuild');
 (async () => {
-  const { Window } = await import('happy-dom');
+  const { Window } = await import(require.resolve('happy-dom'));
   const root = path.resolve(__dirname, '..');
   const mocks = {
     '@dvnt/app/lib/stores/exact-distance-store': `import {useSyncExternalStore} from 'react';export const useExactDistanceStore=s=>useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>s?s(window.fixture.exact):window.fixture.exact);useExactDistanceStore.getState=()=>window.fixture.exact;`,
@@ -14,7 +14,7 @@ const { build } = require('esbuild');
     '@dvnt/app/lib/hooks/use-age-verification': 'export const useVerificationState=()=>({});',
     '@dvnt/app/lib/api/member-proximity': `export const memberProximityApi={distance:async()=>{window.fixture.calls++;if(window.fixture.fail)throw Error('Unavailable');return window.fixture.reply;}};`,
   };
-  const output = await build({
+  const output = await build({nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),
     stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';import {MemberDistanceBadge} from './packages/app/components/feed/member-distance-badge.tsx';const query=new QueryClient({defaultOptions:{queries:{retry:false}}});window.fixture.query=query;const root=createRoot(document.getElementById('root'));window.fixture.unmount=()=>root.unmount();root.render(<QueryClientProvider client={query}><MemberDistanceBadge username="target"/><MemberDistanceBadge username="target"/></QueryClientProvider>);`, resolveDir: root, loader: 'tsx' },
     bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic',
     plugins: [{ name: 'fixtures', setup(b) {

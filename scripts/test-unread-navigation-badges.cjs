@@ -13,6 +13,7 @@ const root = path.resolve(__dirname, "..");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "unread-navigation-"));
 const deps = Object.fromEntries(["react", "react-dom", "react-native-web", "lucide-react", "zustand", "@tanstack/react-query", "@tanstack/query-core"].map(name => [name, path.dirname(resolve(name + "/package.json"))]));
 const mocks = {
+  storage: `const values=new Map();export const createMMKV=()=>({getString:key=>values.get(key),set:(key,value)=>values.set(key,value),remove:key=>values.delete(key)});`,
   auth: `import {create} from 'zustand'; export const useAuthStore=create(()=>({user:{id:'101',username:'fixture'},isAuthenticated:true,authStatus:'authenticated'}));`,
   counts: `export const notificationsApi={getBadges:()=>globalThis.F.fetch('activity')}; export const messagesApi={getUnreadCounts:()=>globalThis.F.fetch('messages')};`,
   store: `export const useUnreadCountsStore={getState:()=>({messagesUnread:999,spamUnread:999,lastMessagesRefresh:Number.MAX_SAFE_INTEGER,setMessagesUnread(){},setSpamUnread(){}})};`,
@@ -21,13 +22,14 @@ const mocks = {
   logo: `export default function Logo(){return <span style={{color:'#fff',fontWeight:800,fontSize:24}}>DVNT</span>}`, 
   html: `import {View} from 'react-native'; export function Header(props){return <View {...props} role="banner"/>}`,
   colors: `export const useColorScheme=()=>({colors:{foreground:'#fff'}});`,
-  scroll: `export const useFeedScrollStore=fn=>fn({triggerScrollToTop(){}});`,
+  scroll: `const state={triggerScrollToTop(){}};export const useFeedScrollStore=Object.assign(fn=>fn(state),{getState:()=>state});`,
   spicy: `export const supportsNativeTabsBottomAccessory=()=>false;export const SpicyToggleFAB=()=>null;`,
   safe: `export const useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});`,
   tabs: `export function NativeTabs({children}){return <div data-native-tabs="">{children}</div>};const Trigger=({name,children})=><div data-native-tab={name}>{children}</div>;Trigger.Icon=()=>null;Trigger.Label=({children})=><span>{children}</span>;Trigger.Badge=({hidden,children})=>hidden?null:<span data-native-badge="">{children}</span>;NativeTabs.Trigger=Trigger;NativeTabs.BottomAccessory=()=>null;`,
   empty: `export {};`,
 };
 const aliases = [
+  [/^react-native-mmkv$/, "storage"],
   [/\/(?:stores\/auth-store)(?:\.ts)?$/, "auth"],
   [/\/(?:api\/(?:messages-impl|notifications))(?:\.ts)?$/, "counts"],
   [/\/stores\/unread-counts-store(?:\.ts)?$/, "store"],

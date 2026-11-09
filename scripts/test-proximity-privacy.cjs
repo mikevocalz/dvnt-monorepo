@@ -43,9 +43,13 @@ test('distance response stays coarse and never returns member GPS coordinates',(
 });
 
 test('restricted users retain the ability to withdraw previously shared GPS',()=>{
-  const revoke=edge.indexOf('if (action === "revoke")');
+  const revoke=edge.indexOf('if (action === "revoke" || action === "revokeExact")');
   const admission=edge.indexOf('const admission = await resolveVerifiedAdmission');
   assert.ok(revoke>0 && admission>revoke, 'revoke must precede access enforcement');
+  const withdrawal=edge.slice(revoke,admission);
+  assert.match(withdrawal,/member_exact_distance_consent[\s\S]*?\.delete\(\)\.eq\("user_id", authUserId\)/);
+  assert.match(withdrawal,/member_proximity_presence[\s\S]*?\.delete\(\)\.eq\("user_id", authUserId\)/);
+  assert.ok(edge.indexOf('verifyLocationSession(db, req)') < revoke, 'withdrawal still requires authentication');
   assert.match(edge,/Could not stop proximity sharing/);
 });
 test('unreadable block relationships fail closed',()=>{
@@ -79,5 +83,5 @@ test('withdrawal waits behind an unfinished publish and reads current preference
   const hook=read('packages/app/lib/hooks/use-member-proximity.ts');
   assert.match(hook,/queue\.current = queue\.current\.catch/);
   assert.match(hook,/useEventsLocationStore\.getState\(\)/);
-  assert.match(hook,/await memberProximityApi\.revoke\(\)/);
+  assert.match(hook,/await memberProximityApi\.revoke\(authId\)/);
 });
