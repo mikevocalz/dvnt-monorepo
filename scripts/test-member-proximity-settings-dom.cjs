@@ -55,6 +55,20 @@ for(const native of [false,true])test(`${native?'native':'web'} direct Settings 
   assert.equal(w.saved['events-location'].state.preciseProximityGrant,undefined);assert.deepEqual(Object.keys(w.saved['member-proximity-withdrawals'].state),['pendingWithdrawals']);
  }finally{await close(w)}
 });
+test('held fresh sample consumes queued intent once and failed exact publication waits for explicit retry',async()=>{
+ const w=await fixture();try{
+  await enable(w);w.fail='publish';w.holdSample=true;
+  button(w,'I agree: allow exact distances').click();await wait(()=>w.samples===1);
+  assert.ok(button(w,'Getting a fresh location…'));w.resolveSample();
+  await wait(()=>!!button(w,'Retry distance sharing'));await tick();await tick();
+  assert.equal(calls(w,'consentExact').length,1);
+  assert.equal(calls(w,'publish').length,2,'one coarse publication and one failed exact publication; queued effects must not automatically replay consumed intent');
+  const failed=calls(w,'publish').at(-1).value;assert.equal(failed.exactDistanceVersion,2);
+  w.fail=null;button(w,'Retry distance sharing').click();await wait(()=>calls(w,'publish').length===3);await tick();
+  assert.deepEqual(calls(w,'publish').at(-1).value,failed,'explicit retry preserves the exact observation and consent version');
+  assert.equal(w.samples,1);assert.equal(w.maxConcurrent,1);assert.equal(button(w,'Retry distance sharing'),undefined);
+ }finally{await close(w)}
+});
 test('Settings exposes publish failure and retry keeps exact consent version and original sample',async()=>{
  const w=await fixture();try{await enable(w);w.fail='publish';button(w,'I agree: allow exact distances').click();await wait(()=>!!button(w,'Retry distance sharing'));assert.match(w.document.querySelector('[role=alert]').textContent,/Could not update distance sharing/);const failed=calls(w,'publish').at(-1).value;assert.equal(failed.exactDistanceVersion,2);w.fail=null;button(w,'Retry distance sharing').click();await wait(()=>calls(w,'publish').length===3);await tick();assert.equal(calls(w,'publish').at(-1).value.exactDistanceVersion,2);assert.equal(calls(w,'publish').at(-1).value.observedAt,failed.observedAt);assert.equal(w.samples,1);assert.equal(button(w,'Retry distance sharing'),undefined);}finally{await close(w)}
 });

@@ -167,13 +167,12 @@ test('empty paid tiers remain unavailable instead of opening login', async () =>
   assertNoPurchase();
 });
 
-test('a missing display-tier row is disabled while an adjacent action buys the selected free row', async () => {
+test('a deleted catalog tier is absent while an adjacent action buys the selected free row', async () => {
   scenario.tiersQuery = query([free]);
   await render();
   const buttons = [...document.querySelectorAll('button')];
   const missing = buttons.find((node) => node.textContent.includes(paid.name));
-  assert.equal(missing.disabled, true);
-  await click(missing);
+  assert.equal(missing, undefined, 'successful live catalog removes stale embedded tier');
   assertNoPurchase();
   await click(buttons.find((node) => node.textContent.includes(free.name)));
   assertNoPurchase();
@@ -554,5 +553,45 @@ test('inactive payload stays hidden during refresh and live reactivation reveals
   scenario.tiersQuery = query([{ ...paid, is_active: true }]);
   await render();
   assert.ok(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`));
+  assertNoPurchase();
+});
+
+
+test('retained empty catalog removes all stale tiers during refresh, pending and errors', async () => {
+  for (const flags of [{}, {isFetching:true}, {isPending:true,isFetching:true}, {isError:true}, {isError:true,isFetching:true}]) {
+    scenario.tiersQuery = query([], flags);
+    await render();
+    assert.equal(document.querySelectorAll('[data-testid^="ticket-tier-"]').length, 0);
+    assertNoPurchase();
+  }
+});
+
+test('retained nonempty catalog never resurrects deleted rows while pending or failed', async () => {
+  for (const flags of [{isFetching:true}, {isPending:true,isFetching:true}, {isError:true}, {isError:true,isFetching:true}]) {
+    scenario.tiersQuery = query([free], flags);
+    await render();
+    assert.equal(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`), null);
+    assert.ok(document.querySelector(`[data-testid="ticket-tier-${free.id}"]`));
+    assertNoPurchase();
+    if (flags.isPending || flags.isError) {
+      assert.equal(document.querySelector(`[data-testid="ticket-tier-${free.id}"]`).disabled, true);
+    }
+  }
+});
+
+test('unavailable live catalog preserves disabled display fallback until successful retry', async () => {
+  for (const flags of [{isPending:true,isFetching:true}, {isError:true}]) {
+    scenario.tiersQuery = query(undefined, flags);
+    await render();
+    const fallback = document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`);
+    assert.ok(fallback, 'aggregate fallback remains while catalog unavailable');
+    assert.equal(fallback.disabled, true);
+    await click(fallback);
+    assertNoPurchase();
+  }
+  scenario.tiersQuery = query([free]);
+  await render();
+  assert.equal(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`), null);
+  assert.ok(document.querySelector(`[data-testid="ticket-tier-${free.id}"]`));
   assertNoPurchase();
 });

@@ -93,18 +93,30 @@ function App(){const [pathname,setPath]=useState('/feed');const [activity,setAct
  for(const variant of ['feed','detail']){
  const surface=page.locator('#text-post-'+variant);await surface.scrollIntoViewIfNeeded();
  await page.waitForFunction(id=>Array.from(document.querySelectorAll('#'+id+' [dir="auto"]')).some(el=>el.textContent===nav.postText), 'text-post-'+variant);
+ // RN-web onLayout feeds production font fitting after its first render.
+ await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  const geometry=await surface.evaluate(container=>{
    const text=Array.from(container.querySelectorAll('[dir="auto"]')).find(el=>el.textContent===nav.postText);
    const style=getComputedStyle(text),box=text.getBoundingClientRect();
-   const walker=document.createTreeWalker(text,NodeFilter.SHOW_TEXT);const rects=[];let node;let second;
-   while(node=walker.nextNode()){const range=document.createRange();range.selectNodeContents(node);rects.push(...Array.from(range.getClientRects()).filter(r=>r.width>0));const index=node.textContent.indexOf('SECOND_LINE');if(index>=0){range.setStart(node,index);range.setEnd(node,index+'SECOND_LINE'.length);second=range.getBoundingClientRect();}}
-   return {text:text.textContent,align:style.textAlign,width:text.clientWidth,scroll:text.scrollWidth,height:box.height,line:parseFloat(style.lineHeight),lines:rects.length,left:box.left,second:second&&{x:second.x,y:second.y},firstY:rects[0]?.y,bodyOverflow:document.documentElement.scrollWidth>innerWidth,maxRight:Math.max(...rects.map(r=>r.right)),right:box.right};
+   const walker=document.createTreeWalker(text,NodeFilter.SHOW_TEXT);const rects=[];let node;let second;let unbrokenLines=0;
+   while(node=walker.nextNode()){
+     // CSS pre-wrap can hang trailing spaces beyond a line box. Inspect actual
+     // word fragments, not those non-painted spaces, for clipping/overflow.
+     for(const match of node.textContent.matchAll(/\S+/g)){
+       const range=document.createRange();range.setStart(node,match.index);range.setEnd(node,match.index+match[0].length);
+       const fragments=Array.from(range.getClientRects()).filter(r=>r.width>0);rects.push(...fragments);
+       if(match[0].startsWith('UnbrokenWord'))unbrokenLines=fragments.length;
+     }
+     const index=node.textContent.indexOf('SECOND_LINE');if(index>=0){const range=document.createRange();range.setStart(node,index);range.setEnd(node,index+'SECOND_LINE'.length);second=range.getBoundingClientRect();}
+   }
+   return {text:text.textContent,align:style.textAlign,width:text.clientWidth,scroll:text.scrollWidth,height:box.height,line:parseFloat(style.lineHeight),lines:new Set(rects.map(r=>r.y)).size,unbrokenLines,left:box.left,second:second&&{x:second.x,y:second.y},firstY:rects[0]?.y,bodyOverflow:document.documentElement.scrollWidth>innerWidth,minLeft:Math.min(...rects.map(r=>r.left)),maxRight:Math.max(...rects.map(r=>r.right)),right:box.right};
  });
  assert.equal(geometry.text,await page.evaluate(()=>nav.postText),'full text is not truncated');
  assert.equal(geometry.align,'left');assert.ok(geometry.lines>3&&geometry.height>geometry.line*3,'long text grows over multiple lines');
  assert.ok(geometry.second&&geometry.second.y>geometry.firstY,'explicit newline places next paragraph on a later line');
  assert.ok(Math.abs(geometry.second.x-geometry.left)<=2,'explicit new paragraph starts at the left edge');
- assert.ok(geometry.scroll<=geometry.width+1&&geometry.maxRight<=geometry.right+1,'long unbroken text wraps within surface');
+ assert.ok(geometry.unbrokenLines>1,'long unbroken word must wrap at '+width+'px '+variant+': '+JSON.stringify(geometry));
+ assert.ok(geometry.scroll<=geometry.width+1&&geometry.maxRight<=geometry.right+1&&geometry.minLeft>=geometry.left-1,'text glyphs and long unbroken words stay within surface at '+width+'px '+variant+': '+JSON.stringify(geometry));
  assert.equal(geometry.bodyOverflow,false,'text surface never widens viewport');
  }
  assert.deepEqual(errors,[]);await page.close();console.log('PASS '+width+'px Chromium production Home repeated reset, logo Sweet/reset/route, ordinary restoration, Activity target vs actor click/keyboard separation, left-aligned wrapped broadcast text, and actual TextPostSurface feed/detail long/multiline/unbroken text layout. Synthetic feed/router/API boundaries.');

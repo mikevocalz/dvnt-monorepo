@@ -46,11 +46,14 @@ function syncPresence(authId: string): Promise<void> {
   // Coalesce duplicate effects from Settings/feed/StrictMode in this sign-in.
   // Read the latest intent when the shared queue actually reaches this job.
   const key = JSON.stringify([authId, epoch]);
-  const live = useEventsLocationStore.getState();
-  const accessNow = useLocationAccessStore.getState();
-  const intent = JSON.stringify([live.cityVisibility, live.preciseProximityGrant, live.preciseProximityOwnerAuthId,
+  const readIntent = () => {
+    const live = useEventsLocationStore.getState();
+    const accessNow = useLocationAccessStore.getState();
+    return JSON.stringify([live.cityVisibility, live.preciseProximityGrant, live.preciseProximityOwnerAuthId,
     live.deviceLat, live.deviceLng, live.deviceObservation, accessNow.blocked, accessNow.settings?.locationEnabled,
     useExactDistanceStore.getState().generation, [...scopes.values()].filter((value) => value.authId === authId)]);
+  };
+  const intent = readIntent();
   const existing = scheduled.get(key);
   if (existing) {
     if (existing.intent !== intent) { existing.intent = intent; existing.again = true; }
@@ -58,6 +61,12 @@ function syncPresence(authId: string): Promise<void> {
   }
   const scheduledRequest = { promise: Promise.resolve(), intent, again: false };
   const operation = serializeProximityWrite(async () => {
+    // Work queued behind consent/sampling reads the latest state below. Changes
+    // before this turn are already consumed, not a reason to replay that same
+    // publication after failure. Later changes during an awaited write still
+    // set `again` and are drained after it settles.
+    scheduledRequest.intent = readIntent();
+    scheduledRequest.again = false;
     if (useAuthStore.getState().user?.authId !== authId || syncEpoch !== epoch) return;
     const scope = [...scopes.values()].find((value) => value.authId === authId && !value.loading);
     const state = useMemberProximitySyncStore.getState();

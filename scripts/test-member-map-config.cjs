@@ -4,22 +4,32 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const {createRequire} = require('node:module');
 const ts = require('typescript');
 const {buildSync} = require('esbuild');
 const {getNextConfigEnv} = require('next/dist/lib/static-env');
 const root = path.resolve(__dirname, '..');
-const configSource = fs.readFileSync(path.join(root,'apps/web/next.config.ts'),'utf8');
-const ast = ts.createSourceFile('next.config.ts',configSource,ts.ScriptTarget.Latest,true);
-let envSource;
-function visit(node) {
- if(ts.isPropertyAssignment(node) && node.name.getText(ast)==='env') envSource=node.initializer.getText(ast);
- ts.forEachChild(node,visit);
+const configFile = path.join(root,'apps/web/next.config.ts');
+const configSource = fs.readFileSync(configFile,'utf8');
+const configCode = ts.transpileModule(configSource,{
+ fileName:configFile,
+ compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true},
+}).outputText;
+const configRequire = createRequire(configFile);
+function loadConfig(env) {
+ const exports={};
+ // Execute the complete config and real public backend resolver. Only framework
+ // wrappers are inert: this fixture never builds Payload or initializes Sentry.
+ vm.runInNewContext(configCode,{exports,process:{env:{...env}},__dirname:path.dirname(configFile),require:name=>{
+  if(name==='@payloadcms/next/withPayload') return {withPayload:config=>config};
+  if(name==='@sentry/nextjs') return {withSentryConfig:config=>config};
+  return configRequire(name);
+ }},{filename:configFile});
+ return exports.default;
 }
-visit(ast);
-assert.ok(envSource,'test uses the real Next configuration env block');
 function browserKey(nextKey,expoKey) {
  const env={EXPO_PUBLIC_GOOGLE_MAPS_API_KEY:expoKey,GOOGLE_MAPS_API_KEY:'server-must-not-leak',GOOGLE_PLACES_API_KEY:'places-must-not-leak'};
- const config={env:vm.runInNewContext(`(${envSource})`,{process:{env}})};
+ const config=loadConfig(env);
  const mapped=getNextConfigEnv(config);
  assert.equal(mapped['process.env.GOOGLE_MAPS_API_KEY'],undefined);
  assert.equal(mapped['process.env.GOOGLE_PLACES_API_KEY'],undefined);
