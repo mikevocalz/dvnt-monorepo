@@ -4,15 +4,18 @@
  * and therefore must NOT also get the global app header from SiteChrome (that
  * was the double-stacked-header bug). The bottom tab bar still shows.
  *
- * Used by BOTH SiteChrome (skips WebAppHeader) and WebAppShell (drops the
- * header-clearance top padding) so the two can't drift.
+ * Used by SiteChrome (marketing header), AppShell (mobile top bar), and
+ * WebAppShell (header clearance) so each shell respects the page header.
  */
 const OWNS_HEADER_PREFIXES = [
   "/profile/", // other-user profile — has its own back/username/more header
 ];
 
 export function routeOwnsHeader(pathname: string): boolean {
-  return OWNS_HEADER_PREFIXES.some((p) => pathname.startsWith(p));
+  // Settings home and every settings sub-screen already render a sticky
+  // title + Close. They need that same header while signed out or hydrating.
+  return pathname === "/settings" || pathname.startsWith("/settings/") ||
+    OWNS_HEADER_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
 // Full-screen surfaces that own the entire viewport and carry their own

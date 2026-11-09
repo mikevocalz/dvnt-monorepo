@@ -58,3 +58,15 @@ test("viewport recovery does not change separate composers or non-event routes",
     "/public/events/42", "/feed/events/42/comments/",
   ]) assert.equal(routeUsesVisualViewportBottom(route), false, route);
 });
+
+
+test("settings owns its top header without removing the app rail or tabs", () => {
+  for (const route of ["/settings", "/settings/", "/settings/privacy", "/settings/privacy-policy", "/settings/account", "/settings/purchases/order-123"]) {
+    assert.equal(routeOwnsHeader(route), true, route);
+    assert.equal(routeIsImmersive(route), false, route);
+  }
+  for (const route of ["/", "/privacy", "/settings-preview", "/settings-old/privacy", "/feed", "/events", "/profile"]) {
+    assert.equal(routeOwnsHeader(route), false, route);
+  }
+  assert.equal(routeOwnsHeader("/profile/other-user"), true);
+});

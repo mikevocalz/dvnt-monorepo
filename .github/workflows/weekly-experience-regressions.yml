@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "packages/app/**"
+      - "apps/web/src/components/site-chrome.tsx"
       - "apps/mobile/supabase/functions/**"
       - "apps/web/src/app/(frontend)/feed/[username]/post/[id]/**"
       - "apps/web/src/app/(frontend)/p/[id]/**"
@@ -17,6 +18,7 @@ on:
     branches: [master, main]
     paths:
       - "packages/app/**"
+      - "apps/web/src/components/site-chrome.tsx"
       - "apps/mobile/supabase/functions/**"
       - "apps/web/src/app/(frontend)/feed/[username]/post/[id]/**"
       - "apps/web/src/app/(frontend)/p/[id]/**"
@@ -136,3 +138,8 @@ jobs:
         env:
           NODE_PATH: ${{ runner.temp }}/weekly-web/node_modules
         run: node scripts/test-weekly-navigation-browser.cjs
+      - name: Production Settings with marketing and app shells in Chromium
+        if: ${{ !cancelled() }}
+        env:
+          NODE_PATH: ${{ runner.temp }}/weekly-web/node_modules
+        run: node scripts/test-settings-shell-browser.cjs
