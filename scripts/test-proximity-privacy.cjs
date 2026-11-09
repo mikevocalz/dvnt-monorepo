@@ -81,7 +81,9 @@ test('proximity consent is tied to an account and cannot leak to a different log
 });
 test('withdrawal waits behind an unfinished publish and reads current preference',()=>{
   const hook=read('packages/app/lib/hooks/use-member-proximity.ts');
-  assert.match(hook,/queue\.current = queue\.current\.catch/);
+  assert.match(hook,/serializeProximityWrite\(async/);
+  const queue=read('packages/app/lib/location/member-proximity-writes.ts');
+  assert.match(queue,/queue\.current\.catch\(\(\) => \{\}\)\.then\(operation\)/);
   assert.match(hook,/useEventsLocationStore\.getState\(\)/);
   assert.match(hook,/await memberProximityApi\.revoke\(authId\)/);
 });

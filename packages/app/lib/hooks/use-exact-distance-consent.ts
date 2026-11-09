@@ -1,11 +1,11 @@
 import { sampleExactDistance } from "@dvnt/app/lib/location/sample-exact-distance";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { serializeProximityWrite } from "@dvnt/app/lib/location/member-proximity-writes";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useLocationAccessStore } from "@dvnt/app/lib/stores/location-access-store";
 import { useExactDistanceStore } from "@dvnt/app/lib/stores/exact-distance-store";
 import { memberProximityApi } from "@dvnt/app/lib/api/member-proximity";
-let writes: Promise<unknown> = Promise.resolve();
 // Epoch invalidation runs even while the settings component is unmounted.
 let consentEpoch = 0;
 useAuthStore.subscribe((next, previous) => {
@@ -32,24 +32,43 @@ export function useExactDistanceConsent() {
   const access = useLocationAccessStore();
   const sessionKey = access.settings?.sessionKey;
   const withdrawalPending = !!owner && local.pendingWithdrawals[owner] === true;
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ owner: string | undefined; sessionKey: string | undefined; epoch: number;
+    request: symbol; intent: "enable" | "withdrawal"; busy: boolean; error: string | null } | null>(null);
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const currentStatus = status && status.owner === owner && status.sessionKey === sessionKey && status.epoch === consentEpoch ? status : null;
+  const busy = currentStatus?.busy ?? false;
+  // The ordinary Stop / all-location Stop can confirm this exact withdrawal.
+  // Keep its error only while the durable negative intent remains unresolved.
+  const error = currentStatus?.intent === "withdrawal" && !withdrawalPending ? null : currentStatus?.error ?? null;
+  useEffect(() => {
+    if (withdrawalPending) return;
+    setStatus((previous) => previous?.owner === owner && previous?.sessionKey === sessionKey &&
+      previous?.epoch === consentEpoch && previous?.intent === "withdrawal" && previous.error
+      ? { ...previous, error: null } : previous);
+  }, [owner, sessionKey, withdrawalPending, currentStatus?.error]);
   const client = useQueryClient();
   const enabled = !!owner && local.owner === owner && local.sessionKey === sessionKey &&
     Date.now() < local.expiresAt && !withdrawalPending && access.hydrationReady && !access.blocked && access.owner === owner && access.settings?.locationEnabled === true;
   const update = async (next: boolean) => {
+    const request = Symbol("exact consent operation");
+    const epoch = consentEpoch;
+    const setResult = (busy: boolean, error: string | null) => {
+      if (!mounted.current || useAuthStore.getState().user?.authId !== owner ||
+          useLocationAccessStore.getState().settings?.sessionKey !== sessionKey || consentEpoch !== epoch) return;
+      setStatus((previous) => previous?.request === request ? { ...previous, busy, error } : previous);
+    };
     if (next && !useExactDistanceStore.getState().hydrationReady) {
-      setError("Exact distance privacy preferences could not be read. Keep sharing off and retry after device storage is available.");
+      setStatus({ owner, sessionKey, epoch, request, intent: "enable", busy: false, error: "Exact distance privacy preferences could not be read. Keep sharing off and retry after device storage is available." });
       return;
     }
     if (!owner || (next && (!sessionKey || withdrawalPending || !access.hydrationReady || access.blocked || access.owner !== owner))) return;
-    setBusy(true); setError(null);
+    setStatus({ owner, sessionKey, epoch, request, intent: next ? "enable" : "withdrawal", busy: true, error: null });
     if (!next) useExactDistanceStore.getState().beginWithdrawal(owner);
     else useExactDistanceStore.getState().clear();
     const generation = useExactDistanceStore.getState().generation;
-    const epoch = consentEpoch;
     client.removeQueries({ queryKey: ["member-proximity"] });
-    const operation = writes.catch(() => {}).then(async () => {
+    const operation = serializeProximityWrite(async () => {
       if (useAuthStore.getState().user?.authId !== owner) return;
       if (!next) {
         await memberProximityApi.revokeExact(owner);
@@ -80,9 +99,8 @@ export function useExactDistanceConsent() {
         }
       }
     });
-    writes = operation;
-    try { await operation; } catch { setError(next ? "Could not enable exact distances. Allow device location and retry with a fresh location." : "Could not confirm withdrawal. Retry Stop exact distances."); }
-    finally { setBusy(false); }
+    try { await operation; setResult(false, null); }
+    catch { setResult(false, next ? "Could not enable exact distances. Allow device location and retry with a fresh location." : "Could not confirm withdrawal. Retry Stop exact distances."); }
   };
   return { enabled, busy, error, update, withdrawalPending };
 }

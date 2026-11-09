@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { PGlite } = require('@electric-sql/pglite');
 const migrations = path.join(__dirname, '../apps/mobile/supabase/migrations');
+const followMigration = fs.readFileSync(path.join(migrations, '20261109110000_private_follow_requests.sql'), 'utf8');
 const gate = fs.readFileSync(path.join(migrations, '20261109114000_post_follow_read_gate.sql'), 'utf8');
 const existingAgeGate = fs.readFileSync(path.join(migrations, '20261003170200_spicy_viewing_excludes_minors.sql'), 'utf8');
 
@@ -24,7 +25,6 @@ async function fixture() {
     CREATE TABLE post_text_slides(id bigint PRIMARY KEY,post_id bigint,content text);
     CREATE TABLE comments(id bigint PRIMARY KEY,post_id bigint,content text);
     CREATE TABLE follows(follower_id bigint,following_id bigint,PRIMARY KEY(follower_id,following_id));
-    CREATE TABLE follow_requests(follower_id bigint,following_id bigint,status text,PRIMARY KEY(follower_id,following_id));
     CREATE TABLE blocks(blocker_id bigint,blocked_id bigint);
     CREATE TABLE identity_verifications(user_id text,date_of_birth date);
     CREATE FUNCTION viewer_user_id() RETURNS integer LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public AS $$
@@ -59,6 +59,7 @@ async function fixture() {
     INSERT INTO post_text_slides VALUES(99,999,'orphan secret');
     INSERT INTO identity_verifications VALUES('minor',CURRENT_DATE-INTERVAL '15 years');
   `);
+  await db.exec(followMigration);
   await db.exec(existingAgeGate);
   await db.exec(`CREATE POLICY spicy_requires_verified_viewer ON posts_media AS RESTRICTIVE FOR SELECT TO anon,authenticated USING(NOT post_spicy_hidden(_parent_id));
     CREATE POLICY spicy_requires_verified_viewer ON post_text_slides AS RESTRICTIVE FOR SELECT TO anon,authenticated USING(NOT post_spicy_hidden(post_id));`);
@@ -92,7 +93,7 @@ test('real restrictive post and child gates enforce follows, approval and existi
     assert.deepEqual(await visible(db, 'author-private'), expected([12, 31, 32]));
     await db.exec('INSERT INTO follows VALUES(2,1),(2,3),(2,4),(2,7),(5,1)');
     assert.deepEqual(await visible(db, 'viewer'), expected([11,12]), 'legacy private follows are not implicit approval');
-    await db.exec("INSERT INTO follow_requests VALUES(2,3,'pending'),(2,4,'approved'),(2,7,'approved')");
+    await db.exec("INSERT INTO follow_requests(follower_id,following_id,status) VALUES(2,3,'pending'),(2,4,'approved'),(2,7,'approved')");
     assert.deepEqual(await visible(db, 'viewer'), expected([11,12,41,42,71]));
     assert.deepEqual(await visible(db, 'minor'), expected([12]), 'following does not bypass the existing age gate');
     await db.exec("UPDATE follow_requests SET status='approved' WHERE following_id=3");
@@ -117,6 +118,49 @@ test('real restrictive post and child gates enforce follows, approval and existi
   } finally { await db.close(); }
 });
 
+test('legacy SQL toggles preserve actual private, block and age read gates', { timeout: 120000 }, async () => {
+  const db = await fixture();
+  const expected = ids => ({ posts: ids, media: ids, slides: ids, comments: ids });
+  const mutate = async (actor, target, action = 'toggle') => {
+    await db.exec('SET ROLE service_role');
+    try {
+      return (await db.query('SELECT mutate_follow_relationship($1,$2,$3) AS result', [actor, target, action])).rows[0].result;
+    } finally { await db.exec('RESET ROLE'); }
+  };
+  try {
+    await db.exec(gate);
+    await mutate(2, 1);
+    assert.deepEqual(await visible(db, 'viewer'), expected([11, 12]));
+    await mutate(2, 1);
+    assert.deepEqual(await visible(db, 'viewer'), expected([12]));
+
+    assert.equal((await mutate(2, 3)).followRequestStatus, 'pending');
+    assert.deepEqual(await visible(db, 'viewer'), expected([12]));
+    await mutate(6, 2, 'approve');
+    await mutate(2, 3, 'approve');
+    assert.deepEqual(await visible(db, 'viewer'), expected([12]), 'neither stranger nor requester can approve');
+    await mutate(3, 2, 'approve');
+    assert.deepEqual(await visible(db, 'viewer'), expected([12, 31, 32]));
+    await mutate(2, 3);
+    await mutate(3, 2, 'approve');
+    assert.deepEqual(await visible(db, 'viewer'), expected([12]), 'cancelled approval cannot resurrect access');
+
+    for (const [blocker, blocked] of [[1, 2], [2, 1]]) {
+      await db.exec(`INSERT INTO blocks VALUES(${blocker},${blocked})`);
+      await mutate(2, 1);
+      assert.deepEqual(await visible(db, 'viewer'), expected([]), 'legacy follow never overrides either direction of block');
+      await mutate(2, 1);
+      await db.exec('DELETE FROM blocks');
+    }
+
+    await mutate(5, 1);
+    assert.deepEqual(await visible(db, 'minor'), expected([12]), 'legacy public follows preserve age restriction');
+    await mutate(5, 3);
+    await mutate(3, 5, 'approve');
+    assert.deepEqual(await visible(db, 'minor'), expected([12, 32]), 'even owner approval never overrides the spicy age restriction');
+  } finally { await db.close(); }
+});
+
 test('read gate refuses mutable identity mappings atomically', { timeout: 120000 }, async () => {
   const db = await fixture();
   try {
@@ -125,5 +169,73 @@ test('read gate refuses mutable identity mappings atomically', { timeout: 120000
     await db.exec('ROLLBACK');
     assert.equal((await db.query("SELECT to_regprocedure('public.post_follow_hidden(bigint)')::text AS fn")).rows[0].fn, null);
     assert.equal((await db.query("SELECT has_table_privilege('authenticated','user_settings','UPDATE') AS allowed")).rows[0].allowed, true, 'failed migration makes no partial permission change');
+  } finally { await db.close(); }
+});
+
+test('actual identity prerequisite composes with private post approvals and optional notification RLS', { timeout: 120000 }, async () => {
+  const db = await fixture();
+  const identity = fs.readFileSync(path.join(__dirname, '../docs/security/users-identity-write-prerequisite.sql'), 'utf8');
+  const notifications = fs.readFileSync(path.join(__dirname, '../docs/security/notification-privacy-draft.sql'), 'utf8');
+  async function as(role, subject, run) {
+    await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: subject })]);
+    await db.exec(`SET ROLE ${role}`);
+    try { return await run(); } finally { await db.exec('RESET ROLE'); }
+  }
+  try {
+    // Reproduce only the observed privilege shape using synthetic identities.
+    await db.exec(`GRANT USAGE,SELECT ON SEQUENCE user_settings_id_seq TO service_role;
+      ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+      CREATE POLICY profile_reads ON users FOR SELECT TO public USING(true);
+      CREATE POLICY profile_updates ON users FOR UPDATE TO public USING(true);
+      CREATE POLICY profile_inserts ON users FOR INSERT TO public WITH CHECK(true);
+      GRANT INSERT,UPDATE,DELETE ON users TO anon,authenticated;
+      GRANT UPDATE(auth_id,id,is_private) ON users TO PUBLIC;`);
+    await assert.rejects(db.exec(gate), /Trusted users identity (column )?prerequisite/);
+    await db.exec('ROLLBACK');
+    await db.exec(identity); await db.exec(identity);
+    for (const role of ['anon', 'authenticated']) await as(role, 'viewer', async () => {
+      assert.equal((await db.query('SELECT id FROM users')).rows.length, 7);
+      for (const sql of ["UPDATE users SET auth_id='forged' WHERE id=3", 'UPDATE users SET is_private=false WHERE id=3',
+        "INSERT INTO users(id,auth_id,is_private) VALUES(99,'forged',false)", 'DELETE FROM users WHERE id=3']) {
+        await assert.rejects(db.exec(sql), error => error.code === '42501');
+      }
+    });
+    await db.exec(gate); await db.exec(gate);
+    const expected = ids => ({ posts: ids, media: ids, slides: ids, comments: ids });
+    assert.deepEqual(await visible(db, 'viewer'), expected([12]));
+    const mutate = (actor, target, action) => as('service_role', '', async () =>
+      (await db.query('SELECT mutate_follow_relationship($1,$2,$3) AS result', [actor,target,action])).rows[0].result);
+    assert.equal((await mutate(2,3,'follow')).followRequestStatus, 'pending');
+    assert.deepEqual(await visible(db, 'viewer'), expected([12]));
+    await mutate(3,2,'approve');
+    assert.deepEqual(await visible(db, 'viewer'), expected([12,31,32]));
+    await mutate(2,3,'unfollow');
+    assert.deepEqual(await visible(db, 'viewer'), expected([12]));
+    await as('service_role', '', async () => {
+      await db.exec("INSERT INTO users(id,auth_id,is_private) VALUES(99,'new-service-profile',false)");
+      await db.exec("INSERT INTO user_settings(auth_id,settings) VALUES('author-private','{\"privacy\":{\"privateAccount\":false}}')");
+      assert.equal((await db.query('SELECT is_private FROM users WHERE id=3')).rows[0].is_private, false);
+    });
+    assert.deepEqual(await visible(db, 'viewer'), expected([12,32]), 'service settings trigger survives identity lockdown');
+    // Weekly protections already work above, before notification SQL is applied.
+    await db.exec(`CREATE TABLE notifications(id serial PRIMARY KEY,recipient_id integer REFERENCES users,
+      read_at timestamptz,entity_payload jsonb);
+      INSERT INTO notifications(recipient_id,entity_payload) VALUES(2,'{"body":"viewer-only"}'),(3,'{"body":"author-only"}');
+      ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+      GRANT SELECT,INSERT,UPDATE ON notifications TO anon,authenticated;
+      GRANT ALL ON notifications TO service_role;
+      GRANT USAGE,SELECT ON SEQUENCE notifications_id_seq TO anon,authenticated,service_role;
+      CREATE POLICY old_notice_read ON notifications FOR SELECT USING(true);
+      CREATE POLICY old_notice_update ON notifications FOR UPDATE USING(true);
+      CREATE POLICY old_notice_insert ON notifications FOR INSERT WITH CHECK(true);`);
+    await db.exec(notifications); await db.exec(notifications);
+    await as('authenticated', 'viewer', async () => {
+      assert.deepEqual((await db.query('SELECT recipient_id FROM notifications')).rows, [{ recipient_id: 2 }]);
+      assert.equal((await db.query('UPDATE notifications SET read_at=now() WHERE recipient_id=3 RETURNING id')).rows.length, 0);
+      assert.equal((await db.query('UPDATE notifications SET read_at=now() WHERE recipient_id=2 RETURNING id')).rows.length, 1);
+      await assert.rejects(db.exec("UPDATE notifications SET entity_payload='{}' WHERE recipient_id=2"), error => error.code === '42501');
+    });
+    await as('anon', '', () => assert.rejects(db.exec('SELECT * FROM notifications'), error => error.code === '42501'));
+    assert.deepEqual(await visible(db, 'viewer'), expected([12,32]));
   } finally { await db.close(); }
 });

@@ -165,7 +165,10 @@ export const useEventsLocationStore = create<EventsLocationState>()(
     {
       name: "events-location",
       storage: mmkvStorage,
-      merge: (persisted, current) => ({ ...current, ...(persisted as Partial<EventsLocationState>), deviceObservation: null }),
+      merge: (persisted, current) => ({ ...current, ...(persisted as Partial<EventsLocationState>), deviceObservation: null,
+        // Coordinate consent is explicit for this running app. A stale disk
+        // snapshot must never restore it after an offline or failed-disk stop.
+        preciseProximityGrant: false, preciseProximityOwnerAuthId: null }),
       partialize: (state) => ({
         activeCity: state.activeCity,
         locationMode: state.locationMode,
@@ -173,8 +176,6 @@ export const useEventsLocationStore = create<EventsLocationState>()(
         deviceLng: state.deviceLng,
         recentCities: state.recentCities,
         cityVisibility: state.cityVisibility,
-        preciseProximityGrant: state.preciseProximityGrant,
-        preciseProximityOwnerAuthId: state.preciseProximityOwnerAuthId,
         visibilityDurationId: state.visibilityDurationId,
         weatherData: state.weatherData,
         weatherCityId: state.weatherCityId,

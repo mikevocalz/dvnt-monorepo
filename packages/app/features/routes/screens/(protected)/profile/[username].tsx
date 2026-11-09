@@ -1,4 +1,5 @@
 import { MemberDistanceBadge } from "@dvnt/app/components/feed/member-distance-badge";
+import { FollowStatusRefresh } from "@dvnt/app/components/feed/follow-status-refresh";
 import { useFollowRequestStatus } from "@dvnt/app/lib/hooks/use-follow-requests";
 import { followButtonLabel } from "@dvnt/app/lib/profile/follow-relationship";
 import * as Haptics from "expo-haptics";
@@ -1047,7 +1048,7 @@ function UserProfileScreenComponent() {
                 ) : (
                   <Motion.Pressable
                     onPress={handleFollowPress}
-                    disabled={followMutation.isPending || followStatus.isLoading || !followTargetId}
+                    disabled={followMutation.isPending || followStatus.isFetching || followStatus.isError || !followTargetId}
                     style={{ flex: 1 }}
                   >
                     <Motion.View
@@ -1105,6 +1106,8 @@ function UserProfileScreenComponent() {
             )}
           </View>
         </View>
+
+        {!isOwnProfile && <FollowStatusRefresh targetId={followTargetId} />}
 
         {/* Tab Bar. Was a single Grid pressable with no onPress — it looked
             interactive and did nothing, and there was no way to link to this

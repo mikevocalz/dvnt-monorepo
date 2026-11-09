@@ -26,6 +26,7 @@ import { slugify } from "@dvnt/app/lib/slug";
  * Local UI state (menu, avatar lightbox) lives in Zustand, never useState.
  */
 
+import { FollowStatusRefresh } from "@dvnt/app/components/feed/follow-status-refresh";
 import { useFollowRequestStatus } from "@dvnt/app/lib/hooks/use-follow-requests";
 import { followButtonLabel } from "@dvnt/app/lib/profile/follow-relationship";
 import { useWindowScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
@@ -358,7 +359,7 @@ export function UserProfileScreen() {
         <div className="mt-4 flex gap-2">
           <button
             onClick={handleFollowPress}
-            disabled={isFollowPending || followStatus.isLoading || !followTargetId}
+            disabled={isFollowPending || followStatus.isFetching || followStatus.isError || !followTargetId}
             className={`flex-1 rounded-lg py-2.5 font-semibold disabled:opacity-50 ${
               isFollowing ? "bg-white/8 text-white" : "bg-[#3EA4E5] text-white"
             }`}
@@ -386,6 +387,8 @@ export function UserProfileScreen() {
             <Share2 size={20} color="#fff" />
           </button>
         </div>
+
+        <FollowStatusRefresh targetId={followTargetId} />
 
         {/* Tab bar — Posts grid + hosted Events, mirroring the logged-in
             profile's tab pattern (events sits right after the images tab). */}

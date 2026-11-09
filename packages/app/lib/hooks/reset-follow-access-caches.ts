@@ -2,7 +2,12 @@ import type { QueryClient } from "@tanstack/react-query";
 import { resetPostAccessOverlays } from "@dvnt/app/lib/posts/revoke-post-overlays";
 
 /** Remove stale protected payloads before refetching under the new relationship. */
-export async function resetFollowAccessCaches(client: QueryClient, refetch = true) {
+export async function resetFollowAccessCaches(
+  client: QueryClient,
+  refetch = true,
+  isCurrent: () => boolean = () => true,
+) {
+  if (!isCurrent()) return;
   // Detached lightboxes and share sheets must disappear in the same frame.
   resetPostAccessOverlays();
   const prefixes = [
@@ -21,6 +26,7 @@ export async function resetFollowAccessCaches(client: QueryClient, refetch = tru
   // Do not wait for cancellation: old payloads must not survive this frame.
   clear();
   await Promise.all(cancellations);
+  if (!isCurrent()) return;
   clear();
   if (refetch) await Promise.all(prefixes.map(prefix => client.invalidateQueries({ queryKey: [prefix] })));
 }

@@ -43,7 +43,9 @@ Deno.serve(async (req: Request) => {
   const t0 = Date.now();
 
   try {
-    const { limit = 50 } = await req.json();
+    const body = await req.json();
+    const limit = typeof body.limit === "number" && Number.isInteger(body.limit)
+      ? Math.max(1, Math.min(100, body.limit)) : 50;
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -94,6 +96,7 @@ Deno.serve(async (req: Request) => {
         )
         .eq("recipient_id", intUserId)
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(limit),
 
       // 2. Unread count
@@ -104,9 +107,10 @@ Deno.serve(async (req: Request) => {
         .is("read_at", null),
     ]);
 
-    if (notificationsResult.error || unreadCountResult.error) {
-      console.warn("[bootstrap-notifications] activity query unavailable");
-      return new Response(JSON.stringify({ error: "Could not load activity. Please retry." }), {
+    if (notificationsResult.error || unreadCountResult.error || unreadCountResult.count == null) {
+      // Never cache a permission/schema/network failure as an empty private feed.
+      console.warn("[bootstrap-notifications] private feed unavailable");
+      return new Response(JSON.stringify({ error: "Could not load private activity. Please retry." }), {
         status: 503, headers: responseHeaders,
       });
     }
@@ -389,7 +393,7 @@ Deno.serve(async (req: Request) => {
   } catch (err: any) {
     console.error("[bootstrap-notifications] request unavailable");
     return new Response(
-      JSON.stringify({ error: "Could not load activity. Please retry." }),
+      JSON.stringify({ error: "Could not load private activity. Please retry." }),
       { status: 500, headers: responseHeaders },
     );
   }

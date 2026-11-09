@@ -1,6 +1,7 @@
 import { supabase } from "../supabase/client";
 import { resolveUserIdInt } from "./auth-helper";
 import { requireBetterAuthToken } from "../auth/identity";
+import { assertFollowIdentity, getFollowIdentity, type FollowIdentity } from "../auth/follow-identity";
 
 interface ToggleFollowResponseData {
   following: boolean;
@@ -35,23 +36,29 @@ export interface FollowMutationResult {
 }
 
 export const followsApi = {
-  async requestAction(action: "status" | "requests" | "approve" | "decline", targetUserId?: string) {
+  async requestAction(action: "status" | "requests" | "approve" | "decline", targetUserId?: string, expectedIdentity?: FollowIdentity) {
+    const identity = expectedIdentity ?? getFollowIdentity();
+    assertFollowIdentity(identity);
     const token = await requireBetterAuthToken();
+    assertFollowIdentity(identity);
+    const targetId = targetUserId ? await resolveUserIdInt(targetUserId) : undefined;
+    assertFollowIdentity(identity);
     const { data, error } = await supabase.functions.invoke("toggle-follow", {
-      body: { action, ...(targetUserId ? { targetUserId: await resolveUserIdInt(targetUserId) } : {}) },
+      body: { action, expectedAuthId: identity.authId, ...(targetId ? { targetUserId: targetId } : {}) },
       headers: { Authorization: `Bearer ${token}` },
     });
+    assertFollowIdentity(identity);
     if (error || !data?.ok || !data.data) throw new Error(data?.error?.message || error?.message || "Follow request failed");
     return data.data;
   },
-  async getFollowRequestStatus(targetUserId: string): Promise<{ following: boolean; followRequestStatus: "none" | "pending" | "approved" }> {
-    return followsApi.requestAction("status", targetUserId);
+  async getFollowRequestStatus(targetUserId: string, expectedIdentity?: FollowIdentity): Promise<{ following: boolean; followRequestStatus: "none" | "pending" | "approved" }> {
+    return followsApi.requestAction("status", targetUserId, expectedIdentity);
   },
-  async getFollowRequests(): Promise<Array<{ follower_id: number; created_at: string; requester: { username: string } | null }>> {
-    return (await followsApi.requestAction("requests")).requests;
+  async getFollowRequests(expectedIdentity?: FollowIdentity): Promise<Array<{ follower_id: number; created_at: string; requester: { username: string } | null }>> {
+    return (await followsApi.requestAction("requests", undefined, expectedIdentity)).requests;
   },
-  async respondToFollowRequest(requesterId: string, action: "approve" | "decline") {
-    return followsApi.requestAction(action, requesterId);
+  async respondToFollowRequest(requesterId: string, action: "approve" | "decline", expectedIdentity?: FollowIdentity) {
+    return followsApi.requestAction(action, requesterId, expectedIdentity);
   },
   /**
    * Follow/unfollow user via Edge Function.
@@ -61,10 +68,14 @@ export const followsApi = {
   async followAction(
     targetUserId: string,
     action: "follow" | "unfollow",
+    expectedIdentity?: FollowIdentity,
   ): Promise<FollowMutationResult> {
+    const identity = expectedIdentity ?? getFollowIdentity();
+    assertFollowIdentity(identity);
     console.log(`[Follows] ${action} via Edge Function:`, targetUserId);
 
     const token = await requireBetterAuthToken();
+    assertFollowIdentity(identity);
 
     // Resolve to integer ID, or fall back to passing auth_id for server-side provisioning
     let bodyPayload: {
@@ -88,12 +99,14 @@ export const followsApi = {
       }
     }
 
+    assertFollowIdentity(identity);
     const { data, error } =
       await supabase.functions.invoke<ToggleFollowResponse>("toggle-follow", {
-        body: bodyPayload,
+        body: { ...bodyPayload, expectedAuthId: identity.authId },
         headers: { Authorization: `Bearer ${token}` },
       });
 
+    assertFollowIdentity(identity);
     if (error) {
       console.error("[Follows] Edge Function error:", error);
       throw new Error(error.message || `Failed to ${action}`);

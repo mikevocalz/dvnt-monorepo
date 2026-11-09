@@ -6,7 +6,7 @@ const mocks={
  '@dvnt/app/lib/stores/auth-store':`import {create} from 'zustand';export const useAuthStore=create(()=>({user:{authId:'a'},authStatus:'authenticated'}));window.auth=useAuthStore;`,
  '@dvnt/app/lib/stores/location-access-store':`import {create} from 'zustand';export const useLocationAccessStore=create(()=>({owner:'a',blocked:false,hydrationReady:true,settings:{locationEnabled:true,sessionKey:'s1'}}));window.access=useLocationAccessStore;`,
  '@tanstack/react-query':`const client={removeQueries:()=>{}};export const useQueryClient=()=>client;`,
- '@dvnt/app/lib/api/member-proximity':`export const memberProximityApi={consentExact:(...args)=>{window.grants.push(args);return new Promise(r=>window.resolveGrant=r)},revokeExact:async owner=>{window.revokes.push(owner);if(window.failRevoke)throw Error('offline')}};`,
+ '@dvnt/app/lib/api/member-proximity':`export const memberProximityApi={consentExact:(...args)=>{window.grants.push(args);return new Promise(r=>window.resolveGrant=r)},revokeExact:async owner=>{window.revokes.push(owner);if(window.holdRevoke)await new Promise((resolve,reject)=>{window.resolveRevoke=resolve;window.rejectRevoke=reject});if(window.failRevoke)throw Error('offline')}};`,
 };
 async function fixture(saved={}, failRead=false){
  const {Window}=await import(require.resolve('happy-dom'));const window=new Window({url:'https://fixture.invalid'});window.console=console;window.saved=saved;window.failRead=failRead;window.grants=[];window.revokes=[];
@@ -27,3 +27,30 @@ test('disk failure never interrupts exact withdrawal or restores a positive leas
 test('legacy stored positive lease never restores and unreadable denial storage fails closed',async()=>{const saved={'exact-distance-consent-v2':{state:{owner:'a',sessionKey:'s1',expiresAt:Date.now()+60000,pendingWithdrawals:{}},version:0}};const w=await fixture(saved);try{assert.equal(w.api.enabled,false);assert.equal(w.exact.getState().owner,null)}finally{w.happyDOM.abort()}const blocked=await fixture(saved,true);try{await blocked.api.update(true);await tick();assert.equal(blocked.grants.length,0);assert.equal(blocked.samples||0,0);assert.match(blocked.api.error,/privacy preferences could not be read/);blocked.exact.getState().accept('a','s1',Date.now()+60000);await tick();assert.equal(blocked.api.enabled,false);assert.equal(blocked.exact.getState().owner,null);await blocked.api.update(false);assert.deepEqual(Array.from(blocked.revokes),['a'])}finally{blocked.happyDOM.abort()}});
 
 test('malformed negative storage prevents sampling and consent but never prevents withdrawal',async()=>{const w=await fixture({'exact-distance-consent-v2':{state:{pendingWithdrawals:'corrupt'},version:0}});try{await w.api.update(true);await tick();assert.equal(w.exact.getState().hydrationReady,false);assert.equal(w.grants.length,0);assert.equal(w.samples||0,0);assert.match(w.api.error,/privacy preferences could not be read/);await w.api.update(false);assert.deepEqual(Array.from(w.revokes),['a'])}finally{w.happyDOM.abort()}});
+
+
+test('failed A withdrawal status never leaks to B, while A keeps its durable retry',async()=>{
+ const w=await fixture();try{
+  await grant(w);w.failRevoke=true;await w.api.update(false);await tick();assert.match(w.api.error,/Could not confirm withdrawal/);
+  w.auth.setState({user:{authId:'b'}});w.access.setState({owner:'b',settings:{locationEnabled:true,sessionKey:'b1'}});await tick();
+  assert.equal(w.api.withdrawalPending,false);assert.equal(w.api.error,null);assert.equal(w.api.busy,false);assert.equal(w.exact.getState().pendingWithdrawals.a,true);
+  w.auth.setState({user:{authId:'a'}});w.access.setState({owner:'a',settings:{locationEnabled:true,sessionKey:'s1'}});await tick();assert.equal(w.api.withdrawalPending,true);
+  w.failRevoke=false;await w.api.update(false);await tick();assert.equal(w.api.withdrawalPending,false);assert.equal(w.api.error,null);
+ }finally{w.happyDOM.abort()}
+});
+test('held A request cannot clear B busy state or install an A error after switching account',async()=>{
+ const w=await fixture();try{
+  w.holdRevoke=true;const a=w.api.update(false);await tick();
+  w.auth.setState({user:{authId:'b'}});w.access.setState({owner:'b',settings:{locationEnabled:true,sessionKey:'b1'}});await tick();
+  const b=w.api.update(true);await tick();assert.equal(w.api.busy,true);
+  w.holdRevoke=false;w.rejectRevoke(Error('offline A'));await a;await tick();assert.equal(w.api.busy,true);assert.equal(w.api.error,null);assert.equal(w.api.withdrawalPending,false);
+  w.resolveGrant({expiresAt:new Date(Date.now()+60000).toISOString(),consentVersion:2});await b;await tick();assert.equal(w.api.busy,false);assert.equal(w.api.enabled,true);assert.equal(w.api.error,null);assert.equal(w.exact.getState().pendingWithdrawals.a,true);
+ }finally{w.happyDOM.abort()}
+});
+test('same-account new sign-in and remount do not show old operation status',async()=>{
+ const w=await fixture();try{
+  w.holdRevoke=true;const old=w.api.update(false);await tick();w.unmount();w.access.setState({settings:{locationEnabled:true,sessionKey:'s2'}});w.mount();await tick();
+  assert.equal(w.api.busy,false);assert.equal(w.api.error,null);assert.equal(w.api.withdrawalPending,true);
+  w.holdRevoke=false;w.rejectRevoke(Error('offline old sign-in'));await old;await tick();assert.equal(w.api.busy,false);assert.equal(w.api.error,null);assert.equal(w.api.withdrawalPending,true);
+ }finally{w.happyDOM.abort()}
+});

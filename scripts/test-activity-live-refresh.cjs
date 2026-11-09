@@ -11,8 +11,9 @@ const { QueryClient, QueryObserver, focusManager } = core;
 const ROOT = path.resolve(__dirname, '..');
 const tick = () => new Promise(resolve => setTimeout(resolve, 15));
 async function fixture() {
-  let viewer = '23', currentId = 23, rows = [], effect, options, state, reads = 0, memo, memoDeps;
-  const channels = [], invalidations = [];
+  let viewer = '23', currentId = 23, epoch = 0, rows = [], effect, options, state, reads = 0, memo, memoDeps;
+  const channels = [], invalidations = [], sessionListeners = new Set();
+  const access = require('./fixtures/notification-access.cjs')(() => currentId, () => epoch);
   const client = new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0}}});
   client.mount(); focusManager.setFocused(true);
   const invalidate = client.invalidateQueries.bind(client);
@@ -33,9 +34,11 @@ async function fixture() {
         if(n.endsWith('/api/notifications'))return {notificationsApiClient:api};
         if(n.endsWith('/stores/auth-store'))return {useAuthStore:authStore};
         if(n.endsWith('/stores/activity-store'))return load('packages/app/lib/stores/activity-store.ts');
+        if(n.endsWith('/api/notification-access'))return access;
+        if(n.endsWith('/auth/session-lifecycle'))return {subscribeSessionLifecycle:fn=>{sessionListeners.add(fn);return ()=>sessionListeners.delete(fn);}};
         if(n.endsWith('/api/auth-helper'))return {getCurrentUserIdSync:()=>currentId};
         if(n.endsWith('/stores/unread-counts-store'))return {useUnreadCountsStore:{getState:()=>({setNotificationsUnread(){}})}};
-        if(n.endsWith('/supabase/client'))return {supabase:{removeChannel:ch=>{ch.removed=true;}}};
+        if(n.endsWith('/supabase/client'))return {ensureBridgeRealtimeAuth:async()=>true,supabase:{removeChannel:async ch=>{ch.removed=true;}}};
         if(n.endsWith('/supabase/realtime'))return {freshChannel:()=>{const ch={on(_,filter,fn){this.filter=filter;this.insert=fn;return this;},subscribe(fn){this.status=fn;return this;}};channels.push(ch);return ch;}};
         if(n.endsWith('/query-keys'))return load('packages/app/lib/query-keys.ts');
         if(n.endsWith('/hooks/use-notifications-query'))return {notificationKeys:{list:id=>['notifications',id],badges:id=>['badges',id]}};
@@ -51,7 +54,7 @@ async function fixture() {
   const stop = observer.subscribe(()=>{});
   const cleanup = effect(); await tick();
   return {client,observer,channels,invalidations,options,hook,
-    setRows:next=>{rows=next;},setViewer:(id,intId)=>{viewer=id;currentId=intId;},
+    setRows:next=>{rows=next;},setViewer:(id,intId)=>{viewer=id;currentId=intId;epoch++;for(const listener of [...sessionListeners])listener();},
     render:()=>{hook.useActivitiesQuery();return effect();},
     get rows(){return client.getQueryData(['activities','23']);},get reads(){return reads;},
     cleanup,dispose(){cleanup?.();stop();client.unmount();client.clear();focusManager.setFocused(undefined);},
@@ -65,7 +68,7 @@ test('SUBSCRIBED catches up rows missed before connection and after reconnect',a
  const f=await fixture();try{f.setRows([transfer]);f.channels[0].status('SUBSCRIBED');await tick();assert.equal(f.rows.length,1);f.setRows([transfer,{...transfer,id:'second'}]);f.channels[0].status('SUBSCRIBED');await tick();assert.equal(f.rows.length,2);}finally{f.dispose();}
 });
 test('cleanup and account switch ignore old subscription callbacks',async()=>{
- const f=await fixture();try{const old=f.channels[0];f.setViewer('24',24);await old.insert({new:{recipient_id:23}});old.status('SUBSCRIBED');assert.equal(f.invalidations.length,0);f.cleanup();assert.equal(old.removed,true);const cleanNew=f.render();f.channels[1].status('SUBSCRIBED');assert.ok(f.invalidations.every(x=>x.queryKey[1]==='24'));cleanNew();const count=f.invalidations.length;await f.channels[1].insert({new:{recipient_id:24}});assert.equal(f.invalidations.length,count);}finally{f.dispose();}
+ const f=await fixture();try{const old=f.channels[0];f.setViewer('24',24);await old.insert({new:{recipient_id:23}});old.status('SUBSCRIBED');assert.equal(f.invalidations.length,0);f.cleanup();assert.equal(old.removed,true);const cleanNew=f.render();await tick();f.channels[1].status('SUBSCRIBED');await tick();assert.ok(f.invalidations.every(x=>x.queryKey[1]==='24'));cleanNew();const count=f.invalidations.length;await f.channels[1].insert({new:{recipient_id:24}});assert.equal(f.invalidations.length,count);}finally{f.dispose();}
 });
 test('foreground interval catches transfers even without published Realtime; background pauses it',async()=>{
  const f=await fixture();try{

@@ -1,3 +1,4 @@
+import { FollowRequestsSetting } from "../../follow-requests-setting";
 import {
   View,
   Text,
@@ -289,6 +290,7 @@ export default function SettingsScreenAndroid() {
               label="Privacy"
               onPress={() => router.push("/settings/privacy" as any)}
             />
+            <FollowRequestsSetting />
             <SettingsListItem
               icon={<Eye size={22} color="#666" />}
               label="Close Friends"

@@ -1,3 +1,6 @@
+import { useSyncExternalStore } from "react";
+import { getSessionLifecycle, subscribeSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { assertFollowIdentity, getFollowIdentity, getFollowIdentityRevision, subscribeFollowIdentityRevision, isFollowIdentityCurrent, type FollowIdentity } from "@dvnt/app/lib/auth/follow-identity";
 import { resetFollowAccessCaches } from "@dvnt/app/lib/hooks/reset-follow-access-caches";
 /**
  * Follow/Unfollow Hook with Optimistic Updates
@@ -175,33 +178,39 @@ function updateAuthUserFallbackCaches(
   return snapshots;
 }
 
+interface FollowVariables {
+  userId: string;
+  action: "follow" | "unfollow";
+  username?: string;
+}
+type OwnedFollowVariables = FollowVariables & { identity: FollowIdentity | null };
+
 export function useFollow() {
   const queryClient = useQueryClient();
   const showToast = useUIStore((s) => s.showToast);
   const authUser = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const viewerId = authUser?.id;
+  useSyncExternalStore(subscribeSessionLifecycle, getSessionLifecycle, getSessionLifecycle);
+  useSyncExternalStore(subscribeFollowIdentityRevision, getFollowIdentityRevision, getFollowIdentityRevision);
+  const identity = getFollowIdentity();
 
-  return useMutation({
-    mutationFn: async ({
-      userId,
-      action,
-    }: {
-      userId: string;
-      action: "follow" | "unfollow";
-      username?: string;
-    }) => {
-      if (!viewerId || useAuthStore.getState().user?.id !== viewerId) throw new Error("Account changed. Try again.");
-      return await followsApi.followAction(userId, action);
+  const mutation = useMutation({
+    mutationFn: async (variables: OwnedFollowVariables) => {
+      assertFollowIdentity(variables.identity);
+      return followsApi.followAction(variables.userId, variables.action, variables.identity);
     },
     // A follow can become a pending request. Never optimistically grant access.
-    onMutate: async ({ action }) => {
-      if (action === "unfollow") await resetFollowAccessCaches(queryClient, false);
+    onMutate: async (variables) => {
+      const isCurrent = () => isFollowIdentityCurrent(variables.identity);
+      assertFollowIdentity(variables.identity);
+      if (variables.action === "unfollow") await resetFollowAccessCaches(queryClient, false, isCurrent);
+      assertFollowIdentity(variables.identity);
       return undefined as FollowContext | undefined;
     },
     onError: (error: any, variables, context) => {
-      if (useAuthStore.getState().user?.id !== viewerId) return;
-      void resetFollowAccessCaches(queryClient);
+      if (!isFollowIdentityCurrent(variables.identity)) return;
+      void resetFollowAccessCaches(queryClient, true, () => isFollowIdentityCurrent(variables.identity));
       // Rollback on error
       let targetKey: readonly unknown[] | null = null;
       if (variables.username) {
@@ -259,11 +268,11 @@ export function useFollow() {
       showToast("error", "Follow failed", errorMessage);
     },
     onSuccess: async (data: FollowMutationResult, variables) => {
-      if (useAuthStore.getState().user?.id !== viewerId) return;
-      await resetFollowAccessCaches(queryClient);
-      if (useAuthStore.getState().user?.id !== viewerId) return;
+      if (!isFollowIdentityCurrent(variables.identity)) return;
+      await resetFollowAccessCaches(queryClient, true, () => isFollowIdentityCurrent(variables.identity));
+      if (!isFollowIdentityCurrent(variables.identity)) return;
       updateUserRelationshipEverywhere(queryClient, variables.userId, variables.username, data.following, viewerId);
-      queryClient.setQueryData(["follow-request-status", viewerId, variables.userId], { following: data.following, followRequestStatus: data.followRequestStatus });
+      queryClient.setQueryData(["follow-request-status", viewerId, variables.userId, variables.identity.epoch, variables.identity.revision], { following: data.following, followRequestStatus: data.followRequestStatus });
       // CRITICAL: Use server-authoritative counts to reconcile cache
       console.log("[useFollow] Server response:", {
         following: data.following,
@@ -331,7 +340,7 @@ export function useFollow() {
       );
     },
     onSettled: (_data, _error, variables) => {
-      if (useAuthStore.getState().user?.id !== viewerId) return;
+      if (!isFollowIdentityCurrent(variables.identity)) return;
       // Targeted invalidation — NOT broad storms
       const invalidations: Promise<unknown>[] = [queryClient.invalidateQueries({ queryKey: ["follow-request-status", viewerId, variables.userId] })];
 
@@ -375,4 +384,18 @@ export function useFollow() {
       });
     },
   });
+  type Options = NonNullable<Parameters<typeof mutation.mutate>[1]>;
+  const ownedOptions = (options?: Options): Options => ({
+    ...options,
+    onSuccess: (...args) => { if (isFollowIdentityCurrent(identity)) options?.onSuccess?.(...args); },
+    onError: (...args) => { if (isFollowIdentityCurrent(identity)) options?.onError?.(...args); },
+    onSettled: (...args) => { if (isFollowIdentityCurrent(identity)) options?.onSettled?.(...args); },
+  });
+  const stale = mutation.variables && !isFollowIdentityCurrent(mutation.variables.identity);
+  return {
+    ...mutation,
+    ...(stale ? { error: null, data: undefined, variables: undefined, isError: false, isPending: false, isSuccess: false, isIdle: true, status: "idle" as const } : {}),
+    mutate: (variables: FollowVariables, options?: Options) => mutation.mutate({ ...variables, identity }, ownedOptions(options)),
+    mutateAsync: (variables: FollowVariables, options?: Options) => mutation.mutateAsync({ ...variables, identity }, ownedOptions(options)),
+  };
 }

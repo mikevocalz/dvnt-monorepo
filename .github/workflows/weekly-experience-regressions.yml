@@ -8,6 +8,8 @@ on:
       - "apps/web/src/app/(frontend)/feed/[username]/post/[id]/**"
       - "apps/web/src/app/(frontend)/p/[id]/**"
       - "apps/mobile/supabase/migrations/**"
+      - "docs/security/users-identity-write-prerequisite.sql"
+      - "docs/security/notification-privacy-draft.sql"
       - "scripts/test-*.cjs"
       - ".github/workflows/weekly-experience-regressions.yml"
   push:
@@ -18,6 +20,8 @@ on:
       - "apps/web/src/app/(frontend)/feed/[username]/post/[id]/**"
       - "apps/web/src/app/(frontend)/p/[id]/**"
       - "apps/mobile/supabase/migrations/**"
+      - "docs/security/users-identity-write-prerequisite.sql"
+      - "docs/security/notification-privacy-draft.sql"
       - "scripts/test-*.cjs"
       - ".github/workflows/weekly-experience-regressions.yml"
   workflow_dispatch:
@@ -44,7 +48,9 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/weekly/node_modules
         run: |
           node --test apps/mobile/supabase/functions/user-settings/index.test.cjs
+          node scripts/test-user-settings-account-switch.cjs
           node --test apps/mobile/supabase/functions/toggle-follow/index.test.cjs
+          node --test packages/app/lib/api/follows-account.test.ts
           node --test apps/mobile/supabase/functions/create-event/index.test.cjs
           node --test packages/app/lib/events/*.test.ts packages/app/features/events/create/event-form.test.ts
           node --test packages/app/lib/api/ticket-types-read.test.ts
@@ -62,6 +68,7 @@ jobs:
           node scripts/test-member-map-session-dom.cjs
           node scripts/test-exact-distance-sql.cjs
           node scripts/test-exact-distance-hooks.cjs
+          node --test scripts/test-member-proximity-settings-dom.cjs
           node scripts/test-proximity-observation-hooks.cjs
           node --test apps/mobile/supabase/functions/member-proximity/exact-consent.test.cjs apps/mobile/supabase/functions/_shared/location-session.test.ts
           node scripts/test-weekly-location-dom.cjs

@@ -69,11 +69,20 @@ Deno.serve(async (req) => {
     const authUserId = sessionResult.userId;
     const authId = authUserId;
 
-    let body: { action: "get" | "update"; settings?: Record<string, unknown> };
+    let body: { action: "get" | "update"; settings?: Record<string, unknown>; expectedAuthId?: string };
     try {
       body = await req.json();
     } catch {
       return errorResponse("validation_error", "Invalid JSON body");
+    }
+
+    if (!isSettingsObject(body)) {
+      return errorResponse("validation_error", "Request body must be an object");
+    }
+    // The bearer session remains authoritative. New clients bind the request
+    // to the account that initiated it; old clients may omit this field.
+    if (body.expectedAuthId !== undefined && body.expectedAuthId !== authId) {
+      return errorResponse("account_changed", "Account changed. Reload settings and try again.");
     }
 
     const { action } = body;

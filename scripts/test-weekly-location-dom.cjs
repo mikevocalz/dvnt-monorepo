@@ -5,11 +5,12 @@ const { build } = require('esbuild');
   const { Window } = await import(require.resolve('happy-dom'));
   const root = path.resolve(__dirname, '..');
   const mocks = {
+    '@dvnt/app/lib/stores/member-proximity-sync-store': 'export const proximityStorageError=()=>null;export const useMemberProximitySyncStore=()=>({});',
     '@dvnt/app/lib/stores/exact-distance-store': `import {useSyncExternalStore} from 'react';export const useExactDistanceStore=s=>useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>s?s(window.fixture.exact):window.fixture.exact);useExactDistanceStore.getState=()=>window.fixture.exact;`,
     'react-native': `import React from 'react'; export const Text=({children})=><span>{children}</span>;`,
     '@dvnt/app/lib/hooks/use-member-map': 'export const useLocationSettings=()=>({});',
-    '@dvnt/app/lib/stores/location-access-store': `import {useSyncExternalStore} from 'react';export const locationAllowedFor=()=>true;export const useLocationAccessStore=s=>useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>s(window.fixture.access));`,
-    '@dvnt/app/lib/stores/auth-store': `import {useSyncExternalStore} from 'react';export const useAuthStore=s=>useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>s({user:window.fixture.user}));`,
+    '@dvnt/app/lib/stores/location-access-store': `import {useSyncExternalStore} from 'react';export const locationAllowedFor=()=>true;export const useLocationAccessStore=s=>useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>s(window.fixture.access));useLocationAccessStore.subscribe=()=>()=>{};`,
+    '@dvnt/app/lib/stores/auth-store': `import {useSyncExternalStore} from 'react';export const useAuthStore=s=>useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>s({user:window.fixture.user}));useAuthStore.subscribe=()=>()=>{};`,
     '@dvnt/app/lib/stores/events-location-store': `import {useSyncExternalStore} from 'react';export const useEventsLocationStore=s=>useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>s(window.fixture.location));`,
     '@dvnt/app/lib/hooks/use-age-verification': 'export const useVerificationState=()=>({});',
     '@dvnt/app/lib/api/member-proximity': `export const memberProximityApi={distance:async()=>{window.fixture.calls++;if(window.fixture.fail)throw Error('Unavailable');return window.fixture.reply;}};`,

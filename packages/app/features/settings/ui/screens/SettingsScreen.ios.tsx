@@ -1,3 +1,4 @@
+import { FollowRequestsSetting } from "../../follow-requests-setting";
 import {
   View,
   Text,
@@ -291,6 +292,8 @@ export default function SettingsScreenIOS() {
               label="Privacy"
               onPress={() => router.push("/settings/privacy" as any)}
             />
+            <View className="ml-12 h-px bg-border" />
+            <FollowRequestsSetting />
             <View className="ml-12 h-px bg-border" />
             <SettingsListItem
               icon={<Eye size={20} color="#666" />}

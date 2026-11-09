@@ -2,6 +2,7 @@
  * Edge Function: toggle-follow
  * Explicit follow/unfollow a user with Better Auth verification.
  * Accepts `action: "follow" | "unfollow"` for idempotent, race-free mutations.
+ * Older clients may omit action for a serialized follow/request toggle.
  * Returns authoritative counts + viewerFollows + target username.
  *
  * Deploy: supabase functions deploy toggle-follow --no-verify-jwt --project-ref npfjanxturvmjyevoyfo
@@ -85,6 +86,7 @@ Deno.serve(async (req) => {
     let body: {
       targetUserId?: number;
       targetAuthId?: string;
+      expectedAuthId?: string;
       action?: "follow" | "unfollow" | "approve" | "decline" | "status" | "requests";
     };
     try {
@@ -92,13 +94,28 @@ Deno.serve(async (req) => {
     } catch {
       return errorResponse("validation_error", "Invalid JSON body");
     }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return errorResponse("validation_error", "Invalid JSON body");
+    }
+
+    // New clients bind intent to the original sign-in. The verified token
+    // remains authoritative; an expected owner can only restrict it.
+    if (Object.prototype.hasOwnProperty.call(body, "expectedAuthId") && body.expectedAuthId !== authUserId) {
+      return errorResponse("unauthorized", "Account changed. Reload before trying again.");
+    }
 
     let { targetUserId } = body;
-    const { targetAuthId, action } = body;
+    const { targetAuthId } = body;
 
-    if (!["follow", "unfollow", "approve", "decline", "status", "requests"].includes(action || "")) {
-      return errorResponse("validation_error", "Explicit follow action is required");
+    // Only omitted actions use the legacy contract. Malformed/unknown explicit
+    // actions must never become an accidental mutation (including "toggle").
+    const legacyToggle = !Object.prototype.hasOwnProperty.call(body, "action");
+    if (!legacyToggle && !["follow", "unfollow", "approve", "decline", "status", "requests"].includes(body.action || "")) {
+      return errorResponse("validation_error", "Invalid follow action");
     }
+    // Resolve the old toggle inside the same locked transaction as the write,
+    // never by reading the current relationship in this Edge handler.
+    const action = legacyToggle ? "toggle" : body.action;
     const readOnly = action === "status" || action === "requests";
     const rl = checkRateLimit(authUserId, readOnly ? "follow-requests-read" : "toggle-follow", readOnly ? { maxRequests: 120, windowMs: 60_000 } : WRITE_LIMIT);
     if (!rl.allowed) return errorResponse("rate_limited", "Too many requests. Try again shortly.");

@@ -45,3 +45,20 @@ test('local request epoch header is stripped before dispatch', async () => {
   const send=bridge.guardFetch(async(_input,init)=>{assert.equal(new Headers(init?.headers).has('x-dvnt-bridge-epoch'),false);return new Response('[]');});
   await send('https://fixture.invalid/rest/v1/events',{headers:{Authorization:`Bearer ${a}`,'x-dvnt-bridge-epoch':bridge.requestEpoch()}});
 });
+
+for (const method of ['GET','HEAD','PATCH','POST','DELETE']) test(`private notification ${method} never falls back to anon after bridge failure`, async () => {
+  const bridge=createBridgeTransport('anon');bridge.setMinter(async()=>null);
+  const bearer=await bridge.accessToken();let calls=0;
+  const send=bridge.guardFetch(async()=>{calls++;return new Response('[]');});
+  await assert.rejects(send('https://fixture.invalid/rest/v1/notifications?recipient_id=eq.1',{method,headers:{Authorization:`Bearer ${bearer}`}}),/private activity/);
+  assert.equal(calls,0);
+});
+test('verified private requests pass, but expiry or signout before dispatch blocks them', async () => {
+  const bridge=createBridgeTransport('anon');const a=jwt('A');bridge.setToken(a);
+  let calls=0;const send=bridge.guardFetch(async()=>{calls++;return new Response('[]');});
+  await send('https://fixture.invalid/rest/v1/notifications',{headers:{Authorization:`Bearer ${a}`}});
+  bridge.setToken(null);
+  await assert.rejects(send('https://fixture.invalid/rest/v1/notifications',{headers:{Authorization:`Bearer ${a}`}}),/private activity/);
+  await assert.rejects(send('https://fixture.invalid/rest/v1/notifications'),/private activity/);
+  assert.equal(calls,1);
+});

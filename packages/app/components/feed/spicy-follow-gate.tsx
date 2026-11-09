@@ -1,5 +1,6 @@
 import { BlurView } from "expo-blur";
 import { View, Text, Pressable } from "react-native";
+import { FollowStatusRefresh } from "./follow-status-refresh";
 import { useSpicyFollowGate } from "./use-spicy-follow-gate";
 export function SpicyFollowGate({
   author,
@@ -63,11 +64,11 @@ export function SpicyFollowGate({
       >
         <Text style={{ color: "white", fontWeight: "600" }}>{gate.label}</Text>
       </Pressable>
-      {gate.statusError && (
-        <Pressable accessibilityRole="button" onPress={gate.retry}>
-          <Text style={{ color: "white" }}>Retry</Text>
-        </Pressable>
-      )}
+      <FollowStatusRefresh
+        targetId={author?.id}
+        showError={false}
+        recoverLockedPost
+      />
       {gate.failed && (
         <Text
           accessibilityRole="alert"

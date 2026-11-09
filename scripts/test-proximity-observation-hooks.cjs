@@ -6,7 +6,7 @@ const {build}=require('esbuild');
   '@dvnt/app/lib/mmkv-zustand':`export const mmkvStorage={getItem:name=>name==='events-location'?window.fixture.persisted:null,setItem:(name,value)=>{if(name==='events-location')window.fixture.saved=value;},removeItem(){}};`,
   '@dvnt/app/lib/stores/auth-store':`import {create} from 'zustand';export const useAuthStore=create(()=>({user:{authId:'a'}}));window.auth=useAuthStore;`,
   '@dvnt/app/lib/stores/location-access-store':`import {create} from 'zustand';export const useLocationAccessStore=create(()=>({owner:'a',blocked:false,hydrationReady:true,settings:{locationEnabled:true,sessionKey:'s1'}}));export const locationAllowedFor=owner=>useLocationAccessStore.getState().owner===owner&&!useLocationAccessStore.getState().blocked;window.access=useLocationAccessStore;`,
-  '@dvnt/app/lib/stores/exact-distance-store':`import {create} from 'zustand';export const useExactDistanceStore=create(()=>({owner:'a',sessionKey:'s1',expiresAt:Date.now()+3600000,generation:0,pendingWithdrawals:{}}));window.exact=useExactDistanceStore;`,
+  '@dvnt/app/lib/stores/exact-distance-store':`import {create} from 'zustand';export const useExactDistanceStore=create(()=>({owner:'a',sessionKey:'s1',expiresAt:Date.now()+3600000,generation:0,pendingWithdrawals:{},confirmWithdrawal:()=>{},clear:()=>useExactDistanceStore.setState({owner:null,sessionKey:null,expiresAt:0})}));window.exact=useExactDistanceStore;`,
   '@dvnt/app/lib/hooks/use-member-map':`import {useLocationAccessStore} from '@dvnt/app/lib/stores/location-access-store';export function useLocationSettings(){const s=useLocationAccessStore();return {enabled:!s.blocked,settings:s.settings}}`,
   '@dvnt/app/lib/hooks/use-age-verification':`export const useVerificationState=()=>({data:{state:'approved'},isLoading:false});`,
   '@dvnt/app/lib/api/member-proximity':`export const memberProximityApi={publish:async input=>window.fixture.publishes.push(input),revoke:async()=>window.fixture.revokes++};`,
@@ -20,17 +20,20 @@ const {build}=require('esbuild');
  try{
   win.eval(output.outputFiles[0].text);await tick();
   assert.equal(win.events.getState().deviceObservation,null,'hydration never restores freshness');
+  assert.equal(win.events.getState().preciseProximityGrant,false,'hydration never restores positive coordinate consent');
   assert.equal(win.fixture.publishes.length,0,'unknown persisted coordinates never publish');
   win.events.getState().setDeviceLocation(40,-74,{observedAt:now-960000,ownerAuthId:'a',sessionKey:'s1'});await tick();
   assert.equal(win.fixture.publishes.length,0,'ancient coordinates cannot obtain a new lease');
+  win.events.getState().setPreciseProximityGrant(true,'a');
+  win.exact.setState({owner:'a',sessionKey:'s1',expiresAt:Date.now()+3600000,generation:1});
   const fresh=Date.now()-5000;
   win.events.getState().setDeviceLocation(40,-74,{observedAt:fresh,ownerAuthId:'a',sessionKey:'s1'});
   await wait(()=>win.fixture.publishes.length===1);
   assert.equal(win.fixture.publishes[0].observedAt,new Date(fresh).toISOString(),'original provider observation, not publication time');
   assert.equal(win.fixture.publishes[0].exactDistanceVersion,2);
-  win.exact.setState({generation:1});win.events.setState({cityVisibility:{...win.events.getState().cityVisibility,expiresAt:Date.now()+3600000}});await tick();
+  win.exact.setState({generation:2});win.events.setState({cityVisibility:{...win.events.getState().cityVisibility,expiresAt:Date.now()+3600000}});await tick();
   assert.equal(win.fixture.publishes.length,1,'consent/city renewal cannot replay or freshen a sample');
-  win.access.setState({settings:{locationEnabled:true,sessionKey:'s2'}});win.exact.setState({sessionKey:'s2',generation:2});await tick();
+  win.access.setState({settings:{locationEnabled:true,sessionKey:'s2'}});win.exact.setState({sessionKey:'s2',generation:3});await tick();
   assert.equal(win.fixture.publishes.length,1,'same-account new sign-in cannot reuse old-session observation');
   win.fixture.providerTimestamp=Date.now();
   await win.sample('a','s2',()=>true);await wait(()=>win.fixture.publishes.length===2);

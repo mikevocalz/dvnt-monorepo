@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncMemberProximityPresence } from "@dvnt/app/lib/hooks/use-member-proximity";
 import { useExactDistanceConsent } from "@dvnt/app/lib/hooks/use-exact-distance-consent";
 import { EXACT_DISTANCE_COPY } from "@dvnt/app/lib/stores/exact-distance-store";
 import { FollowRequestsPanel } from "./follow-requests-panel";
@@ -85,21 +86,19 @@ function Switch({
  * duration the member picks, revocable in one click, and carrying a city name
  * rather than coordinates, an event or a ticket.
  */
-function CityVisibilitySection() {
+export function CityVisibilitySection() {
+  const proximity = useSyncMemberProximityPresence();
   const exact = useExactDistanceConsent();
   const activeCity = useEventsLocationStore((s) => s.activeCity);
   const durationId = useEventsLocationStore((s) => s.visibilityDurationId);
   const setDuration = useEventsLocationStore((s) => s.setVisibilityDuration);
   const showMeInCity = useEventsLocationStore((s) => s.showMeInCity);
-  const hideMeInCity = useEventsLocationStore((s) => s.hideMeInCity);
+  const hideMeInCity = () => proximity.stop(true);
   const preciseOptIn = useEventsLocationStore((s) => s.preciseProximityGrant);
   const preciseOwner = useEventsLocationStore(
     (s) => s.preciseProximityOwnerAuthId,
   );
   const authId = useAuthStore((s) => s.user?.authId);
-  const setPreciseOptIn = useEventsLocationStore(
-    (s) => s.setPreciseProximityGrant,
-  );
   const deviceLat = useEventsLocationStore((s) => s.deviceLat);
   const deviceLng = useEventsLocationStore((s) => s.deviceLng);
   const grant = useActiveCityVisibility();
@@ -127,7 +126,7 @@ function CityVisibilitySection() {
           <Switch
             label={COPY.toggleLabel}
             checked={grant != null}
-            disabled={!activeCity && grant == null}
+            disabled={grant == null && (!activeCity || proximity.withdrawalPending)}
             onChange={onToggle}
           />
         </div>
@@ -179,9 +178,12 @@ function CityVisibilitySection() {
         </div>
         <div className="border-t border-white/8 py-4">
           <p className="text-sm text-white/60">{EXACT_DISTANCE_COPY}</p>
-          <button type="button" disabled={exact.busy || (!exact.enabled && !exact.withdrawalPending && (!grant || !hasDeviceLocation || !preciseOptIn || preciseOwner !== authId))}
+          {!exact.enabled && !exact.withdrawalPending && (!grant || !hasDeviceLocation || !preciseOptIn || preciseOwner !== authId || proximity.withdrawalPending) ? (
+            <p className="mt-2 text-sm text-white/60">To allow exact distances, turn on city visibility and approximate distance sharing, and make a device location available first. Exact sharing asks separately and gets a fresh location.</p>
+          ) : null}
+          <button type="button" disabled={exact.busy || (!exact.enabled && !exact.withdrawalPending && (!grant || !hasDeviceLocation || !preciseOptIn || preciseOwner !== authId || proximity.withdrawalPending))}
             onClick={() => void exact.update(!(exact.enabled || exact.withdrawalPending))} className="mt-3 rounded-full border border-white/15 px-4 py-2 text-white">
-            {exact.withdrawalPending ? "Retry Stop exact distances" : exact.enabled ? "Stop exact distances" : "I agree: allow exact distances"}
+            {exact.busy ? (exact.withdrawalPending ? "Stopping…" : "Getting a fresh location…") : exact.withdrawalPending ? "Retry Stop exact distances" : exact.enabled ? "Stop exact distances" : "I agree: allow exact distances"}
           </button>
           {exact.error ? <p role="alert" className="mt-2 text-sm text-red-400">{exact.error}</p> : null}
         </div>
@@ -202,10 +204,18 @@ function CityVisibilitySection() {
           <Switch
             label={PROXIMITY_COPY.toggleLabel}
             checked={Boolean(grant && preciseOptIn && preciseOwner === authId)}
-            disabled={(!grant || !hasDeviceLocation) && preciseOwner !== authId}
-            onChange={(checked) => setPreciseOptIn(checked, authId ?? null)}
+            disabled={proximity.withdrawalPending || ((!grant || !hasDeviceLocation) && preciseOwner !== authId)}
+            onChange={proximity.setDistanceSharing}
           />
         </div>
+        {proximity.busy ? <p role="status" className="pb-3 text-sm text-white/60">{proximity.withdrawalPending ? "Stopping distance sharing…" : "Updating distance sharing…"}</p> : null}
+        {proximity.error ? <p role="alert" className="pb-3 text-sm text-red-400">{proximity.error}</p> : null}
+        {proximity.error || proximity.withdrawalPending ? (
+          <button type="button" disabled={proximity.busy} onClick={() => void proximity.retry()}
+            className="mb-4 rounded-full border border-white/15 px-4 py-2 text-sm text-white">
+            {proximity.withdrawalPending ? "Retry Stop sharing distance" : "Retry distance sharing"}
+          </button>
+        ) : null}
       </div>
     </>
   );

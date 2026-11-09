@@ -393,12 +393,14 @@ test('comment creation refuses locked parent before reply or insert lookup', asy
 
 test('settings read failure never becomes Public defaults', async () => {
   const source = fs.readFileSync(path.resolve(root, '../../../../packages/app/lib/hooks/use-user-settings.ts'), 'utf8');
-  const fn = source.slice(source.indexOf('async function fetchUserSettings'), source.indexOf('async function updateUserSettings'));
-  for (const result of [{ error: { message: 'offline' } }, { data: { ok: false, error: { message: 'denied' } } }]) {
+  const tree = ts.createSourceFile('use-user-settings.ts', source, ts.ScriptTarget.Latest, true);
+  const fn = tree.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'requestUserSettings');
+  assert.ok(fn, 'execute the production settings request helper');
+  for (const result of [{ error: { message: 'offline' } }, { data: { ok: false, error: { message: 'denied' } } }, {}]) {
     const exports = {};
-    vm.runInNewContext(ts.transpileModule(fn + '\nexports.fetch = fetchUserSettings;', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
+    vm.runInNewContext(ts.transpileModule(fn.getText(tree) + '\nexports.fetch = requestUserSettings;', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
       exports, requireBetterAuthToken: async () => 'fixture', supabase: { functions: { invoke: async () => result } },
     });
-    await assert.rejects(exports.fetch());
+    await assert.rejects(exports.fetch({ assertCurrent() {}, authId: 'fixture-owner' }));
   }
 });

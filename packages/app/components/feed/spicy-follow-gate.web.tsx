@@ -1,4 +1,5 @@
 "use client";
+import { FollowStatusRefresh } from "./follow-status-refresh";
 import { useSpicyFollowGate } from "./use-spicy-follow-gate";
 export function SpicyFollowGate({
   author,
@@ -33,11 +34,11 @@ export function SpicyFollowGate({
       >
         {gate.label}
       </button>
-      {gate.statusError && (
-        <button type="button" onClick={gate.retry}>
-          Retry
-        </button>
-      )}
+      <FollowStatusRefresh
+        targetId={author?.id}
+        showError={false}
+        recoverLockedPost
+      />
       {gate.failed && (
         <p role="alert" className="text-xs">
           Could not update follow. Please try again.

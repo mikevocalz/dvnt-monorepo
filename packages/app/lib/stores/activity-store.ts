@@ -9,7 +9,9 @@ import {
   type NotificationType,
 } from "@dvnt/app/lib/api/notifications";
 import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
-import { supabase } from "@dvnt/app/lib/supabase/client";
+import { supabase, ensureBridgeRealtimeAuth } from "@dvnt/app/lib/supabase/client";
+import { requireNotificationAccess } from "@dvnt/app/lib/api/notification-access";
+import { subscribeSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/api/auth-helper";
 import { followsApi } from "@dvnt/app/lib/api/follows";
@@ -420,65 +422,67 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
   },
 
-  // Subscribe to realtime notifications for instant updates
+  // Private channels are opened only after canonical identity + socket auth.
+  // Return cleanup synchronously so unmount during either await cannot leak one.
   subscribeToNotifications: (onRefresh) => {
-    const userId = getCurrentUserIdSync();
-    if (!userId) {
-      console.log("[ActivityStore] No user ID for realtime subscription");
-      return undefined;
-    }
-
-    // Cancellation guard: prevents stale callbacks from executing after cleanup
+    if (!getCurrentUserIdSync()) return undefined;
     let cancelled = false;
-
-    // Unique channel ID prevents collisions on rapid remount
-    const channelId = `notifications:${userId}:${Date.now()}`;
-    console.log(
-      "[ActivityStore] Subscribing to realtime notifications:",
-      channelId,
-    );
-
-    const channel = freshChannel(channelId)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-          filter: `recipient_id=eq.${userId}`,
-        },
-        async (payload) => {
-          if (cancelled || getCurrentUserIdSync() !== userId) {
-            console.log(
-              "[ActivityStore] Ignoring notification - subscription cancelled",
-            );
-            return;
-          }
-          console.log(
-            "[ActivityStore] Realtime notification received:",
-            payload.new?.type,
-          );
-          // Refetch all notifications to get full actor data (the INSERT payload
-          // doesn't include the joined actor info)
-          if (onRefresh) onRefresh();
-          else await get().fetchFromBackend();
-        },
-      )
-      .subscribe((status, err) => {
-        if (cancelled || getCurrentUserIdSync() !== userId) return;
-        // Catch up rows inserted before subscription or while disconnected.
-        if (status === "SUBSCRIBED") onRefresh?.();
-        console.log("[ActivityStore] Realtime subscription status:", status);
-        if (err) {
-          console.error("[ActivityStore] Subscription error:", err);
-        }
-      });
-
-    return () => {
-      console.log("[ActivityStore] Unsubscribing from:", channelId);
+    let channel: ReturnType<typeof freshChannel> | undefined;
+    let stopSession = () => {};
+    const cleanup = () => {
+      if (cancelled) return;
       cancelled = true;
-      supabase.removeChannel(channel);
+      stopSession();
+      if (channel) void supabase.removeChannel(channel).catch(() => {});
     };
+    // Invalidate immediately on sign-out, A→B or A→B→A, not only on rerender.
+    stopSession = subscribeSessionLifecycle(cleanup);
+
+    void (async () => {
+      try {
+        const access = await requireNotificationAccess();
+        if (cancelled) return;
+        if (!await ensureBridgeRealtimeAuth()) throw new Error("Realtime session unavailable");
+        if (cancelled) return;
+        access.assertCurrent();
+        const current = () => {
+          if (cancelled) return false;
+          try { access.assertCurrent(); return true; } catch { cleanup(); return false; }
+        };
+        channel = freshChannel(`notifications:${access.userId}`);
+        channel.on("postgres_changes", {
+            event: "INSERT", schema: "public", table: "notifications",
+            filter: `recipient_id=eq.${access.userId}`,
+          }, async (payload) => {
+            if (!current() || String(payload.new?.recipient_id) !== String(access.userId)) return;
+            try {
+              if (onRefresh) onRefresh();
+              else await get().fetchFromBackend();
+            } catch {
+              // A fetch failure is handled by the activity query/retry UI.
+              console.warn("[ActivityStore] Notification refresh unavailable");
+            }
+          })
+          .subscribe((status, error) => {
+            if (!current()) return;
+            if (error) console.warn("[ActivityStore] Notification subscription unavailable");
+            // Catch up rows emitted while initial authentication/reconnect ran.
+            if (status === "SUBSCRIBED") {
+              void Promise.resolve().then(() => {
+                if (!current()) return;
+                if (onRefresh) onRefresh();
+                else return get().fetchFromBackend();
+              }).catch(() => {
+                console.warn("[ActivityStore] Notification refresh unavailable");
+              });
+            }
+          });
+      } catch {
+        cleanup();
+        console.warn("[ActivityStore] Notification realtime unavailable; retry after signing in");
+      }
+    })();
+    return cleanup;
   },
 
   reset: () => {

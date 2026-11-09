@@ -80,15 +80,15 @@ function fixture(initial, options = {}) {
     get settings() { return settings; },
     get writes() { return writes; },
     get readCount() { return readCount; },
-    async update(patch) {
+    async update(patch, expectedAuthId) {
       return (await handler(new Request("https://fixture.invalid", {
         method: "POST", headers: { Authorization: "Bearer fixture" },
-        body: JSON.stringify({ action: "update", settings: patch, auth_id: "attacker" }),
+        body: JSON.stringify({ action: "update", settings: patch, expectedAuthId, auth_id: "attacker" }),
       }))).json();
     },
-    async get() {
+    async get(expectedAuthId) {
       return (await handler(new Request("https://fixture.invalid", {
-        method:"POST",headers:{Authorization:"Bearer fixture"},body:JSON.stringify({action:"get"}),
+        method:"POST",headers:{Authorization:"Bearer fixture"},body:JSON.stringify({action:"get",expectedAuthId}),
       }))).json();
     },
   };
@@ -190,4 +190,22 @@ test("invalid privacy patches cannot clear a saved private choice", async () => 
     assert.equal((await h.update({privacy})).ok,false);
     assert.equal(h.writes,0);
   }
+});
+
+test("account-bound reads and updates reject another session before accessing settings", async () => {
+  for (const expectedAuthId of ["previous-account", "", null, 123, ["verified-viewer"]]) {
+    const h = fixture({ privacy: { privateAccount: true } });
+    assert.equal((await h.get(expectedAuthId)).error.code, "account_changed");
+    assert.equal((await h.update({ privacy: { privateAccount: false } }, expectedAuthId)).error.code, "account_changed");
+    assert.equal(h.readCount, 0);
+    assert.equal(h.writes, 0);
+    assert.equal(h.settings.privacy.privateAccount, true);
+  }
+});
+
+test("matching account-bound requests preserve canonical privacy and allow explicit Public", async () => {
+  const h = fixture({ privacy: { privateAccount: false } }, { privateProfile: true });
+  assert.equal((await h.get("verified-viewer")).data.settings.privacy.privateAccount, true);
+  assert.equal((await h.update({ privacy: { privateAccount: false } }, "verified-viewer")).ok, true);
+  assert.equal(h.settings.privacy.privateAccount, false);
 });

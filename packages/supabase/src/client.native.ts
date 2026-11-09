@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { withFunctionObserver } from "./function-observer";
 import { createBridgeTransport } from "./bridge-transport";
+import { createRealtimeAuthController } from "./realtime-auth";
 
 export { setFunctionResponseObserver } from "./function-observer";
 
@@ -30,12 +31,19 @@ const bridge = createBridgeTransport(supabaseAnonKey);
 export function setBridgeAccessToken(token: string | null) {
   bridge.setToken(token);
   // Explicit anon reset also supersedes pending Realtime auth callbacks.
-  void supabase.realtime.setAuth(token ?? supabaseAnonKey).catch(() => {
+  void realtimeAuth.updateAuth(token ?? supabaseAnonKey).catch(() => {
     console.warn("[Supabase] Realtime credential update failed");
   });
 }
 export const setBridgeTokenMinter = bridge.setMinter;
 export const getBridgeRequestEpoch = bridge.requestEpoch;
+const realtimeAuth = createRealtimeAuthController({
+  accessToken: bridge.accessToken,
+  requestEpoch: bridge.requestEpoch,
+  anonKey: supabaseAnonKey,
+  setAuth: (token) => supabase.realtime.setAuth(token),
+});
+export const ensureBridgeRealtimeAuth = realtimeAuth.ensureBridgeRealtimeAuth;
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   accessToken: bridge.accessToken,
   global: { fetch: withFunctionObserver(bridge.guardFetch((input, init) => fetch(input, init))) },

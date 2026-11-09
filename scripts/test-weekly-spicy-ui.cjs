@@ -66,6 +66,22 @@ function load(file, extra = "", overrides = {}) {
     if (name === "react") return React;
     if (name === "react-native") return native;
     if (name.includes("auth-store")) return { useAuthStore: auth };
+    if (name.endsWith("follow-identity"))
+      return {
+        getFollowIdentity: () =>
+          viewer
+            ? {
+                viewerId: viewer.id,
+                authId: viewer.authId,
+                epoch: 0,
+                revision: 0,
+              }
+            : null,
+        isFollowIdentityCurrent: (identity) =>
+          !!identity &&
+          identity.viewerId === viewer?.id &&
+          identity.authId === viewer?.authId,
+      };
     if (name.endsWith("spicy-lock")) return loaded.lock;
     if (name.endsWith("use-spicy-follow-gate")) return loaded.hook;
     if (name.endsWith("spicy-follow-gate"))
@@ -74,6 +90,7 @@ function load(file, extra = "", overrides = {}) {
       return {
         useFollowRequestStatus: () => ({
           data: status,
+          following: status === "approved",
           isLoading: false,
           isError: statusError,
           refetch: () => calls.push("retry"),
@@ -218,7 +235,11 @@ const checks = [
   [
     "packages/app/features/location/location-detail.web.tsx",
     "LocationPostGate",
-    { post: secret, height: 180, children: jsx("img", { src: "SECRET_MEDIA" }) },
+    {
+      post: secret,
+      height: 180,
+      children: jsx("img", { src: "SECRET_MEDIA" }),
+    },
   ],
   [base + "feed-post.tsx", "FeedPost", { ...secret, likes: 0, comments: 0 }],
   [

@@ -19,7 +19,7 @@ CREATE OR REPLACE FUNCTION public.mutate_follow_relationship(p_actor bigint, p_t
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE v_private boolean; v_status text; v_following boolean; v_changed boolean := false;
 BEGIN
-  IF p_actor IS NULL OR p_target IS NULL OR p_actor=p_target OR p_action NOT IN ('follow','unfollow','approve','decline','status') THEN
+  IF p_actor IS NULL OR p_target IS NULL OR p_actor=p_target OR p_action IS NULL OR p_action NOT IN ('follow','unfollow','approve','decline','status','toggle') THEN
     RAISE EXCEPTION 'Invalid follow action' USING ERRCODE='22023';
   END IF;
   -- All pair operations use the same ordering and serialize cancellation/approval.
@@ -43,6 +43,16 @@ BEGIN
   SELECT coalesce(u.is_private,false) OR coalesce(s.settings#>>'{privacy,privateAccount}','false') <> 'false'
     INTO v_private FROM public.users u LEFT JOIN public.user_settings s ON s.auth_id=u.auth_id WHERE u.id=p_target;
   SELECT status INTO v_status FROM public.follow_requests WHERE follower_id=p_actor AND following_id=p_target;
+  IF p_action='toggle' THEN
+    -- Only legacy Edge callers with an omitted action use this operation.
+    -- Decide after taking both user locks: repeated calls must toggle rather
+    -- than race two independent reads into the same follow/request operation.
+    -- A pending request is an existing intent to follow, so the next toggle
+    -- cancels it. Historical follows also cancel without manufacturing approval.
+    p_action := CASE WHEN v_status='pending' OR EXISTS (
+      SELECT 1 FROM public.follows WHERE follower_id=p_actor AND following_id=p_target
+    ) THEN 'unfollow' ELSE 'follow' END;
+  END IF;
   IF p_action='unfollow' THEN
     DELETE FROM public.follows WHERE follower_id=p_actor AND following_id=p_target;
     DELETE FROM public.follow_requests WHERE follower_id=p_actor AND following_id=p_target;

@@ -3,18 +3,18 @@ const ROOT=path.resolve(__dirname,'..');
 function load(file,deps={},extra='') {
  const exported={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT,file),'utf8')+extra,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:exported,console:{log(){},warn(){},error(){}},Date,Set,Map,Promise,require:n=>deps[n]||{}});return exported;
 }
-function apiFixture({viewer=23,data={id:17},error=null}={}) {
- const calls=[];const q={update:value=>{calls.push(['update',value]);return q;},eq:(...args)=>{calls.push(['eq',...args]);return q;},select:fields=>{calls.push(['select',fields]);return q;},maybeSingle:async()=>({data,error})};
- const api=load('packages/app/lib/api/notifications.ts',{'../supabase/client':{supabase:{from:table=>{calls.push(['from',table]);return q;}}},'./auth-helper':{getCurrentUserIdSync:()=>viewer}}).notificationsApi;
+function apiFixture({viewer=23,data=[{id:17}],error=null}={}) {
+ const calls=[];const q={update:value=>{calls.push(['update',value]);return q;},eq:(...args)=>{calls.push(['eq',...args]);return q;},select:fields=>{calls.push(['select',fields]);return q;},setHeader:(...args)=>{calls.push(['setHeader',...args]);return q;},then:(resolve,reject)=>Promise.resolve({data,error}).then(resolve,reject)};
+ const api=load('packages/app/lib/api/notifications.ts',{'../supabase/client':{supabase:{from:table=>{calls.push(['from',table]);return q;}}},'./auth-helper':{getCurrentUserIdSync:()=>viewer},'./notification-access':require('./fixtures/notification-access.cjs')(()=>viewer)}).notificationsApi;
  return {api,calls};
 }
 test('actual markAsRead validates before database work and scopes writes to canonical recipient',async()=>{
  for(const id of ['','0','-1','1.5','1x','17 OR 1=1']){const f=apiFixture();await assert.rejects(f.api.markAsRead(id),/Invalid notification/);assert.equal(f.calls.length,0);}
- const missing=apiFixture({viewer:null});await assert.rejects(missing.api.markAsRead('17'),/Not authenticated/);assert.equal(missing.calls.length,0);
+ const missing=apiFixture({viewer:null});await assert.rejects(missing.api.markAsRead('17'),/Sign in/);assert.equal(missing.calls.length,0);
  const f=apiFixture();await f.api.markAsRead('17');assert.deepEqual(f.calls.filter(x=>x[0]==='eq'),[['eq','id',17],['eq','recipient_id',23]]);assert.ok(f.calls.some(x=>x[0]==='select'&&x[1]==='id'));
 });
 test('actual markAsRead rejects missing owned row and resolved database errors',async()=>{
- await assert.rejects(apiFixture({data:null}).api.markAsRead('17'),/not updated/);
+ await assert.rejects(apiFixture({data:null}).api.markAsRead('17'),/unavailable/);
  await assert.rejects(apiFixture({data:null,error:new Error('database unavailable')}).api.markAsRead('17'),/database unavailable/);
 });
 function helperFixture() {

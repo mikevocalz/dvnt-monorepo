@@ -26,6 +26,8 @@ export function SettingsListItem({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole={onPress ? "button" : undefined}
+      accessibilityLabel={value ? `${label}, ${value}` : label}
       className={`flex-row items-center justify-between px-4 py-3 ${
         isIOS ? "active:bg-secondary/50" : "active:bg-secondary/30"
       }`}

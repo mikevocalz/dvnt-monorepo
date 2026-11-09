@@ -122,9 +122,9 @@ export default function PrivacyScreen() {
                 ))}
               </View>
             </View>
-
-            <View className="mx-4 h-px bg-border" />
-
+          </View>
+          <FollowRequestsPanel />
+          <View className="mb-6 rounded-xl border border-border bg-card">
             <View className="flex-row items-center justify-between p-4">
               <View className="flex-1 pr-4">
                 <Text className="font-semibold text-foreground">
@@ -186,7 +186,6 @@ export default function PrivacyScreen() {
               Could not save visibility. Please try again.
             </Text>
           )}
-          <FollowRequestsPanel />
           <LocationControls />
 
           <View className="mt-2 rounded-xl border border-primary/20 bg-primary/5 p-4">

@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { withFunctionObserver } from "./function-observer";
 import { createBridgeTransport } from "./bridge-transport";
+import { createRealtimeAuthController } from "./realtime-auth";
 
 export { setFunctionResponseObserver } from "./function-observer";
 
@@ -63,12 +64,19 @@ const bridge = createBridgeTransport(clientKey);
 export function setBridgeAccessToken(token: string | null) {
   bridge.setToken(token);
   // Explicit anon reset also supersedes pending Realtime auth callbacks.
-  void supabase.realtime.setAuth(token ?? clientKey).catch(() => {
+  void realtimeAuth.updateAuth(token ?? clientKey).catch(() => {
     console.warn("[Supabase] Realtime credential update failed");
   });
 }
 export const setBridgeTokenMinter = bridge.setMinter;
 export const getBridgeRequestEpoch = bridge.requestEpoch;
+const realtimeAuth = createRealtimeAuthController({
+  accessToken: bridge.accessToken,
+  requestEpoch: bridge.requestEpoch,
+  anonKey: clientKey,
+  setAuth: (token) => supabase.realtime.setAuth(token),
+});
+export const ensureBridgeRealtimeAuth = realtimeAuth.ensureBridgeRealtimeAuth;
 
 // Same-origin edge-function proxy (Next only — gated on the same env flag the
 // auth proxy uses; web-vite has no /api/fn rewrite). Cross-origin calls to
