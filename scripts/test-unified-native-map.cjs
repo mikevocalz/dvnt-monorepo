@@ -65,11 +65,11 @@ const mocks={
   await page.locator('[data-marker="event:1"]').click();assert.equal(await page.evaluate(()=>window.fixture.eventRoute),'1');
   await page.locator('[data-marker="member:self"]').click();assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture');
   const loadedPhoto=await page.locator('[data-marker="member:self"]').getAttribute('data-image');
-  await page.evaluate(()=>{window.fixture.failRaster=true;window.fixture.data.self.avatarUrl='https://fixture.example/allocation-failure.png';window.renderFixture()});
+  await page.evaluate(()=>{window.fixture.data.members=[{...window.fixture.data.self,id:'fallback-peer',username:'fallbackpeer',displayName:'Fallback Peer',latitude:40.72}];window.fixture.failRaster=true;window.fixture.data.self.avatarUrl='https://fixture.example/allocation-failure.png';window.renderFixture()});
   await page.locator('[data-marker="member:self"]').waitFor({state:'detached'});
-  await page.getByRole('button',{name:"Open Fixture's profile",exact:true}).click();
-  assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fixture','raster failure keeps list navigation without passing null to Expo image loader');
-  await page.evaluate(()=>{window.fixture.failRaster=false;window.fixture.data.self.avatarUrl='https://fixture.example/recovered.png';window.renderFixture()});
+  await page.getByRole('button',{name:"Open Fallback Peer's profile",exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.fixture.route),'/(protected)/profile/fallbackpeer','raster failure keeps list navigation without passing null to Expo image loader');
+  await page.evaluate(()=>{window.fixture.data.members=[];window.fixture.failRaster=false;window.fixture.data.self.avatarUrl='https://fixture.example/recovered.png';window.renderFixture()});
   await page.waitForFunction(expected=>document.querySelector('[data-marker="member:self"]')?.getAttribute('data-image')===expected,loadedPhoto);
 
   await page.evaluate(()=>{window.fixture.data.self.avatarUrl='https://fixture.example/broken.png';window.renderFixture()});

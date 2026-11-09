@@ -24,3 +24,7 @@ Focused pure tests, real React/Happy DOM hook tests, edge-handler tests and isol
 Commands include `scripts/test-member-map-session-sql.cjs`, `scripts/test-member-map-session-dom.cjs`, `scripts/test-exact-distance-sql.cjs`, `scripts/test-exact-distance-hooks.cjs`, `scripts/test-weekly-location-dom.cjs` `scripts/test-weekly-location-consent-dom.cjs` and `scripts/test-proximity-observation-hooks.cjs`.
 
 Happy DOM is not native-device or real-browser visual QA. Chromium launch was blocked by process socket restrictions. A full isolated app typecheck exceeded the review container memory budget; aggregate typecheck belongs to the combined branch. No deployment, live migration, or live location disclosure was performed.
+
+### Withdrawal storage failures
+
+Exact-distance storage retains only negative withdrawal intent. Existing persisted positive grants are discarded on hydration, so an old lease cannot revive after a disk-failed stop or restart. Local withdrawal takes effect before persistence, disk errors cannot interrupt the authenticated server revoke, and failed server withdrawal keeps the visible retry error and blocks re-enabling. Unreadable denial storage prevents accepting a grant.

@@ -31,6 +31,7 @@ on:
       - 'scripts/test-feed-motion*'
       - 'scripts/test-lightbox-video-controls-browser.cjs'
       - 'scripts/fixtures/lightbox-controls-video.*'
+      - 'scripts/fixtures/post-media-auth.cjs'
       - 'scripts/test-live-photo*'
       - 'scripts/test-browser-live-photo*'
       - 'scripts/test-browser-intake*.cjs'

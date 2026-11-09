@@ -38,6 +38,10 @@ export function useExactDistanceConsent() {
   const enabled = !!owner && local.owner === owner && local.sessionKey === sessionKey &&
     Date.now() < local.expiresAt && !withdrawalPending && access.hydrationReady && !access.blocked && access.owner === owner && access.settings?.locationEnabled === true;
   const update = async (next: boolean) => {
+    if (next && !useExactDistanceStore.getState().hydrationReady) {
+      setError("Exact distance privacy preferences could not be read. Keep sharing off and retry after device storage is available.");
+      return;
+    }
     if (!owner || (next && (!sessionKey || withdrawalPending || !access.hydrationReady || access.blocked || access.owner !== owner))) return;
     setBusy(true); setError(null);
     if (!next) useExactDistanceStore.getState().beginWithdrawal(owner);

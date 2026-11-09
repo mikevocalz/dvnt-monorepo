@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { postMediaAuthFixture } = require('./fixtures/post-media-auth.cjs');
 const http = require('node:http');
 const { execFileSync } = require('node:child_process');
 const { build } = require('esbuild');
@@ -31,7 +32,7 @@ const { chromium } = require('playwright');
         return <><PostMediaCarousel key={id} media={media} caption="Live Photo regression"/><Lightbox/><div style={{height:2000}}/></>;
       }
       window.root = createRoot(document.getElementById('root')); window.root.render(<App/>);
-    `, resolveDir: root, loader: 'tsx' }, bundle: true, outfile: path.join(dir, 'app.js'), platform: 'browser', jsx: 'automatic', alias: { '@dvnt/app': path.join(root, 'packages/app') }, nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean), define: { 'process.env.NODE_ENV': '"test"' } });
+    `, resolveDir: root, loader: 'tsx' }, bundle: true, plugins: [postMediaAuthFixture(root)], outfile: path.join(dir, 'app.js'), platform: 'browser', jsx: 'automatic', alias: { '@dvnt/app': path.join(root, 'packages/app') }, nodePaths: (process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean), define: { 'process.env.NODE_ENV': '"test"' } });
     if (process.argv.includes('--build-only')) {
       console.log('PASS actual carousel browser fixture bundles (build-only; playback not executed).'); return;
     }

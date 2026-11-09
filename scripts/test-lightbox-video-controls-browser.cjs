@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { postMediaAuthFixture } = require('./fixtures/post-media-auth.cjs');
 const ROOT = path.resolve(__dirname, '..');
 const paths = [...(process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean), ROOT];
 const resolve = name => require.resolve(name, { paths });
@@ -20,12 +21,13 @@ const load = name => require(resolve(name));
       import { Lightbox } from './packages/app/components/lightbox.web';
       const media = [{type:'video',url:${JSON.stringify(videoUrl)}}];
       createRoot(document.getElementById('root')).render(<><PostMediaCarousel media={media} caption="Offline video"/><Lightbox/></>);
-    `, loader:'tsx', resolveDir:ROOT }, bundle:true, platform:'browser', jsx:'automatic', outfile:path.join(dir,'app.js'), alias:{'@dvnt/app':path.join(ROOT,'packages/app')}, nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean), define:{'process.env.NODE_ENV':'"test"'} });
+    `, loader:'tsx', resolveDir:ROOT }, bundle:true, plugins:[postMediaAuthFixture(ROOT)], platform:'browser', jsx:'automatic', outfile:path.join(dir,'app.js'), alias:{'@dvnt/app':path.join(ROOT,'packages/app')}, nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean), define:{'process.env.NODE_ENV':'"test"'} });
     const tw = path.dirname(resolve('tailwindcss/package.json'));
     const sources = ['packages/app/components/lightbox.web.tsx','packages/app/components/feed/post-media-carousel.web.tsx'];
     const css = (await load('postcss')([load('@tailwindcss/postcss')({base:ROOT})]).process(
       `@import "${tw}/theme.css" layer(theme);\n@import "${tw}/preflight.css" layer(base);\n@import "${tw}/utilities.css" important;\n` + sources.map(s=>`@source "${path.join(ROOT,s)}";`).join('\n'), {from:path.join(ROOT,'lightbox-fixture.css')}
     )).css;
+    if (process.argv.includes('--build-only')) { console.log('PASS actual lightbox controls browser fixture and CSS bundle (playback not executed).'); return; }
     const browserChoice = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? {executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH} : process.env.FEED_BROWSER_CHANNEL ? {channel:process.env.FEED_BROWSER_CHANNEL} : {};
     browser = await load('playwright').chromium.launch({headless:true, ...browserChoice, args:['--no-sandbox']});
     const page = await browser.newPage({viewport:{width:320,height:568},hasTouch:true});
