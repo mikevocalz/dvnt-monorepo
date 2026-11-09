@@ -54,7 +54,9 @@ async function build() {
     define: { 'process.env.NODE_ENV': '"production"', __DEV__: 'false' },
     nodePaths: [...new Set(depPaths.flatMap(p => [p, path.join(p, 'node_modules')]))],
     resolveExtensions: ['.web.tsx', '.web.ts', '.tsx', '.ts', '.web.js', '.js'],
-    alias: { 'react-native': 'react-native-web' },
+    // Resolve extensionless workspace imports to source, just as Next does.
+    // In an isolated CI install the package export map does not add .ts.
+    alias: { 'react-native': 'react-native-web', '@dvnt/app': path.join(ROOT, 'packages/app') },
     plugins: [{ name: 'synthetic-service-boundaries', setup(b) {
       b.onResolve({ filter: /.*/ }, a => boundaries.has(a.path) ? { path: a.path, namespace: 'fixture' } : undefined);
       b.onLoad({ filter: /.*/, namespace: 'fixture' }, a => ({ contents: boundaries.get(a.path), loader: 'tsx', resolveDir: ROOT }));

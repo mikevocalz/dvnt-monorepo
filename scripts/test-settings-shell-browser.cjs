@@ -53,9 +53,10 @@ const fixtures = {
   '@dvnt/app/lib/stores/faq-store': `export const useFAQStore=s=>s({expandedIndex:null,toggleExpanded(){}});`,
   '@dvnt/app/features/screens/landing/sections/Footer': `export const Footer=()=> <footer data-fixture-footer>Public footer</footer>;`,
   '@dvnt/app/components/logo': `export default ()=> <span style={{display:'block',width:78,height:30}}>DVNT</span>;`,
-  // The Expo/nativewind adapters become RN-web semantic hosts, preserving
-  // RN style compilation (including paddingHorizontal and fixed positioning).
-  '@dvnt/app/components/ui/html': `import {unstable_createElement as create} from 'react-native';export const Header=p=>create('header',p);export const Nav=p=>create('nav',p);export const A=({onPress,...p})=>create('a',{...p,onClick:onPress});`,
+  // Mirror @expo/html-elements' actual web primitives: Header/Nav are Views
+  // with semantic roles; A is a Text link. Raw createElement omits View's
+  // display:flex baseline and falsely stacks the desktop marketing nav.
+  '@dvnt/app/components/ui/html': `import {View,Text} from 'react-native';export const Header=p=><View role="banner" {...p}/>;export const Nav=p=><View role="navigation" {...p}/>;export const A=p=><Text role="link" {...p}/>;`,
 };
 const entry = `
   import React from 'react';import {createRoot} from 'react-dom/client';
@@ -122,6 +123,9 @@ async function domChecks(bundle) {
     w.settingsShell.router.push('/settings/privacy');await wait(()=>w.document.querySelector('h1')?.textContent==='Privacy');assert.equal(!!header(),false);
     w.settingsShell.router.push('/settings/privacy-policy');await wait(()=>w.document.querySelector('h1')?.textContent==='Privacy Policy');assert.equal(!!header(),false);
     w.settingsShell.router.push('/privacy');await wait(()=>!!header());assert.ok(w.document.querySelector('a[href="/auth/login"]'),'public route restores actual GlassHeader');
+    const nav=w.document.querySelector('header nav');assert.ok(nav);
+    assert.equal(w.getComputedStyle(nav).display,'flex','semantic Nav retains the production View baseline');
+    assert.equal(w.getComputedStyle(nav).flexDirection,'row','desktop marketing links form one row');
     w.settingsShell.router.push('/auth/login');await wait(()=>!header());assert.equal(w.document.querySelector('[data-fixture-footer]'),null);
     console.log('PASS real settings/shell DOM composition across hydration, account replacement, nested legal and public/auth navigation. Geometry and native browser history NOT tested in --dom.');
   } finally {w.settingsRoot.unmount();await w.happyDOM.close()}
@@ -144,6 +148,9 @@ async function browserChecks(bundle) {
         assert.equal(await page.locator('header').count(),0,'no competing global header');
       };
       await page.locator('header').waitFor();
+      // The synthetic public page must clear the real marketing header before
+      // entering Settings. Never force a click through an obstructing layer.
+      await page.waitForFunction(()=>{const el=Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Open settings');if(!el)return false;const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))});
       await page.getByRole('button',{name:'Open settings'}).click();await title('Settings').waitFor();await hitClose();
       await page.evaluate(()=>settingsShell.set({hydrated:true}));await hitClose();
       for(const owner of [null,'alice','bob',null]){
