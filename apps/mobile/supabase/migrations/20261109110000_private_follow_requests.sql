@@ -46,7 +46,8 @@ GRANT SELECT ON public.public_follow_acceptances TO service_role;
 ALTER TABLE public.follow_access_cutovers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.follow_legacy_access ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.follow_access_cutovers,public.follow_legacy_access FROM PUBLIC,anon,authenticated,service_role;
-GRANT SELECT ON public.follow_access_cutovers,public.follow_legacy_access TO service_role;
+GRANT SELECT ON public.follow_access_cutovers TO service_role;
+GRANT SELECT ON public.follow_legacy_access TO service_role;
 INSERT INTO public.follow_access_cutovers(batch_id,provenance,source_migration,ready)
   VALUES('private-follow-v1','legacy_access_preservation','20261109110000_private_follow_requests.sql',false)
   ON CONFLICT(batch_id) DO NOTHING;

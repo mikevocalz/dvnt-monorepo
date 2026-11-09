@@ -51,6 +51,12 @@ function seed(policy = ENFORCED) {
     identity_verifications: Object.values(PERSONAS).filter(p => p.record)
       .map(p => ({ user_id: p.authId, failure_code: null, failure_message: null, provider_ref: null, ...p.record })),
     users,
+    user_settings: [],
+    blocks: [],
+    follow_requests: [],
+    follow_legacy_access: [],
+    public_follow_acceptances: [],
+    follow_access_cutovers: [{ batch_id: 'private-follow-v1', ready: true }],
     // Holding a ticket must not change any verdict below.
     tickets: Object.values(PERSONAS).map((p, i) => ({ id: 100 + i, user_id: p.authId, event_id: 1, status: 'active' })),
     follows: Object.values(PERSONAS).map(p => ({ id: p.userId, follower_id: p.userId, following_id: SPICY_AUTHOR })),
@@ -71,6 +77,7 @@ function seed(policy = ENFORCED) {
 /** In-memory PostgREST stand-in. Embedded selects are ignored; unknown tables are empty. */
 function fakeDb(tables) {
   const writes = [];
+  const rpcCalls = [];
   let nextId = 1000;
   const parseValue = v => (v === 'null' ? null : v === 'true' ? true : v === 'false' ? false : v);
   function from(table) {
@@ -131,7 +138,30 @@ function fakeDb(tables) {
     });
     return builder;
   }
-  return { db: { from, rpc: async () => ({ data: null, error: null }), storage: { from: () => ({}) } }, writes, tables };
+  // Model the service-only SQL projection contract, not an unconditional allow.
+  // Keep admission/ID policy in the real production modules loaded below.
+  async function rpc(name, args) {
+    rpcCalls.push({ name, args });
+    if (name !== 'post_relationship_access') return { data: null, error: null };
+    assert.ok(args && Array.isArray(args.p_authors), 'projection must name its authors');
+    assert.ok(args.p_viewer === null || Number.isSafeInteger(args.p_viewer), 'projection viewer must be a resolved member');
+    const cutover = tables.follow_access_cutovers?.find(c => c.batch_id === 'private-follow-v1');
+    if (!cutover) return { data: null, error: { code: '55000', message: 'Follow compatibility schema is not ready' } };
+    const data = tables.users.filter(u => args.p_authors.includes(Number(u.id))).map(u => {
+      const preference = tables.user_settings?.find(s => s.auth_id === u.auth_id)?.settings?.privacy?.privateAccount;
+      const isPrivate = u.is_private === true || (preference != null && String(preference) !== 'false');
+      const follow = tables.follows?.find(f => f.follower_id === args.p_viewer && f.following_id === u.id);
+      const approved = tables.follow_requests?.some(f => f.follower_id === args.p_viewer && f.following_id === u.id && f.status === 'approved');
+      const legacy = follow && tables.follow_legacy_access?.some(g => g.follow_id === follow.id && g.batch_id === cutover.batch_id && cutover.ready);
+      const publicAcceptance = follow && tables.public_follow_acceptances?.some(a => a.follow_id === follow.id);
+      return { author_id: u.id, is_private: isPrivate,
+        is_following: !!follow && (!isPrivate || !cutover.ready || !!approved || !!legacy || !!publicAcceptance),
+        is_blocked: !!tables.blocks?.some(b => (b.blocker_id === args.p_viewer && b.blocked_id === u.id) || (b.blocker_id === u.id && b.blocked_id === args.p_viewer)),
+        enforcement_ready: cutover.ready };
+    });
+    return { data, error: null };
+  }
+  return { db: { from, rpc, storage: { from: () => ({}) } }, writes, tables, rpcCalls };
 }
 
 function harness({ policy = ENFORCED, stubs = {} } = {}) {
@@ -457,3 +487,79 @@ for (const who of ['buyer', 'minor']) {
   });
 }
 
+
+
+// The newly shared relationship RPC must compose with, never replace, the
+// existing viewing-age policy. Exercise actual handlers on every affected rail.
+const RELATIONSHIP_READERS = [
+  ['bootstrap-feed', { include_nsfw: true }],
+  ['bootstrap-profile', { user_id: SPICY_AUTHOR, include_nsfw: true }],
+  ['get-text-post-slides', { postIds: [10, 11] }],
+  ['get-bookmarks', { withPosts: true }],
+  ['get-liked-activity', {}],
+];
+for (const [fn, body] of RELATIONSHIP_READERS) {
+  for (const [label, configure, visible] of [
+    ['unverified adult viewer with legacy access', t => {
+      t.users.find(u => u.id === SPICY_AUTHOR).is_private = true;
+      t.follow_legacy_access.push({ follow_id: PERSONAS.buyer.userId, batch_id: 'private-follow-v1' });
+    }, true],
+    ['unverified adult viewer with Public acceptance', t => {
+      t.users.find(u => u.id === SPICY_AUTHOR).is_private = true;
+      t.public_follow_acceptances.push({ follow_id: PERSONAS.buyer.userId });
+    }, true],
+    ['unverified adult viewer with real owner approval', t => {
+      t.users.find(u => u.id === SPICY_AUTHOR).is_private = true;
+      t.follow_requests.push({ follower_id: PERSONAS.buyer.userId, following_id: SPICY_AUTHOR, status: 'approved' });
+    }, true],
+    ['staged private live follower', t => {
+      t.users.find(u => u.id === SPICY_AUTHOR).is_private = true;
+      t.follow_access_cutovers[0].ready = false;
+    }, true],
+    ['staged Public nonfollower', t => {
+      t.follow_access_cutovers[0].ready = false;
+      t.follows = t.follows.filter(f => f.follower_id !== PERSONAS.buyer.userId);
+    }, true],
+    ['legacy grant from a different batch', t => {
+      t.users.find(u => u.id === SPICY_AUTHOR).is_private = true;
+      t.follow_legacy_access.push({ follow_id: PERSONAS.buyer.userId, batch_id: 'different-batch' });
+    }, false],
+    ['pending private request', t => {
+      t.users.find(u => u.id === SPICY_AUTHOR).is_private = true;
+      t.follow_requests.push({ follower_id: PERSONAS.buyer.userId, following_id: SPICY_AUTHOR, status: 'pending' });
+    }, false],
+    ['approval without live follow', t => {
+      t.users.find(u => u.id === SPICY_AUTHOR).is_private = true;
+      t.follows = t.follows.filter(f => f.follower_id !== PERSONAS.buyer.userId);
+      t.follow_requests.push({ follower_id: PERSONAS.buyer.userId, following_id: SPICY_AUTHOR, status: 'approved' });
+    }, false],
+    ['retired incarnation grant', t => {
+      t.users.find(u => u.id === SPICY_AUTHOR).is_private = true;
+      t.follow_legacy_access.push({ follow_id: PERSONAS.buyer.userId, batch_id: 'private-follow-v1' });
+      t.follows.find(f => f.follower_id === PERSONAS.buyer.userId).id = 999;
+    }, false],
+    ['author block', t => t.blocks.push({ blocker_id: SPICY_AUTHOR, blocked_id: PERSONAS.buyer.userId }), false],
+    ['viewer block', t => t.blocks.push({ blocker_id: PERSONAS.buyer.userId, blocked_id: SPICY_AUTHOR }), false],
+    ['missing compatibility marker', t => { t.follow_access_cutovers = []; }, false],
+    ['operator denied viewer', t => { t.verified_admission_policy[0] = { ...ENFORCED, denylist: [PERSONAS.buyer.authId] }; }, false],
+  ]) test(`${fn}: ${label} preserves relationship and age policy boundaries`, async () => {
+    const h = harness(); configure(h.fake.tables);
+    const res = await h.call(fn, PERSONAS.buyer.authId, { ...body, viewerUserId: SPICY_AUTHOR, authId: 'auth_author' });
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    const original = fn === 'get-text-post-slides' ? 'slide 10' : '"spicy"';
+    assert.equal(JSON.stringify(res.json).includes(original), visible, JSON.stringify(res.json));
+    const calls = h.fake.rpcCalls.filter(c => c.name === 'post_relationship_access');
+    assert.ok(calls.length > 0, 'handler must call real projection through the fixture RPC');
+    assert.ok(calls.every(c => c.args.p_viewer === PERSONAS.buyer.userId), 'body spoof cannot replace verified viewer');
+    assert.equal(h.fake.tables.identity_verifications.some(v => v.user_id === PERSONAS.buyer.authId), false, 'viewing has not acquired a passed-ID requirement');
+    assert.equal(h.fake.writes.length, 0, 'reads cannot manufacture follows or approvals');
+  });
+  test(`${fn}: legacy preservation never overrides the existing underage restriction`, async () => {
+    const h = harness();
+    h.fake.tables.users.find(u => u.id === SPICY_AUTHOR).is_private = true;
+    h.fake.tables.follow_legacy_access.push({ follow_id: PERSONAS.minor.userId, batch_id: 'private-follow-v1' });
+    const res = await h.call(fn, PERSONAS.minor.authId, body);
+    const original = fn === 'get-text-post-slides' ? 'slide 10' : '"spicy"';
+    assert.equal(JSON.stringify(res.json).includes(original), false, JSON.stringify(res.json));
+  });
+}
