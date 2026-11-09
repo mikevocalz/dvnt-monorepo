@@ -48,6 +48,9 @@ const fixture = {
   "@dvnt/app/lib/hooks/use-stories": `import {state} from 'social-fixture';export const useStories=()=>({data:[]});export const useCreateStory=()=>({isPending:false,mutateAsync:async data=>{state.stories.push(data);if(state.releaseStory)await new Promise(resolve=>{state.resolveStory=resolve});if(state.failStory)throw new Error('story refused');return {id:'s1'}}});`,
   "@dvnt/app/lib/stores/app-store": `export const useAppStore=s=>s({feedMode:'all',nsfwEnabled:false,setNsfwEnabled(){}});`,
   "@dvnt/app/lib/hooks/use-verified-gate": `import {state} from 'social-fixture';export const useVerifiedGate=()=> (action,run)=>{if(state.deferGate)state.gate=run;else if(!state.blocked)run()};`,
+  // Keep the real follow-identity/session guards; only the auth-service edge is
+  // offline, as in test-follow-requests-dom.cjs. Never bundle a live DB client.
+  "@dvnt/app/lib/auth/identity": `import {auth} from 'social-fixture';export const getAuthIdFromStore=()=>auth.getState().user?.authId ?? null;`,
   "@dvnt/app/lib/stores/auth-store": `export {auth as useAuthStore} from 'social-fixture';`,
   "@dvnt/app/lib/stores/ui-store": `import {state} from 'social-fixture';const value={showToast:(...args)=>state.toasts.push(args)};export const useUIStore=s=>s(value);useUIStore.getState=()=>value;`,
   "@dvnt/app/lib/hooks/use-messages": `import {conversationData} from 'social-fixture';export const useConversations=()=>conversationData();`,
@@ -75,10 +78,11 @@ const fixture = {
   "@dvnt/app/components/verified-admission-banner.web": `export const VerifiedAdmissionBanner=()=>null;`,
   "@dvnt/app/components/event/FeedEventCard.web": `export const FeedEventCard=()=>null;`,
   "@dvnt/app/components/story-viewer-overlay.web": `export const StoryViewerOverlay=()=>null;`,
-  "@tanstack/react-query": `export const useQuery=()=>({data:null});`,
   "@dvnt/ui": `export {Drawer} from '${ROOT}/packages/ui/src/form/Drawer.web.tsx';export const Dialog=()=>null;`,
 };
 const source = `import React,{act} from 'react';import {createRoot} from 'react-dom/client';
+import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
+const queryClient=new QueryClient({defaultOptions:{queries:{retry:false}}});
 import {MasonryCell} from './packages/app/features/home/screen.web';
 import {PostDetailScreen} from './packages/app/features/post/post-detail.web';
 import {ShareToInboxSheet} from './packages/app/components/share-to-inbox-sheet.web';
@@ -89,7 +93,7 @@ import {useShareSheetStore} from './packages/app/lib/stores/share-sheet-store';
 import {postStoryItem} from './packages/app/lib/posts/share-post';
 import {state,post,auth,likes,conversationData} from 'social-fixture';
 export {act,state,post,auth,likes,conversationData,postStoryItem,useChatStore,useWebPostShareStore,useShareSheetStore,usePostDetailUIStore};
-export function mount(node){const root=createRoot(node);return {render:(detail=false,showSheet=true)=>root.render(<React.StrictMode>{detail?<PostDetailScreen/>:<><MasonryCell post={post} fallbackHeight={220}/>{showSheet&&<ShareToInboxSheet/>}</>}</React.StrictMode>),unmount:()=>root.unmount()};}`;
+export function mount(node){const root=createRoot(node);return {render:(detail=false,showSheet=true)=>root.render(<React.StrictMode><QueryClientProvider client={queryClient}>{detail?<PostDetailScreen/>:<><MasonryCell post={post} fallbackHeight={220}/>{showSheet&&<ShareToInboxSheet/>}</>}</QueryClientProvider></React.StrictMode>),unmount:()=>root.unmount()};}`;
 (async () => {
   const { Window } = await import(
     require.resolve("happy-dom", {
@@ -111,6 +115,7 @@ export function mount(node){const root=createRoot(node);return {render:(detail=f
       platform: "node",
       format: "cjs",
       jsx: "automatic",
+      resolveExtensions: [".web.tsx", ".web.ts", ".tsx", ".ts", ".jsx", ".js", ".json"],
       outfile: path.join(dir, "test.cjs"),
       nodePaths: (process.env.NODE_PATH || "")
         .split(path.delimiter)
