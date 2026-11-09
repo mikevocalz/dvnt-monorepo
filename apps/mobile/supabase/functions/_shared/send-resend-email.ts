@@ -36,6 +36,10 @@ export interface SendEmailArgs {
   from?: string;
   /** Extra MIME headers, e.g. List-Unsubscribe. Omitted from the request when empty. */
   headers?: Record<string, string>;
+  /** Provider deduplication key; HTTP header, never a MIME header. */
+  idempotencyKey?: string;
+  /** Optional bounded request for leased workers; existing callers unchanged. */
+  timeoutMs?: number;
 }
 
 export async function sendResendEmail(
@@ -53,9 +57,11 @@ export async function sendResendEmail(
 
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
+    ...(args.timeoutMs ? { signal: AbortSignal.timeout(args.timeoutMs) } : {}),
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      ...(args.idempotencyKey ? { "Idempotency-Key": args.idempotencyKey } : {}),
     },
     body: JSON.stringify({
       from,

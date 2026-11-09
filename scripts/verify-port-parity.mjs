@@ -178,6 +178,14 @@ const NATIVE_ONLY_WIRING = new Set([
   "useClock", "useLandingScroll", "useSectionProgress", "useScrollProgress",
 ]);
 
+// Route-specific navigation mechanisms, not missing product data. Native Lynk
+// Back clears an Expo pending-link replay; web retains/cancels its destination
+// through the browser URL and auth return helpers. Do not exempt this portable
+// store globally (the web deep-link debugger legitimately reads it).
+const PLATFORM_NAVIGATION_WIRING = {
+  "sneaky-lynk/screens/room.web.tsx": new Set(["deep-link-store", "useDeepLinkStore"]),
+};
+
 // Genuine PORTABLE product features deferred to a later web-port phase. Each is a
 // real gap (must eventually be ported) but accepted now so the gate is green and
 // the debt is itemized every run + mirrored in docs/port-parity-manifest.md.
@@ -454,11 +462,11 @@ const webDataDiffs = [];   // hard failures — dropped portable wiring
 const webDataDebt = [];    // accepted deferrals (KNOWN_WEB_DEBT) seen this run
 const webDataChecked = [];
 // Filter a missing-list: drop native-only, equivalent-covered, + accepted-debt.
-function classify(missing, debtSet, webWiring) {
+function classify(missing, debtSet, webWiring, platformNavigation = new Set()) {
   const real = [];
   const debt = [];
   for (const x of missing) {
-    if (NATIVE_ONLY_WIRING.has(x)) continue;
+    if (NATIVE_ONLY_WIRING.has(x) || platformNavigation.has(x)) continue;
     // covered by an equivalent convenience hook the web file references?
     const equivs = EQUIVALENT_WIRING[x];
     if (equivs && equivs.some((e) => webWiring.has(e))) continue;
@@ -561,9 +569,10 @@ for (const webRel of allWebScreens) {
   const debtEntry = KNOWN_WEB_DEBT[webRel];
   const debtSet = debtEntry ? debtEntry.items : new Set();
   const wAll = new Set([...w.stores, ...w.hooks, ...w.domainHooks]);
-  const s = classify(setDiff(n.stores, w.stores), debtSet, wAll);
-  const h = classify(setDiff(n.hooks, w.hooks), debtSet, wAll);
-  const d = classify(setDiff(n.domainHooks, w.domainHooks), debtSet, wAll);
+  const platformNavigation = PLATFORM_NAVIGATION_WIRING[webRel];
+  const s = classify(setDiff(n.stores, w.stores), debtSet, wAll, platformNavigation);
+  const h = classify(setDiff(n.hooks, w.hooks), debtSet, wAll, platformNavigation);
+  const d = classify(setDiff(n.domainHooks, w.domainHooks), debtSet, wAll, platformNavigation);
   // queryKeys are INFORMATIONAL only — literal `queryKey:["x"]` matching misses
   // key-factory usage (bookmarkKeys/activityKeys/notificationKeys), so it's too
   // brittle to gate on. Stores + lib-hooks + domain-hooks are the real teeth.

@@ -48,6 +48,25 @@ function json(data: unknown, status = 200) {
   });
 }
 
+// Database/transport failures are not evidence that a guest's ticket is invalid.
+async function lookupRow(read: () => PromiseLike<any>): Promise<any | null> {
+  const { data, error } = await read();
+  if (error) throw new Error("Scanner lookup unavailable");
+  return data;
+}
+
+// Once redemption commits, display enrichment cannot reverse the admission verdict.
+// Catch both PostgREST error responses and thrown transport failures.
+async function displayRow(read: () => PromiseLike<any>): Promise<any | null> {
+  try {
+    const { data, error } = await read();
+    return error ? null : data;
+  } catch {
+    console.warn("[ticket-scan] display lookup unavailable");
+    return null;
+  }
+}
+
 interface AddonSummary {
   id: string;
   name: string;
@@ -198,10 +217,18 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       event_id,
       offline,
       offline_scanned_at,
+      supports_credential_purposes,
     } = await req.json();
 
     if (!qr_token && !qr_payload) {
       return json({ error: "Missing qr_token or qr_payload" }, 400);
+    }
+
+    const clientEventId = event_id == null ? null : Number(event_id);
+    if (clientEventId !== null &&
+      ((typeof event_id !== "string" && typeof event_id !== "number") ||
+       !Number.isSafeInteger(clientEventId) || clientEventId <= 0 || clientEventId > 2147483647)) {
+      return json({ error: "Invalid event_id" }, 400);
     }
 
     // Each session gets its own lane; the shared venue IP is only a coarse
@@ -248,6 +275,17 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
     let scanKind: "ticket" | "addon" = "ticket";
     let resolvedToken: string | null = null;
     let resolvedEventId: number | null = null;
+    // Category is authorization-relevant display data: resolve it BEFORE the
+    // CAS, so a failed enrichment can never turn a service QR into admission.
+    let resolvedTicketType: { name?: string; category?: string | null } | null = null;
+    const rememberTicketType = (ticket: { ticket_types?: unknown; ticket_type_id?: string | null; category?: string }) => {
+      const row = Array.isArray(ticket.ticket_types) ? ticket.ticket_types[0] : ticket.ticket_types;
+      resolvedTicketType = row && typeof row === "object" ? row
+        // Untiered free RSVPs are real admission credentials; they have no
+        // related tier by design. A missing referenced tier is not the same.
+        : ticket.ticket_type_id == null && ticket.category
+          ? { category: ticket.category } : null;
+    };
 
     if (qr_payload) {
       // Fast path: HMAC-signed QR payload (tickets and add-ons).
@@ -255,17 +293,18 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       if (!verification.valid) {
         return json({ valid: false, reason: "invalid_signature" });
       }
-      const { data: byId } = await supabase
+      const byId = await lookupRow(() => supabase
         .from("tickets")
-        .select("qr_token, event_id")
+        .select("qr_token, event_id, ticket_type_id, category, ticket_types(name, category)")
         .eq("id", verification.ticketId!)
         // A valid signature proves issuance, not current ownership. Transfers
         // rotate the payload; the sender's old signed screenshot must not
         // resolve to the recipient's new raw token by ticket id alone.
         .eq("qr_payload", qr_payload)
         .eq("event_id", verification.eventId!)
-        .maybeSingle();
+        .maybeSingle());
       if (byId?.qr_token) {
+        rememberTicketType(byId);
         resolvedToken = byId.qr_token;
         resolvedEventId = byId.event_id ?? verification.eventId!;
       } else {
@@ -274,12 +313,12 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
         // (cart-issuance.ts prepareCartAddonRows), so the signed id never
         // matches a ticket. Match the stored payload exactly, scoped to
         // the signed event, and redeem through the add-on CAS below.
-        const { data: addonRow } = await supabase
+        const addonRow = await lookupRow(() => supabase
           .from("order_addons")
           .select("qr_token, event_id")
           .eq("qr_payload", qr_payload)
           .eq("event_id", verification.eventId!)
-          .maybeSingle();
+          .maybeSingle());
         if (addonRow?.qr_token) {
           scanKind = "addon";
           resolvedToken = addonRow.qr_token;
@@ -287,22 +326,23 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
         }
       }
     } else {
-      const { data: byToken } = await supabase
+      const byToken = await lookupRow(() => supabase
         .from("tickets")
-        .select("event_id")
+        .select("event_id, ticket_type_id, category, ticket_types(name, category)")
         .eq("qr_token", qr_token)
-        .maybeSingle();
+        .maybeSingle());
       if (byToken) {
+        rememberTicketType(byToken);
         resolvedToken = qr_token;
         resolvedEventId = byToken.event_id;
       } else {
         // Not a ticket token — check the add-on rail (order_addons carry
         // their own qr_token for scan-at-door redeemables).
-        const { data: addonRow } = await supabase
+        const addonRow = await lookupRow(() => supabase
           .from("order_addons")
           .select("event_id")
           .eq("qr_token", qr_token)
-          .maybeSingle();
+          .maybeSingle());
         if (addonRow) {
           scanKind = "addon";
           resolvedToken = qr_token;
@@ -315,10 +355,7 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
     // (cross-event scans then surface as wrong_event from the CAS),
     // falling back to the token's own event for event-less callers
     // (legacy offline sync).
-    const clientEventId = event_id != null ? parseInt(String(event_id)) : NaN;
-    const scanEventId = Number.isFinite(clientEventId)
-      ? clientEventId
-      : resolvedEventId;
+    const scanEventId = clientEventId ?? resolvedEventId;
 
     if (!scanEventId) {
       // Unknown token AND no event context — nothing to audit against
@@ -329,11 +366,11 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
     // ── HOST-ROLE GATE ─────────────────────────────────────────
     // Confirm the session user may scan for this event BEFORE any
     // status mutation.
-    const { data: scanEvent } = await supabase
+    const scanEvent = await lookupRow(() => supabase
       .from("events")
-      .select("host_id")
+      .select("host_id, status")
       .eq("id", scanEventId)
-      .single();
+      .maybeSingle());
     if (!scanEvent) {
       return json({ valid: false, reason: "event_not_found" }, 404);
     }
@@ -345,14 +382,14 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
     // unblocks door staff that aren't the actual event owner.
     let isAuthorizedScanner = isHost;
     if (!isAuthorizedScanner) {
-      const { data: coOrg } = await supabase
+      const coOrg = await lookupRow(() => supabase
         .from("event_co_organizers")
         .select("role, accepted")
         .eq("event_id", scanEventId)
         .eq("user_id", scannerAuthId)
         .eq("accepted", true)
         .in("role", ["scanner", "editor", "admin"])
-        .maybeSingle();
+        .maybeSingle());
       isAuthorizedScanner = !!coOrg;
     }
 
@@ -361,6 +398,10 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
         { error: "Forbidden — not the event host or an authorized scanner" },
         403,
       );
+    }
+
+    if (["cancelled", "deleted"].includes(scanEvent.status)) {
+      return json({ valid: false, reason: "event_cancelled" });
     }
 
     // ── ADD-ON RAIL: atomic redemption via redeem_addon CAS ───
@@ -387,6 +428,11 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       };
 
       switch (addonResult.result) {
+        case "financials_unavailable":
+        case "retry_later":
+          return json({ error: "Another event update is in progress. Please retry the scan." }, 503);
+        case "event_cancelled":
+          return json({ valid: false, kind: "addon", reason: "event_cancelled" });
         case "valid":
           return json({ valid: true, kind: "addon", addon });
         case "already_scanned":
@@ -421,6 +467,25 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       }
     }
 
+    // Service/product credentials use the same one-time redemption CAS, not
+    // admission. Missing/unknown category evidence must never announce entry.
+    const ticketCategory = (resolvedTicketType as { category?: string | null } | null)?.category;
+    const credentialKind = !resolvedTicketType ? "unknown"
+      : ticketCategory === "service" || ticketCategory === "coat_check" ? "service"
+      : ticketCategory === "product" ? "product"
+      : ticketCategory == null || ticketCategory === "admission" ? "ticket"
+      : "unknown";
+    const admitsEntry = credentialKind === "ticket";
+    // Older native builds treat every valid ticket-row response as admission.
+    // Refuse their non-admission scans BEFORE redemption, until they update or
+    // use the current web scanner. This flag does not grant staff authority.
+    if (resolvedToken && !admitsEntry && supports_credential_purposes !== true) {
+      return json({
+        error: "This credential is not event admission. Update the app or use the current web scanner to redeem it.",
+        code: "scanner_update_required",
+      }, 426);
+    }
+
     // ── TICKET RAIL: atomic check-in via redeem_ticket CAS ────
     // Single RPC replaces the old read-then-update path: the CAS flips
     // active → scanned AND writes the audit row in one transaction.
@@ -439,27 +504,26 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
     if (rpcError) throw rpcError;
 
     switch (rpcResult.result) {
+      case "financials_unavailable":
+      case "retry_later":
+        return json({ error: "Another event update is in progress. Please retry the scan." }, 503);
+      case "event_cancelled":
+        return json({ valid: false, reason: "event_cancelled" });
       case "valid": {
         // CAS won — enrich for the door result card (reads only).
-        const { data: ticket } = await supabase
+        const ticket = await displayRow(() => supabase
           .from("tickets")
           .select(
             "id, event_id, ticket_type_id, user_id, status, qr_token, checked_in_at, checked_in_by, cart_id, guest_name, attendee_name",
           )
           .eq("id", rpcResult.ticketId)
-          .single();
+          .single());
 
-        const { data: user } = await supabase
+        const user = await displayRow(() => supabase
           .from("users")
           .select("username, first_name, last_name")
           .eq("auth_id", ticket?.user_id)
-          .maybeSingle();
-
-        const { data: ticketType } = await supabase
-          .from("ticket_types")
-          .select("name")
-          .eq("id", ticket?.ticket_type_id)
-          .maybeSingle();
+          .maybeSingle());
 
         const addons = ticket
           ? await fetchTicketAddons(supabase, ticket)
@@ -467,14 +531,16 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
 
         // WS-4: tier + perk on the result card. Resolved AFTER the CAS redeem
         // above, so a slow or failing lookup can never affect admission.
-        const door = await resolveDoorTier(
+        const door = admitsEntry ? await resolveDoorTier(
           supabase,
           (ticket as any)?.user_id ?? null,
           (ticket as any)?.event_id ?? rpcResult.eventId ?? null,
-        );
+        ) : { membership_tier: null, perks: [] };
 
         return json({
           valid: true,
+          kind: credentialKind,
+          admits_entry: admitsEntry,
           membership_tier: door.membership_tier,
           perks: door.perks,
           ticket: {
@@ -497,7 +563,9 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
               user?.username ||
               (ticket as any)?.guest_name?.trim() ||
               "Guest",
-            tier_name: ticketType?.name || "General",
+            category: ticketCategory ?? null,
+            tier_name: (resolvedTicketType as { name?: string } | null)?.name ||
+              (credentialKind === "service" ? "Service" : credentialKind === "product" ? "Product" : "Ticket"),
           },
           addons,
         });
@@ -517,15 +585,17 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
             }
           : null;
         if (ticketRef) {
-          const { data: t } = await supabase
+          const t = await displayRow(() => supabase
             .from("tickets")
             .select("cart_id")
             .eq("id", rpcResult.ticketId)
-            .maybeSingle();
+            .maybeSingle());
           ticketRef.cart_id = t?.cart_id ?? null;
         }
         return json({
           valid: false,
+          kind: credentialKind,
+          admits_entry: admitsEntry,
           reason: "already_scanned",
           status: "scanned",
           checked_in_at: rpcResult.checkedInAt ?? null,
@@ -570,7 +640,7 @@ Deno.serve(withSentry("ticket-scan", async (req: Request) => {
       }
     }
   } catch (err: any) {
-    console.error("[ticket-scan] Error:", err);
-    return json({ error: err.message || "Internal error" }, 500);
+    console.error("[ticket-scan] Scan request failed");
+    return json({ error: "Unable to verify this ticket. Please retry online." }, 500);
   }
 }));

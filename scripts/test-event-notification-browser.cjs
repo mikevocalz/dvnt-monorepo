@@ -69,9 +69,12 @@ const boundaries = {
   '@dvnt/app/lib/stores/auth-store': 'export const useAuthStore=()=>({});',
   '@dvnt/app/lib/hooks/use-follow': 'export const useFollow=()=>({});',
   '@dvnt/app/lib/hooks/use-bootstrap-notifications': 'export const useBootstrapNotifications=()=>({});',
+  // Screen-level invite cards are covered by test-lynk-cohost-invites.cjs;
+  // keep this fixture focused on real event notification rows and navigation.
   '@dvnt/app/features/sneaky-lynk/ui/web/CohostInvites': 'export const PendingCohostInvites=()=>null;',
+  '@dvnt/app/features/sneaky-lynk/ui/PendingCohostInvites': 'export const PendingCohostInvites=()=>null;',
   '@dvnt/app/lib/api/notifications': 'export const notificationsApiClient={formatTimeAgo:()=>"3m ago"};',
-  '@dvnt/app/lib/hooks/use-notifications-query': 'export const notificationKeys={};',
+  '@dvnt/app/lib/hooks/use-notifications-query': 'export const notificationKeys={};export const useBadges=()=>({});',
   '@dvnt/app/lib/stores/unread-counts-store': 'export const useUnreadCountsStore=()=>({});',
   '@dvnt/app/lib/stores/ui-store': 'export const useUIStore=()=>({});',
   '@dvnt/app/lib/api/users': 'export const usersApi={};',
@@ -120,7 +123,8 @@ const boundaries = {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let browser;
   try {
-    browser = await chromium.launch({ headless: true, ...(fs.existsSync('/usr/bin/chromium') ? { executablePath: '/usr/bin/chromium' } : {}), args: ['--no-sandbox','--disable-dev-shm-usage'] });
+    const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
+    browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox','--disable-dev-shm-usage'] });
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/activity`);

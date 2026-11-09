@@ -31,11 +31,11 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
   const f = global.__webCaptureSdk = {
     Signals, Publish, latest: null, sources: [], connections: [], publications: [], resources: [], tracks: [],
     calls: { audio: 0, video: 0 }, allowed: { audio: false, video: true }, viewerLeaves: 0,
-    deferAudio: false, resolveAudio: null, deferVideo: false, resolveVideo: null,
+    devicePreferences: {}, deviceList: [{ kind: 'audioinput', deviceId: 'audio-fixture' }, { kind: 'videoinput', deviceId: 'video-fixture' }], constraints: [], tokenVersion: 1, deferAudio: false, resolveAudio: null, deferVideo: false, resolveVideo: null,
   };
   class Track extends EventTarget {
-    constructor(kind) { super(); this.kind = kind; this.readyState = 'live'; this.id = `${kind}-${f.tracks.length}`; f.tracks.push(this); }
-    getSettings() { return { deviceId: `${this.kind}-fixture`, sampleRate: 48000 }; }
+    constructor(kind, deviceId = `${kind}-fixture`) { super(); this.kind = kind; this.deviceId = deviceId; this.readyState = 'live'; this.id = `${kind}-${f.tracks.length}`; f.tracks.push(this); }
+    getSettings() { return { deviceId: this.deviceId, sampleRate: 48000 }; }
     stop() { this.readyState = 'ended'; }
   }
   class MediaStream {
@@ -46,13 +46,13 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
   }
   global.MediaStream = MediaStream;
   const mediaDevices = new EventTarget();
-  mediaDevices.enumerateDevices = async () => [{ kind: 'audioinput', deviceId: 'audio-fixture' }, { kind: 'videoinput', deviceId: 'video-fixture' }];
+  mediaDevices.enumerateDevices = async () => f.deviceList;
   mediaDevices.getUserMedia = async constraints => {
-    const kind = constraints.audio ? 'audio' : 'video'; f.calls[kind]++;
+    const kind = constraints.audio ? 'audio' : 'video'; f.calls[kind]++; f.constraints.push(constraints);
     if (kind === 'video' && f.deferVideo) return new Promise(resolve => { f.resolveVideo = resolve; });
     if (kind === 'audio' && f.deferAudio) return new Promise(resolve => { f.resolveAudio = resolve; });
     if (!f.allowed[kind]) { const error = new Error(`${kind === 'audio' ? 'Microphone' : 'Camera'} permission denied`); error.name = 'NotAllowedError'; throw error; }
-    return new MediaStream([new Track(kind)]);
+    return new MediaStream([new Track(kind, constraints[kind]?.deviceId?.exact)]);
   };
   const permission = new EventTarget(); permission.state = 'prompt';
   const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -63,14 +63,14 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     plugins: [{ name: 'actual-capture-sdk-boundaries', setup(build) {
       build.onResolve({ filter: /^(react|react\/jsx-runtime)$/ }, ({ path: name }) => ({ path: resolve(name), external: true }));
       build.onResolve({ filter: /^(@moq\/(signals|publish|net)|\.\/useMoqToken|\.\/useLynkViewer.web)$/ }, ({ path: name }) => ({ path: name, namespace: 'capture-sdk' }));
-      build.onLoad({ filter: /.*/, namespace: 'capture-sdk' }, ({ path: name }) => ({ loader: 'js', contents: name === '@moq/signals' ? `export const {Signal,Computed}=globalThis.__webCaptureSdk.Signals;` : name === './useMoqToken' ? `
-        export const useMoqToken=(room,intent,enabled)=>({token:room&&enabled?{relayUrl:'https://example.invalid/'+room,path:'lynk/'+room+'/self',peerId:'self'}:null,error:null});
+      build.onLoad({ filter: /.*/, namespace: 'capture-sdk' }, ({ path: name }) => ({ loader: 'js', contents: name === '@moq/signals' ? `export const {Signal,Computed,Derived}=globalThis.__webCaptureSdk.Signals;` : name === './useMoqToken' ? `
+        export const useMoqToken=(room,intent,enabled)=>({token:room&&enabled?{expiresAt:new Date(Date.now()+120000).toISOString(),relayUrl:'https://example.invalid/'+room+'?jwt='+globalThis.__webCaptureSdk.tokenVersion,path:'lynk/'+room+'/self',peerId:'self'}:null,error:null});
       ` : name === './useLynkViewer.web' ? `
         const f=globalThis.__webCaptureSdk;const leave=()=>f.viewerLeaves++;const publishers=[{path:'lynk/room/peer',peerId:'peer'}];
         const viewer={state:'live',error:null,publishers,viewerCount:1,attachCanvas(){},leave};export const useLynkViewer=()=>viewer;
       ` : name === '@moq/net' ? `
         const f=globalThis.__webCaptureSdk;const{Signal}=f.Signals;
-        export class Connection{constructor(){this.closed=false;this.status=new Signal('connected');this.error=new Signal(undefined);this.origin=new Signal({});this.bandwidth=new Signal({});f.connections.push(this)}close(){this.closed=true}}
+        export class Connection{constructor(props){this.props=props;this.closed=false;this.status=new Signal('connected');this.error=new Signal(undefined);this.origin=new Signal({});this.bandwidth=new Signal({});f.connections.push(this)}close(){this.closed=true}}
         export const Time={Milli:{zero:0}};export const Path={from:p=>p};
       ` : `
         const f=globalThis.__webCaptureSdk;const{Signal}=f.Signals;
@@ -86,7 +86,7 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
   const module = { exports: {} };
   new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, module, module.exports);
   const { useLynkBroadcast } = module.exports;
-  function Harness({ canPublish = true }) { f.latest = useLynkBroadcast('room', canPublish); return null; }
+  function Harness({ canPublish = true }) { f.latest = useLynkBroadcast('room', canPublish, f.devicePreferences); return null; }
   let root = createRoot(document.getElementById('root'));
   let unmounted = false;
   const tick = () => new Promise(resolve => setTimeout(resolve, 5));
@@ -100,6 +100,7 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     await act(() => f.latest.goLive());
     assert.equal(f.calls.audio, 1);
     assert.equal(f.calls.video, 1);
+    assert.equal(f.latest.microphoneActive, false, 'denied capture is not an active microphone');
     assert.equal(f.latest.error, null);
     assert.equal(f.latest.state, 'live');
     assert.equal(f.latest.coPublishers.length, 1);
@@ -123,11 +124,29 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     await act(() => f.latest.retryCapture());
     await settle(() => f.latest.localAudioStream && !f.latest.captureError);
     assert.equal(f.calls.audio, 3, 'new source resets real private SDK terminal retry budget');
+    assert.equal(f.latest.microphoneActive, true);
+    const usableMic = f.latest.localAudioStream.getAudioTracks()[0];
+    await act(() => { usableMic.muted = true; usableMic.dispatchEvent(new Event('mute')); });
+    assert.equal(f.latest.microphoneActive, false); assert.equal(f.latest.localAudioStream, null);
+    await act(() => { usableMic.muted = false; usableMic.dispatchEvent(new Event('unmute')); });
+    assert.equal(f.latest.microphoneActive, true);
     assert.equal(f.latest.localAudioStream.getAudioTracks()[0].readyState, 'live');
     assert.equal(latestSource('video'), camera);
     assert.equal(f.publications.filter(publication => !publication.closed).length, 1, 'only one publication remains active after source replacement');
+    const stablePublicationCount = f.publications.length;
+    const stableCaptureCalls = { ...f.calls };
+    const originalUrl = connection.props.url.peek().href;
+    for (let i = 2; i <= 12; i++) {
+      f.tokenVersion = i; await render(true);
+      assert.equal(connection.props.url.peek().href, originalUrl, 'successful renewal never restarts publishing transport');
+      assert.equal(f.publications.length, stablePublicationCount, 'encoders/publication survive renewal');
+      assert.deepEqual(f.calls, stableCaptureCalls, 'camera and microphone are not reopened by renewal');
+      assert.equal(cameraTrack.readyState, 'live');
+      assert.equal(f.latest.localAudioStream.getAudioTracks()[0].readyState, 'live');
+    }
     await act(() => connection.error.set(new Error('Credentials rejected')));
     assert.equal(f.latest.state, 'error'); assert.equal(f.latest.error, 'Credentials rejected');
+    assert.equal(connection.props.url.peek().searchParams.get('jwt'), '12', 'terminal transport error gets freshest authorization');
     await act(() => connection.error.set(undefined));
     assert.equal(f.latest.state, 'live');
 
@@ -241,7 +260,37 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     assert.equal(f.calls.audio, callsAfterUnmount);
     assert.ok(f.sources.every(source => source.fixtureClosed));
     assert.ok(f.tracks.every(track => track.readyState === 'ended'));
-    console.log('PASS actual web SDK capture: background/pageshow, blur exclusion, mute/unmute/end, rapid interruptions, manual-off and failed resume, delayed video release, private terminal-budget retry, microtask signals, failed-source-only replacement, healthy capture/viewer retention, duplicate retry, host mute/role/end races, auth fatal, publication cleanup and late getUserMedia release. Media/network boundaries mocked; no audible browser/hardware verification.');
+    // Production hook integration: reviewed hardware starts exact, live switching
+    // preserves the receiver/relay/publication and mute intent wins in one batch.
+    f.deferAudio = false; f.allowed.audio = true; f.allowed.video = true;
+    f.deviceList = [...f.deviceList, {kind:'audioinput',deviceId:'audio-second'}, {kind:'videoinput',deviceId:'video-second'}];
+    f.devicePreferences = {cameraDeviceId:'video-second',microphoneDeviceId:'audio-second'};
+    const selectedRoot = document.createElement('div');document.body.append(selectedRoot);
+    root = createRoot(selectedRoot);unmounted = false;
+    const firstSelectionCall = f.constraints.length;
+    await render(true);await settle(()=>f.latest.cameraActive && f.latest.microphoneActive);
+    await act(()=>f.latest.goLive());
+    assert(f.constraints.slice(firstSelectionCall).every(c => (c.video || c.audio).deviceId?.exact?.endsWith('second')), 'selected entry must never capture default hardware first');
+    const sameConnection = f.connections.at(-1), sameCamera = latestSource('video');
+    const beforeSwitchPublications = f.publications.length, beforeSwitchViewerLeaves = f.viewerLeaves;
+    f.devicePreferences = {cameraDeviceId:'video-fixture',microphoneDeviceId:'audio-second'};
+    await render(true);await settle(()=>f.latest.localStream?.getVideoTracks()[0].getSettings().deviceId==='video-fixture');
+    assert.equal(latestSource('video'),sameCamera);assert.equal(f.connections.at(-1),sameConnection);
+    assert.equal(f.publications.length,beforeSwitchPublications);assert.equal(f.viewerLeaves,beforeSwitchViewerLeaves);
+    const beforeMutedSwitch = f.calls.audio;
+    await act(()=>{f.latest.setMicEnabled(false);f.devicePreferences={...f.devicePreferences,microphoneDeviceId:'audio-fixture'};root.render(React.createElement(Harness));});
+    assert.equal(f.calls.audio,beforeMutedSwitch);assert.equal(f.latest.microphoneActive,false);
+    await act(()=>f.latest.setMicEnabled(true));await settle(()=>f.latest.microphoneActive);
+    assert.equal(f.latest.localAudioStream.getAudioTracks()[0].getSettings().deviceId,'audio-fixture');
+    f.deviceList=f.deviceList.filter(d=>d.deviceId!=='video-fixture');
+    await act(()=>mediaDevices.dispatchEvent(new Event('devicechange')));
+    await settle(()=>!f.latest.cameraActive && !!f.latest.cameraError);
+    const beforeMissing = f.calls.video;await act(tick);assert.equal(f.calls.video,beforeMissing,'disconnected explicit hardware never opens default');
+    assert.equal(f.latest.micEnabled,true);assert.equal(f.latest.microphoneActive,true);
+    assert.equal(sameConnection.closed,false);assert.equal(f.viewerLeaves,beforeSwitchViewerLeaves);
+    await act(()=>root.unmount());unmounted=true;
+    assert.ok(f.sources.every(source=>source.fixtureClosed));assert.ok(f.tracks.every(track=>track.readyState==='ended'));
+    console.log('PASS actual web SDK capture: repeated renewal/capture/encoder continuity and newest-grant recovery, background/pageshow, blur exclusion, mute/unmute/end, rapid interruptions, manual-off and failed resume, delayed video release, private terminal-budget retry, microtask signals, failed-source-only replacement, healthy capture/viewer retention, duplicate retry, host mute/role/end races, auth fatal, publication cleanup and late getUserMedia release. Media/network boundaries mocked; no audible browser/hardware verification.');
   } finally {
     if (!unmounted) await act(() => root.unmount());
     window.close(); delete global.__webCaptureSdk; delete global.MediaStream;

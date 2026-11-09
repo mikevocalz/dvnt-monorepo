@@ -72,3 +72,9 @@ test("with a coat check the sheet previews what cart-checkout charges", () => {
   // 2.5% of 4950 rounds to 124, plus $1 for each of the 3 units.
   assert.equal(t.feeCents, 124 + 300);
 });
+
+test('free admission plus paid add-on previews only paid-unit fees', () => {
+ const r=computeCheckoutSheetTotals({admissionSubtotalCents:0,quantity:3,promoterDiscountBps:0,addonCents:1000,addonQuantity:2,addonFeeQuantity:1});
+ assert.equal(r.feeCents,125);
+ assert.equal(r.totalCents,1125);
+});

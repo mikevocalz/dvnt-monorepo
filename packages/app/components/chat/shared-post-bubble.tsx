@@ -9,11 +9,13 @@ import type { SharedPostContext } from "@dvnt/app/lib/stores/chat-store";
 interface SharedPostBubbleProps {
   sharedPost: SharedPostContext;
   isOwnMessage: boolean;
+  onLongPress?: () => void;
 }
 
 export function SharedPostBubble({
   sharedPost,
   isOwnMessage,
+  onLongPress,
 }: SharedPostBubbleProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -25,7 +27,12 @@ export function SharedPostBubble({
   };
 
   return (
-    <Pressable onPress={handlePress} style={styles.container}>
+    <Pressable
+      onPress={handlePress}
+      onLongPress={onLongPress}
+      delayLongPress={400}
+      style={styles.container}
+    >
       {/* Post media preview */}
       {sharedPost.mediaUrl ? (
         <Image

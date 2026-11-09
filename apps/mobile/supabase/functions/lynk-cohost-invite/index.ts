@@ -23,6 +23,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { resolveEventRoomAccess } from "../_shared/event-access.ts";
 import { parseMemberHandle } from "../_shared/room-member-handle.ts";
 import { resolveVerifiedAdmission, admissionRefusal } from "../_shared/verified-admission.ts";
 import { resolveCreatorStanding, creatorStandingRefusal } from "../_shared/creator-standing.ts";
@@ -281,7 +282,7 @@ Deno.serve(async (req) => {
 
       const { data: room } = await supabase
         .from("video_rooms")
-        .select("id, uuid, status")
+        .select("id, uuid, status, room_kind, created_at, ends_at")
         .eq("id", invite.room_id)
         .maybeSingle();
       if (!room || room.status !== "open") {
@@ -316,6 +317,14 @@ Deno.serve(async (req) => {
       if (admission.state === "blocked") {
         const refusal = admissionRefusal(admission);
         return errorResponse("forbidden", refusal.message);
+      }
+      // A room co-host invite is not an event ticket, event staff role, or
+      // permission to enter before the event host starts. Acceptance allocates
+      // an active privileged seat, so apply the same linked-event gate as join.
+      // Refusals leave the invitation pending for an eligible later retry.
+      const eventAccess = await resolveEventRoomAccess(supabase, room, callerId);
+      if (!eventAccess.ok) {
+        return errorResponse(eventAccess.code, eventAccess.message);
       }
       // An invite can grant a hosting role, so suspension/pausing must apply
       // here just as it does to room creation and hosting reconnects.

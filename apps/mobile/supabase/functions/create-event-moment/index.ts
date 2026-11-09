@@ -1,7 +1,7 @@
 /**
  * Edge Function: create-event-moment
  * Save a "Who All Over There" moment (photo or ≤30s video) for an event.
- * Only ticket holders and hosts/co-hosts may upload.
+ * Only admission holders and hosts/co-hosts may upload.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -68,7 +68,9 @@ Deno.serve(async (req) => {
       .select("id")
       .eq("event_id", eventId)
       .eq("user_id", authUserId)
-      .eq("status", "active")
+      .eq("category", "admission")
+      .in("status", ["active", "scanned"])
+      .limit(1)
       .maybeSingle();
     canUpload = !!ticket;
   }

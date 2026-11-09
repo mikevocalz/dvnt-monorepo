@@ -46,7 +46,8 @@ const {
     );
     await page.addStyleTag({ content: css });
     await page.addScriptTag({ path: path.join(dir, "fixture.js") });
-    await page.evaluate(() => {
+    const videoUrl = "data:video/webm;base64," + fs.readFileSync(path.join(__dirname, "fixtures/story-controls-video.webm")).toString("base64");
+    await page.evaluate((videoUrl) => {
       const avatar =
         "data:image/svg+xml," +
         encodeURIComponent(
@@ -91,6 +92,8 @@ const {
         },
       };
       const photo = { ...post, id: "103", url: flyer };
+      const video = { id: "105", type: "video", duration: 60000, url: videoUrl };
+      globalThis.__setVideoUrl = (url) => { video.url = url; };
       const textEvent = { ...event, id: "104", url: undefined, sharedSource: {
         ...event.sharedSource,
         title: "A long original event title that wraps across multiple lines on a narrow story",
@@ -162,10 +165,10 @@ const {
             id: `tag-${index}`, username: `tagged-member-${index}`, avatar,
           })) : []);
         }
-        f.open([makeGroup(kind === "event" ? [event, post] : kind === "text-event" ? [textEvent, post] : kind === "photo" ? [photo, event] : [post, event])]);
+        f.open([makeGroup(kind === "event" ? [event, post] : kind === "text-event" ? [textEvent, post] : kind === "photo" ? [photo, event] : kind === "video" ? [video] : kind === "video-image" ? [video, { id: "106", type: "image", url: flyer, duration: 800 }] : kind === "image-video" ? [{ id: "106", type: "image", url: flyer, duration: 800 }, video] : [post, event])]);
       };
       globalThis.__openStory("post");
-    });
+    }, videoUrl);
     const actions = () => page.locator("[data-story-source-actions]");
     const sourceLink = () =>
       actions().getByRole("link", { name: /^View (Event|Post)$/ });
@@ -393,6 +396,120 @@ const {
       "Shared event by @original",
     );
     assert.equal(await page.locator(".dvnt-story-viewer").count(), 1);
+    // A cold video must stay open while metadata is still pending. The real
+    // player must not run a zero-duration progress clock and finish the group.
+    // Replace the already-open group (selected segment 1) to cover a fresh
+    // viewer session with the same group id and a shorter segment list too.
+    let pendingVideo;
+    await page.route("https://fixture.invalid/slow-story.webm", route => { pendingVideo = route; });
+    await page.evaluate(() => {
+      HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
+      globalThis.__setVideoUrl("https://fixture.invalid/slow-story.webm");
+      globalThis.__openStory("video", "other");
+    });
+    await page.getByRole("button", { name: "Close story" }).waitFor();
+    await page.getByRole("button", { name: "Unmute story" }).waitFor();
+    await page.waitForTimeout(250); // several progress frames before any metadata
+    assert.equal(await page.evaluate(() => globalThis.__fixture.useStoryViewerStore.getState().open), true, "cold video cannot finish before metadata");
+    assert.equal(await page.locator(".dvnt-story-viewer video").count(), 1);
+    assert.equal(await page.locator(".dvnt-story-viewer video").evaluate(video => video.readyState), 0);
+    assert.ok(pendingVideo, "real video request is pending at the offline boundary");
+    await pendingVideo.fulfill({ status: 200, contentType: "video/webm", body: fs.readFileSync(path.join(__dirname, "fixtures/story-controls-video.webm")) });
+    await page.waitForFunction(() => document.querySelector(".dvnt-story-viewer video")?.readyState >= 2);
+    assert.equal(await page.locator(".dvnt-story-viewer video").evaluate(video => video.duration), 60, "fixture supplies a real nonzero decoded duration");
+    await page.getByRole("button", { name: "Close story" }).click();
+    await page.evaluate(url => globalThis.__setVideoUrl(url), videoUrl);
+
+    // Leaving an unresolved video must not strand the following image paused.
+    let skippedVideo;
+    await page.route("https://fixture.invalid/skipped-story.webm", route => { skippedVideo = route; });
+    await page.evaluate(() => {
+      globalThis.__setVideoUrl("https://fixture.invalid/skipped-story.webm");
+      globalThis.__openStory("video-image", "other");
+    });
+    await page.getByRole("button", { name: "Unmute story" }).waitFor();
+    await page.waitForTimeout(250);
+    await page.keyboard.press("ArrowRight");
+    await page.waitForFunction(() => !document.querySelector(".dvnt-story-viewer video") && document.querySelector(".dvnt-story-viewer img"));
+    await page.getByRole("button", { name: "Close story" }).waitFor({ state: "detached", timeout: 5000 });
+    assert.ok(skippedVideo, "unresolved video was skipped before its response");
+    await skippedVideo.abort();
+    await page.evaluate(url => globalThis.__setVideoUrl(url), videoUrl);
+
+    // Readiness must also be acquired for a later video, not only initial video.
+    let laterVideo;
+    await page.route("https://fixture.invalid/later-story.webm", route => { laterVideo = route; });
+    await page.evaluate(() => {
+      globalThis.__setVideoUrl("https://fixture.invalid/later-story.webm");
+      globalThis.__openStory("image-video", "other");
+    });
+    await page.locator(".dvnt-story-viewer video").waitFor();
+    await page.waitForTimeout(250);
+    assert.equal(await page.evaluate(() => globalThis.__fixture.useStoryViewerStore.getState().open), true, "later cold video must also wait for media readiness");
+    assert.ok(laterVideo, "later video request is held");
+    await laterVideo.fulfill({ status: 200, contentType: "video/webm", body: fs.readFileSync(path.join(__dirname, "fixtures/story-controls-video.webm")) });
+    await page.getByRole("button", { name: "Unmute story" }).waitFor();
+    await page.waitForFunction(() => document.querySelector(".dvnt-story-viewer video")?.readyState >= 2);
+    await page.getByRole("button", { name: "Close story" }).click();
+    await page.evaluate(url => globalThis.__setVideoUrl(url), videoUrl);
+
+    // Mobile-web short-video regression: test the REAL production overlay in
+    // Chromium (not CSS/source assertions alone). Use the same valid offline
+    // video; the real player and both outer controls remain independently
+    // tappable. Freeze media play while testing geometry and mute toggles.
+    for (const viewport of [
+      { width: 320, height: 568 },   // short portrait
+      { width: 375, height: 812 },   // standard iPhone portrait
+      { width: 812, height: 375 },   // phone landscape
+    ]) {
+      await page.setViewportSize(viewport);
+      for (const role of ["other", "own"]) {
+        await page.evaluate(role => {
+          HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
+          globalThis.__openStory("video", role);
+        }, role);
+        const close = page.getByRole("button", { name: "Close story" });
+        const unmute = page.getByRole("button", { name: "Unmute story" });
+        await close.waitFor();
+        await unmute.waitFor();
+        const closeBox = await close.boundingBox();
+        const soundBox = await unmute.boundingBox();
+        const hit = await page.evaluate(() => {
+          const target = (label) => {
+            const el = document.querySelector('button[aria-label="' + label + '"]');
+            const rect = el.getBoundingClientRect();
+            return el.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+          };
+          return { close: target("Close story"), sound: target("Unmute story") };
+        });
+        const context = JSON.stringify({ viewport, closeBox, soundBox, hit });
+        assert.ok(closeBox.width >= 44 && closeBox.height >= 44, "close touch target: " + context);
+        assert.ok(soundBox.width >= 44 && soundBox.height >= 44, "sound touch target: " + context);
+        assert.ok(soundBox.y >= closeBox.y + closeBox.height + 12 - 1, "at least 12px vertical separation: " + context);
+        assert.ok(soundBox.y + soundBox.height <= viewport.height, "sound accessible in viewport: " + context);
+        assert.deepEqual(hit, { close: true, sound: true }, "both controls receive real pointer hits: " + context);
+        await unmute.click();
+        await page.getByRole("button", { name: "Mute story" }).waitFor();
+        const videoNode = page.locator(".dvnt-story-viewer video");
+        assert.equal(await videoNode.count(), 1, "production video renderer mounted");
+        assert.equal(await videoNode.evaluate((v) => v.muted), false, "sound toggle unmuted player");
+        await page.getByRole("button", { name: "Mute story" }).click();
+        assert.equal(await videoNode.evaluate((v) => v.muted), true, "sound toggle re-muted player");
+        if (role === "own") {
+          const remove = page.getByRole("button", { name: "Delete story", exact: true });
+          await remove.click(); // first click only reveals confirmation; no deletion
+          const confirm = page.getByRole("button", { name: "Confirm delete story" });
+          const confirmBox = await confirm.boundingBox();
+          assert.ok(confirmBox.y + confirmBox.height <= soundBox.y, "delete confirmation must not cover sound");
+          await page.getByRole("button", { name: "Unmute story" }).click();
+          assert.equal(await videoNode.evaluate(v => v.muted), false, "sound reachable alongside delete confirmation");
+          await page.getByRole("button", { name: "Mute story" }).click();
+        }
+        if (screenshots) await page.screenshot({ path: path.join(screenshots, `video-controls-${role}-${viewport.width}x${viewport.height}.png`) });
+        await close.click();
+        await close.waitFor({ state: "detached" });
+      }
+    }
     assert.deepEqual(errors, []);
     console.log(
       "PASS story attribution Chromium: actual player, own/other/guest eligibility, 320/375/1440px unboxed two-action footer, Viewers left/source right, text/photo/event, seven 44px reactions, expanded tags, composer focus, hit-testing, keyboard and navigation-close semantics",

@@ -51,21 +51,19 @@ export const useDoorSyncStore = create<DoorSyncState>((set) => ({
 
 export function useDoorOfflineKit(eventId: string) {
   const setSync = useDoorSyncStore((s) => s.set);
-  const setTokensForEvent = useOfflineCheckinStore((s) => s.setTokensForEvent);
   const pendingScans = useOfflineCheckinStore((s) => s.pendingScans);
   const queued = pendingScans.filter((p) => p.eventId === eventId).length;
 
   const refreshTokens = useCallback(async () => {
     if (!eventId || typeof navigator === "undefined" || navigator.onLine === false) return;
     try {
-      const tokens = await ticketsApi.downloadOfflineTokens(eventId);
-      setTokensForEvent(eventId, tokens);
+      await ticketsApi.downloadOfflineTokens(eventId);
       setSync({ listUpdatedAt: Date.now() });
     } catch {
       // A failed refresh leaves the PREVIOUS list in place, which is the whole
       // point of having downloaded it. Never surfaced as a scan error.
     }
-  }, [eventId, setTokensForEvent, setSync]);
+  }, [eventId, setSync]);
 
   const drain = useCallback(async () => {
     if (typeof navigator !== "undefined" && navigator.onLine === false) return;
@@ -95,6 +93,7 @@ export function useDoorOfflineKit(eventId: string) {
   useEffect(() => {
     const onOnline = () => {
       setSync({ phase: "online" });
+      void refreshTokens();
       void drain();
     };
     const onOffline = () => setSync({ phase: "offline" });
@@ -106,7 +105,7 @@ export function useDoorOfflineKit(eventId: string) {
       window.removeEventListener("offline", onOffline);
       if (id !== null) window.clearInterval(id);
     };
-  }, [drain, queued, setSync]);
+  }, [drain, queued, refreshTokens, setSync]);
 
   return { queued, refreshTokens };
 }

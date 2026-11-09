@@ -78,6 +78,7 @@ function fixture({ rail = 'addon', status = 'payment_pending', cartStatus = 'hol
     },
     async rpc(name, args) {
       ops.push({ rpc: name, args });
+      if (name === 'claim_ticket_receipts') return state.receiptQueueError ? {data:null,error:{message:'synthetic queue unavailable'}} : {data:[],error:null};
       if (name === 'list_paid_cart_recovery_candidates') {
         if (state.candidateError) return { data: null, error: { message: 'recovery selector unavailable' } };
         return { data: recoveryCandidate && ['payment_pending', 'payment_failed'].includes(order.status) ? [{ ...order }] : [], error: null };

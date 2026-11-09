@@ -20,7 +20,7 @@ const body = {
     },
   ],
 };
-function fixture(existingCart) {
+function fixture(existingCart, rpcResult = { ok: true, holdExpiresAt: "2099-01-01T00:00:00Z" }) {
   let handler;
   const writes = [],
     rpcs = [];
@@ -58,7 +58,7 @@ function fixture(existingCart) {
     async rpc(name, args) {
       rpcs.push({ name, args });
       return {
-        data: { ok: true, holdExpiresAt: "2099-01-01T00:00:00Z" },
+        data: rpcResult,
         error: null,
       };
     },
@@ -187,4 +187,61 @@ test("another buyer cannot use the frozen-cart error to inspect ownership", asyn
   });
   assert.equal((await f.call()).status, 404);
   assert.deepEqual(f.writes, []);
+});
+
+for (const error of ["sale_not_started", "sale_ended", "invalid_sale_window", "tier_not_on_sale"]) {
+  test(`sale-policy RPC refusal reaches the buyer without a successful hold: ${error}`, async () => {
+    const f = fixture(null, { ok: false, error, tierId: body.lineItems[0].tierId });
+    const r = await f.call();
+    assert.equal(r.status, 400);
+    assert.equal(r.data.error, error);
+    assert.equal(r.data.tierId, body.lineItems[0].tierId);
+    assert.equal(r.data.ok, undefined);
+    assert.equal(r.data.holdExpiresAt, undefined);
+    assert.equal(f.rpcs.length, 1);
+  });
+}
+
+test("sale preflight locks cart lines and tiers before date checks or hold mutations; existing allocator preserved", () => {
+  const dir = path.resolve(__dirname, "../../migrations");
+  const migration = fs.readFileSync(path.join(dir, "20261106120000_cart_hold_sale_windows.sql"), "utf8");
+  const previous = fs.readFileSync(path.join(dir, "20261031142216_repeat_purchase_tier_limits.sql"), "utf8");
+  const cartLock = migration.indexOf("WHERE id = p_cart_id FOR UPDATE");
+  const lineLock = migration.indexOf("ORDER BY cli.id FOR UPDATE;");
+  const tierLock = migration.indexOf("ORDER BY t.id FOR UPDATE;");
+  const start = migration.indexOf("  -- Use wall time AFTER");
+  const end = migration.indexOf("  FOR v_line IN\n    SELECT t.id AS tier_id, t.max_per_user", start);
+  assert.ok(cartLock < lineLock && lineLock < tierLock && tierLock < start);
+  assert.ok(end < migration.indexOf("UPDATE public.cart_holds SET released"));
+  assert.match(migration.slice(start,end), /v_sale_now := clock_timestamp\(\)/);
+  assert.match(migration.slice(start,end), /sale_start > v_sale_now/);
+  assert.match(migration.slice(start,end), /sale_end <= v_sale_now/);
+  assert.match(migration.slice(start,end), /NOT isfinite/);
+  const functionStart = "CREATE OR REPLACE FUNCTION public.cart_create_hold(";
+  const original = previous.slice(previous.indexOf(functionStart), previous.indexOf("-- Preserve the existing paid recovery allocator"));
+  const withoutPreflight = (migration.slice(migration.indexOf(functionStart), start) + migration.slice(end))
+    .replace("  v_sale_now timestamptz;\n", "")
+    .replace(/  -- Freeze the selection before locking its tier set\.[\s\S]*?ORDER BY cli.id FOR UPDATE;\n\n/, "")
+    .replace("ORDER BY t.id FOR UPDATE;\n\n", "ORDER BY t.id FOR UPDATE;\n");
+  assert.equal(withoutPreflight, original, "caps, unlock chains, allocator, add-ons, and grants otherwise unchanged");
+  const schema = fs.readFileSync(path.join(dir, "20260516150000_mixed_cart_checkout.sql"), "utf8");
+  assert.match(schema, /create table if not exists public\.cart_line_items \([\s\S]*?cart_id uuid not null references public\.carts\(id\)/);
+});
+
+test("inactive preflight runs under tier locks before mutations and otherwise preserves the prior function", () => {
+  const dir = path.resolve(__dirname, "../../migrations");
+  const migration = fs.readFileSync(path.join(dir, "20261106160919_cart_hold_inactive_tiers.sql"), "utf8");
+  const previous = fs.readFileSync(path.join(dir, "20261106120000_cart_hold_sale_windows.sql"), "utf8");
+  const inactiveCheck = migration.indexOf("IF v_line.is_active IS FALSE THEN");
+  const tierLock = migration.indexOf("ORDER BY t.id FOR UPDATE;");
+  assert.ok(tierLock >= 0 && tierLock < inactiveCheck);
+  assert.ok(inactiveCheck < migration.indexOf("UPDATE public.cart_holds SET released"));
+  assert.ok(inactiveCheck < migration.indexOf("UPDATE public.cart_line_items SET unit_price_cents"));
+  assert.ok(inactiveCheck < migration.indexOf("INSERT INTO public.cart_holds"));
+  const functionStart = "CREATE OR REPLACE FUNCTION public.cart_create_hold(";
+  const withoutInactiveCheck = migration.slice(migration.indexOf(functionStart))
+    .replace("SELECT t.id AS tier_id, t.is_active, t.sale_start, t.sale_end", "SELECT t.id AS tier_id, t.sale_start, t.sale_end")
+    .replace(/    -- Deactivation is independent of status:[\s\S]*?    END IF;\n/, "");
+  assert.equal(withoutInactiveCheck, previous.slice(previous.indexOf(functionStart)),
+    "sale windows, caps, visibility, inventory, add-ons and grants remain byte-for-byte unchanged");
 });

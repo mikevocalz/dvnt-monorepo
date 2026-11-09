@@ -7,6 +7,7 @@ import { invokeEdge } from "./invoke-edge";
 export type EventLynkState = "scheduled" | "ready" | "live" | "ended" | "cancelled";
 
 export interface EventLynkWaiter {
+  /** Response-local row key, never a member identity; may change on every poll. */
   userId: string;
   username: string | null;
   displayName: string | null;
@@ -28,12 +29,17 @@ export interface EventLynkHostView {
 }
 
 async function call<T>(body: Record<string, unknown>, fallback: string): Promise<T> {
-  const { data, error } = await invokeEdge<T & { ok?: boolean; error?: string }>(
+  const { data, error } = await invokeEdge<T & { ok?: boolean; error?: string; reason?: string }>(
     "event-lynk-room",
     body,
   );
   if (error || !data || (data as any).ok === false) {
-    throw new Error(error?.message || (data as any)?.error || fallback);
+    // A terminal refusal is not a transient failed heartbeat. Preserve the
+    // HTTP status instead of asking the waiting UI to guess from English copy.
+    throw Object.assign(new Error(error?.message || data?.error || fallback), {
+      status: error?.status,
+      reason: data?.reason,
+    });
   }
   return data;
 }
@@ -46,9 +52,9 @@ export const eventLynkApi = {
   list: (eventId: number) =>
     call<EventLynkHostView>({ action: "list", event_id: eventId }, "Couldn't load the waiting room"),
   /** Host only: open the room. Idempotent. */
-  start: (eventId: number) =>
-    call<{ state: EventLynkState; started: boolean; admitted: number }>(
-      { action: "start", event_id: eventId },
+  start: (eventId: number, expectedRoomId: string) =>
+    call<{ state: EventLynkState; started: boolean; admitted: number; roomId: string }>(
+      { action: "start_bound", event_id: eventId, expected_room_id: expectedRoomId },
       "Couldn't start the Lynk",
     ),
 };

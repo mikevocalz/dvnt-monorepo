@@ -5,6 +5,7 @@
  */
 
 import { z } from "zod";
+import { normalizeLynkRoomId } from "@dvnt/app/features/sneaky-lynk/room-links";
 import { getLynkDisplayName } from "@dvnt/app/lib/branding/lynk-branding";
 
 export type RouteAuth = "public" | "auth-required";
@@ -26,9 +27,13 @@ export interface RouteEntry {
 
 const usernameSchema = z.object({ username: z.string().min(1) });
 const idSchema = z.object({ id: z.string().min(1) });
+const eventReviewSchema = z.object({ id: z.string().regex(/^[1-9]\d*$/).refine(id => Number.isSafeInteger(Number(id))) });
 const postIdSchema = z.object({ postId: z.string().min(1) });
 const commentIdSchema = z.object({ commentId: z.string().min(1) });
 const roomIdSchema = z.object({ roomId: z.string().min(1) });
+// Shared Lynks are server rooms, never local practice IDs or route fragments.
+const lynkIdSchema = z.object({ id: z.string().refine((id) => normalizeLynkRoomId(id) !== null &&
+  id !== "my-room" && !id.startsWith("space-")) });
 const gameNightCodeSchema = z.object({ code: z.string().length(6) });
 const tokenSchema = z.object({ token: z.string().min(1) });
 
@@ -45,34 +50,16 @@ export const ROUTE_REGISTRY: RouteEntry[] = [
     label: "Live Photo handoff",
   },
   // ── Auth routes (public) ───────────────────────────────────────────
-  {
-    urlPattern: "/auth/reset",
-    routerPath: "/(auth)/reset-password",
-    auth: "public",
-    paramsSchema: tokenSchema,
-    label: "Reset Password",
-  },
-  {
-    urlPattern: "/reset-password",
-    routerPath: "/(auth)/reset-password",
-    auth: "public",
-    paramsSchema: tokenSchema,
-    label: "Reset Password (legacy alias)",
-  },
-  {
-    urlPattern: "/auth/verify",
-    routerPath: "/(auth)/verify-email",
-    auth: "public",
-    paramsSchema: tokenSchema,
-    label: "Verify Email",
-  },
-  {
-    urlPattern: "/verify-email",
-    routerPath: "/(auth)/verify-email",
-    auth: "public",
-    paramsSchema: tokenSchema,
-    label: "Verify Email (legacy alias)",
-  },
+  ...["/auth/reset", "/auth/reset-password", "/reset-password"].map(
+    (urlPattern): RouteEntry => ({
+      urlPattern, routerPath: "/(auth)/reset-password", auth: "public", label: "Reset Password",
+    }),
+  ),
+  ...["/auth/verify", "/auth/verify-email", "/verify-email"].map(
+    (urlPattern): RouteEntry => ({
+      urlPattern, routerPath: "/(auth)/verify-email", auth: "public", label: "Verify Email",
+    }),
+  ),
   {
     urlPattern: "/auth/callback",
     routerPath: "/(auth)/login",
@@ -147,6 +134,37 @@ export const ROUTE_REGISTRY: RouteEntry[] = [
   },
 
   // ── Events ─────────────────────────────────────────────────────────
+  // Email links target the existing event detail section, not the all-reviews screen.
+  ...["/public/events/:id", "/feed/events/:id"].map((urlPattern): RouteEntry => ({
+    urlPattern,
+    routerPath: "/(protected)/events/:id",
+    auth: "auth-required",
+    paramsSchema: eventReviewSchema,
+    label: "Event Detail (email alias)",
+  })),
+  {
+    urlPattern: "/feed/events/:id/reviews",
+    routerPath: "/(protected)/events/:id/reviews",
+    auth: "auth-required",
+    paramsSchema: eventReviewSchema,
+    label: "Event Reviews",
+  },
+  {
+    // Android currently claims the whole host, including browser email paths.
+    // Future builds must route this spelling too; old installs need a browser.
+    urlPattern: "/public/events/:id/reviews",
+    routerPath: "/(protected)/events/:id/reviews",
+    auth: "auth-required",
+    paramsSchema: eventReviewSchema,
+    label: "Event Reviews (email alias)",
+  },
+  {
+    urlPattern: "/events/:id/reviews",
+    routerPath: "/(protected)/events/:id/reviews",
+    auth: "auth-required",
+    paramsSchema: eventReviewSchema,
+    label: "Event Reviews (alias)",
+  },
   {
     urlPattern: "/e/:id",
     routerPath: "/(protected)/events/:id",
@@ -317,27 +335,19 @@ export const ROUTE_REGISTRY: RouteEntry[] = [
   },
 
   // ── Lynk Private Rooms ────────────────────────────────────────────
-  {
-    urlPattern: "/sneaky-lynk/room/:id",
-    routerPath: "/(protected)/sneaky-lynk/room/:id",
-    auth: "auth-required",
-    paramsSchema: idSchema,
-    label: getLynkDisplayName(),
-  },
-  {
-    urlPattern: "/sl/:id",
-    routerPath: "/(protected)/sneaky-lynk/room/:id",
-    auth: "auth-required",
-    paramsSchema: idSchema,
-    label: `${getLynkDisplayName()} (short link)`,
-  },
-  {
-    urlPattern: "/sneaky/:id",
-    routerPath: "/(protected)/sneaky-lynk/room/:id",
-    auth: "auth-required",
-    paramsSchema: idSchema,
-    label: `${getLynkDisplayName()} (alias)`,
-  },
+  ...[
+    "/sneaky-lynk/room/:id", "/sneaky-lynk/:id",
+    "/feed/sneaky-lynk/room/:id", "/feed/sneaky-lynk/:id",
+    "/sl/:id", "/sneaky/:id",
+  ].map(
+    (urlPattern): RouteEntry => ({
+      urlPattern,
+      routerPath: "/(protected)/sneaky-lynk/room/:id",
+      auth: "auth-required",
+      paramsSchema: lynkIdSchema,
+      label: getLynkDisplayName(),
+    }),
+  ),
 
   // ── DM / Direct Message ────────────────────────────────────────────
   {
@@ -526,9 +536,8 @@ export function buildRouterPath(
   routerPath: string,
   params: Record<string, string>,
 ): string {
-  let result = routerPath;
-  for (const [key, value] of Object.entries(params)) {
-    result = result.replace(`:${key}`, value);
-  }
-  return result;
+  // Substitute whole placeholders, never a query key that happens to be a
+  // prefix (for example `i` must not replace the `:i` portion of `:id`).
+  return routerPath.replace(/:([A-Za-z][A-Za-z0-9_]*)/g,
+    (placeholder, key: string) => params[key] ?? placeholder);
 }

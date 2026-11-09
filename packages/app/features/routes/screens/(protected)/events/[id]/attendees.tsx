@@ -1,3 +1,4 @@
+import { hasAdmissionPurpose, ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 /**
  * Event Attendees Screen — host roster with filter chips + search +
  * server-side pagination.
@@ -14,7 +15,8 @@
  *   - anyone else → server returns 403 and we show an empty state
  */
 
-import React, { useCallback, useMemo, useState } from "react";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import React, { useEffect, useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -49,17 +51,14 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { BroadcastModal } from "@dvnt/app/features/events";
+import { CompCancelModal } from "@dvnt/app/features/events/ui/comp-cancel-modal";
+import { useCompCancelStore } from "@dvnt/app/lib/stores/comp-cancel-store";
 import { CompTicketsModal } from "@dvnt/app/features/events";
 import { RefundConfirmModal } from "@dvnt/app/features/events";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 type StatusFilter =
-  | "all"
-  | "active"
-  | "scanned"
-  | "refunded"
-  | "transfer_pending"
-  | "void";
+  "all" | "active" | "scanned" | "refunded" | "transfer_pending" | "void";
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -70,14 +69,14 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "void", label: "Void" },
 ];
 
-function statusBadge(status: string): {
+function statusBadge(status: string, category?: string | null): {
   Icon: typeof CheckCircle2;
   color: string;
   label: string;
 } {
   switch (status) {
     case "scanned":
-      return { Icon: CheckCircle2, color: "#22C55E", label: "Scanned" };
+      return { Icon: CheckCircle2, color: "#22C55E", label: hasAdmissionPurpose(category) ? "Scanned" : "Redeemed" };
     case "refunded":
       return { Icon: XCircle, color: "#FC253A", label: "Refunded" };
     case "transfer_pending":
@@ -89,12 +88,30 @@ function statusBadge(status: string): {
       return {
         Icon: Circle,
         color: "rgba(255,255,255,0.45)",
-        label: "Unscanned",
+        label: hasAdmissionPurpose(category) ? "Unscanned" : "Unredeemed",
       };
   }
 }
 
+/** Free/unknown-value tickets must never enter the monetary refund flow. */
+export function isOrganizerPaidRefundCandidate(ticket: {
+  status: string;
+  purchase_amount_cents?: number | null;
+  checked_in_at?: string | null;
+}): boolean {
+  return (ticket.status === "active" || ticket.status === "transfer_pending") &&
+    typeof ticket.purchase_amount_cents === "number" &&
+    Number.isSafeInteger(ticket.purchase_amount_cents) &&
+    ticket.purchase_amount_cents > 0 && !ticket.checked_in_at;
+}
+
 export default function EventAttendeesScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const user = useAuthStore(s => s.user);
+  const accountKey = user ? `${user.id}:${user.authId || ""}` : "";
+  return <ScopedAttendees key={`${id}:${accountKey}`} accountKey={accountKey} />;
+}
+function ScopedAttendees({ accountKey }: { accountKey: string }) {
   const { id } = useLocalSearchParams<{ id: string }>();
   const eventId = parseInt(id || "0", 10);
   const router = useRouter();
@@ -108,6 +125,7 @@ export default function EventAttendeesScreen() {
     queryKey: [
       "event-attendees",
       eventId,
+      accountKey,
       statusFilter,
       searchDebounced.trim(),
     ],
@@ -118,21 +136,20 @@ export default function EventAttendeesScreen() {
         status: statusFilter,
         search: searchDebounced.trim(),
       }),
-    getNextPageParam: (last) =>
-      last.hasMore ? last.page + 1 : undefined,
+    getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
     initialPageParam: 1,
-    enabled: Number.isFinite(eventId) && eventId > 0,
+    enabled: !!accountKey && Number.isFinite(eventId) && eventId > 0,
   });
 
+  const pendingSearch = searchInput.trim() !== searchDebounced.trim();
+  const resultsKnown = !!accountKey && !pendingSearch && !query.isError;
   const flat = useMemo(
-    () => query.data?.pages.flatMap((p) => p.tickets) ?? [],
-    [query.data],
+    () => resultsKnown ? query.data?.pages.flatMap((p) => p.tickets) ?? [] : [],
+    [query.data, resultsKnown],
   );
-  const total =
-    query.data?.pages[query.data.pages.length - 1]?.total ?? null;
-  const role = query.data?.pages[0]?.role ?? null;
-  const canExport =
-    role === "owner" || role === "admin" || role === "editor";
+  const total = resultsKnown ? query.data?.pages[query.data.pages.length - 1]?.total ?? null : null;
+  const role = resultsKnown ? query.data?.pages[0]?.role ?? null : null;
+  const canExport = role === "owner" || role === "admin" || role === "editor";
   const canBroadcast = role === "owner" || role === "admin";
   const canComp = role === "owner" || role === "admin";
   const canRefund = role === "owner";
@@ -142,19 +159,14 @@ export default function EventAttendeesScreen() {
   const [refundOpen, setRefundOpen] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  useEffect(() => { setSelected(new Set()); setSelecting(false); setRefundOpen(false); }, [searchInput, statusFilter]);
   const showToast = useUIStore((s) => s.showToast);
   const queryClient = useQueryClient();
 
-  // Refund-eligible (paid/free, not already refunded/scanned/void)
-  const isRefundable = useCallback((status: string) => {
-    return (
-      status === "active" || status === "transfer_pending"
-    );
-  }, []);
-
   const toggleSelect = useCallback(
-    (id: string, status: string) => {
-      if (!isRefundable(status)) return;
+    (id: string) => {
+      const ticket = flat.find((item) => item.id === id);
+      if (!ticket || !isOrganizerPaidRefundCandidate(ticket)) return;
       setSelected((prev) => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
@@ -162,7 +174,7 @@ export default function EventAttendeesScreen() {
         return next;
       });
     },
-    [isRefundable],
+    [flat],
   );
 
   const exitSelect = useCallback(() => {
@@ -173,13 +185,15 @@ export default function EventAttendeesScreen() {
   const selectedTotalCents = useMemo(() => {
     let s = 0;
     for (const t of flat) {
-      if (selected.has(t.id))
-        s += Number(t.purchase_amount_cents || 0);
+      if (selected.has(t.id) && isOrganizerPaidRefundCandidate(t)) s += Number(t.purchase_amount_cents);
     }
     return s;
   }, [flat, selected]);
 
-  const selectedIds = useMemo(() => Array.from(selected), [selected]);
+  const selectedIds = useMemo(
+    () => flat.filter((ticket) => selected.has(ticket.id) && isOrganizerPaidRefundCandidate(ticket)).map((ticket) => ticket.id),
+    [flat, selected],
+  );
 
   const handleExport = useCallback(async () => {
     if (exporting) return;
@@ -218,20 +232,20 @@ export default function EventAttendeesScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: any }) => {
-      const { Icon, color, label } = statusBadge(item.status);
-      const tier = item.ticket_type_name || "General";
-      const refundable = isRefundable(item.status);
+      const { Icon, color, label } = statusBadge(item.status, item.category);
+      const tier = item.ticket_type_name || ticketCategoryLabel(item.category);
+      const refundable = isOrganizerPaidRefundCandidate(item);
       const isSelected = selected.has(item.id);
       const handlePress = () => {
         if (selecting) {
-          toggleSelect(item.id, item.status);
+          toggleSelect(item.id);
         }
       };
       const handleLongPress = () => {
         if (!canRefund) return;
         if (!refundable) return;
         setSelecting(true);
-        toggleSelect(item.id, item.status);
+        toggleSelect(item.id);
       };
       return (
         <Pressable
@@ -269,27 +283,22 @@ export default function EventAttendeesScreen() {
               ]}
             >
               <Text style={styles.avatarText}>
-                {(item.qr_token || "?").slice(0, 1).toUpperCase()}
+                {(item.username || item.holder_name || "?").slice(0, 1).toUpperCase()}
               </Text>
             </View>
           )}
           <View style={styles.body}>
             <Text style={styles.name} numberOfLines={1}>
-              {item.guest_name ||
-                item.guest_email ||
+              {(item.username ? `@${item.username}` : item.holder_name) ||
+                item.guest_name ||
                 `Ticket ${String(item.id).slice(0, 8)}`}
             </Text>
             <View style={styles.metaRow}>
               <View
-                style={[
-                  styles.tierBadge,
-                  { borderColor: tierAccent("ga") },
-                ]}
+                style={[styles.tierBadge, { borderColor: tierAccent("ga") }]}
               >
-                <Text
-                  style={[styles.tierText, { color: tierAccent("ga") }]}
-                >
-                  {tier}
+                <Text style={[styles.tierText, { color: tierAccent("ga") }]}>
+                  {tier}{!hasAdmissionPurpose(item.category) ? " · No admission" : ""}
                 </Text>
               </View>
               {item.purchase_amount_cents != null && (
@@ -299,6 +308,21 @@ export default function EventAttendeesScreen() {
               )}
             </View>
           </View>
+          {canRefund && !selecting && item.organizer_free_cancel ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Review free-ticket cancellation"
+              onPress={(e) => {
+                e.stopPropagation();
+                useCompCancelStore.getState().open(item);
+              }}
+              style={{ padding: 10 }}
+            >
+              <Text style={{ color: "#fca5a5", fontSize: 12 }}>
+                Review cancellation
+              </Text>
+            </Pressable>
+          ) : null}
           <View style={styles.statusWrap}>
             <Icon size={14} color={color} />
             <Text style={[styles.statusText, { color }]}>{label}</Text>
@@ -314,7 +338,7 @@ export default function EventAttendeesScreen() {
         </Pressable>
       );
     },
-    [isRefundable, selected, selecting, toggleSelect, canRefund],
+    [selected, selecting, toggleSelect, canRefund],
   );
 
   return (
@@ -325,7 +349,7 @@ export default function EventAttendeesScreen() {
           <Text style={styles.headerTitle}>Attendees</Text>
           {total != null && (
             <Text style={styles.headerSubtitle}>
-              {total} total
+              {total} {searchInput.trim() || statusFilter !== "all" ? "matching tickets" : "tickets"}
               {role === "scanner" ? " · scanner view" : ""}
             </Text>
           )}
@@ -348,7 +372,10 @@ export default function EventAttendeesScreen() {
                   hitSlop={12}
                   style={[
                     styles.exportBtn,
-                    { borderColor: "rgba(63,220,255,0.32)", backgroundColor: "rgba(63,220,255,0.12)" },
+                    {
+                      borderColor: "rgba(63,220,255,0.32)",
+                      backgroundColor: "rgba(63,220,255,0.12)",
+                    },
                   ]}
                   accessibilityLabel="Comp tickets"
                 >
@@ -385,6 +412,7 @@ export default function EventAttendeesScreen() {
         </View>
       </View>
 
+      {canRefund ? <CompCancelModal eventId={eventId} /> : null}
       <BroadcastModal
         visible={broadcastOpen}
         onClose={() => setBroadcastOpen(false)}
@@ -422,12 +450,15 @@ export default function EventAttendeesScreen() {
         <TextInput
           value={searchInput}
           onChangeText={setSearchInput}
-          placeholder="Search ticket id"
+          placeholder="Search name, @username, or ticket ID"
+          maxLength={200}
+          accessibilityLabel="Search attendees by name, username, or ticket ID"
           placeholderTextColor="rgba(255,255,255,0.35)"
           autoCapitalize="none"
           autoCorrect={false}
           style={styles.searchInput}
         />
+        {searchInput ? <Pressable accessibilityLabel="Clear attendee search" onPress={() => setSearchInput("")}><XIcon size={16} color="#fff" /></Pressable> : null}
       </View>
 
       <View style={styles.chipsWrap}>
@@ -437,13 +468,11 @@ export default function EventAttendeesScreen() {
             <Pressable
               key={f.value}
               onPress={() => setStatusFilter(f.value)}
+              accessibilityState={{ selected }}
               style={[styles.chip, selected && styles.chipSelected]}
             >
               <Text
-                style={[
-                  styles.chipText,
-                  selected && styles.chipTextSelected,
-                ]}
+                style={[styles.chipText, selected && styles.chipTextSelected]}
               >
                 {f.label}
               </Text>
@@ -452,15 +481,16 @@ export default function EventAttendeesScreen() {
         })}
       </View>
 
-      {query.isLoading ? (
+      {pendingSearch || query.isLoading || !accountKey ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator color="rgba(255,255,255,0.4)" />
         </View>
       ) : query.isError ? (
         <View style={styles.loadingWrap}>
           <Text style={styles.dim}>
-            Couldn't load attendees. Pull to retry.
+            Couldn't load attendees. Try again.
           </Text>
+          <Pressable onPress={() => query.refetch()} accessibilityLabel="Retry attendees"><Text style={styles.dim}>Retry</Text></Pressable>
         </View>
       ) : flat.length === 0 ? (
         <View style={styles.loadingWrap}>
@@ -497,9 +527,7 @@ export default function EventAttendeesScreen() {
       {selecting && (
         <View style={styles.selectionBar}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.selectionCount}>
-              {selected.size} selected
-            </Text>
+            <Text style={styles.selectionCount}>{selectedIds.length} selected</Text>
             {selectedTotalCents > 0 && (
               <Text style={styles.selectionSub}>
                 ~${(selectedTotalCents / 100).toFixed(2)} to refund
@@ -514,11 +542,11 @@ export default function EventAttendeesScreen() {
             <Text style={styles.selectionCancelText}>Cancel</Text>
           </Pressable>
           <Pressable
-            onPress={() => setRefundOpen(true)}
-            disabled={selected.size === 0}
+            onPress={() => { if (selectedIds.length > 0) setRefundOpen(true); }}
+            disabled={selectedIds.length === 0}
             style={[
               styles.selectionRefund,
-              selected.size === 0 && { opacity: 0.4 },
+              selectedIds.length === 0 && { opacity: 0.4 },
             ]}
           >
             <RotateCcw size={14} color="#fff" />

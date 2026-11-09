@@ -427,7 +427,7 @@ test('claim-comp-ticket: an admitted adult can receive their ticket before socia
   const claims = [];
   h.fake.db.rpc = async (name, args) => {
     if (name === 'is_checkout_restricted') return { data: false, error: null };
-    assert.equal(name, 'claim_comp_ticket');
+    assert.equal(name, 'claim_comp_ticket_with_receipt');
     claims.push(args);
     return { data: { ok: true, ticket_id: 'ticket-1', event_id: 1, already_claimed: false }, error: null };
   };
@@ -445,7 +445,7 @@ for (const who of ['buyer', 'minor']) {
     const h = harness();
     let claims = 0;
     h.fake.db.rpc = async name => {
-      if (name === 'claim_comp_ticket') claims++;
+      if (name === 'claim_comp_ticket_with_receipt') claims++;
       return { data: false, error: null };
     };
     const res = await h.call('claim-comp-ticket', PERSONAS[who].authId, {

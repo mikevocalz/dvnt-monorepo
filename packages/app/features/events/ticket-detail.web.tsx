@@ -1,4 +1,5 @@
 "use client";
+import { defaultTicketTypeName, ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 
 /**
  * Ticket Detail — web (port of native `app/(protected)/ticket/[id].tsx`).
@@ -59,11 +60,13 @@ import { Dialog } from "@dvnt/ui";
 import {
   useTicketRoute,
   useTicketViewerId,
+  useTicketViewerAuthId,
+  useTicketTypes,
 } from "@dvnt/app/lib/hooks/use-tickets";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { getTicketSelfServiceAction, ticketSelfServiceCopy } from "@dvnt/app/lib/tickets/self-service-action";
 import { formatEventClock, formatEventDay } from "@dvnt/app/lib/events/event-time";
-import { ticketTypesApi } from "@dvnt/app/lib/api/ticket-types";
+import { resolveTicketDetailPurchases, ticketServicePurchaseHref } from "@dvnt/app/lib/tickets/ticket-detail-purchases";
 import { addonsApi, type OrderAddonRecord } from "@dvnt/app/lib/api/addons";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import {
@@ -141,7 +144,7 @@ function dbToTicket(rec: TicketRecord): Ticket {
         : (rec.purchase_amount_cents ?? 0) === 0
           ? "free"
           : "ga") as TicketTierLevel,
-    tierName: rec.ticket_type_name || "General Admission",
+    tierName: rec.ticket_type_name || defaultTicketTypeName(rec.category),
     eventTitle: rec.event_title || "",
     eventDate: rec.event_date || "",
     eventTz: rec.event_tz ?? null,
@@ -171,6 +174,7 @@ export function TicketDetailScreen() {
   const routeId = Array.isArray(rawId) ? (rawId[0] ?? "") : (rawId ?? "");
 
   const viewerId = useTicketViewerId();
+  const viewerAuthId = useTicketViewerAuthId();
   /**
    * Same identity rule as native: a uuid names one credential, an integer is an
    * event id that resolves to the group. `useMyTicketForEvent` returned
@@ -188,9 +192,11 @@ export function TicketDetailScreen() {
   const dbTicket =
     route.resolution.kind === "ticket" ? route.resolution.ticket : undefined;
   const storeTicket = useTicketStore((s) => s.getTicketByEventId(routeId));
-  const ticket: Ticket | undefined = dbTicket
-    ? dbToTicket(dbTicket)
-    : storeTicket;
+  const ticket: Ticket | undefined = route.resolution.kind === "group"
+    ? undefined
+    : dbTicket
+      ? dbToTicket(dbTicket)
+      : storeTicket;
   // Door time in the venue's zone with its abbreviation ("8:00 PM PDT").
   const ticketZone = {
     eventTz: ticket?.eventTz ?? null,
@@ -270,26 +276,12 @@ export function TicketDetailScreen() {
     };
   }, [qrToken, setQrDataUrl]);
 
-  // ── Upgrade tiers (existence drives the upgrade card) ──
-  const { data: upgradeTiers = [] } = useQuery({
-    queryKey: [
-      "ticket-upgrade-tiers",
-      dbTicket?.event_id ?? "",
-      dbTicket?.purchase_amount_cents ?? 0,
-    ],
-    enabled: !!dbTicket?.event_id && dbTicket?.status === "active",
-    staleTime: 30 * 1000,
-    queryFn: async () => {
-      if (!dbTicket?.event_id) return [] as any[];
-      const tiers = await ticketTypesApi.getByEvent(String(dbTicket.event_id));
-      const paidCents = dbTicket.purchase_amount_cents ?? 0;
-      return tiers.filter(
-        (t: any) =>
-          t.is_active !== false &&
-          (t.price_cents ?? 0) > paidCents &&
-          t.id !== dbTicket.ticket_type_id,
-      );
-    },
+  // Services are separate purchases, never price-based admission upgrades.
+  const { data: purchaseTiers = [] } = useTicketTypes(eventId);
+  const { upgrades: upgradeTiers, services: serviceTiers, canBuyMore } = resolveTicketDetailPurchases({
+    ticket: dbTicket, tiers: purchaseTiers,
+    tickets: route.resolution.kind === "ticket" ? route.resolution.group : [],
+    viewerId, viewerAuthId,
   });
 
   // ── Owned add-ons (WS-3) — order_addons via RLS owner read. Holder-side
@@ -572,6 +564,53 @@ export function TicketDetailScreen() {
         <div className="mx-auto w-full max-w-xl px-4 py-6">
           <div className="h-64 animate-pulse rounded-3xl border border-white/8 bg-white/4" />
           <div className="mt-6 h-72 animate-pulse rounded-3xl border border-white/8 bg-white/4" />
+        </div>
+      </div>
+    );
+  }
+
+  // Event-id links (notifications, push and calendar) can name several
+  // owned passes. Make the viewer choose a credential, just like native.
+  // This must precede the missing-ticket branch and any legacy store pass.
+  if (route.resolution.kind === "group") {
+    const passes = route.resolution.group;
+    return (
+      <div className="min-h-[100dvh] bg-[#06070d] text-white">
+        <div className="sticky top-0 z-20 flex items-center gap-3 border-b border-white/8 bg-[#06070d]/85 px-4 py-3 backdrop-blur">
+          <button onClick={() => router.back()} aria-label="Back" className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 active:scale-95">
+            <ArrowLeft size={18} color="#fff" />
+          </button>
+          <h1 className="flex-1 text-[17px] font-semibold">Your tickets</h1>
+        </div>
+        <div className="mx-auto w-full max-w-xl px-5 py-8">
+          <h2 className="text-2xl font-bold">{passes[0].event_title || "Your passes"}</h2>
+          <p className="mt-2 text-sm leading-relaxed text-white/60">
+            You have {passes.length} passes for this event. Choose the one to show at the door or transfer.
+          </p>
+          <div className="mt-6 space-y-3">
+            {passes.map((pass, index) => {
+              const label = pass.category === "coat_check" ? "Coat check" : pass.ticket_type_name || ticketCategoryLabel(pass.category);
+              const status = pass.status === "active" ? "Ready to scan"
+                : pass.status === "scanned" ? "Already used"
+                : pass.status === "transfer_pending" ? "Transfer pending"
+                : pass.status === "void" ? "Cancelled"
+                : pass.status === "refunded" ? "Refunded" : pass.status;
+              return (
+                <button key={pass.id} onClick={() => router.replace(`/feed/ticket/${pass.id}`)}
+                  aria-label={`Ticket ${index + 1} of ${passes.length}: ${label}, ${status}`}
+                  className="flex w-full items-center gap-4 rounded-2xl border border-white/10 bg-white/4 p-4 text-left transition-colors hover:bg-white/8 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400">
+                  <TicketIcon size={24} className="shrink-0 text-cyan-400" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-white/50">Ticket {index + 1} of {passes.length}</p>
+                    <p className="mt-1 font-semibold">{label}</p>
+                    {pass.attendee_name && <p className="mt-1 break-words text-sm text-white/70">{pass.attendee_name}</p>}
+                    <p className="mt-1 text-sm text-white/60">{status}</p>
+                  </div>
+                  <ChevronRight size={18} className="shrink-0 text-white/40" />
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     );
@@ -1036,8 +1075,23 @@ export function TicketDetailScreen() {
             })()
           : null}
 
+        {/* A service keeps the existing admission and uses the normal checkout. */}
+        {serviceTiers.map((tier) => (
+          <button
+            key={tier.id}
+            type="button"
+            data-testid={`ticket-service-${tier.id}`}
+            onClick={() => router.push(ticketServicePurchaseHref(eventId, tier.id, "web"))}
+            className="mb-3 flex w-full items-center justify-between gap-3 rounded-2xl border border-pink-400/30 bg-pink-400/10 px-4 py-3.5 text-left"
+          >
+            <span><span className="block text-sm font-bold">Buy {tier.name}</span>
+              <span className="mt-0.5 block text-xs text-white/55">Separate service · Your admission stays unchanged</span></span>
+            <ChevronRight size={18} color="rgb(255,109,193)" />
+          </button>
+        ))}
+
         {/* ── 2.7 ADD-ONS — link to event detail ── */}
-        {isActive && eventId ? (
+        {canBuyMore && eventId ? (
           <button
             onClick={() => router.push(`/feed/events/${eventId}`)}
             aria-label="Add more for this event"

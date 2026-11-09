@@ -1,5 +1,7 @@
 "use client";
 
+import { consumeReviewReturn } from "@dvnt/app/lib/auth/review-return";
+
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, CheckCircle2, ImagePlus, LoaderCircle } from "lucide-react";
@@ -14,6 +16,10 @@ export default function NewMemberPhotoPage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const updateUser = useAuthStore((s) => s.updateUser);
+  const active = useRef(true);
+  const currentUserId = useRef(user?.id);
+  currentUserId.current = user?.id;
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -26,9 +32,9 @@ export default function NewMemberPhotoPage() {
     if (!user?.id) return;
     let cancelled = false;
     void fetchNewMemberProgress().then((status) => {
-      if (cancelled) return;
+      if (cancelled || !active.current || currentUserId.current !== user.id) return;
       if (status.step === "first_post") router.replace("/feed/create");
-      if (status.step === "complete" || status.step === "not_required") router.replace("/feed");
+      if (status.step === "complete" || status.step === "not_required") router.replace(consumeReviewReturn(user.id) || "/feed");
     }).catch(() => { /* user can still select/upload and retry */ });
     return () => { cancelled = true; };
   }, [user?.id, router]);
@@ -46,29 +52,35 @@ export default function NewMemberPhotoPage() {
 
   const savePhoto = async () => {
     if (!preview || submitting) return;
+    const savingUserId = user?.id;
+    const stillCurrent = () => active.current && currentUserId.current === savingUserId;
     setSubmitting(true);
     setError(null);
     try {
       // Reuse the same avatar upload pipeline as the regular Edit Profile page.
       const upload = await uploadSingle(preview);
+      if (!stillCurrent()) return;
       if (!upload.success || !upload.url)
         throw new Error(upload.error || "Photo upload failed. Please try again.");
       await updateProfile({ avatarUrl: upload.url });
+      if (!stillCurrent()) return;
       invalidateProfileCompletion(user);
       // The upload is NOT a completed step until both the saved media row and
       // the real avatar URL can be read back from the server on this account.
       const status = await fetchNewMemberProgress();
+      if (!stillCurrent()) return;
       if (!status.hasPhoto || status.step === "photo")
         throw new Error("Your photo hasn't finished saving. Please retry before continuing.");
       try {
         const latest = await syncAuthUser();
-        if (latest?.avatar) updateUser({ avatar: latest.avatar });
+        if (stillCurrent() && latest?.avatar) updateUser({ avatar: latest.avatar });
       } catch { /* progress was already proven by the status endpoint */ }
-      router.replace(status.step === "first_post" ? "/feed/create" : "/feed");
+      if (!stillCurrent()) return;
+      router.replace(status.step === "first_post" ? "/feed/create" : consumeReviewReturn(user?.id) || "/feed");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save your photo. Please try again.");
+      if (stillCurrent()) setError(err instanceof Error ? err.message : "Couldn't save your photo. Please try again.");
     } finally {
-      setSubmitting(false);
+      if (stillCurrent()) setSubmitting(false);
     }
   };
 

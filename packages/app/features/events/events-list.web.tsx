@@ -44,6 +44,7 @@ import {
   usePromotedEventIds,
 } from "@dvnt/app/lib/hooks/use-promotions";
 import { useEventsScreenStore } from "@dvnt/app/lib/stores/events-screen-store";
+import { MapSharingConsent } from "@dvnt/app/features/events/ui/map-sharing-consent";
 // Resolves to `use-responsive-grid.web.ts` (webpack `.web.ts` extension order),
 // which reads the viewport with a `resize` listener instead of react-native's
 // `useWindowDimensions`. Same `resolveResponsiveGrid` maths as native.
@@ -289,6 +290,8 @@ export function EventsListScreen() {
 
   return (
     <div className="min-h-[100dvh] bg-[#02030A] text-white">
+      {/* Prompt on Events entry; visiting the map is not required. */}
+      {isAuthenticated ? <MapSharingConsent active promptOnly /> : null}
       {/* max-w-3xl (768px) minus px-4 left the list container at exactly
           736px, so the grid could never reach even a 2-column breakpoint —
           a media wall inside a reading column. Search hit this same wall and

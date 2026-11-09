@@ -1,6 +1,6 @@
 // Synthetic ReactDOM regressions against the actual EventDetailScreen module.
 // No network, checkout requests, holds, orders, or browser credentials are used.
-// Dependencies: typescript, react, react-dom, zustand, jsdom (normal dev deps or NODE_PATH).
+// Dependencies: typescript, react, react-dom, zustand, jsdom, lucide-react (normal dev deps or NODE_PATH).
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -29,7 +29,7 @@ function load(file) {
   cache.set(file, exports);
   const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { fileName: file, compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, jsxImportSource: 'react', target: ts.ScriptTarget.ES2022 } });
   assert.equal((compiled.diagnostics || []).length, 0);
-  vm.runInNewContext(compiled.outputText, { exports, require: (name) => name.startsWith('.') ? load(path.resolve(path.dirname(file), name)) : require(name), console, Date, Set }, { filename: file });
+  vm.runInNewContext(compiled.outputText, { exports, require: (name) => name.startsWith('.') ? load(path.resolve(path.dirname(file), name)) : require(name), console, Date, Set, URL, URLSearchParams }, { filename: file });
   return exports;
 }
 const ui = load(path.join(ROOT, 'packages/app/lib/stores/event-detail-ui-store.ts')).useEventDetailUiStore;
@@ -47,9 +47,10 @@ for (const statement of ast.statements) {
   if (statement.importClause?.name) entry.default = Empty;
 }
 const app = (suffix, values) => Object.assign(mocks['@dvnt/app/' + suffix], values);
+mocks['./ui/EventLynkCard.web'] = load(path.join(ROOT, 'packages/app/features/events/ui/EventLynkCard.web.tsx'));
 mocks.react = React;
 mocks['react/jsx-runtime'] = require('react/jsx-runtime');
-mocks['solito/navigation'] = { useParams: () => scenario.params, usePathname: () => '/public/events/42', useRouter: () => ({ push: (url) => scenario.navigation.push(url), back: noop }) };
+mocks['solito/navigation'] = { useSearchParams: () => null, useParams: () => scenario.params, usePathname: () => '/public/events/42', useRouter: () => ({ push: (url) => scenario.navigation.push(url), back: noop }) };
 mocks['@tanstack/react-query'] = {
   useQuery: ({ queryKey, enabled }) => {
     if (queryKey[1] === 'share-token') return scenario.tokenQuery;
@@ -65,6 +66,7 @@ app('lib/hooks/use-events', {
   useToggleEventLike: () => ({ mutate: noop }),
   useRsvpEvent: () => ({ isPending: false, mutate: (value) => scenario.memberRsvps.push(value) }),
 });
+app('lib/hooks/use-ticket-sale-clock', { useTicketSaleClock: () => scenario.now ?? Date.now() });
 app('lib/hooks/use-event-attendee-privacy', { useEventAttendeePrivacy: (_id, event) => attendeePrivacy.canShowEventAttendees(event) });
 app('components/event/GoingAccordion.web', { GoingAccordion: ({ attendees }) => React.createElement('div', null, attendees.map(a => a.username).join(', ')) });
 app('lib/hooks/use-event-title-route', { useEventTitleRoute: () => ({ ...scenario.indexQuery, routingIndex: !scenario.indexQuery.isError && !scenario.indexQuery.isFetching ? scenario.indexQuery.data : undefined }) });
@@ -467,11 +469,90 @@ test('event Lynk detail disables ended rooms and pending entry and exposes waiti
   scenario.lynkHost = {view:{state:'ended',count:0,waiting:[]},isTerminal:true};
   await render();
   assert.equal(document.querySelector('[data-lynk-room]').disabled,true);
-  assert.equal(button('Start Lynk'),undefined);
+  assert.equal(button('Start event Lynk'),undefined);
+  assert.match(document.querySelector('[data-lynk-room]').textContent,/This Lynk has ended/);
   scenario.lynkHost = {isError:true,refetch:()=>scenario.retries.push('lynk')};
   scenario.lynkEntry = {isOpening:true,open:noop};
   await render();
   assert.equal(document.querySelector('[data-lynk-room]').disabled,true);
-  const retry=[...document.querySelectorAll('button')].find(b=>b.textContent==='Try again');
+  const retry=button('Retry waiting room');
+  assert.ok(retry, 'real event card exposes waiting-room retry');
   await click(retry);assert.deepEqual(scenario.retries,['lynk']);
+});
+
+
+test('signed-out event Lynk CTA returns to the linked room without invoking entry', async () => {
+  scenario.eventQuery = query({...fixtureEvent,lynkRoomId:'fixture-room'});
+  scenario.lynkEntry = {isOpening:false,open:()=>{throw new Error('signed-out entry must not execute')}};
+  await render();
+  await click(button('Sign in to join'));
+  assert.equal(scenario.navigation.length,1);
+  assert.match(decodeURIComponent(scenario.navigation[0]),/\/feed\/sneaky-lynk\/room\/fixture-room/);
+});
+
+test('delayed admission and service tiers are absent, while sold-out and ended tiers remain', async () => {
+  const later = { ...paid, id: 'later', name: 'Delayed admission', sale_start: '2099-01-01T00:00:00Z' };
+  const service = { ...later, id: 'coat', name: 'Delayed coat check', category: 'service' };
+  const ended = { ...paid, id: 'ended', name: 'Ended admission', sale_end: '2000-01-01T00:00:00Z' };
+  const sold = { ...paid, id: 'sold', name: 'Sold-out admission', quantity_sold: 20 };
+  scenario.tiersQuery = query([free, later, service, ended, sold]);
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [free, later, service, ended, sold] });
+  await render();
+  assert.equal(document.querySelector('[data-testid="ticket-tier-later"]'), null);
+  assert.equal(document.querySelector('[data-testid="ticket-tier-coat"]'), null);
+  assert.ok(document.querySelector('[data-testid="ticket-tier-ended"]'));
+  assert.match(document.querySelector('[data-testid="ticket-tier-sold"]').textContent, /Sold out/);
+  assertNoPurchase();
+});
+
+test('fallback payload tiers respect delayed dates while the live query is pending', async () => {
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [{ ...paid, sale_start: '2099-01-01T00:00:00Z' }] });
+  scenario.tiersQuery = query(undefined, { isPending: true, isFetching: true });
+  await render();
+  assert.equal(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`), null);
+  assertNoPurchase();
+});
+
+test('live schedule overrides stale payload and delayed rows appear at the opening boundary', async () => {
+  const opens = Date.now() + 60_000;
+  const later = { ...paid, sale_start: new Date(opens).toISOString() };
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [paid] });
+  scenario.tiersQuery = query([later]);
+  scenario.now = opens - 1;
+  await render();
+  assert.equal(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`), null);
+  scenario.now = opens;
+  await render();
+  assert.ok(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`));
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [later] });
+  scenario.tiersQuery = query([{ ...paid, sale_start: null }]);
+  scenario.now = opens - 1;
+  await render();
+  assert.ok(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`));
+  assertNoPurchase();
+});
+
+test('inactive screenshot tiers disappear while active RSVP stays available', async () => {
+  const rows = [free,
+    { ...paid, id: 'coat-one', name: 'Coat Check', category: 'service', price_cents: 1000, is_active: false, sale_start: null },
+    { ...paid, id: 'coat-two', name: 'Coat Check', category: 'service', price_cents: 1000, is_active: false, sale_start: null },
+    { ...paid, id: 'before-midnight', name: 'Before 12AM Admission', price_cents: 1500, is_active: false, sale_start: null },
+    { ...paid, id: 'general', name: 'General Admission', price_cents: 3000, is_active: false, sale_start: null }];
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: rows.map(row => ({ ...row, is_active: true })) });
+  scenario.tiersQuery = query(rows);
+  await render();
+  for (const row of rows.slice(1)) assert.equal(document.querySelector(`[data-testid="ticket-tier-${row.id}"]`), null);
+  assert.ok(document.querySelector(`[data-testid="ticket-tier-${free.id}"]`));
+  assertNoPurchase();
+});
+
+test('inactive payload stays hidden during refresh and live reactivation reveals it', async () => {
+  scenario.eventQuery = query({ ...fixtureEvent, ticketTiers: [{ ...paid, is_active: false }] });
+  scenario.tiersQuery = query(undefined, { isPending: true, isFetching: true });
+  await render();
+  assert.equal(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`), null);
+  scenario.tiersQuery = query([{ ...paid, is_active: true }]);
+  await render();
+  assert.ok(document.querySelector(`[data-testid="ticket-tier-${paid.id}"]`));
+  assertNoPurchase();
 });

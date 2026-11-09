@@ -4,8 +4,8 @@
  * Long-press a participant tile → Mute / Make Co-Host / Remove
  */
 
-import React from "react";
-import { View, Text, Pressable, Modal, StyleSheet } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Alert, View, Text, Pressable, Modal, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Mic, MicOff, Crown, UserMinus, X, EyeOff } from "lucide-react-native";
 import { Avatar } from "@dvnt/app/components/ui/avatar";
@@ -23,11 +23,11 @@ interface ParticipantActionsProps {
     role: string;
     isMicOn: boolean;
   } | null;
-  onMute: (userId: string) => void;
-  onUnmute?: (userId: string) => void;
-  onMakeCoHost: (userId: string) => void;
-  onDemote: (userId: string) => void;
-  onRemove: (userId: string) => void;
+  onMute: (userId: string) => void | boolean | Promise<void | boolean>;
+  onUnmute?: (userId: string) => void | boolean | Promise<void | boolean>;
+  onMakeCoHost: (userId: string) => void | boolean | Promise<void | boolean>;
+  onDemote: (userId: string) => void | boolean | Promise<void | boolean>;
+  onRemove: (userId: string) => void | boolean | Promise<void | boolean>;
   onClose: () => void;
 }
 
@@ -44,6 +44,21 @@ export function ParticipantActions({
   onClose,
 }: ParticipantActionsProps) {
   const insets = useSafeAreaInsets();
+  const latest = useRef({ visible, actorRole, actorId, participant, onRemove, onClose });
+  latest.current = { visible, actorRole, actorId, participant, onRemove, onClose };
+  const selection = JSON.stringify([visible, actorRole, actorId, participant?.userId, participant?.role]);
+  const selectionRef = useRef({ key: selection, version: 0 });
+  const inFlight = useRef(new Set<string>());
+  const [pending, setPending] = useState<Set<string>>(() => new Set());
+  const [error, setError] = useState<{ key: string; message: string } | null>(null);
+  if (selectionRef.current.key !== selection) {
+    selectionRef.current = { key: selection, version: selectionRef.current.version + 1 };
+  }
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; selectionRef.current.version += 1; };
+  }, []);
 
   if (!participant) return null;
 
@@ -53,6 +68,24 @@ export function ParticipantActions({
   const isCoHost = role === "co-host";
   const isAnon = user.isAnonymous;
   const label = getSneakyUserLabel(user);
+  const actionKey = JSON.stringify([actorId, userId]);
+  const busy = pending.has(actionKey);
+  const run = async (action: () => void | boolean | Promise<void | boolean>) => {
+    if (!mounted.current || inFlight.current.has(actionKey)) return;
+    const version = selectionRef.current.version;
+    inFlight.current.add(actionKey);
+    setPending(new Set(inFlight.current));
+    setError(null);
+    try {
+      const result = await action();
+      if (result !== false && mounted.current && latest.current.visible && selectionRef.current.version === version) latest.current.onClose();
+    } catch {
+      if (mounted.current && selectionRef.current.version === version) setError({ key: actionKey, message: "Couldn't update this Lynk. Check your connection and try again." });
+    } finally {
+      inFlight.current.delete(actionKey);
+      setPending(new Set(inFlight.current));
+    }
+  };
 
   return (
     <Modal
@@ -102,15 +135,18 @@ export function ParticipantActions({
 
           <View style={styles.divider} />
 
+          {busy ? <Text accessibilityLiveRegion="polite" style={styles.actionDesc}>Updating participant…</Text> : null}
+          {error?.key === actionKey ? <Text accessibilityRole="alert" style={[styles.actionDesc, { color: "#FCA5A5" }]}>{error.message}</Text> : null}
           {/* Actions */}
           {isMicOn ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Mute ${label}`}
-              style={styles.action}
+              disabled={busy}
+              accessibilityState={{ disabled: busy, busy }}
+              style={[styles.action, busy && { opacity: 0.4 }]}
               onPress={() => {
-                onMute(userId);
-                onClose();
+                void run(() => onMute(userId));
               }}
             >
               <View
@@ -127,10 +163,11 @@ export function ParticipantActions({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Let ${label} unmute`}
-              style={styles.action}
+              disabled={busy}
+              accessibilityState={{ disabled: busy, busy }}
+              style={[styles.action, busy && { opacity: 0.4 }]}
               onPress={() => {
-                onUnmute(userId);
-                onClose();
+                void run(() => onUnmute(userId));
               }}
             >
               <View
@@ -151,10 +188,11 @@ export function ParticipantActions({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Remove co-host from ${label}`}
-              style={styles.action}
+              disabled={busy}
+              accessibilityState={{ disabled: busy, busy }}
+              style={[styles.action, busy && { opacity: 0.4 }]}
               onPress={() => {
-                onDemote(userId);
-                onClose();
+                void run(() => onDemote(userId));
               }}
             >
               <View
@@ -174,10 +212,11 @@ export function ParticipantActions({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Make ${label} a co-host`}
-              style={styles.action}
+              disabled={busy}
+              accessibilityState={{ disabled: busy, busy }}
+              style={[styles.action, busy && { opacity: 0.4 }]}
               onPress={() => {
-                onMakeCoHost(userId);
-                onClose();
+                void run(() => onMakeCoHost(userId));
               }}
             >
               <View
@@ -198,10 +237,24 @@ export function ParticipantActions({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Remove ${label} from the room`}
-              style={styles.action}
+              disabled={busy}
+              accessibilityState={{ disabled: busy, busy }}
+              style={[styles.action, busy && { opacity: 0.4 }]}
               onPress={() => {
-                onRemove(userId);
-                onClose();
+                const version = selectionRef.current.version;
+                let consumed = false;
+                Alert.alert(`Remove ${label}?`, "They will be removed from this Lynk.", [
+                  { text: "Cancel", style: "cancel", onPress: () => { consumed = true; } },
+                  { text: "Remove", style: "destructive", onPress: () => {
+                    const current = latest.current;
+                    if (consumed || !mounted.current || !current.visible || selectionRef.current.version !== version || current.actorId !== actorId ||
+                      current.participant?.userId !== userId || !participantModeration(
+                        current.actorRole, current.actorId, userId, current.participant.role,
+                      ).remove) return;
+                    consumed = true;
+                    void run(() => current.onRemove(userId));
+                  } },
+                ], { cancelable: true, onDismiss: () => { consumed = true; } });
               }}
             >
               <View

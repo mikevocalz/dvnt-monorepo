@@ -34,7 +34,7 @@ function fixture(options={}){
  const writes=[],stripe=[],emails=[],usage=[],logs=[],profileCalls=[],qr=[];let serial=0;
  const db={rpc:async(fn,args)=>{
   writes.push({table:'rpc',fn,args});
-  if(fn==='ticket_hold_create_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
+  if(fn==='ticket_purchase_hold_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
   if(fn==='guest_free_checkout_atomic'){
    if(options.atomicError)return{data:null,error:options.atomicError};
    if(options.atomicResult)return{data:options.atomicResult,error:null};

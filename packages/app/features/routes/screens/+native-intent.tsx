@@ -4,13 +4,12 @@
  * We parse through the Link Engine and return the correct Expo Router path.
  */
 
-import { parseIncomingUrl } from "@dvnt/app/lib/deep-linking/link-engine";
+import { parseIncomingUrl, resolveNavigationTarget, resolveGuestPublicTarget, isLynkRoomLink, deepLinkAccountKey, trackDeepLinkAccount } from "@dvnt/app/lib/deep-linking/link-engine";
 import { useDeepLinkStore } from "@dvnt/app/lib/stores/deep-link-store";
-import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 
-const SHARE_INTENT_MARKERS = /dataUrl=|dvntShareKey/i;
+const SHARE_INTENT_MARKERS = /^dvnt:\/\/(?:dataUrl=|dvntShareKey(?:[/?#]|$))/i;
 const DEV_CLIENT_BOOTSTRAP_MARKERS =
-  /^exp\+dvnt:\/\/expo-development-client\b|^dvnt:\/\/expo-development-client\b|expo-development-client\/?\?url=/i;
+  /^(?:(?:exp\+dvnt|dvnt):\/\/|\/?)expo-development-client(?:[/?#]|$)/i;
 
 export function redirectSystemPath({
   path,
@@ -19,7 +18,7 @@ export function redirectSystemPath({
   path: string;
   initial: boolean;
 }) {
-  console.log("[NativeIntent] Incoming:", path, "initial:", initial);
+  console.log("[NativeIntent] Incoming link; initial:", initial);
 
   // Skip empty or root paths
   if (!path || path === "/" || path === "") return "/";
@@ -46,37 +45,32 @@ export function redirectSystemPath({
     return "/";
   }
 
-  // Replay protection
+  if (!resolveNavigationTarget(parsed).valid) return "/";
+  trackDeepLinkAccount();
+
+  // Expo expects a destination, not a skip sentinel. Returning "/" for a
+  // duplicate room event would send a member who just opened it to the feed.
   const store = useDeepLinkStore.getState();
   if (store.isReplay(path)) {
     console.log("[NativeIntent] Replay detected, skipping");
-    return "/";
+    if (!deepLinkAccountKey()) {
+      const guestTarget = resolveGuestPublicTarget(parsed);
+      if (guestTarget) return guestTarget.path;
+      if (parsed.requiresAuth) return "/(auth)/login";
+    }
+    return parsed.routerPath;
   }
   store.markHandled(path);
 
   // Auth gating: if route requires auth and user isn't authenticated, save as pending
-  const { isAuthenticated } = useAuthStore.getState();
+  const isAuthenticated = !!deepLinkAccountKey();
   if (!isAuthenticated) {
-    const normalizedPath = parsed.path.toLowerCase();
-    const userProfileMatch =
-      normalizedPath.match(/^\/u\/([^/?#]+)/) ||
-      normalizedPath.match(/^\/profile\/([^/?#]+)/);
-
-    if (userProfileMatch?.[1]) {
-      const username = decodeURIComponent(userProfileMatch[1]);
-      return `/(public)/profile/${username}`;
-    }
-
-    if (normalizedPath === "/search") {
-      return "/(public)/search";
-    }
-
-    if (normalizedPath === "/activity") {
-      return "/(public)/(tabs)/activity";
-    }
-
-    if (normalizedPath === "/create") {
-      return "/(public)/(tabs)/create";
+    const guestTarget = resolveGuestPublicTarget(parsed);
+    if (guestTarget) {
+      // An intentional newer public destination replaces the old room intent.
+      // Authentication routes are not public content and retain that intent.
+      store.setPendingLink(null);
+      return guestTarget.path;
     }
   }
 
@@ -86,9 +80,12 @@ export function redirectSystemPath({
       parsed.path,
     );
     store.setPendingLink(parsed);
-    return "/"; // Let the auth guard show login
+    return "/(auth)/login";
   }
 
-  console.log("[NativeIntent] Routing to:", parsed.routerPath);
+  if (parsed.requiresAuth) {
+    store.setPendingLink(isLynkRoomLink(parsed) ? parsed : null, deepLinkAccountKey());
+  }
+  console.log("[NativeIntent] Routing to:", parsed.routerPath.split("?")[0]);
   return parsed.routerPath;
 }

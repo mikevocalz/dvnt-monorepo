@@ -5,6 +5,7 @@
  * email speaks one visual language.
  */
 
+import { darkSurface, protectText } from "./dark-mode.ts";
 import { COLORS, FONTS, GRADIENTS, LOGO, SPACE, esc, tierTheme } from "./tokens.ts";
 
 /** H1 — white display heading on dark. `gradient` opt applies a clip-on-text
@@ -18,7 +19,7 @@ export function heading(
   const grad = opts.gradient
     ? `background-image:${GRADIENTS.brand.css};-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;`
     : "";
-  return `<h1 style="margin:0 0 12px;font-family:${FONTS.display};font-size:${size}px;line-height:1.2;font-weight:700;color:${COLORS.text};text-align:${align};${grad}">${text}</h1>`;
+  return `<h1 style="margin:0 0 12px;font-family:${FONTS.display};font-size:${size}px;line-height:1.2;font-weight:700;color:${COLORS.text};text-align:${align};${grad}">${protectText(text)}</h1>`;
 }
 
 /** Body paragraph. */
@@ -30,7 +31,7 @@ export function paragraph(
   const size = opts.size ?? 16;
   const align = opts.align ?? "left";
   const margin = opts.margin ?? "0 0 16px";
-  return `<p style="margin:${margin};font-family:${FONTS.body};font-size:${size}px;line-height:1.6;color:${color};text-align:${align}">${html}</p>`;
+  return `<p style="margin:${margin};font-family:${FONTS.body};font-size:${size}px;line-height:1.6;color:${color};text-align:${align}">${protectText(html)}</p>`;
 }
 
 /** Hairline divider. */
@@ -45,7 +46,7 @@ export function card(inner: string, opts: { accent?: string } = {}): string {
     : `border:1px solid ${COLORS.hairline};`;
   return [
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px">`,
-    `<tr><td style="background:${COLORS.panelInset};border-radius:${SPACE.panelRadius}px;${accentBar}padding:20px">`,
+    `<tr><td bgcolor="${COLORS.panelInset}" style="${darkSurface(COLORS.panelInset)}border-radius:${SPACE.panelRadius}px;${accentBar}padding:20px">`,
     inner,
     `</td></tr></table>`,
   ].join("");
@@ -78,7 +79,7 @@ export function button(
     `</v:roundrect>`,
     `<![endif]-->`,
     `<!--[if !mso]><!-->`,
-    `<a href="${safeHref}" style="display:inline-block;min-width:${w}px;background-color:${g.solid};background-image:${g.css};color:#ffffff;text-decoration:none;font-family:${FONTS.body};font-size:16px;font-weight:700;line-height:50px;text-align:center;border-radius:12px;">${label}</a>`,
+    `<a href="${safeHref}" style="display:inline-block;width:${w}px;max-width:100%;background-color:${g.solid};background-image:${g.css};color:#ffffff;text-decoration:none;font-family:${FONTS.body};font-size:16px;font-weight:700;line-height:50px;text-align:center;border-radius:12px;">${protectText(label)}</a>`,
     `<!--<![endif]-->`,
     `</td></tr></table>`,
   ].join("");
@@ -88,8 +89,8 @@ export function button(
 export function codeBlock(code: string): string {
   return [
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 16px"><tr>`,
-    `<td align="center" style="background:${COLORS.panelInset};border:1px solid ${COLORS.hairline};border-radius:${SPACE.panelRadius}px;padding:24px 16px">`,
-    `<div style="font-family:${FONTS.mono};font-size:40px;font-weight:800;letter-spacing:12px;color:${COLORS.cyan};line-height:1;padding-left:12px">${esc(code)}</div>`,
+    `<td align="center" bgcolor="${COLORS.panelInset}" style="${darkSurface(COLORS.panelInset)}border:1px solid ${COLORS.hairline};border-radius:${SPACE.panelRadius}px;padding:24px 16px">`,
+    `<div style="font-family:${FONTS.mono};font-size:40px;font-weight:800;letter-spacing:12px;color:${COLORS.cyan};line-height:1;padding-left:12px">${protectText(esc(code))}</div>`,
     `</td></tr></table>`,
   ].join("");
 }
@@ -105,8 +106,8 @@ export function infoRow(
   const size = opts.strong ? 16 : 14;
   return [
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 6px"><tr>`,
-    `<td style="font-family:${FONTS.body};font-size:${size}px;color:${COLORS.textMuted};text-align:left">${label}</td>`,
-    `<td style="font-family:${FONTS.body};font-size:${size}px;font-weight:${weight};color:${valColor};text-align:right">${value}</td>`,
+    `<td style="font-family:${FONTS.body};font-size:${size}px;color:${COLORS.textMuted};text-align:left">${protectText(label)}</td>`,
+    `<td style="font-family:${FONTS.body};font-size:${size}px;font-weight:${weight};color:${valColor};text-align:right">${protectText(value)}</td>`,
     `</tr></table>`,
   ].join("");
 }
@@ -115,7 +116,7 @@ export function infoRow(
 export function tierBadge(tier?: string | null, labelOverride?: string): string {
   const t = tierTheme(tier);
   const label = esc(labelOverride ?? t.label);
-  return `<span style="display:inline-block;background-color:${t.accent};background-image:${t.grad};color:#ffffff;font-family:${FONTS.body};font-size:11px;font-weight:800;letter-spacing:1.5px;padding:5px 12px;border-radius:999px;text-transform:uppercase">${label}</span>`;
+  return `<span style="display:inline-block;background-color:${t.fill};background-image:${t.grad};color:#ffffff;font-family:${FONTS.body};font-size:11px;font-weight:800;letter-spacing:1.5px;padding:5px 12px;border-radius:999px;text-transform:uppercase">${protectText(label)}</span>`;
 }
 
 /**
@@ -135,16 +136,16 @@ export function eventHeader(opts: {
     ? `<tr><td style="padding:0 0 16px"><img src="${esc(opts.flyerUrl)}" alt="${esc(opts.title)}" width="536" style="display:block;width:100%;max-width:536px;height:auto;border-radius:${SPACE.panelRadius}px;border:1px solid ${COLORS.hairline}"/></td></tr>`
     : "";
   const date = opts.dateLine
-    ? `<p style="margin:6px 0 0;font-family:${FONTS.body};font-size:14px;color:${COLORS.textBody}">${esc(opts.dateLine)}</p>`
+    ? `<p style="margin:6px 0 0;font-family:${FONTS.body};font-size:14px;color:${COLORS.textBody}">${protectText(esc(opts.dateLine))}</p>`
     : "";
   const loc = opts.location
-    ? `<p style="margin:2px 0 0;font-family:${FONTS.body};font-size:14px;color:${COLORS.textBody}">${esc(opts.location)}</p>`
+    ? `<p style="margin:2px 0 0;font-family:${FONTS.body};font-size:14px;color:${COLORS.textBody}">${protectText(esc(opts.location))}</p>`
     : "";
   return [
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">`,
     flyer,
     `<tr><td style="border-left:3px solid ${accent};padding:2px 0 2px 14px">`,
-    `<p style="margin:0;font-family:${FONTS.display};font-size:20px;font-weight:700;color:${COLORS.text};line-height:1.25">${esc(opts.title)}</p>`,
+    `<p style="margin:0;font-family:${FONTS.display};font-size:20px;font-weight:700;color:${COLORS.text};line-height:1.25">${protectText(esc(opts.title))}</p>`,
     date,
     loc,
     `</td></tr></table>`,
@@ -163,14 +164,14 @@ export function qrBlock(opts: {
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(opts.qrToken)}`;
   const counter =
     opts.index != null && opts.total != null && opts.total > 1
-      ? `<p style="margin:0 0 10px;font-family:${FONTS.body};font-size:13px;color:${COLORS.textMuted};text-align:center">Ticket ${opts.index + 1} of ${opts.total}</p>`
+      ? `<p style="margin:0 0 10px;font-family:${FONTS.body};font-size:13px;color:${COLORS.textMuted};text-align:center">${protectText(`Ticket ${opts.index + 1} of ${opts.total}`)}</p>`
       : "";
   const link = opts.lookupUrl
-    ? `<p style="text-align:center;margin:14px 0 0"><a href="${esc(opts.lookupUrl)}" style="color:${COLORS.cyan};font-family:${FONTS.body};font-size:13px;text-decoration:none">View ticket &rarr;</a></p>`
+    ? `<p style="text-align:center;margin:14px 0 0"><a href="${esc(opts.lookupUrl)}" style="color:${COLORS.cyan};font-family:${FONTS.body};font-size:13px;text-decoration:none">${protectText("View ticket &rarr;")}</a></p>`
     : "";
   return [
     counter,
-    `<img src="${qrSrc}" alt="QR code" width="200" height="200" style="display:block;margin:0 auto;width:200px;height:200px;background:#ffffff;border-radius:10px;padding:8px"/>`,
+    `<img src="${qrSrc}" alt="QR code" width="200" height="200" style="display:block;margin:0 auto;width:200px;height:200px;${darkSurface("#ffffff")}border-radius:10px;padding:8px"/>`,
     link,
   ].join("");
 }

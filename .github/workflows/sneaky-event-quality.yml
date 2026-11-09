@@ -20,14 +20,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm install --prefix "$RUNNER_TEMP/lynk" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @electric-sql/pglite@0.3.7 jsdom@26.1.0 @tanstack/react-query@5.90.2
+      - run: npm install --prefix "$RUNNER_TEMP/lynk" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.25.11 lucide-react@0.468.0 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @electric-sql/pglite@0.3.7 jsdom@26.1.0 @tanstack/react-query@5.90.2
       - name: Creation, RSVP admission, lifecycle, privacy, free purchase and retry
         env:
           NODE_PATH: ${{ runner.temp }}/lynk/node_modules
         run: |
-          node --test apps/mobile/supabase/functions/video_refresh_token/index.test.cjs apps/mobile/supabase/functions/create-event/index.test.cjs packages/app/lib/events/event-publish-error.test.ts packages/app/lib/events/prepare-event-lynk-room.test.ts packages/app/lib/events/event-access.test.ts packages/app/lib/events/event-lynk.test.ts apps/mobile/supabase/functions/event-lynk-room/index.test.cjs apps/mobile/supabase/functions/event-lynk-invite/index.test.cjs apps/mobile/supabase/functions/process-event-lynk-lifecycle/index.test.cjs
+          node --test packages/app/features/events/ui/event-lynk-card-model.test.ts apps/mobile/supabase/functions/video_refresh_token/index.test.cjs apps/mobile/supabase/functions/create-event/index.test.cjs packages/app/lib/events/event-publish-error.test.ts packages/app/lib/events/prepare-event-lynk-room.test.ts packages/app/lib/events/event-access.test.ts packages/app/lib/events/event-lynk.test.ts apps/mobile/supabase/functions/event-lynk-room/index.test.cjs apps/mobile/supabase/functions/event-lynk-invite/index.test.cjs apps/mobile/supabase/functions/process-event-lynk-lifecycle/index.test.cjs
           node scripts/test-event-lynk-expiry.cjs --pglite
           node scripts/test-event-lynk-entry-hooks.cjs
+          node scripts/test-event-lynk-waiting-room.cjs
+          node scripts/test-event-lynk-lobby-presentation.cjs
+          node scripts/test-event-lynk-setup.cjs
           node scripts/test-guest-event-purchase.cjs
   event-browser:
     runs-on: ubuntu-24.04
@@ -43,13 +46,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm install --prefix "$RUNNER_TEMP/lynk" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 @tanstack/react-query@5.90.2 playwright@1.58.2
+      - run: npm install --prefix "$RUNNER_TEMP/lynk" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 @tanstack/react-query@5.90.2 playwright@1.58.2 lucide-react@0.468.0 tailwindcss@4.3.0 @tailwindcss/postcss@4.3.0 postcss@8.5.26
       - run: node "$RUNNER_TEMP/lynk/node_modules/playwright/cli.js" install --with-deps ${{ matrix.browser }}
       - name: Actual React hooks in browser with synthetic server and auth
         env:
           NODE_PATH: ${{ runner.temp }}/lynk/node_modules
           LYNK_BROWSER: ${{ matrix.browser }}
-        run: node scripts/test-event-lynk-entry-hooks.cjs --browser
+        run: |
+          node scripts/test-event-lynk-entry-hooks.cjs --browser
+          node scripts/test-event-lynk-waiting-room.cjs --browser
+          node scripts/test-event-lynk-card-browser.cjs
+          node scripts/test-event-lynk-lobby-browser.cjs
   event-postgres:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

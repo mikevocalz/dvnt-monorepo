@@ -22,10 +22,18 @@ export interface NearbyMembers {
   center: { latitude: number; longitude: number } | null;
   expiresAt: string | null;
 }
+export class MemberMapError extends Error {
+  code?: string;
+  status?: number;
+  constructor(message: string, details: { code?: string; status?: number } = {}) {
+    super(message); this.name = "MemberMapError";
+    this.code = details.code; this.status = details.status;
+  }
+}
 async function call<T>(body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await invokeEdge<{ ok: boolean; data?: T; error?: string }>("member-map", body);
-  if (error) throw new Error(error.message);
-  if (!data?.ok || !data.data) throw new Error(data?.error || "Location settings are unavailable. Please retry.");
+  const { data, error } = await invokeEdge<{ ok: boolean; data?: T; error?: string; code?: string; status?: number }>("member-map", body);
+  if (error) throw new MemberMapError(error.message, error);
+  if (!data?.ok || !data.data) throw new MemberMapError(data?.error || "Location settings are unavailable. Please retry.", { code: data?.code, status: data?.status });
   return data.data;
 }
 export const memberMapApi = {

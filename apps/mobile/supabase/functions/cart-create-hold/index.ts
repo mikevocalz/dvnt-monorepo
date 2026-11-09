@@ -195,7 +195,7 @@ function errorFromRpc(result: Record<string, unknown>): Response {
   const status =
     error === "cart_not_found"
       ? 404
-      : error === "insufficient_capacity" ||
+      : error === "buyer_limit" || error === "insufficient_capacity" ||
           error === "addon_insufficient_capacity" ||
           error === "cart_completed"
         ? 409
@@ -207,6 +207,8 @@ function errorFromRpc(result: Record<string, unknown>): Response {
       tierId: result.tierId,
       lineItemId: result.lineItemId,
       available: result.available,
+      limit: result.limit,
+      remaining: result.remaining,
       // Add-on loop errors (20260613000200+): never includes unlock_code.
       addonId: result.addonId,
       variantId: result.variantId,

@@ -73,13 +73,21 @@ const resolve = name => require.resolve(name, { paths: deps });
     const expiryStart = route.indexOf('  const handleTimeUp = useCallback', route.indexOf('  const timerStartedAt = parseRoomStartedAt'));
     const expirySource = route.slice(expiryStart, route.indexOf('\n\n  const handleToggleMic', expiryStart));
     const order = [], cameraIntent = { current: true }, micIntent = { current: true };
-    const expire = new Function('useCallback', 'desiredVideoEnabledRef', 'desiredMicEnabledRef', 'videoRoomRef', 'markRoomClosed', 'sneakyLynkApi', 'id', expirySource + '; return handleTimeUp;')(
+    const departures = [], authIntentEpochRef = { current: 7 };
+    let finishDeparture;
+    const expire = new Function('useCallback', 'desiredVideoEnabledRef', 'desiredMicEnabledRef', 'videoRoomRef', 'markRoomClosed', 'queueRoomDeparture', 'useAuthStore', 'authIntentEpochRef', expirySource + '; return handleTimeUp;')(
       fn => fn, cameraIntent, micIntent,
       { current: { leave: () => { order.push('media-stop'); } } },
-      () => order.push('terminal-screen'), { leaveRoom: () => { order.push('presence-leave'); return Promise.resolve(); } }, 'room');
+      () => order.push('terminal-screen'),
+      (owner, authEpoch) => { departures.push({ owner, authEpoch }); order.push('presence-leave'); return new Promise(resolve => { finishDeparture = resolve; }); },
+      { getState: () => ({ user: { id: 'profile-id', authId: 'account-id' } }) }, authIntentEpochRef);
     expire();
     assert.deepEqual(order, ['media-stop', 'terminal-screen', 'presence-leave']);
     assert.equal(cameraIntent.current, false); assert.equal(micIntent.current, false);
+    assert.deepEqual(departures, [{ owner: 'account-id', authEpoch: 7 }], 'expiry queues cleanup for the authenticated owner and current identity generation');
+    // Terminal UI and device shutoff never wait for the serialized departure.
+    finishDeparture(); await Promise.resolve();
+    assert.deepEqual(order, ['media-stop', 'terminal-screen', 'presence-leave'], 'late departure completion cannot restore capture or reopen the room');
     assert.doesNotMatch(expirySource, /isPaidHost|handleLeave|setShowTimesUpPaywall|Alert\./, 'terminal expiry never depends on entitlement or confirmation');
     console.log('PASS native countdown: absolute deadline without createdAt, always-visible header wiring, exact 30-second warning, AppState immediate resume including bare window/no document, reduced motion, once-only expiry, unlimited/invalid deadline and listener cleanup. Native primitives mocked.');
   } finally { Date.now = oldNow; window.happyDOM.abort(); window.close(); delete global.__nativeCountdown; for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete global[key]; else global[key] = value; } }

@@ -1,0 +1,15 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript'),path=require('node:path');
+function load(file,deps,extra={}){const exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,require:n=>deps[n],console:{error(){}},...extra});return exports;}
+const shared=load(path.join(__dirname,'organizer-free-cancellation.ts'),{});
+const body={ticket_id:'11111111-1111-1111-1111-111111111111',event_id:80,expected_owner_id:'holder',reason:'Wrong event'};
+function fixture({actor='host',allowed=true,result={data:{ok:true,changed:true},error:null}}={}){let handler;const calls=[];const response=(x,status=200)=>new Response(JSON.stringify(x),{status});load(path.join(__dirname,'../organizer-cancel-free-ticket/index.ts'),{
+'https://esm.sh/@supabase/supabase-js@2':{createClient:()=>({rpc:async(...args)=>{calls.push(args);return result;}})},
+'../_shared/verify-session.ts':{verifySession:async()=>actor,jsonResponse:response,errorResponse:(error,status)=>response({error},status),optionsResponse:()=>response({})},
+'../_shared/rate-limit.ts':{checkRateLimit:()=>({allowed})},
+'../_shared/organizer-free-cancellation.ts':shared,
+},{Deno:{env:{get:()=>''},serve:fn=>handler=fn}});return {calls,call:(b=body,method='POST')=>handler(new Request('https://example.test',{method,...(method==='POST'?{body:JSON.stringify(b)}:{})}))};}
+test('authenticated identity not client actor is passed to atomic RPC',async()=>{const f=fixture();const r=await f.call({...body,p_actor_id:'attacker'});assert.equal(r.status,200);assert.equal(f.calls.length,1);assert.equal(f.calls[0][0],'organizer_cancel_free_ticket');assert.equal(f.calls[0][1].p_actor_id,'host');assert.equal((await r.json()).changed,true);});
+for(const [label,opts,status]of [['unauthenticated',{actor:null},401],['rate limited',{allowed:false},429],['transaction unavailable',{result:{error:{code:'55P03'}}},503],['not owner',{result:{data:{ok:false,error:'not_authorized'}}},403],['scan race',{result:{data:{ok:false,error:'ticket_changed'}}},409]])test(label,async()=>{const f=fixture(opts);assert.equal((await f.call()).status,status);if(status===401||status===429)assert.equal(f.calls.length,0);});
+test('invalid/method requests never invoke mutation',async()=>{const f=fixture();assert.equal((await f.call({},'POST')).status,400);assert.equal((await f.call(body,'GET')).status,405);assert.equal(f.calls.length,0);});
+test('idempotent replay does not falsely claim changed',async()=>{const f=fixture({result:{data:{ok:true,changed:false}}});const r=await f.call();assert.equal((await r.json()).changed,false);});
+test('financial guard reports manual review instead of success',async()=>{const f=fixture({result:{data:{ok:false,error:'financial_review_required'}}});const r=await f.call();assert.equal(r.status,409);const b=await r.json();assert.equal(b.ok,false);assert.match(b.error,/No ticket was changed/);});

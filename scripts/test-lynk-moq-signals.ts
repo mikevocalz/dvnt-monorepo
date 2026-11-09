@@ -15,7 +15,7 @@ const dependencyRequire = createRequire(process.env.LYNK_PROBE_DEPS
   : new URL("../packages/app/package.json", import.meta.url));
 const signalsPath = dependencyRequire.resolve("@moq/signals");
 assert.equal(JSON.parse(readFileSync(resolve(dirname(signalsPath), "package.json"), "utf8")).version, "0.2.5");
-const { Signal, Computed: SdkComputed, readonlys } = await import(pathToFileURL(signalsPath).href);
+const { Signal, Derived, Computed: SdkComputed, readonlys } = await import(pathToFileURL(signalsPath).href);
 // Node 24 runs these tests; the app's older @types/node predates registerHooks.
 const { registerHooks } = createRequire(import.meta.url)("node:module");
 
@@ -133,7 +133,13 @@ class Player {
     assert.ok(props.origin instanceof Signal);
     assert.ok(props.canvas instanceof Signal);
     assert.ok(props.muted instanceof Signal);
-    assert.ok(props.volume instanceof Signal);
+    // Watch.Player accepts the public Getter contract, not just mutable
+    // Signals. Production derives volume from the user's level and output
+    // routing readiness, so requiring Signal here rejects a valid SDK input.
+    for (const method of ["peek", "subscribe", "changed"]) {
+      assert.equal(typeof props.volume?.[method], "function", `volume must implement Getter.${method}`);
+    }
+    assert.equal(typeof props.volume.peek(), "number", "initial output gain is defined synchronously");
     this.props = props; resources.players.push(this);
   }
   close() { this.closed = true; this.broadcast.close(); }
@@ -146,11 +152,12 @@ class Publication {
 }
 class Device {
   in: any;
+  device: any;
   media = new Signal(undefined);
   failure = new Signal(undefined);
   out = readonlys({ source: this.media, error: this.failure });
   closed = false;
-  constructor(props: any) { assert.ok(props.enabled instanceof Signal); this.in = props; resources.devices.push(this); }
+  constructor(props: any) { assert.equal(typeof props.enabled.peek, "function"); this.in = props; this.device = { preferred: props.device?.preferred ?? new Signal(undefined), out: { available: new Signal([]), requested: new Signal(undefined), active: new Signal(undefined) } }; resources.devices.push(this); }
   close() { this.closed = true; }
 }
 class Capture {
@@ -167,18 +174,18 @@ class Encoder {
 }
 const tokenState = { publish: true };
 const savedGlobals = { window: (globalThis as any).window, document: (globalThis as any).document, MediaStream: (globalThis as any).MediaStream };
-(globalThis as any).__lynkMocks = { Signal, Computed, Connection, Player, Publication, Device, Capture, Encoder, tokenState };
+(globalThis as any).__lynkMocks = { Signal, Computed, Derived, Connection, Player, Publication, Device, Capture, Encoder, tokenState };
 (globalThis as any).window = new EventTarget();
 (globalThis as any).document = Object.assign(new EventTarget(), { visibilityState: "visible" });
 (globalThis as any).MediaStream = class { tracks: any[]; constructor(tracks: any[]) { this.tracks = tracks; } };
 const moduleUrl = (source: string) => `data:text/javascript,${encodeURIComponent(source)}`;
 const stubs: Record<string, string> = {
   react: moduleUrl(["useState", "useRef", "useMemo", "useCallback", "useEffect", "useSyncExternalStore"].map((name) => `export const ${name} = (...args) => globalThis.__lynkHooks.${name}(...args);`).join("\n")),
-  "@moq/signals": moduleUrl("export const Signal = globalThis.__lynkMocks.Signal; export const Computed = globalThis.__lynkMocks.Computed;"),
+  "@moq/signals": moduleUrl("export const Signal = globalThis.__lynkMocks.Signal; export const Computed = globalThis.__lynkMocks.Computed; export const Derived = globalThis.__lynkMocks.Derived;"),
   "@moq/net": moduleUrl("export const Connection = globalThis.__lynkMocks.Connection; export const Path = { from: p => p }; export const Time = { Milli: { zero: 0 } };"),
   "@moq/watch": moduleUrl("export const Player = globalThis.__lynkMocks.Player;"),
   "@moq/publish": moduleUrl("export const Broadcast = globalThis.__lynkMocks.Publication; export const Source = { Camera: globalThis.__lynkMocks.Device, Microphone: globalThis.__lynkMocks.Device }; export const Video = { Capture: globalThis.__lynkMocks.Capture, Encoder: globalThis.__lynkMocks.Encoder }; export const Audio = Video;"),
-  "./useMoqToken": moduleUrl("export const useMoqToken = (room, intent, enabled = true) => ({ token: room && enabled && (intent !== 'publish' || globalThis.__lynkMocks.tokenState.publish) ? { relayUrl: 'https://example.invalid/' + room + '/' + intent, namespace: 'lynk/' + room, path: 'lynk/' + room + '/self', peerId: 'self' } : null, error: null });"),
+  "./useMoqToken": moduleUrl("export const useMoqToken = (room, intent, enabled = true) => ({ token: room && enabled && (intent !== 'publish' || globalThis.__lynkMocks.tokenState.publish) ? { expiresAt: new Date(Date.now()+120000).toISOString(), relayUrl: 'https://example.invalid/' + room + '/' + intent, namespace: 'lynk/' + room, path: 'lynk/' + room + '/self', peerId: 'self' } : null, error: null });"),
 };
 const hooks = registerHooks({ resolve(specifier: string, context: { parentURL?: string }, next: (...args: any[]) => any) {
   if (stubs[specifier]) return { url: stubs[specifier], shortCircuit: true };
@@ -214,12 +221,34 @@ test("real signals: asynchronous initial discovery, replacement, withdrawal, and
   assert.equal(h.value.attachCanvas, attach);
   assert.equal(resources.players[0].props.muted.peek(), true);
   assert.equal(resources.players[0].props.delay, 0);
+  const player = resources.players[0];
+  assert.equal(player.props.volume.peek(), 1);
+  const volumes: number[] = [];
+  const unsubscribeVolume = player.props.volume.subscribe((value: number) => volumes.push(value));
+  t.after(unsubscribeVolume);
+  const changedVolume = player.props.volume.changed();
+  h.value.setVolume(0.35); await h.settle();
+  assert.equal(await changedVolume, 0.35, "derived volume implements Getter.changed");
+  assert.equal(player.props.volume.peek(), 0.35);
+  assert.equal(h.value.volume, 0.35);
+  h.value.setVolume(2); await h.settle();
+  assert.equal(player.props.volume.peek(), 1, "gain is clamped at one");
+  h.value.setVolume(-1); await h.settle();
+  assert.equal(player.props.volume.peek(), 0, "gain is clamped at zero");
+  h.value.setVolume(0.6); await h.settle();
+  assert.deepEqual(volumes, [0.35, 1, 0, 0.6], "derived gain publishes real SDK notifications");
+  assert.equal(resources.players.length, 1, "volume changes retain the decoder/audio player");
+  assert.equal(player.closed, false);
+  assert.equal(h.value.attachCanvas, attach, "volume changes retain the canvas ref callback");
+  unsubscribeVolume();
   const next = new Signal(new Map([["lynk/room/bob", {}]]));
   resources.connections[0].origin.set({ broadcasts: () => next });
   await h.settle();
   assert.deepEqual(h.value.publishers.map((p: any) => p.path), ["lynk/room/bob"]);
   assert.equal(resources.players[0].closed, true);
   h.value.attachCanvas("lynk/room/bob", {});
+  assert.equal(resources.players[1].props.volume.peek(), 0.6, "replacement publisher inherits the current gain");
+  assert.equal(resources.players[1].props.muted.peek(), true, "replacement publisher preserves mute independently of volume");
   resources.connections[0].origin.set(undefined);
   await h.settle();
   assert.deepEqual(h.value.publishers, []);

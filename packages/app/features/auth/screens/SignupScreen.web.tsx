@@ -1,5 +1,8 @@
+import { rememberSignupContinuation } from "../../../lib/auth/signup-continuation";
+import { authPathWithReturn, readReturnToFromUrl } from "../../../lib/auth/return-to";
 import { hydrateAuthProfile } from "@dvnt/app/lib/auth/hydrate-auth-profile";
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { captureAuthContinuation } from '../../../lib/auth/continuation-guard';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useForm } from '@tanstack/react-form';
 import { useRouter } from 'solito/navigation';
@@ -44,6 +47,8 @@ const signupBirthDateError = (value: string) =>
     : validateDateOfBirth(value).errorMessage;
 
 export function SignupScreen() {
+  const active = useRef(true);
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Hydration-safe restoration after Didit's full-page redirect.
   const [activeStep, setActiveStep] = useState(0);
@@ -67,7 +72,8 @@ export function SignupScreen() {
   }, [activeStep, verification.data?.state]);
   // Next app uses Solito/Next routing (no TanStack RouterProvider).
   const router = useRouter();
-  const navigate = ({ to }: { to: string }) => router.push(to);
+  const navigate = ({ to }: { to: "/auth/login" | "/auth/verify-email" }) =>
+    router.push(authPathWithReturn(to, readReturnToFromUrl('')));
 
   const form = useForm({
     defaultValues: { email: '', username: '', password: '', dateOfBirth: '' },
@@ -91,10 +97,12 @@ export function SignupScreen() {
         // move the stepper to show work is happening.
         setIsSubmitting(true);
         try {
-          const { data, error } = await signUp.email({ email: value.email, password: value.password, name: value.username, dateOfBirth: value.dateOfBirth, callbackURL: `${window.location.origin}/auth/verify-email` } as any);
+          const { data, error } = await signUp.email({ email: value.email, password: value.password, name: value.username, dateOfBirth: value.dateOfBirth, callbackURL: `${window.location.origin}${authPathWithReturn('/auth/verify-email', readReturnToFromUrl(''))}` } as any);
           if (error) throw Object.assign(new Error((error as any).message || 'Signup failed'), { code: (error as any).code });
           if (!data?.user) throw new Error('Could not create account — no user was returned.');
           if (data?.user) {
+            rememberSignupContinuation(data.user.id);
+            try { window.sessionStorage.setItem('dvnt:signup:verification', 'pending'); } catch { /* optional */ }
             let profile: any;
             try { profile = await syncAuthUser(); } catch { profile = await auth.getProfile(data.user.id, data.user.email); }
             if (profile) setUser(hydrateAuthProfile(profile));
@@ -232,11 +240,16 @@ export function SignupScreen() {
               loading={startVerification.isPending}
               disabled={startVerification.isPending}
               onPress={async () => {
+                const entryUrl = window.location.href;
+                const continuation = captureAuthContinuation();
+                const stillCurrent = () => active.current && window.location.href === entryUrl && continuation.isCurrent();
                 setVerificationStartError(null);
                 try {
-                  const result = await startVerification.mutateAsync({ returnUrl: window.location.origin + '/auth/signup' });
+                  const result = await startVerification.mutateAsync({ returnUrl: window.location.origin + authPathWithReturn('/auth/signup', readReturnToFromUrl('')) });
+                  if (!stillCurrent()) return;
                   if (result.status === 'passed') {
                     await verification.refetch();
+                    if (!stillCurrent()) return;
                     setActiveStep(3);
                     return;
                   }
@@ -246,7 +259,9 @@ export function SignupScreen() {
                   try { window.sessionStorage.setItem('dvnt:signup:verification', 'pending'); } catch { /* optional */ }
                   window.location.assign(result.url);
                 } catch (error: any) {
-                  setVerificationStartError(error?.message || 'Please try again in a moment.');
+                  if (stillCurrent()) setVerificationStartError(error?.message || 'Please try again in a moment.');
+                } finally {
+                  continuation.release();
                 }
               }}
             >
@@ -257,12 +272,19 @@ export function SignupScreen() {
             <Button
               variant="secondary"
               onPress={async () => {
-                const refreshed = await verification.refetch();
-                if (refreshed.data?.state === 'approved') {
-                  setActiveStep(3);
-                  navigate({ to: '/auth/verify-email' });
-                } else {
-                  toast.message('Verification not finished yet');
+                const entryUrl = window.location.href;
+                const continuation = captureAuthContinuation();
+                try {
+                  const refreshed = await verification.refetch();
+                  if (!active.current || window.location.href !== entryUrl || !continuation.isCurrent()) return;
+                  if (refreshed.data?.state === 'approved') {
+                    setActiveStep(3);
+                    navigate({ to: '/auth/verify-email' });
+                  } else {
+                    toast.message('Verification not finished yet');
+                  }
+                } finally {
+                  continuation.release();
                 }
               }}
             >

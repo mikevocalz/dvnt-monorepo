@@ -140,3 +140,13 @@ test('public numeric event route renders the existing guest-capable screen outsi
  const feed=fs.readFileSync(path.join(ROOT,'apps/web/src/app/(frontend)/feed/layout.tsx'),'utf8');
  assert.match(feed,/<WebAppShell>/,'member routes still require the authenticated app shell');
 });
+
+test('delayed tier stays out of public widget until its sale starts', async () => {
+ const h=harness();
+ h.tables.ticket_types[0].sale_start='2099-01-01T00:00:00Z';
+ assert.deepEqual((await h.call()).data.tiers,[]);
+ assert.equal(h.rpcs.length,0);
+ h.tables.ticket_types[0].sale_start='2000-01-01T00:00:00Z';
+ assert.equal((await h.call()).data.tiers.length,1);
+ assert.equal(h.writes.length,0);
+});

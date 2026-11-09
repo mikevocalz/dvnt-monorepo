@@ -8,12 +8,16 @@ import { Header } from "@dvnt/app/components/ui/html";
 import { useRouter } from "solito/navigation";
 import { Search, MessageCircle } from "lucide-react";
 import Logo from "./logo";
+import { UnreadBadge } from "./unread-badge";
+import { useUnreadMessageCount } from "@dvnt/app/lib/hooks/use-messages";
+import { unreadAccessibilityLabel } from "@dvnt/app/lib/badges/unread-badge";
 
 /** Fixed height logged-in content should clear (header + top offset). */
 export const WEB_APP_HEADER_HEIGHT = 78;
 
 export function WebAppHeader() {
   const router = useRouter();
+  const { data: unreadCount } = useUnreadMessageCount();
   // Phones: flush, edge-to-edge glass at the top (no floating gap / black frame).
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
@@ -34,11 +38,14 @@ export function WebAppHeader() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Inbox"
+            accessibilityLabel={unreadAccessibilityLabel("Messages", unreadCount)}
             onPress={() => router.push("/feed/messages")}
             style={styles.iconBtn}
           >
-            <MessageCircle size={22} color="#FAFAF9" strokeWidth={2} />
+            <View style={{ position: "relative" }}>
+              <MessageCircle size={22} color="#FAFAF9" strokeWidth={2} />
+              <UnreadBadge count={unreadCount} />
+            </View>
           </Pressable>
         </View>
       </View>

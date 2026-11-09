@@ -10,6 +10,9 @@ import { Header } from "@dvnt/app/components/ui/html";
 import { useRouter } from "solito/navigation";
 import { Search, BookOpen, MessageCircle } from "lucide-react";
 import Logo from "@dvnt/app/components/logo";
+import { UnreadBadge } from "./unread-badge";
+import { useUnreadMessageCount } from "@dvnt/app/lib/hooks/use-messages";
+import { unreadAccessibilityLabel } from "@dvnt/app/lib/badges/unread-badge";
 
 // Web-only style props (position:sticky, backdrop-filter, env()) cast via `any`.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -17,6 +20,7 @@ const web = (s: Record<string, unknown>) => s as any;
 
 export function WebTopBar() {
   const router = useRouter();
+  const { data: unreadCount } = useUnreadMessageCount();
   return (
     <Header style={styles.wrap} aria-label="App header">
       <Pressable
@@ -47,10 +51,13 @@ export function WebTopBar() {
         <Pressable
           onPress={() => router.push("/feed/messages")}
           accessibilityRole="button"
-          accessibilityLabel="Messages"
+          accessibilityLabel={unreadAccessibilityLabel("Messages", unreadCount)}
           style={styles.iconBtn}
         >
-          <MessageCircle size={23} strokeWidth={2} color="#FFFFFF" />
+          <View style={{ position: "relative" }}>
+            <MessageCircle size={23} strokeWidth={2} color="#FFFFFF" />
+            <UnreadBadge count={unreadCount} />
+          </View>
         </Pressable>
       </View>
     </Header>

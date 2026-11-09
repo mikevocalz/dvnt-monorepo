@@ -8,7 +8,8 @@
  *   { event_id, page, pageSize, status, search }
  *     → paginated, server-filtered. status is one of
  *       'active' | 'scanned' | 'refunded' | 'transfer_pending' | 'void' | 'all'
- *       search matches qr_token / user info (case-insensitive prefix).
+ *       search matches holder names / @usernames (literal case-insensitive partial),
+ *       ticket UUID / legacy qr_token (prefix).
  *   { event_id, offline: true }
  *     → minimal payload for offline check-in: just qr_tokens of active
  *       tickets. Same auth gate. Bypasses pagination since the roster
@@ -25,6 +26,9 @@ import {
   errorResponse,
   optionsResponse,
 } from "../_shared/verify-session.ts";
+
+import { readAllRows } from "../_shared/read-all-rows.ts";
+import { organizerFreeCancellation } from "../_shared/organizer-free-cancellation.ts";
 
 // ── Membership tier resolution (Host & Guest WS-1) ─────────────────────────
 // Deno can't import packages/app, so PLAN_RANK and the entitlement rules are
@@ -96,10 +100,6 @@ function clampInt(
   return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
-function escapeLike(s: string): string {
-  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST") return errorResponse("Method not allowed", 405);
@@ -143,7 +143,7 @@ Deno.serve(async (req: Request) => {
     // get a PII-redacted payload when their role is 'scanner'.
     const { data: event } = await supabase
       .from("events")
-      .select("id, host_id")
+      .select("id, host_id, title, location, status")
       .eq("id", eventIdNum)
       .maybeSingle();
     if (!event) return errorResponse("Event not found", 404);
@@ -188,47 +188,53 @@ Deno.serve(async (req: Request) => {
     // Scanners need this even in offline mode, so it's allowed at any
     // role tier. Returns just qr_tokens (no PII).
     if (body.offline === true) {
-      const { data, error } = await supabase
-        .from("tickets")
-        .select("qr_token")
-        .eq("event_id", eventIdNum)
-        .eq("status", "active")
-        .not("qr_token", "is", null);
-      if (error) {
-        console.error("[get-event-tickets] offline query error:", error);
-        return errorResponse("Could not fetch tokens", 500);
+      if (["cancelled", "deleted"].includes(event.status)) {
+        return errorResponse("Event is not available for scanning", 409);
       }
-      const qrTokens = (data || [])
-        .map((t: any) => t.qr_token)
-        .filter(Boolean);
-
-      // Add-on allowlist for offline door validation (WS-3 × WS-8):
-      // unredeemed redeemable add-ons carry their own qr_token
-      // (order_addons, 20260613000100). Same no-PII discipline — tokens
-      // only. Display-only extra: never fail the whole download over it.
-      let addonQrTokens: string[] = [];
-      const { data: addonRows, error: addonError } = await supabase
-        .from("order_addons")
-        .select("qr_token")
-        .eq("event_id", eventIdNum)
-        .in("status", ["unfulfilled", "fulfilled"])
-        .not("qr_token", "is", null);
-      if (addonError) {
-        console.error(
-          "[get-event-tickets] offline addon query error:",
-          addonError,
-        );
-      } else {
-        addonQrTokens = (addonRows || [])
-          .map((a: any) => a.qr_token)
-          .filter(Boolean);
+      try {
+        // Both admission rails are required. PostgREST may cap a response below
+        // the requested size, so scan stable IDs until an empty terminal page.
+        const [tickets, addons] = await Promise.all([
+          readAllRows(() => supabase.from("tickets")
+            .select("id, qr_token, ticket_type_id, category, ticket_types(category)")
+            .eq("event_id", eventIdNum)
+            .eq("status", "active")
+            .not("qr_token", "is", null)),
+          readAllRows(() => supabase.from("order_addons")
+            .select("id, qr_token")
+            .eq("event_id", eventIdNum)
+            .in("status", ["unfulfilled", "fulfilled"])
+            .not("qr_token", "is", null)),
+        ]);
+        // Do not mint a newly downloaded allowlist if cancellation/deletion
+        // happened during the multi-page read. Offline use is still a snapshot.
+        const { data: latestEvent, error: eventError } = await supabase.from("events")
+          .select("id, status").eq("id", eventIdNum).maybeSingle();
+        if (eventError) throw eventError;
+        if (!latestEvent) return errorResponse("Event not found", 404);
+        if (["cancelled", "deleted"].includes(latestEvent.status)) {
+          return errorResponse("Event is not available for scanning", 409);
+        }
+        const tokens = (rows: any[]) => rows.map(row => row.qr_token)
+          .filter((token): token is string => typeof token === "string" && token.length > 0);
+        return jsonResponse({
+          ok: true,
+          // Service/product ticket rows are redeemable online only. The
+          // legacy offline "ticket" rail means event admission, so do not put
+          // non-admission (or unresolved) credentials on that allowlist.
+          qr_tokens: tokens(tickets.filter((ticket: any) => {
+            const tier = Array.isArray(ticket.ticket_types)
+              ? ticket.ticket_types[0] : ticket.ticket_types;
+            return tier ? tier.category == null || tier.category === "admission"
+              : ticket.ticket_type_id == null && ticket.category === "admission";
+          })),
+          addon_qr_tokens: tokens(addons),
+        });
+      } catch {
+        // An incomplete rail must never look like a successful empty renewal.
+        console.error("[get-event-tickets] complete offline allowlist unavailable");
+        return errorResponse("Could not fetch complete offline tokens. Please retry.", 503);
       }
-
-      return jsonResponse({
-        ok: true,
-        qr_tokens: qrTokens,
-        addon_qr_tokens: addonQrTokens,
-      });
     }
 
     // Pagination + status filter + search — server-side per Phase 5
@@ -238,13 +244,23 @@ Deno.serve(async (req: Request) => {
     const page = clampInt(body.page, 1, 1, 1_000_000);
     const offset = (page - 1) * pageSize;
     const status = typeof body.status === "string" ? body.status : "all";
+    if (body.search !== undefined && typeof body.search !== "string") {
+      return errorResponse("search must be a string", 400);
+    }
     const search =
       typeof body.search === "string" ? body.search.trim() : "";
 
-    let query = supabase
-      .from("tickets")
-      .select("*, ticket_types(name)", { count: "exact" })
-      .eq("event_id", eventIdNum);
+    if (search.length > 200) return errorResponse("Search must be 200 characters or fewer", 400);
+
+    // SQL restricts matches to this authorized event before count/pagination.
+    // SETOF tickets preserves the ticket_types relationship and existing sort,
+    // cursor, status and response projections; no global profile lookup or
+    // unbounded ticket-ID list is sent through a PostgREST URL.
+    let query = search
+      ? supabase.rpc("search_event_tickets", {
+          p_event_id: eventIdNum, p_auth_id: authId, p_search: search,
+        }, { count: "exact" }).select("*, ticket_types(name, category)")
+      : supabase.from("tickets").select("*, ticket_types(name, category)", { count: "exact" }).eq("event_id", eventIdNum);
 
     if (
       status &&
@@ -256,13 +272,6 @@ Deno.serve(async (req: Request) => {
       query = query.eq("status", status);
     }
 
-    if (search) {
-      // qr_token prefix match (case-insensitive) is the cheapest +
-      // most useful search target. We don't join users here to keep
-      // this query fast; user-by-name search would benefit from a
-      // dedicated FTS index and is left for a follow-up.
-      query = query.ilike("qr_token", `${escapeLike(search)}%`);
-    }
 
     // ── Ordering + keyset pagination (WS-2) ────────────────────────────
     // Offset paging (.range) duplicates and skips rows the moment a ticket is
@@ -303,6 +312,25 @@ Deno.serve(async (req: Request) => {
     if (error) {
       console.error("[get-event-tickets] query error:", error);
       return errorResponse("Could not fetch tickets", 500);
+    }
+
+    // Fail closed if verification dependencies are unavailable. This is only a
+    // roster hint; the cancellation RPC rechecks all facts under row locks.
+    const cancellationOrders = new Map<string, any>();
+    const cancellationTransfers = new Set<string>();
+    let cancellationVerified = false;
+    if (isOwner && (data || []).length > 0) {
+      const orderIds = [...new Set((data || []).map((t: any) => t.order_id).filter(Boolean))];
+      const ticketIds = (data || []).map((t: any) => t.id);
+      const [orders, transfers] = await Promise.all([
+        orderIds.length ? supabase.from("orders").select("id,user_id,event_id,type,status,total_cents,subtotal_cents,discount_cents,stripe_payment_intent_id,stripe_checkout_session_id,cart_id,promo_code_id").in("id", orderIds) : Promise.resolve({ data: [], error: null }),
+        supabase.from("ticket_transfers").select("ticket_id").in("ticket_id", ticketIds).in("status", ["pending", "accepted"]),
+      ]);
+      cancellationVerified = !orders.error && !transfers.error;
+      if (cancellationVerified) {
+        for (const order of orders.data || []) cancellationOrders.set(order.id, order);
+        for (const transfer of transfers.data || []) cancellationTransfers.add(transfer.ticket_id);
+      }
     }
 
     // ── Batched holder + tier lookup (WS-1). Two queries for the whole page,
@@ -348,13 +376,20 @@ Deno.serve(async (req: Request) => {
 
     const isScanner = effectiveRole === "scanner";
     const tickets = (data || []).map((t: any) => {
+      const ticketType = Array.isArray(t.ticket_types) ? t.ticket_types[0] : t.ticket_types;
+      // Legacy single-tier issuance omitted tickets.category. The authoritative
+      // tier is the display/entry purpose; this does not rewrite stored rows.
+      const category = ticketType?.category ?? t.category ?? "admission";
+      const isAdmission = category === "admission";
+      const ticketTypeName = ticketType?.name || (isAdmission ? "General" : category === "product" ? "Product" : "Service");
       const base = {
         id: t.id,
         event_id: t.event_id,
         ticket_type_id: t.ticket_type_id,
         status: t.status,
         qr_token: t.qr_token,
-        ticket_type_name: t.ticket_types?.name || "General",
+        category,
+        ticket_type_name: ticketTypeName,
         checked_in_at: t.checked_in_at,
         checked_in_by: t.checked_in_by,
       };
@@ -376,13 +411,13 @@ Deno.serve(async (req: Request) => {
           : null) ??
         (t.user_id ? nameByUser.get(t.user_id) || null : t.guest_name || null);
       const tier = t.user_id ? tierByUser.get(t.user_id) || null : null;
-      const membership_tier = tier
+      const membership_tier = isAdmission && tier
         ? { planKey: tier.planKey, rank: tier.rank }
         : null;
       // Resolved server-side per WS-3 so the scanner card and the priority lane
       // read a decision rather than making one. A lapsed member reaches here
       // with tier === null and therefore gets [].
-      const perks = resolvePerks(tier?.rank ?? null, perkConfig);
+      const perks = isAdmission ? resolvePerks(tier?.rank ?? null, perkConfig) : [];
 
       if (isScanner) {
         // Scanner role (Phase-0 decision, option 3): holder name + membership
@@ -395,7 +430,16 @@ Deno.serve(async (req: Request) => {
       // Owner/admin/editor get the full row
       return {
         ...t,
-        ticket_type_name: t.ticket_types?.name || "General",
+        ...(isOwner ? {
+          username: nameByUser.get(t.user_id) || undefined,
+          event_title: event.title,
+          event_location: event.location,
+          organizer_free_cancel: cancellationVerified
+            ? organizerFreeCancellation({ ...t, category }, cancellationOrders.get(t.order_id), cancellationTransfers.has(t.id))
+            : { eligible: false, reason: "Cancellation eligibility is unavailable. Refresh the roster." },
+        } : {}),
+        category,
+        ticket_type_name: ticketTypeName,
         holder_name: holderName,
         membership_tier,
         perks,

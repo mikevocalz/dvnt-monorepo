@@ -48,7 +48,7 @@ const bundle=await esbuild.build({stdin:{resolveDir:ROOT,loader:'tsx',contents:`
  if(args.path==='../api/comments'&&args.importer.endsWith('useRoomChat.ts'))return {path:'chat-api-fixture',namespace:'fixture'};
  if(args.path==='../../video/api'&&args.importer.endsWith('useRoomMembers.ts'))return {path:'video-api-fixture',namespace:'fixture'};
  if(args.path==='lucide-react')return {path:'icons',namespace:'fixture'};
- });build.onLoad({filter:/.*/,namespace:'fixture'},args=>({loader:'tsx',resolveDir:ROOT,contents:args.path==='icons'?['Ban','Check','Crown','Hand','MessageCircle','Mic','MicOff','Send','UserMinus','Users','UserX','X'].map(n=>'export const '+n+'=()=>null;').join('\n'):boundaries[args.path]}));}}]});
+ });build.onLoad({filter:/.*/,namespace:'fixture'},args=>({loader:'tsx',resolveDir:ROOT,contents:args.path==='icons'?['AlertCircle','ArrowDown','Ban','Check','Crown','Hand','LoaderCircle','MessageCircle','Mic','MicOff','Search','Send','UserMinus','Users','UserX','X'].map(n=>'export const '+n+'=()=>null;').join('\n'):boundaries[args.path]}));}}]});
 if (process.argv.includes('--dom')) {
  const {JSDOM}=require('jsdom');
  const dom=new JSDOM('<!doctype html><div id="root"></div>',{url:'http://localhost',runScripts:'outside-only',pretendToBeVisual:true});
@@ -71,7 +71,7 @@ if (process.argv.includes('--dom')) {
  const submit=async body=>{const input=alice.querySelector('input');input.value=body;alice.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await tick();return input};
  const input=await submit('Hello Bob');assert.equal(f.requests.length,1);const saved=comment(101,'alice','Hello Bob');for(const i of [ac,bc])f.send(i,[comment(1,'bob','Already here'),saved]);f.requests[0].resolve(saved);await tick();assert.equal(input.value,'');assert.equal(f.snapshots.alice.chat.comments.filter(c=>c.id===101).length,1);assert.equal(f.snapshots.bob.chat.comments.filter(c=>c.id===101).length,1);
  f.send(am,members.filter(m=>m.userId!=='bob'));await tick();assert.doesNotMatch(alice.querySelector('[data-members]').textContent,/bob/);f.send(am,members);await tick();assert.match(alice.querySelector('[data-members]').textContent,/bob/);
- await submit('Retry me');f.requests[1].resolve(null);await tick();assert.equal(input.value,'Retry me');assert.match(alice.querySelector('[role=alert]').textContent,/wasn't sent/);
+ await submit('Retry me');f.requests[1].resolve(null);await tick();assert.equal(input.value,'Retry me');assert.match(alice.querySelector('[role=alert]').textContent,/Message not sent/);
  await submit('Retry me');await update('alice',{userId:'charlie'});assert.equal(alice.querySelector('[data-members]').textContent,'');assert.doesNotMatch(alice.textContent,/Already here/);
  f.send(ac,[comment(900,'alice','STALE PRIVATE MESSAGE')]);f.send(am,members);f.requests[2].resolve(comment(102,'alice','Retry me'));await tick();assert.doesNotMatch(alice.textContent,/STALE PRIVATE MESSAGE|Retry me/);assert.equal(alice.querySelector('[data-members]').textContent,'');assert.equal(f.subscriptions.filter(s=>s.active).length,4);
  await update('alice',{enabled:false});assert.equal(f.subscriptions.filter(s=>s.active).length,2);assert.deepEqual(errors,[]);dom.window.close();console.log('PASS React DOM fixture: scoped entry/account/room gate, two clients, delayed admission, anonymous peer mapping, optimistic echo/HTTP races, join/leave/reconnect snapshots, failed-send draft, account switch, stale callbacks, cleanup');return;

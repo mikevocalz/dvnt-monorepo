@@ -69,7 +69,8 @@ export function StoryViewerOverlay() {
   // Which segment inside the current group is playing — drives which item's
   // overlays are shown. react-insta-stories fires onStoryChange (onStoryStart)
   // on every segment start; reset to 0 whenever the group changes (the viewer
-  // remounts per group via key={group.id}).
+  // remounts for each explicit viewing session and group). Reopening a group
+  // must discard the old player's internal index before a shorter list renders.
   const [selection, setSelection] = useState({ viewSession, groupIndex, index: 0 });
   const storyIndex = selection.viewSession === viewSession && selection.groupIndex === groupIndex ? selection.index : 0;
   const segmentEpoch = useRef(0);
@@ -86,8 +87,10 @@ export function StoryViewerOverlay() {
   // here and never take it down. Same mutation native uses, so the rail drops
   // it optimistically and the list refetches behind that.
   const deleteStory = useDeleteStory();
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  useEffect(() => setConfirmingDelete(false), [groupIndex]);
+  const deleteConfirmationKey = `${viewSession}:${groupIndex}:${storyIndex}:${viewer?.id ?? ""}`;
+  const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
+  // Confirmation belongs to this account, segment and viewing session only.
+  const confirmingDelete = deleteConfirmation === deleteConfirmationKey;
 
   // Replying and reacting — the half of stories web never had. Both are DMs
   // carrying story context; the shaping lives in lib/stories/story-message so
@@ -237,7 +240,7 @@ export function StoryViewerOverlay() {
       // The group is gone from the rail either way; leaving the viewer on a
       // deleted story is the one thing that must not happen.
       onSettled: () => {
-        setConfirmingDelete(false);
+        setDeleteConfirmation(null);
         if (groups.length > 1) nextGroup();
         else close();
       },
@@ -350,9 +353,9 @@ export function StoryViewerOverlay() {
       <button
         onClick={close}
         aria-label="Close story"
-        className="absolute right-4 z-10 w-9 h-9 rounded-xl flex items-center justify-center active:scale-95 border border-white/20"
+        className="absolute right-4 z-10 w-11 h-11 rounded-xl flex items-center justify-center active:scale-95 border border-white/20"
         style={{
-          top: "calc(env(safe-area-inset-top) + 14px)",
+          top: "calc(env(safe-area-inset-top) + 12px)",
           background: "rgba(255,255,255,0.12)",
           backdropFilter: "saturate(160%) blur(18px)",
           WebkitBackdropFilter: "saturate(160%) blur(18px)",
@@ -365,7 +368,7 @@ export function StoryViewerOverlay() {
           over a playing story is worse than a button that asks once. */}
       {isOwnStory ? (
         <button
-          onClick={() => (confirmingDelete ? removeStory() : setConfirmingDelete(true))}
+          onClick={() => (confirmingDelete ? removeStory() : setDeleteConfirmation(deleteConfirmationKey))}
           disabled={deleteStory.isPending}
           aria-label={confirmingDelete ? "Confirm delete story" : "Delete story"}
           className="absolute right-16 z-10 h-9 rounded-xl flex items-center justify-center gap-2 px-3 active:scale-95 border border-white/20 disabled:opacity-50"
@@ -402,7 +405,7 @@ export function StoryViewerOverlay() {
         }}
       >
         {playbackReady ? <StoryViewer
-          key={group.id}
+          key={`${viewSession}:${group.id}`}
           stories={storyItems}
           currentIndex={storyIndex}
           onAllStoriesEnd={nextGroup}
@@ -441,32 +444,6 @@ export function StoryViewerOverlay() {
               router.push(path);
             }}
           />
-        ) : null}
-
-        {/* Sound. The kit's <video> is muted so the browser will autoplay it at
-            all; this is the only way back to the audio the poster recorded. */}
-        {segment?.type === "video" ? (
-          <button
-            onClick={() => {
-              const next = !muted;
-              setMuted(next);
-              frameRef.current
-                ?.querySelectorAll("video")
-                .forEach((v) => {
-                  v.muted = next;
-                  if (!next) void v.play().catch(() => {});
-                });
-            }}
-            aria-label={muted ? "Unmute story" : "Mute story"}
-            style={{ zIndex: STORY_UI_Z }}
-            className="absolute right-4 top-16 flex h-9 w-9 items-center justify-center rounded-xl border border-white/20 bg-black/45 backdrop-blur-md"
-          >
-            {muted ? (
-              <VolumeX size={17} color="#fff" />
-            ) : (
-              <Volume2 size={17} color="#fff" />
-            )}
-          </button>
         ) : null}
 
         {/* Reactions in flight — the receipt for a tap, without a toast over
@@ -635,6 +612,38 @@ export function StoryViewerOverlay() {
           }}
         />
       </div>
+      {/* Sound lives beside the close control in the OUTER overlay, not
+          inside the centered 9:16 frame. On short mobile viewports the frame
+          can start at y=0; its former top-16 position collided with the close
+          button's safe-area-adjusted top offset. One shared safe-area origin
+          guarantees 12px between 44px controls, even on iPhone landscape. */}
+      {segment?.type === "video" ? (
+        <button
+          type="button"
+          onClick={() => {
+            const next = !muted;
+            setMuted(next);
+            frameRef.current
+              ?.querySelectorAll("video")
+              .forEach((v) => {
+                v.muted = next;
+                if (!next) void v.play().catch(() => {});
+              });
+          }}
+          aria-label={muted ? "Unmute story" : "Mute story"}
+          style={{
+            top: "calc(env(safe-area-inset-top) + 68px)",
+            zIndex: STORY_UI_Z,
+          }}
+          className="absolute right-4 flex h-11 w-11 items-center justify-center rounded-xl border border-white/20 bg-black/45 backdrop-blur-md"
+        >
+          {muted ? (
+            <VolumeX size={17} color="#fff" />
+          ) : (
+            <Volume2 size={17} color="#fff" />
+          )}
+        </button>
+      ) : null}
     </div>,
     document.body,
   );

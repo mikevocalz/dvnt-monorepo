@@ -13,7 +13,6 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { isFeatureEnabled } from "@dvnt/app/lib/feature-flags";
 import { bootstrapApi, type BootstrapMessagesResponse } from "@dvnt/app/lib/api/bootstrap";
 import { messageKeys } from "@dvnt/app/lib/hooks/use-messages";
-import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
 import { useScreenTrace } from "@dvnt/app/lib/perf/screen-trace";
 
 function hydrateFromMessagesBootstrap(
@@ -31,16 +30,9 @@ function hydrateFromMessagesBootstrap(
       data.conversations,
     );
 
-    // 2. Seed unread counts
-    queryClient.setQueryData(messageKeys.unreadCount(userId), {
-      inbox: data.unreadInbox,
-      spam: data.unreadSpam,
-    });
+    // Badge totals are owned by the canonical unread query. The bootstrap
+    // endpoint still scans a bounded history page and has a different block scope.
 
-    // 3. Sync with unread counts store for badge rendering
-    const store = useUnreadCountsStore.getState();
-    store.setMessagesUnread(data.unreadInbox);
-    store.setSpamUnread(data.unreadSpam);
   }
 
   console.log(

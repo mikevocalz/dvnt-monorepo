@@ -50,8 +50,8 @@ test("all device-collection entry points honor overall permission and stale call
   // Local centering needs overall permission, not avatar publication consent.
   // Publication still requires the fresh grant inside the serialized write.
   assert.match(controller, /if \(!allowed\(\) \|\| !mapGrantActive\(state\.settings, Date\.now\(\)\)\) return;\s*await memberMapApi\.publish/);
-  assert.match(controller, /permission === "denied"\) return null/);
+  assert.match(controller, /permission === "denied"\) \{ onDenied\(\); return null;/);
   assert.match(controller, /permission === "prompt" && !requestPermission\) return null/);
-  assert.match(controller, /permission\.status === "undetermined" && requestPermission && allowed\(\)/);
-  assert.match(controller, /const requestPermission = !permissionAttempted\.current/);
+  assert.match(controller, /permission\.status !== "granted" && permission\.canAskAgain !== false && requestPermission && allowed\(\)/);
+  assert.match(controller, /const requestPermission = false/);
 });

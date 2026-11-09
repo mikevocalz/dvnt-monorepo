@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useForm } from '@tanstack/react-form';
 import { useRouter, useSearchParams } from 'solito/navigation';
@@ -8,6 +8,8 @@ import { FormInput } from '../../../components/form';
 import { authClient, submitPasswordReset } from '../../../lib/auth-client';
 import { Check, AlertCircle, ShieldCheck, ArrowLeft } from 'lucide-react';
 import { AUTH_PRIMARY_COLOR as P, AUTH_DESTRUCTIVE_COLOR as D } from './AuthScreens.shared';
+import { authPathWithReturn, readReturnToFromUrl } from '../../../lib/auth/return-to';
+import { captureAuthContinuation } from '../../../lib/auth/continuation-guard';
 
 type Status = 'checking' | 'ready' | 'success' | 'invalid';
 
@@ -16,7 +18,14 @@ export function ResetPasswordScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Next app uses Solito/Next routing (no TanStack RouterProvider).
   const router = useRouter();
-  const navigate = ({ to }: { to: string }) => router.push(to);
+  const navigate = ({ to }: { to: '/auth/login' | '/auth/forgot-password' }) => router.push(authPathWithReturn(to, readReturnToFromUrl('')));
+  const active = useRef(true);
+  const redirectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const continuation = useRef<ReturnType<typeof captureAuthContinuation> | null>(null);
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; continuation.current?.release(); if (redirectTimer.current) clearTimeout(redirectTimer.current); };
+  }, []);
   // Recovery token from the email link (?token=…). Web reset is TOKEN-BASED —
   // the link is first-party and carries the token; we do NOT rely on a session
   // cookie (which Better Auth sets on the Supabase domain, not the app domain).
@@ -36,15 +45,25 @@ export function ResetPasswordScreen() {
   const form = useForm({
     defaultValues: { password: '', confirmPassword: '' },
     onSubmit: async ({ value }) => {
+      continuation.current?.release();
+      const guard = captureAuthContinuation();
+      continuation.current = guard;
+      const entryUrl = window.location.href;
+      const stillCurrent = () => active.current && continuation.current === guard &&
+        guard.isCurrent() && window.location.href === entryUrl;
       setIsSubmitting(true);
       try {
         const response = await submitPasswordReset(value.password, token);
+        if (!stillCurrent()) return;
         if ((response as any)?.error) { toast.error('Reset failed', { description: (response as any).error.message || 'Could not update password.' }); return; }
         setStatus('success');
         toast.success('Password updated', { description: 'Your new password is set.' });
-        setTimeout(() => navigate({ to: '/auth/login' }), 1800);
+        redirectTimer.current = setTimeout(() => {
+          if (stillCurrent()) navigate({ to: '/auth/login' });
+          guard.release();
+        }, 1800);
       } catch (err: any) {
-        toast.error('Reset failed', { description: err?.message || 'Could not update password.' });
+        if (stillCurrent()) toast.error('Reset failed', { description: err?.message || 'Could not update password.' });
       } finally { setIsSubmitting(false); }
     },
   });

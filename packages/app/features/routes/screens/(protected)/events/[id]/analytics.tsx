@@ -32,7 +32,10 @@ import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { currentAccountingMonth, useEventAnalyticsStore } from "@dvnt/app/lib/stores/event-analytics-store";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
+import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import {
   eventAnalyticsApi,
   resolveAttendanceBreakdown,
@@ -125,21 +128,29 @@ function EventAnalyticsContent() {
   const { colors } = useColorScheme();
   const showToast = useUIStore((s) => s.showToast);
   const eventId = Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
+  const viewerId = useAuthStore((s) => s.user?.authId ?? s.user?.id ?? null);
+  const month = useEventAnalyticsStore((s) => s.month);
+  const setMonth = useEventAnalyticsStore((s) => s.setMonth);
+  const shiftMonth = (delta: number) => {
+    const [year, mon] = month.split("-").map(Number);
+    const d = new Date(Date.UTC(year, mon - 1 + delta, 1));
+    setMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+  };
 
   const { data, isLoading, isError, refetch, isRefetching } =
     useQuery<EventAnalyticsSummary | null>({
-      queryKey: ["event-analytics", eventId],
-      queryFn: () => eventAnalyticsApi.getSummary(eventId),
-      enabled: !!eventId,
+      queryKey: ["event-analytics", eventId, month, viewerId],
+      queryFn: () => eventAnalyticsApi.getSummary(eventId, month),
+      enabled: !!eventId && !!viewerId,
       staleTime: 30 * 1000,
     });
 
   // Promoter leaderboard (WS-4) — ranked server-side by NET ledger
   // earnings (single ledger query). No client re-math beyond formatting.
   const { data: promoterLeaderboard } = useQuery<PromoterLeaderboardRow[]>({
-    queryKey: ["event-promoter-leaderboard", eventId],
+    queryKey: ["event-promoter-leaderboard", eventId, viewerId],
     queryFn: () => promotersApi.leaderboard(parseInt(eventId, 10)),
-    enabled: !!eventId,
+    enabled: !!eventId && !!viewerId,
     staleTime: 30 * 1000,
   });
 
@@ -245,7 +256,7 @@ function EventAnalyticsContent() {
     );
   }
 
-  const { revenue, ticketStats, tiers, promoCodes } = data;
+  const { revenue, monthlyPlatformFees, ticketStats, tiers, promoCodes } = data;
   const attendanceBreakdown = resolveAttendanceBreakdown(data);
   const checkInPercent =
     ticketStats.total > 0
@@ -307,11 +318,11 @@ function EventAnalyticsContent() {
           <StatCard
             icon={<Ticket size={16} color="#3b82f6" />}
             iconColor="#3b82f6"
-            label="Tickets sold"
+            label="Tickets issued"
             value={String(ticketStats.total)}
             sublabel={
               totalCapacity > 0
-                ? `${remainingTickets} remaining`
+                ? `${remainingTickets} tier inventory remaining`
                 : undefined
             }
           />
@@ -327,10 +338,60 @@ function EventAnalyticsContent() {
           <StatCard
             icon={<TrendingUp size={16} color="#f59e0b" />}
             iconColor="#f59e0b"
-            label="Fees paid"
-            value={formatMoney(revenue.dvntFeeCents + revenue.stripeFeeCents)}
-            sublabel={`${formatMoney(revenue.dvntFeeCents)} DVNT platform · ${formatMoney(revenue.stripeFeeCents)} Stripe processing`}
+            label="Stripe costs · lifetime"
+            value={formatMoney(revenue.stripeFeeCents)}
+            sublabel="Not the monthly platform fee"
           />
+        </View>
+
+        {/* Month-scoped paid-order ledger, separate from organizer lifetime net. */}
+        <View style={[styles.section, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>DVNT platform fees · monthly</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 12 }}>
+            <Pressable onPress={() => shiftMonth(-1)} accessibilityLabel="Previous accounting month"
+              style={{ padding: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 8 }}>
+              <Text style={{ color: colors.foreground }}>‹</Text>
+            </Pressable>
+            <Text style={{ color: colors.foreground, fontWeight: "700" }}>{month} · New York</Text>
+            <Pressable onPress={() => shiftMonth(1)} disabled={month >= currentAccountingMonth()}
+              accessibilityLabel="Next accounting month"
+              style={{ padding: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 8, opacity: month >= currentAccountingMonth() ? 0.3 : 1 }}>
+              <Text style={{ color: colors.foreground }}>›</Text>
+            </Pressable>
+          </View>
+          {monthlyPlatformFees && monthlyPlatformFees.month === month ? (
+            <>
+              {([
+                ["Buyer-side fees", monthlyPlatformFees.buyerFeeCents],
+                ["Organizer-side fees", monthlyPlatformFees.organizerFeeCents],
+                ["Gross DVNT platform fees", monthlyPlatformFees.grossPlatformFeeCents],
+                ["Stripe processing costs", monthlyPlatformFees.stripeFeeCents],
+              ] as const).map(([label, cents]) => (
+                <View key={label} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
+                  <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>{label}</Text>
+                  <Text style={{ color: colors.foreground, fontWeight: "700" }}>{formatCents(cents)}</Text>
+                </View>
+              ))}
+              <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, marginTop: 4 }}>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Provisional fees after Stripe</Text>
+                <Text style={{ color: "#3FDCFF", fontSize: 25, fontWeight: "800" }}>
+                  {formatCents(monthlyPlatformFees.afterStripeFeeCents)}
+                </Text>
+                <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 8 }}>
+                  {monthlyPlatformFees.paidOrders} paid orders; {monthlyPlatformFees.chargedOrders} charged.
+                  {monthlyPlatformFees.excludedPartiallyRefundedOrders > 0
+                    ? ` ${monthlyPlatformFees.excludedPartiallyRefundedOrders} partially refunded order(s) excluded.` : ""}
+                  {" "}Refund reversals, credits and other deductions are not reconciled.
+                  {" "}Not verified settled proceeds or a developer payout.
+                </Text>
+                <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 4 }}>
+                  Checked {new Date(monthlyPlatformFees.asOf).toLocaleString()}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <Text style={{ color: colors.mutedForeground }}>Monthly fee ledger unavailable; do not use legacy event estimates for payouts.</Text>
+          )}
         </View>
 
         {/* ── Attendance source breakdown (host-only) ── */}
@@ -345,9 +406,9 @@ function EventAnalyticsContent() {
           </Text>
           <View style={{ flexDirection: "row", gap: 12 }}>
             {[
-              ["RSVP", attendanceBreakdown.rsvp],
-              ["Paid", attendanceBreakdown.paid],
-              ["Total", attendanceBreakdown.total],
+              ["RSVP people", attendanceBreakdown.rsvp],
+              ["Paid tickets", attendanceBreakdown.paid],
+              ["Going", attendanceBreakdown.total],
             ].map(([label, value]) => (
               <View key={String(label)} style={{ flex: 1 }}>
                 <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
@@ -360,7 +421,7 @@ function EventAnalyticsContent() {
             ))}
           </View>
           <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 10 }}>
-            Total includes paid, free/comp tickets, and RSVP-only guests without double-counting.
+            Going counts valid ticket units (including free/comp) plus RSVP-only guests. Refunded and cancelled tickets are excluded; issued tickets above include their history.
           </Text>
         </View>
 

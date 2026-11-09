@@ -41,6 +41,8 @@ import {
   ensureDirectConversation,
   postConversationMessage,
 } from "../_shared/conversation-delivery.ts";
+import { brandEmailWrapper } from "../_shared/email/wrapper.ts";
+import { paragraph } from "../_shared/email/components.ts";
 import { sendResendEmail } from "../_shared/send-resend-email.ts";
 import { welcome as welcomeEmail } from "../_shared/email/templates.ts";
 
@@ -354,7 +356,7 @@ Deno.serve(async (req: Request) => {
           const id = await sendResendEmail({
             to: recipient.email,
             subject: copy.subject,
-            html: copy.body.replace(/\n/g, "<br/>"),
+            html: brandEmailWrapper(paragraph(copy.body.replace(/\n/g, "<br/>")), { preheader: copy.subject }),
           });
           // The provider returns null when RESEND_API_KEY is missing. An HTTP
           // success from this worker must never be misread as email delivery.

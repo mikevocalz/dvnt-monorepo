@@ -29,6 +29,9 @@ function detailControlClass(tag, marker) {
 const reviewClass=detailControlClass('textarea', 'Share how the event went');
 const promoClass=detailControlClass('input', 'Promo or promoter code');
 const mocks = {
+    // This fixture covers layout; unread data/lifecycle is exercised separately.
+    '@dvnt/app/lib/hooks/use-notifications-query': `export const useBadges=()=>({data:{unread:0,total:0}});`,
+    '@dvnt/app/lib/hooks/use-messages': `export const useUnreadMessageCount=()=>({data:0,spamCount:0});`,
   'solito/navigation': `export const usePathname=()=>window.detailFixture.path; export const useRouter=()=>({push:path=>window.detailFixture.navigate(path)});`,
   '@dvnt/app/lib/stores/auth-store': `export const useAuthStore=selector=>selector({user:{username:'fixture-member'}});`,
   '@dvnt/app/components/logo': `export default ()=> <span>DVNT</span>;`,

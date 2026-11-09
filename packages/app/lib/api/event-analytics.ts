@@ -9,6 +9,25 @@ import { invokeEdge } from "./invoke-edge";
 
 export { resolveAttendanceBreakdown } from "./event-attendance";
 
+export interface MonthlyPlatformFeeSummary {
+  month: string;
+  timeZone: "America/New_York";
+  start: string;
+  end: string;
+  asOf: string;
+  currency: "usd";
+  paidOrders: number;
+  chargedOrders: number;
+  excludedPartiallyRefundedOrders: number;
+  checkoutCents: number;
+  buyerFeeCents: number;
+  organizerFeeCents: number;
+  grossPlatformFeeCents: number;
+  stripeFeeCents: number;
+  afterStripeFeeCents: number;
+  provisional: true;
+}
+
 export interface EventRevenueSummary {
   grossCents: number;
   refundsCents: number;
@@ -61,6 +80,8 @@ export interface EventAnalyticsSummary {
   eventId: string;
   title: string;
   revenue: EventRevenueSummary;
+  /** Null on a failed ledger read; absent on older Edge deployments. Never zero-fill. */
+  monthlyPlatformFees?: MonthlyPlatformFeeSummary | null;
   ticketStats: EventTicketStats;
   /** Optional during rolling deploys so old Edge payloads cannot blank UI. */
   attendanceBreakdown?: EventAttendanceBreakdown;
@@ -109,10 +130,10 @@ function unwrap<T>(
 }
 
 export const eventAnalyticsApi = {
-  async getSummary(eventId: string | number): Promise<EventAnalyticsSummary | null> {
+  async getSummary(eventId: string | number, month?: string): Promise<EventAnalyticsSummary | null> {
     const res = await invokeEdge<AnalyticsResponse<EventAnalyticsSummary>>(
       "event-analytics",
-      { event_id: eventId },
+      { event_id: eventId, ...(month ? { month } : {}) },
     );
     return unwrap<EventAnalyticsSummary>("getSummary", res);
   },

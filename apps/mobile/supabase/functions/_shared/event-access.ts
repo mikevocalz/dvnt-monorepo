@@ -68,33 +68,13 @@ export async function canAccessEvent(db: any, eventId: number, userId: string | 
  *  _shared/sales-cutoff.ts. */
 const ASSUMED_EVENT_LENGTH_MS = 6 * 60 * 60 * 1000;
 
-export type EventRoomAccess =
-  | { ok: true; linked: boolean; endsAt: string | null; event?: EventAccessRow & { lynk_room_id?: string | null } }
-  | { ok: false; code: "forbidden" | "conflict"; message: string; detail: Record<string, unknown> };
-
-/** Pure decision function, shared by all token rails through the resolver below. */
-export function decideEventRoomAccess(
-  event: EventAccessRow | null,
-  access: { organizer: boolean; ticket: boolean; invited: boolean },
-  room: { created_at?: string | null; ends_at?: string | null; status?: string | null },
-  now = Date.now(),
-  /** event_lynk_lifecycle.state === 'live': a host pressed Start. */
-  started = false,
-  lifecycleState?: string,
-): EventRoomAccess {
-  const deny = (reason: string, message: string, code: "forbidden" | "conflict" = "forbidden"): EventRoomAccess =>
-    ({ ok: false, code, message, detail: { reason } });
-  if (!event) return { ok: true, linked: false, endsAt: room.ends_at ?? null };
-  if (["cancelled", "deleted"].includes(event.status ?? ""))
-    return deny("event_unavailable", "This event is no longer available", "conflict");
-  // Even a room invite/old membership cannot replace admission to a paid event.
-  if (!access.organizer && (event.ticketing_enabled ? !access.ticket : !access.ticket && !access.invited))
-    return deny(event.ticketing_enabled ? "event_ticket_required" : "event_invite_required",
-      event.ticketing_enabled ? "An active admission ticket is required for this event" : "This event requires an invitation");
-  if ((room.status != null && room.status !== "open") || ["ended", "cancelled"].includes(lifecycleState ?? ""))
-    return deny("room_ended", "This Lynk has ended", "conflict");
+/** Shared list/token deadline. Preserve the existing plan allowance and event rules. */
+export function eventRoomDeadline(
+  event: Pick<EventAccessRow, "start_date" | "end_date">,
+  room: { created_at?: string | null; ends_at?: string | null },
+): number | null {
   const start = Date.parse(event.start_date ?? "");
-  if (!Number.isFinite(start)) return deny("event_schedule_missing", "The event schedule is not ready", "conflict");
+  if (!Number.isFinite(start)) return null;
   const end = Date.parse(event.end_date ?? "");
   // Free-plan rooms used to expire five minutes after being created, days before
   // a scheduled event. Preserve the plan duration, starting at the event's start.
@@ -116,6 +96,44 @@ export function decideEventRoomAccess(
       ...[durationEnd].filter(Number.isFinite),
     );
   }
+  return effectiveEnd;
+}
+
+export function hasEventRoomAdmission(
+  event: Pick<EventAccessRow, "ticketing_enabled">,
+  access: { organizer: boolean; ticket: boolean; invited: boolean },
+): boolean {
+  return access.organizer || (event.ticketing_enabled ? access.ticket : access.ticket || access.invited);
+}
+
+export type EventRoomAccess =
+  | { ok: true; linked: boolean; endsAt: string | null; event?: EventAccessRow & { lynk_room_id?: string | null } }
+  | { ok: false; code: "forbidden" | "conflict"; message: string; detail: Record<string, unknown> };
+
+/** Pure decision function, shared by all token rails through the resolver below. */
+export function decideEventRoomAccess(
+  event: EventAccessRow | null,
+  access: { organizer: boolean; ticket: boolean; invited: boolean },
+  room: { created_at?: string | null; ends_at?: string | null; status?: string | null },
+  now = Date.now(),
+  /** event_lynk_lifecycle.state === 'live': a host pressed Start. */
+  started = false,
+  lifecycleState?: string,
+): EventRoomAccess {
+  const deny = (reason: string, message: string, code: "forbidden" | "conflict" = "forbidden"): EventRoomAccess =>
+    ({ ok: false, code, message, detail: { reason } });
+  if (!event) return { ok: true, linked: false, endsAt: room.ends_at ?? null };
+  if (["cancelled", "deleted"].includes(event.status ?? ""))
+    return deny("event_unavailable", "This event is no longer available", "conflict");
+  // Even a room invite/old membership cannot replace admission to a paid event.
+  if (!hasEventRoomAdmission(event, access))
+    return deny(event.ticketing_enabled ? "event_ticket_required" : "event_invite_required",
+      event.ticketing_enabled ? "An active admission ticket is required for this event" : "This event requires an invitation");
+  if ((room.status != null && room.status !== "open") || ["ended", "cancelled"].includes(lifecycleState ?? ""))
+    return deny("room_ended", "This Lynk has ended", "conflict");
+  const start = Date.parse(event.start_date ?? "");
+  if (!Number.isFinite(start)) return deny("event_schedule_missing", "The event schedule is not ready", "conflict");
+  const effectiveEnd = eventRoomDeadline(event, room);
   if (effectiveEnd !== null && now >= effectiveEnd)
     return deny("session_expired", "This event's live session has ended", "conflict");
   // The room opens when a host starts it, not when the clock reaches

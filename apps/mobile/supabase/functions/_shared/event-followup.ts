@@ -1,9 +1,12 @@
 /**
  * Pure helpers for the organizer post-event follow-up email.
  *
- * No imports and no env reads, so the Deno tests in event-followup.test.ts
- * can drive every rule directly. The edge functions own all I/O.
+ * The edge functions own all I/O; the shared email kit only renders HTML.
  */
+
+import { brandEmailWrapper } from "./email/wrapper.ts";
+import { button, heading, paragraph } from "./email/components.ts";
+import { COLORS } from "./email/tokens.ts";
 
 export interface FollowupContent {
   subject: string | null;
@@ -121,7 +124,7 @@ export function recipientsToEnqueue(
 ): Map<string, { ticketId: string; userId: string | null }> {
   const out = new Map<string, { ticketId: string; userId: string | null }>();
   for (const t of tickets) {
-    const email = String(t.guest_email || emailByAuth.get(String(t.user_id)) || "")
+    const email = String((t.user_id ? emailByAuth.get(String(t.user_id)) : t.guest_email) || "")
       .trim()
       .toLowerCase();
     if (!email || out.has(email) || alreadyMailed.has(email)) continue;
@@ -222,17 +225,24 @@ export function buildFollowupEmail(args: {
   ctaLabel: string | null;
   reviewUrl: string;
   unsubscribeUrl: string;
+  preview?: boolean;
+  /** Guests without an account receive only this signup CTA. */
+  joinUrl?: string;
 }): { subject: string; html: string; headers: Record<string, string> } {
   const title = args.eventTitle || "your event";
   const message = escapeHtml(args.message || `Thanks for coming to ${title}.`);
-  const html =
-    `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto">` +
-    `<h2>${escapeHtml(args.eventTitle || "Thanks for coming")}</h2>` +
-    `<p style="white-space:pre-wrap">${message}</p>` +
-    `<p><a href="${escapeHtml(args.reviewUrl)}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#111;color:#fff;text-decoration:none">${escapeHtml(args.ctaLabel || "Leave a review")}</a></p>` +
-    `<p style="font-size:12px;color:#666">You got this because you had a ticket to ${escapeHtml(title)}. ` +
-    `<a href="${escapeHtml(args.unsubscribeUrl)}" style="color:#666">Unsubscribe from event follow-up emails</a>.</p>` +
-    `</div>`;
+  const ctaUrl = args.joinUrl || args.reviewUrl;
+  const html = brandEmailWrapper([
+    heading(escapeHtml(args.eventTitle || "Thanks for coming")),
+    paragraph(`<span style="white-space:pre-wrap">${message}</span>`),
+    button(ctaUrl, args.joinUrl ? "Join the platform" : escapeHtml(args.ctaLabel || "Rate the party")),
+    paragraph(`If the app opens instead, copy this link into your browser’s address bar:<br/><a href="${escapeHtml(ctaUrl)}" style="color:${COLORS.textMuted};word-break:break-all">${escapeHtml(ctaUrl)}</a>`, { size: 12, color: COLORS.textMuted }),
+    paragraph(
+      (args.preview ? `This is your requested preview for ${escapeHtml(title)}. ` : `You got this because you had a ticket to ${escapeHtml(title)}. `) +
+      `<a href="${escapeHtml(args.unsubscribeUrl)}" style="color:${COLORS.textMuted};text-decoration:underline">Unsubscribe from event follow-up emails</a>.`,
+      { size: 12, color: COLORS.textMuted },
+    ),
+  ].join(""), { preheader: args.subject || `How was ${title}?` });
   return {
     subject: args.subject || `How was ${title}?`,
     html,

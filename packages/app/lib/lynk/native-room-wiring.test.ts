@@ -19,7 +19,16 @@ test("native roster-count changes do not recreate the callback that owns join/le
 });
 
 test("native room and account switches own separate component lifetimes", () => {
-  assert.match(route, /<ServerRoom\s+key=\{id\}/);
+  const entry = route.slice(route.indexOf("function SneakyLynkRoomScreenContent("), route.indexOf("// ── LocalRoom:"));
+  // The room mount must own both the route and account session. Generation
+  // also distinguishes A → B → A changes that React can batch into one render.
+  assert.match(entry, /const entryKey = JSON\.stringify\(\[id, accountKey, accountGeneration\]\)/);
+  assert.match(entry, /<ServerRoom\s+key=\{entryKey\}\s+id=\{id\}/);
+  assert.match(entry, /reviewedJoin\?\.key !== entryKey/);
+  assert.match(entry, /roomLookup\.key === entryKey \? roomLookup : null/);
+  const accountSubscription = entry.slice(entry.indexOf("useEffect(() => useAuthStore.subscribe("), entry.indexOf("const roomHasVideo ="));
+  assert.match(accountSubscription, /accountEpochRef\.current \+= 1/);
+  assert.match(accountSubscription, /setAccountGeneration\(\(generation\) => generation \+ 1\)/);
   assert.match(route, /const roomAccountKey = JSON.stringify\(\[roomId, accountKey\]\)/);
   assert.match(route, /<SneakyLynkRoomScreenContent key=\{roomAccountKey\}/);
 });

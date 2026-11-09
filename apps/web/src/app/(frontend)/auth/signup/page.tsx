@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { SignupEntry } from '@dvnt/app/components/signup-entry.web';
 
 const Screen = dynamic(
   () => import('@dvnt/app/features/auth/screens/SignupScreen').then((m) => m.SignupScreen),
@@ -8,5 +9,5 @@ const Screen = dynamic(
 );
 
 export default function Page() {
-  return <Screen />;
+  return <SignupEntry><Screen /></SignupEntry>;
 }

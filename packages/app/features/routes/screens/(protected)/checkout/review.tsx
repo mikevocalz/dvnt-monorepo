@@ -18,7 +18,7 @@ import {
 import { LegendList, type LegendListRenderItemProps } from "@dvnt/app/components/list";
 import { AppTrace } from "@dvnt/app/lib/diagnostics/app-trace";
 import type { CartLineItem, LineItemCategory } from "@dvnt/app/lib/contracts/dto";
-import { calculateCartSubtotalCents } from "@dvnt/app/lib/contracts/invariants";
+import { calculateCartSubtotalCents, calculateCartFeeQuantity } from "@dvnt/app/lib/contracts/invariants";
 import { useMixedCartCheckout } from "@dvnt/app/lib/hooks/use-mixed-cart-checkout";
 import { CheckoutPhoneField } from "@dvnt/app/features/events/checkout-phone-field";
 import { computeFees, formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
@@ -398,15 +398,16 @@ export default function CartReviewScreen() {
     promoterDiscountBps,
     quantity,
   });
+  const feeQuantity = calculateCartFeeQuantity(lineItems);
   const fees = useMemo(
     () =>
-      quantity > 0
-        ? computeFees(effectiveSubtotalCents, quantity)
+      feeQuantity > 0
+        ? computeFees(effectiveSubtotalCents, feeQuantity)
         : {
             buyer_fee: 0,
             customer_charge_amount: 0,
           },
-    [quantity, effectiveSubtotalCents],
+    [feeQuantity, effectiveSubtotalCents],
   );
 
   const handleIncrement = useCallback(

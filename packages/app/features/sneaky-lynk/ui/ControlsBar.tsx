@@ -24,9 +24,8 @@ import {
 import * as Haptics from "expo-haptics";
 import {
   DVNTLiquidGlass,
-  DVNTLiquidGlassIconButton,
 } from "@dvnt/app/components/media/DVNTLiquidGlass";
-import Reanimated, { FadeInRight, FadeOutRight } from "react-native-reanimated";
+import Reanimated, { FadeInRight, FadeOutRight, useReducedMotion } from "react-native-reanimated";
 import { controlsLayout } from "./controls-layout";
 import type { RoomReaction } from "../hooks/useRoomReactions";
 
@@ -38,6 +37,8 @@ import type { RoomReaction } from "../hooks/useRoomReactions";
 export const REACTION_EMOJIS = ["😂", "😢", "😊", "😈", "🥵", "💝"];
 
 interface ControlsBarProps {
+  disabled?: boolean;
+  isLeaving?: boolean;
   isMuted: boolean;
   /** The host is holding this participant muted (lib/video/host-mute). The
    *  control still renders — hiding it would leave someone wondering where
@@ -74,6 +75,7 @@ function FloatingReaction({
   reaction: RoomReaction;
   onComplete: () => void;
 }) {
+  const reduceMotion = useReducedMotion();
   const translateY = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(1)).current;
   const scale = useRef(new Animated.Value(0.72)).current;
@@ -90,6 +92,10 @@ function FloatingReaction({
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
+    if (reduceMotion) {
+      const timer = setTimeout(() => onCompleteRef.current(), 1600);
+      return () => clearTimeout(timer);
+    }
     const animation = Animated.parallel([
       Animated.timing(translateY, {
         toValue: -196 - Math.random() * 72,
@@ -164,147 +170,50 @@ function FloatingReaction({
 function ControlButton({
   icon,
   label,
+  displayLabel,
   onPress,
   active = false,
   danger = false,
   compact = false,
   showLabel = true,
   diameter,
+  disabled = false,
 }: {
   icon: ReactNode;
   label: string;
+  displayLabel?: string;
   onPress: () => void;
   active?: boolean;
   danger?: boolean;
   compact?: boolean;
   showLabel?: boolean;
   diameter?: number;
+  disabled?: boolean;
 }) {
-  const scale = useRef(new Animated.Value(1)).current;
-
-  const handlePressIn = useCallback(() => {
-    Animated.spring(scale, {
-      toValue: 0.92,
-      useNativeDriver: true,
-      speed: 22,
-      bounciness: 5,
-    }).start();
-  }, [scale]);
-
-  const handlePressOut = useCallback(() => {
-    Animated.spring(scale, {
-      toValue: 1,
-      useNativeDriver: true,
-      speed: 22,
-      bounciness: 5,
-    }).start();
-  }, [scale]);
-
-  const size = diameter ?? (compact ? 44 : 52);
-  const labelColor = danger
-    ? "#FCA5A5"
-    : active
-      ? "#E2F2FF"
-      : "rgba(255,255,255,0.72)";
-
+  const size = Math.max(44, diameter ?? (compact ? 44 : 52));
   return (
-    <View
-      style={{
-        alignItems: "center",
-        gap: showLabel ? 5 : 0,
-        minWidth: size,
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled, selected: active }}
+      disabled={disabled}
+      onPress={() => {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        onPress();
       }}
+      style={({ pressed }) => ({ width: size, minHeight: size + (showLabel ? 22 : 0), alignItems: "center", gap: 6, opacity: disabled ? 0.4 : pressed ? 0.65 : 1 })}
     >
-      <Animated.View style={{ transform: [{ scale }] }}>
-        <Pressable
-          collapsable={false}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            onPress();
-          }}
-          onPressIn={handlePressIn}
-          onPressOut={handlePressOut}
-          hitSlop={compact ? 12 : 10}
-          accessibilityRole="button"
-          accessibilityLabel={label}
-          style={{ zIndex: 2, elevation: 2 }}
-          onStartShouldSetResponder={() => true}
-        >
-          {compact ? (
-            <View
-              style={{
-                width: size,
-                height: size,
-                borderRadius: 14,
-                borderWidth: 1,
-                borderColor: danger
-                  ? "rgba(248, 113, 113, 0.34)"
-                  : active
-                    ? "rgba(104, 198, 255, 0.38)"
-                    : "rgba(255,255,255,0.16)",
-                backgroundColor: danger
-                  ? "rgba(127, 29, 29, 0.28)"
-                  : active
-                    ? "rgba(46, 157, 255, 0.26)"
-                    : "rgba(12,16,24,0.88)",
-                alignItems: "center",
-                justifyContent: "center",
-                shadowColor: "#000",
-                shadowOpacity: 0.24,
-                shadowRadius: 14,
-                shadowOffset: { width: 0, height: 8 },
-              }}
-            >
-              {icon}
-            </View>
-          ) : (
-            <DVNTLiquidGlassIconButton
-              size={size}
-              interactive={false}
-              style={{
-                borderWidth: 1,
-                borderColor: danger
-                  ? "rgba(248, 113, 113, 0.34)"
-                  : active
-                    ? "rgba(104, 198, 255, 0.38)"
-                    : "rgba(255,255,255,0.16)",
-              }}
-            >
-              <View
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: danger
-                    ? "rgba(127, 29, 29, 0.28)"
-                    : active
-                      ? "rgba(46, 157, 255, 0.26)"
-                      : "rgba(255,255,255,0.04)",
-                }}
-              >
-                {icon}
-              </View>
-            </DVNTLiquidGlassIconButton>
-          )}
-        </Pressable>
-      </Animated.View>
-      {showLabel ? (
-        <Text
-          style={{
-            color: labelColor,
-            fontSize: compact ? 10 : 11,
-            fontWeight: "700",
-          }}
-        >
-          {label}
-        </Text>
-      ) : null}
-    </View>
+      <View style={{ width: size, height: size, borderRadius: 8, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: danger ? "rgba(252,37,58,0.35)" : active ? "rgba(63,220,255,0.24)" : "rgba(255,255,255,0.10)", backgroundColor: danger ? "rgba(252,37,58,0.14)" : active ? "rgba(63,220,255,0.10)" : "rgba(255,255,255,0.04)" }}>
+        {icon}
+      </View>
+      {showLabel ? <Text numberOfLines={1} style={{ color: danger ? "#FF9CA8" : active ? "#E3FAFF" : "#B7B9C5", fontSize: 11, fontWeight: "600" }}>{displayLabel ?? label}</Text> : null}
+    </Pressable>
   );
 }
 
 export function ControlsBar({
+  disabled = false,
+  isLeaving = false,
   isMuted,
   hostMuteLocked = false,
   isVideoEnabled,
@@ -323,6 +232,7 @@ export function ControlsBar({
   onSendReaction,
   onReport,
 }: ControlsBarProps) {
+  const reduceMotion = useReducedMotion();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const dock = controlsLayout(width, insets.left, insets.right, hasVideo ? 5 : 4);
@@ -338,11 +248,11 @@ export function ControlsBar({
 
     Animated.timing(dockVisibility, {
       toValue: overlayOpen ? 0 : 1,
-      duration: overlayOpen ? 140 : 180,
+      duration: reduceMotion ? 0 : overlayOpen ? 140 : 180,
       easing: overlayOpen ? Easing.in(Easing.cubic) : Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [dockVisibility, overlayOpen]);
+  }, [dockVisibility, overlayOpen, reduceMotion]);
 
   const controlsTranslateY = dockVisibility.interpolate({
     inputRange: [0, 1],
@@ -356,7 +266,8 @@ export function ControlsBar({
         hasVideo && isVideoEnabled && onSwitchCamera
           ? {
               key: "flip",
-              label: "Flip",
+              label: "Flip camera",
+              displayLabel: "Flip",
               onPress: onSwitchCamera,
               icon: <RotateCcw size={18} color="#E2F2FF" />,
             }
@@ -364,7 +275,8 @@ export function ControlsBar({
         canRaiseHand
           ? {
               key: "hand",
-              label: "Hand",
+              label: handRaised ? "Lower hand" : "Raise hand",
+              displayLabel: handRaised ? "Hand up" : "Hand",
               onPress: onToggleHand,
               icon: (
                 <Hand size={18} color={handRaised ? "#FBBF24" : "#F8FAFC"} />
@@ -386,6 +298,7 @@ export function ControlsBar({
       ].filter(Boolean) as Array<{
         key: string;
         label: string;
+        displayLabel?: string;
         onPress: () => void;
         icon: ReactNode;
         active?: boolean;
@@ -449,7 +362,7 @@ export function ControlsBar({
             style={{
               borderWidth: 1,
               borderColor: "rgba(255,255,255,0.18)",
-              backgroundColor: "rgba(3, 7, 18, 0.18)",
+              backgroundColor: "rgba(6, 7, 13, 0.96)",
             }}
           >
             <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 4 }}>
@@ -467,7 +380,7 @@ export function ControlsBar({
                   style={{
                     width: 44,
                     height: 44,
-                    borderRadius: 12,
+                    borderRadius: 8,
                     alignItems: "center",
                     justifyContent: "center",
                     backgroundColor: "rgba(255,255,255,0.08)",
@@ -488,7 +401,7 @@ export function ControlsBar({
             flexDirection: "row",
             justifyContent: "center",
             gap: 10,
-            marginBottom: 10,
+            marginBottom: 12,
             zIndex: 4,
             elevation: 4,
           }}
@@ -501,7 +414,8 @@ export function ControlsBar({
               onPress={action.onPress}
               active={action.active}
               icon={action.icon}
-              showLabel={false}
+              displayLabel={action.displayLabel}
+              disabled={disabled || isLeaving}
             />
           ))}
         </View>
@@ -509,18 +423,14 @@ export function ControlsBar({
 
       <DVNTLiquidGlass
         interactive={false}
-        radius={22}
+        radius={16}
         paddingH={dock.glassPadding}
         paddingV={8}
         style={{
           alignSelf: "center",
           borderWidth: 1,
           borderColor: "rgba(255,255,255,0.16)",
-          backgroundColor: "rgba(5, 10, 22, 0.22)",
-          shadowColor: "#000",
-          shadowOpacity: 0.22,
-          shadowRadius: 18,
-          shadowOffset: { width: 0, height: 10 },
+          backgroundColor: "rgba(6, 7, 13, 0.88)",
         }}
       >
         <View
@@ -533,6 +443,9 @@ export function ControlsBar({
         >
           <ControlButton
             diameter={dock.size}
+            displayLabel={hostMuteLocked ? "Host mute" : isMuted ? "Mic off" : "Mic on"}
+            // Ending on the server may be slow. Local shutoff is always available.
+            disabled={disabled || (isLeaving && isMuted)}
             label={
               hostMuteLocked
                 ? "Muted by host — you can't unmute yet"
@@ -553,12 +466,13 @@ export function ControlsBar({
                 <Mic size={21} color="#F8FAFC" />
               )
             }
-            showLabel={false}
           />
 
           {hasVideo && (
             <ControlButton
               diameter={dock.size}
+              displayLabel={isVideoEnabled ? "Cam on" : "Cam off"}
+              disabled={disabled || (isLeaving && !isVideoEnabled)}
               label={isVideoEnabled ? "Turn camera off" : "Turn camera on"}
               active={isVideoEnabled}
               onPress={onToggleVideo}
@@ -569,33 +483,36 @@ export function ControlsBar({
                   <VideoOff size={21} color="#F87171" />
                 )
               }
-              showLabel={false}
             />
           )}
 
           <ControlButton
             diameter={dock.size}
-            label="Open reactions"
+            displayLabel="React"
+            disabled={disabled || isLeaving || !onSendReaction}
+            label={showEmojiPicker ? "Close reactions" : "Open reactions"}
             active={showEmojiPicker}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setShowEmojiPicker((prev) => !prev);
             }}
             icon={<Heart size={21} color="#FF7BB8" />}
-            showLabel={false}
           />
 
           <ControlButton
             diameter={dock.size}
+            displayLabel="Chat"
+            disabled={disabled || isLeaving}
             label="Open chat"
             onPress={onOpenChat}
             icon={<MessageCircle size={21} color="#F8FAFC" />}
-            showLabel={false}
           />
 
           <ControlButton
             diameter={dock.size}
-            label="Leave room"
+            displayLabel={isLeaving ? "Leaving" : "Leave"}
+            disabled={isLeaving}
+            label={isLeaving ? "Leaving room" : "Leave room"}
             danger
             onPress={() => {
               Haptics.notificationAsync(
@@ -604,7 +521,6 @@ export function ControlsBar({
               onLeave();
             }}
             icon={<LogOut size={21} color="#FCA5A5" />}
-            showLabel={false}
           />
         </View>
       </DVNTLiquidGlass>

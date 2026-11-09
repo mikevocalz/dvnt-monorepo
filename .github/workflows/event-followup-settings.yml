@@ -1,0 +1,29 @@
+name: Event follow-up settings
+on:
+  pull_request:
+    paths:
+      - 'packages/app/**'
+      - 'scripts/test-event-followup-*.cjs'
+      - '.github/workflows/event-followup-settings.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'packages/app/**'
+      - 'scripts/test-event-followup-*.cjs'
+      - '.github/workflows/event-followup-settings.yml'
+permissions:
+  contents: read
+jobs:
+  opt-in-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Isolated mounted UI dependencies
+        run: npm install --prefix "$RUNNER_TEMP/followup-ui" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.28.1 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 happy-dom@20.10.3
+      - run: node scripts/test-event-followup-settings-dom.cjs && node scripts/test-event-followup-api.cjs
+        env:
+          NODE_PATH: ${{ runner.temp }}/followup-ui/node_modules

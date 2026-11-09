@@ -10,6 +10,12 @@
  * Replaces the cramped inline carousel + modal in app/(protected)/ticket/[id].tsx.
  */
 
+import { filterBuyerVisibleTiers } from "@dvnt/app/lib/tickets/pricing";
+import { useTicketSaleClock } from "@dvnt/app/lib/hooks/use-ticket-sale-clock";
+import {
+  isAdmissionUpgradeCategory,
+  isAdmissionUpgradeSource,
+} from "@dvnt/app/lib/tickets/upgrade-purpose";
 import React from "react";
 import {
   View,
@@ -179,12 +185,14 @@ function ViewTicketUpgradeScreenContent() {
     };
   }, [dbTicket, allTiers]);
 
+  const saleNow = useTicketSaleClock(allTiers ?? []);
   const upgradeOptions: EnrichedTier[] = React.useMemo(() => {
-    if (!dbTicket || !allTiers) return [];
+    if (!dbTicket || !allTiers || !isAdmissionUpgradeSource(dbTicket, allTiers)) return [];
     const paidCents = dbTicket.purchase_amount_cents ?? 0;
-    return allTiers
+    return filterBuyerVisibleTiers(allTiers, undefined, saleNow).visible
       .filter(
         (t) =>
+          isAdmissionUpgradeCategory(t.category) &&
           t.is_active !== false &&
           (t.price_cents ?? 0) > paidCents &&
           String(t.id) !== String(dbTicket.ticket_type_id),
@@ -203,7 +211,7 @@ function ViewTicketUpgradeScreenContent() {
         };
       })
       .sort((a, b) => a.price_cents - b.price_cents);
-  }, [dbTicket, allTiers]);
+  }, [dbTicket, allTiers, saleNow]);
 
   const selectedTier = React.useMemo(
     () => upgradeOptions.find((t) => String(t.id) === String(selectedTierId)) ?? null,
@@ -509,9 +517,11 @@ function ViewTicketUpgradeScreenContent() {
         </Pressable>
         <View style={styles.emptyWrap}>
           <Crown size={48} color="rgba(255,255,255,0.25)" />
-          <Text style={styles.emptyTitle}>You're at the top</Text>
+          <Text style={styles.emptyTitle}>{isAdmissionUpgradeSource(dbTicket, allTiers) ? "You're at the top" : "No admission upgrades"}</Text>
           <Text style={styles.emptySub}>
-            Your ticket is already the highest available tier for this event.
+            {isAdmissionUpgradeSource(dbTicket, allTiers)
+              ? "Your ticket is already the highest available tier for this event."
+              : "Services and add-ons are purchased separately and cannot replace an admission ticket."}
           </Text>
         </View>
       </View>

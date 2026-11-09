@@ -25,6 +25,9 @@ const IMMERSIVE_PREFIXES = [
   // Call rooms own the whole viewport, including the desktop navigation rail.
   "/feed/lynk",
   "/feed/sneaky-lynk/room",
+  // Legacy Fishjam rooms still render under the frontend root, outside /feed.
+  // Hide their site chrome too, while /video/rooms keeps its listing navigation.
+  "/video/room",
 ];
 
 export function routeIsImmersive(pathname: string): boolean {

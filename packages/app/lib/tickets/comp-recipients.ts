@@ -110,7 +110,7 @@ export interface CompSummary {
   claimLinks: number;
   /** Every ticket that now exists. */
   totalIssued: number;
-  /** Claim emails the mailer confirmed. */
+  /** Grouped member/guest email messages accepted by the provider, not inbox delivery. */
   delivered: number;
   /** Minted, not emailed. The tickets are valid; the host has to follow up. */
   undelivered: number;
@@ -134,7 +134,23 @@ export function summarizeCompResult(result: CompResult): CompSummary {
     claimLinks: result.claim_links?.length ?? 0,
     totalIssued: result.issued + guestIssued + phoneIssued,
     delivered,
-    undelivered: delivery.length - delivered,
+    undelivered: delivery.filter((d) => d.status === "failed" || d.status === "not_available").length,
     skipped: result.skipped.length,
+  };
+}
+
+/** Do not equate provider acceptance with inbox receipt or email count with passes. */
+export function compEmailPresentation(result: CompResult) {
+  const summary = summarizeCompResult(result);
+  const queued = (result.delivery ?? []).filter((d) => d.status === "queued").length;
+  return {
+    label: "Ticket emails sent",
+    detail: `${!(result.delivery?.length) && (summary.issued + summary.guestIssued > 0) ? "—" : summary.delivered} accepted for sending${queued ? ` · ${queued} queued` : ""}${summary.undelivered ? ` · ${summary.undelivered} need attention` : ""}`,
+    explanation: "Email counts are messages, not ticket quantities. Inbox delivery is not guaranteed.",
+    unknown: !(result.delivery?.length) && (summary.issued + summary.guestIssued > 0)
+      ? "Email status is unavailable for this batch." : null,
+    phoneNotice: summary.phoneIssued > 0 || summary.claimLinks > 0
+      ? "Phone recipients receive a claim link to text. Ticket email follows account claim when a verified email address is available." : null,
+    failureNotice: "The tickets stay valid. Do not comp again to retry email. Members can find their tickets in My Tickets; check the recipient's email address for follow-up.",
   };
 }

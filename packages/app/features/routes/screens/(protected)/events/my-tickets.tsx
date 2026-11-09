@@ -1,3 +1,4 @@
+import { ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 /**
  * My Tickets — the member's pass library.
  *
@@ -224,7 +225,7 @@ function TicketGroupCard({
             const isCoatCheck = ticket.category === "coat_check";
             const typeLabel = isCoatCheck
               ? `Coat check · ${ticket.ticket_type_name || "Pass"}`
-              : ticket.ticket_type_name || "Admission";
+              : ticket.ticket_type_name || ticketCategoryLabel(ticket.category);
             return (
               <Pressable
                 key={ticket.id}

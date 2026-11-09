@@ -9,8 +9,8 @@ const ts = require('typescript');
 // _shared modules that decide access are the real ones, transpiled the same
 // way, so these tests exercise the production host and admission rules.
 const SHARED = path.join(__dirname, '../_shared');
-function transpile(file) {
-  return ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+function transpile(file, source) {
+  return ts.transpileModule(source ?? fs.readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
 }
@@ -26,9 +26,9 @@ function loadShared(name) {
 const HOUR = 60 * 60 * 1000;
 
 // In-memory PostgREST stand-in: eq / in / is / gte / limit filters, update
-// and upsert that write back, and a fake sync_event_lynk_lifecycle that only
-// creates a missing row (it never makes one live, like the migration).
-function harness({ actor = 'host-auth', failTables = [], event = {}, room = {}, coOrganizers = [] } = {}) {
+// and upsert that write back. Atomic start is a synthetic RPC boundary here;
+// test-event-lynk-terminal-start.cjs executes the real SQL separately.
+function harness({ actor = 'host-auth', failTables = [], event = {}, room = {}, coOrganizers = [], admission = { state: 'allowed' }, standing = { state: 'allowed' }, handlerSource } = {}) {
   let handler;
   const tables = {
     events: [{
@@ -60,11 +60,30 @@ function harness({ actor = 'host-auth', failTables = [], event = {}, room = {}, 
         writes.push({ table: 'tickets', kind: 'rpc', value: args });
         return { data: { id: 'rsvp-ticket', already_existed: !!existing }, error: null };
       }
-      if (name !== 'sync_event_lynk_lifecycle') throw new Error(`unexpected rpc ${name}`);
-      if (!tables.event_lynk_lifecycle.some((r) => r.event_id === args.p_event_id)) {
-        tables.event_lynk_lifecycle.push({ event_id: args.p_event_id, state: 'scheduled' });
+      if (name !== 'start_event_lynk_atomic') throw new Error(`unexpected rpc ${name}`);
+      if (['events', 'video_rooms', 'event_lynk_lifecycle'].some(table => failTables.includes(table))) {
+        return { data: null, error: { message: 'start unavailable' } };
       }
-      return { data: { ok: true }, error: null };
+      const ev = tables.events.find(row => row.id === args.p_event_id);
+      const room = tables.video_rooms.find(row => row.uuid === ev?.lynk_room_id);
+      let lifecycle = tables.event_lynk_lifecycle.find(row => row.event_id === args.p_event_id);
+      if (!ev) return { data: { ok: false, reason: 'event_unavailable', message: 'Event not found' } };
+      if (tables.events.filter(row => row.lynk_room_id === ev.lynk_room_id).length > 1)
+        return { data: { ok: false, reason: 'event_link_ambiguous', message: 'Linked room is ambiguous' } };
+      if (!await shared['event-lynk-host.ts'].isEventLynkHost(client, ev, args.p_actor))
+        return { data: { ok: false, reason: 'not_host', message: 'Only a host can do this' } };
+      const decision = shared['event-access.ts'].decideEventRoomAccess(ev,
+        { organizer: true, ticket: false, invited: false }, room ?? { status: 'ended' },
+        Date.now(), lifecycle?.state === 'live', lifecycle?.state);
+      if (!decision.ok) return { data: { ok: false, reason: decision.detail.reason, message: decision.message } };
+      const started = lifecycle?.state !== 'live';
+      if (!lifecycle) { lifecycle = { event_id: ev.id, state: 'scheduled' }; tables.event_lynk_lifecycle.push(lifecycle); }
+      lifecycle.state = 'live';
+      writes.push({ table: 'event_lynk_lifecycle', kind: 'update', value: { state: 'live' }, count: started ? 1 : 0 });
+      const waiting = tables.event_lynk_waiting.filter(row => row.event_id === ev.id && !row.admitted_at);
+      waiting.forEach(row => { row.admitted_at = new Date().toISOString(); });
+      writes.push({ table: 'event_lynk_waiting', kind: 'update', count: waiting.length });
+      return { data: { ok: true, started, admitted: waiting.length }, error: null };
     },
     from: (table) => {
       const filters = [];
@@ -116,13 +135,21 @@ function harness({ actor = 'host-auth', failTables = [], event = {}, room = {}, 
   };
   let who = actor;
   const loadHandler = (file) => {
-  vm.runInNewContext(transpile(file), {
+  vm.runInNewContext(transpile(file, path.dirname(file) === __dirname ? handlerSource : undefined), {
     exports: {}, console: { log() {}, warn() {}, error() {} }, Response, Date,
     Deno: { env: { get: () => 'test' }, serve: (fn) => { handler = fn; } },
     require: (name) => {
       if (name.includes('supabase-js')) return { createClient: () => client };
       const base = path.basename(name);
       if (shared[base]) return shared[base];
+      if (base === 'verified-admission.ts') return {
+        resolveVerifiedAdmission: async () => admission,
+        admissionRefusal: () => ({ message: 'Complete account verification before joining', reason: admission.reason }),
+      };
+      if (base === 'creator-standing.ts') return {
+        resolveCreatorStanding: async () => standing,
+        creatorStandingRefusal: () => ({ message: 'Your creator hosting is suspended', reason: standing.reason }),
+      };
       return {
         checkRateLimit: () => ({ allowed: true }),
         verifySession: async () => who,
@@ -145,7 +172,8 @@ function harness({ actor = 'host-auth', failTables = [], event = {}, room = {}, 
     rsvp: (as, extra = {}) => call(as, { eventId: 9, ...extra }, rsvpHandler),
     wait: (as) => call(as, { action: 'wait', room_id: 'room-uuid' }),
     list: (as = 'host-auth') => call(as, { action: 'list', event_id: 9 }),
-    start: (as = 'host-auth') => call(as, { action: 'start', event_id: 9 }),
+    boundStart: (extra = {}) => call('host-auth', { action: 'start_bound', event_id: 9, ...extra }),
+    start: (as = 'host-auth', extra = {}) => call(as, { action: 'start', event_id: 9, ...extra }),
     state: () => tables.event_lynk_lifecycle.find((r) => r.event_id === 9)?.state ?? null,
   };
 }
@@ -160,7 +188,7 @@ test('a ticket holder who opens the room before the host starts waits, and the h
   const listed = await h.list();
   assert.equal(listed.status, 200);
   assert.equal(listed.body.count, 1);
-  assert.deepEqual(listed.body.waiting.map((w) => [w.username, w.displayName, w.avatar]), [['ann', 'Ann Lee', 'a.png']]);
+  assert.deepEqual(listed.body.waiting.map((w) => [w.username, w.displayName, w.avatar]), [[null, null, null]]);
 });
 
 test('the clock alone never admits a guest: past start_date with no host start still waits', async () => {
@@ -352,8 +380,9 @@ test('video_join_room starts the room when a host joins, after the join succeeds
   const tokenStored = join.indexOf('.from("video_room_tokens")');
   const hostCheck = join.indexOf('isEventLynkHost(supabase,');
   const start = join.indexOf('startEventLynk(supabase,');
-  assert.ok(tokenStored > 0 && hostCheck > tokenStored && start > hostCheck,
-    'the host check and start must run after the peer token exists');
+  const standing = join.indexOf('resolveCreatorStanding(supabase, userId)');
+  assert.ok(hostCheck > 0 && standing > hostCheck && tokenStored > standing && start > tokenStored,
+    'host standing is checked before media; automatic start waits until the peer token exists');
 });
 
 test('the migration marks events already in progress live and leaves future ones scheduled', () => {
@@ -499,4 +528,141 @@ test('host list normalizes terminal rooms/events without returning stale waiting
 test('host list fails closed if room metadata cannot be verified', async () => {
   const h = harness({ failTables: ['video_rooms'] });
   assert.equal((await h.list()).status, 500);
+});
+
+
+test('signed-out callers cannot wait, start, or read the host list', async () => {
+  const h = harness();
+  for (const call of [h.wait, h.start, h.list]) assert.equal((await call(null)).status, 401);
+  assert.equal(h.writes.length, 0);
+});
+
+test('verification and adult admission are checked before starting or joining the waiting list', async () => {
+  for (const reason of ['verification_required', 'underage', 'profile_photo_required', 'first_post_required']) {
+    const h = harness({ admission: { state: 'blocked', reason } });
+    for (const [action, who] of [['start', 'host-auth'], ['wait', 'host-auth'], ['wait', 'ann-auth']]) {
+      const result = await h[action](who);
+      assert.equal(result.status, 403, `${reason}: ${action}`);
+      assert.equal(result.body.reason, reason);
+    }
+    assert.equal(h.writes.length, 0, 'no lifecycle or waiting presence written');
+    assert.equal((await h.list()).status, 200, 'read-only event management is still available');
+  }
+});
+
+test('current creator standing closes both explicit start and host wait auto-start, including editor cohosts', async () => {
+  for (const who of ['host-auth', 'editor-auth']) {
+    const h = harness({ standing: { state: 'refused', reason: 'suspended' },
+      coOrganizers: [{ event_id: 9, user_id: 'editor-auth', role: 'editor', accepted: true }] });
+    for (const action of ['start', 'wait']) {
+      const result = await h[action](who);
+      assert.equal(result.status, 403);
+      assert.equal(result.body.reason, 'suspended');
+    }
+    assert.equal(h.writes.length, 0);
+    assert.equal(h.state(), null);
+  }
+  const guest = harness({ standing: { state: 'refused', reason: 'suspended' } });
+  assert.equal((await guest.wait('ann-auth')).body.admitted, false, 'hosting suspension does not remove ordinary guest eligibility');
+});
+
+
+test('transient creator-standing reads are retryable without starting the event', async () => {
+  const h = harness({ standing: { state: 'refused', reason: 'standing_unavailable' } });
+  for (const action of ['start', 'wait']) assert.equal((await h[action]('host-auth')).status, 503);
+  assert.equal(h.writes.length, 0);
+});
+
+test('explicit start cannot revive terminal lifecycle or start a duplicate room link', async () => {
+  for (const state of ['ended', 'cancelled']) {
+    const h = harness();
+    h.tables.event_lynk_lifecycle.push({ event_id: 9, state });
+    assert.equal((await h.start()).status, 409);
+    assert.equal(h.state(), state);
+    assert.equal(h.writes.length, 0);
+  }
+  const duplicate = harness();
+  duplicate.tables.events.push({ ...duplicate.tables.events[0], id: 10 });
+  assert.equal((await duplicate.start()).body.reason, 'event_link_ambiguous');
+  assert.equal(duplicate.writes.length, 0);
+});
+
+
+test('expected-room start rejects relinked intent without writes and confirms correct/legacy room', async () => {
+  const h = harness();
+  const stale = await h.boundStart({ expected_room_id: 'previous-room' });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.reason, 'event_link_changed');
+  assert.equal(h.writes.length, 0);
+  const correct = await h.boundStart({ expected_room_id: 'room-uuid' });
+  assert.equal(correct.status, 200);
+  assert.equal(correct.body.roomId, 'room-uuid');
+  const legacy = await h.start();
+  assert.equal(legacy.status, 200);
+  assert.equal(legacy.body.roomId, 'room-uuid');
+  assert.equal(legacy.body.started, false);
+});
+
+test('start rejects malformed room and event identifiers without writes', async () => {
+  for (const expected_room_id of [null, 9, {}, '', ' ', '../room', 'room?other', 'x'.repeat(129)]) {
+    const h = harness();
+    assert.equal((await h.boundStart({ expected_room_id })).status, 400);
+    assert.equal(h.writes.length, 0);
+  }
+  for (const event_id of [true, {}, [], 0, -1, 1.1, '9x', ' 9 ', Number.MAX_SAFE_INTEGER + 1]) {
+    const h = harness();
+    assert.equal((await h.start('host-auth', { event_id })).status, 400);
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test('host roster protects first-time and retained anonymous waiters without profile lookup', async () => {
+  const h = harness({ failTables: ['users'] });
+  h.tables.video_room_members.push({ room_uuid: 'room-uuid', user_id: 'bo-auth', is_anonymous: true });
+  await h.wait('ann-auth');
+  await h.wait('bo-auth');
+  const listed = await h.list();
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.count, 2);
+  for (const [index, row] of listed.body.waiting.entries()) {
+    assert.deepEqual(row, { userId: `waiting-${index + 1}`, username: null, displayName: null, avatar: null,
+      joinedAt: h.tables.event_lynk_waiting[index].joined_at });
+  }
+  assert.equal((await h.list('ann-auth')).status, 403);
+  for (const secret of ['ann-auth', 'bo-auth', 'Ann Lee', 'a.png']) assert.ok(!JSON.stringify(listed.body).includes(secret));
+});
+
+
+test('bound start requires intent and preserves verified admission', async () => {
+  const missing = harness();
+  assert.equal((await missing.boundStart()).status, 400);
+  assert.equal(missing.writes.length, 0);
+  const blocked = harness({ admission: { state: 'blocked', reason: 'not_verified' } });
+  assert.equal((await blocked.boundStart({ expected_room_id: 'room-uuid' })).status, 403);
+  assert.equal(blocked.writes.length, 0);
+});
+
+
+test('released handler rejects new bound action without mutation during rollout', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '__fixtures__/released-0cec75d3.ts'), 'utf8');
+  const h = harness({ handlerSource: source });
+  const result = await h.boundStart({ expected_room_id: 'previous-room' });
+  assert.equal(result.status, 400);
+  assert.equal(h.writes.length, 0);
+  assert.equal(h.state(), null);
+});
+
+test('new start API uses only bound action and never falls back on old backend refusal', async () => {
+  const calls = [];
+  const exports = {};
+  vm.runInNewContext(transpile(path.resolve(__dirname, '../../../../../packages/app/lib/api/event-lynk.ts')), {
+    exports, require: () => ({ invokeEdge: async (name, body) => {
+      calls.push({ name, body }); return { data: null, error: { message: 'Unknown action', status: 400 } };
+    } }),
+  });
+  await assert.rejects(exports.eventLynkApi.start(9, 'room-uuid'), /Unknown action/);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.action, 'start_bound');
+  assert.equal(calls[0].body.expected_room_id, 'room-uuid');
+  assert.equal(calls[0].body.event_id, 9);
 });

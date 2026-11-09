@@ -40,7 +40,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Radio, ScanLine } from "lucide-react-native";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { freshChannel } from "@dvnt/app/lib/supabase/realtime";
-import { ticketsApi } from "@dvnt/app/lib/api/tickets";
+import { isLiveAdmission } from "@dvnt/app/lib/events/live-admission";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 const BUCKET_COUNT = 30; // 30 minutes
@@ -145,7 +145,7 @@ export default function EventLiveScreen() {
         const sinceIso = new Date(Date.now() - 60 * 60_000).toISOString();
         const { data: scans } = await supabase
           .from("tickets")
-          .select("id, checked_in_at, qr_token, ticket_types(name)")
+          .select("id, ticket_type_id, category, checked_in_at, qr_token, ticket_types(name, category)")
           .eq("event_id", eventId)
           .eq("status", "scanned")
           .gte("checked_in_at", sinceIso)
@@ -157,6 +157,7 @@ export default function EventLiveScreen() {
         const newBuckets = Array(BUCKET_COUNT).fill(0);
         const feed: ScanRow[] = [];
         for (const s of scans || []) {
+          if (!isLiveAdmission(s)) continue;
           const ts = s.checked_in_at ? new Date(s.checked_in_at).getTime() : 0;
           const bi = bucketIndexFor(ts, now);
           if (bi >= 0) newBuckets[bi] += 1;
@@ -185,6 +186,7 @@ export default function EventLiveScreen() {
   // Realtime subscription on tickets UPDATE.
   useEffect(() => {
     if (!Number.isFinite(eventId) || eventId <= 0) return;
+    let cancelled = false;
     const channelId = `event-live:${eventId}:${Date.now()}`;
     const channel = freshChannel(channelId)
       // New ticket issued — bump sold count immediately. Without this,
@@ -218,11 +220,26 @@ export default function EventLiveScreen() {
           table: "tickets",
           filter: `event_id=eq.${eventId}`,
         },
-        (payload: any) => {
+        async (payload: any) => {
           const next = payload?.new;
           const prev = payload?.old;
           if (!next) return;
           if (next.status === "scanned" && prev?.status !== "scanned") {
+            // Aggregate "Scanned" is credential redemption; only admission
+            // belongs in the check-in feed/chart. Realtime has no joined tier.
+            setScannedCount((c) => c + 1);
+            let ticketType: { category?: string | null; name?: string } | null = null;
+            if (next.ticket_type_id) {
+              try {
+                const { data, error } = await supabase.from("ticket_types")
+                  .select("name, category").eq("id", next.ticket_type_id).maybeSingle();
+                if (cancelled || error) return;
+                ticketType = data;
+              } catch {
+                return; // An unresolved purpose is not evidence of admission.
+              }
+            }
+            if (cancelled || !isLiveAdmission({ ...next, ticket_types: ticketType })) return;
             const ts = next.checked_in_at
               ? new Date(next.checked_in_at).getTime()
               : Date.now();
@@ -233,13 +250,13 @@ export default function EventLiveScreen() {
               nextBuckets[bi] += 1;
               setBuckets(nextBuckets);
             }
-            setScannedCount((c) => c + 1);
             setRecent((prevFeed) =>
               [
                 {
                   id: next.id,
                   checked_in_at: next.checked_in_at || new Date().toISOString(),
                   qr_token: next.qr_token,
+                  ticket_type_name: ticketType?.name,
                 },
                 ...prevFeed,
               ].slice(0, 20),
@@ -257,6 +274,7 @@ export default function EventLiveScreen() {
         setConnected(status === "SUBSCRIBED");
       });
     return () => {
+      cancelled = true;
       try {
         supabase.removeChannel(channel);
       } catch {}
@@ -339,7 +357,7 @@ export default function EventLiveScreen() {
 
           <View style={styles.heroCard}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.heroLabel}>SCANS · LAST 5 MIN</Text>
+              <Text style={styles.heroLabel}>ADMISSION SCANS · LAST 5 MIN</Text>
               <Text style={styles.heroValue}>{last5m}</Text>
               <Text style={styles.heroSub}>
                 {refunded > 0
@@ -350,7 +368,7 @@ export default function EventLiveScreen() {
             <ScanLine size={36} color="rgba(34,197,94,0.5)" />
           </View>
 
-          <Text style={styles.sectionLabel}>SCANS PER MINUTE · LAST 30M</Text>
+          <Text style={styles.sectionLabel}>ADMISSION SCANS PER MINUTE · LAST 30M</Text>
           <View style={styles.chartWrap}>
             {buckets.map((b, i) => {
               const h = Math.max(2, (b / maxBucket) * 70);

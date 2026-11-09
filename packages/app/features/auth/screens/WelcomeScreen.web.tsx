@@ -1,8 +1,11 @@
+import { rememberReviewReturn } from "../../../lib/auth/review-return";
+import { readReturnToFromUrl } from "../../../lib/auth/return-to";
+import { captureAuthContinuation } from "../../../lib/auth/continuation-guard";
 import { useLocationSettings } from "@dvnt/app/lib/hooks/use-member-map";
 import { locationAllowedFor, useLocationAccessStore } from "@dvnt/app/lib/stores/location-access-store";
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
-import { useRouter } from 'solito/navigation';
+import { useRouter, useSearchParams } from 'solito/navigation';
 import { toast } from 'sonner';
 import { MapPin, Check } from 'lucide-react';
 import { Button } from '../../../components/ui/button';
@@ -63,6 +66,11 @@ function Chip({
 export function WelcomeScreen() {
   const locationAccess = useLocationSettings();
   const router = useRouter();
+  const search = useSearchParams()?.toString() ?? '';
+  const checkRevision = useRef(0);
+  const checkingAccount = useRef<ReturnType<typeof captureAuthContinuation> | null>(null);
+  const active = useRef(true);
+  useEffect(() => { active.current = true; return () => { active.current = false; checkRevision.current += 1; checkingAccount.current?.release(); }; }, []);
   const user = useAuthStore((s) => s.user);
   const updateUser = useAuthStore((s) => s.updateUser);
   const [step, setStep] = useState(0);
@@ -77,7 +85,7 @@ export function WelcomeScreen() {
     if (user?.id && typeof localStorage !== 'undefined') {
       localStorage.setItem(welcomeDoneKey(user.id), '1');
     }
-    router.replace('/feed');
+    router.replace(readReturnToFromUrl('/feed'));
   };
 
   // If identity is already saved (maybe on mobile), skip straight to the feed.
@@ -85,19 +93,32 @@ export function WelcomeScreen() {
   // the questions, so stored answers are never re-asked or overwritten on a
   // read that only failed.
   const checkIdentity = async (userId: string) => {
+    checkingAccount.current?.release();
+    const continuation = captureAuthContinuation();
+    checkingAccount.current = continuation;
+    const revision = ++checkRevision.current;
+    const entryUrl = window.location.href;
+    const stillCurrent = () => active.current && checkRevision.current === revision &&
+      window.location.href === entryUrl && continuation.isCurrent() && useAuthStore.getState().user?.id === userId;
     setCheck('checking');
     // Newly verified signups MUST do photo -> first published post BEFORE the
     // optional location/interests welcome questions or the main app.
     try {
       const progress = await fetchNewMemberProgress();
+      if (!stillCurrent()) return;
+      if (progress.step === 'photo' || progress.step === 'first_post') {
+        rememberReviewReturn(userId, readReturnToFromUrl(''));
+      }
       if (progress.step === 'photo') { router.replace('/feed/onboarding/photo'); return; }
       if (progress.step === 'first_post') { router.replace('/feed/create'); return; }
-      if (progress.step === 'complete') { router.replace('/feed'); return; }
+      if (progress.step === 'complete') { router.replace(readReturnToFromUrl('/feed')); return; }
     } catch {
       // A network error is not proof onboarding is complete. The shared
       // site guard will retry rather than setting a client "done" flag.
     }
+    if (!stillCurrent()) return;
     const result = await fetchOwnIdentity(supabase, userId);
+    if (!stillCurrent()) return;
     const state = onboardingState(result);
     if (state === 'unknown') {
       setCheck('error');
@@ -117,8 +138,9 @@ export function WelcomeScreen() {
   useEffect(() => {
     if (!user?.id) return;
     void checkIdentity(user.id);
+    return () => { checkRevision.current += 1; checkingAccount.current?.release(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user?.id, search]);
 
   const toggleIdentity = (label: string) =>
     setIdentity((prev) =>
@@ -281,7 +303,7 @@ export function WelcomeScreen() {
             </Text>
             <Button onPress={() => user?.id && void checkIdentity(user.id)}>Try again</Button>
             {/* Leave without the done flag, so welcome is offered again. */}
-            <Pressable onPress={() => router.replace('/feed')} accessibilityRole="button">
+            <Pressable onPress={() => router.replace(readReturnToFromUrl('/feed'))} accessibilityRole="button">
               <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 14, fontWeight: '700' }}>Not now</Text>
             </Pressable>
           </>

@@ -8,6 +8,7 @@ import { FormInput } from '../../../components/form';
 import { requestPasswordReset } from '../../../lib/auth-client';
 import { Mail, ShieldCheck, LifeBuoy, ArrowLeft } from 'lucide-react';
 import { AUTH_PRIMARY_COLOR as P, AUTH_SUPPORT_EMAIL } from './AuthScreens.shared';
+import { loginPathWithReturn, readReturnToFromUrl } from '../../../lib/auth/return-to';
 
 export function ForgotPasswordScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -15,7 +16,7 @@ export function ForgotPasswordScreen() {
   // Next app uses Solito/Next routing (no TanStack RouterProvider). Shim keeps
   // the `navigate({ to })` call sites unchanged.
   const router = useRouter();
-  const navigate = ({ to }: { to: string }) => router.push(to);
+  const navigate = ({ to }: { to: string }) => router.push(to === '/auth/login' ? loginPathWithReturn(readReturnToFromUrl('')) : to);
 
   const form = useForm({
     defaultValues: { email: '' },

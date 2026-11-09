@@ -34,6 +34,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useSyncExternalStore,
   useState,
 } from "react";
 import { useParams, useRouter } from "solito/navigation";
@@ -59,6 +60,8 @@ import {
 } from "@dvnt/app/lib/stores/chat-store";
 import { useChatScreenStore } from "@dvnt/app/lib/stores/chat-screen-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { getSessionLifecycle, subscribeSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { reactionsFromMetadata } from "@dvnt/app/lib/messages/reactions";
 import { normalizeChatParams } from "@dvnt/app/lib/navigation/chat-routes";
 import { messagesApiClient } from "@dvnt/app/lib/api/messages";
 import { useConversationResolution } from "@dvnt/app/lib/hooks/use-conversation-resolution";
@@ -228,7 +231,6 @@ function MessageRow({
   onOpenMedia: (m: MediaAttachment) => void;
 }) {
   const reactToMessage = useChatStore((s) => s.reactToMessage);
-  const deleteMessage = useChatStore((s) => s.deleteMessage);
   const retryMessage = useChatStore((s) => s.retryMessage);
   const setSelectedMessage = useChatScreenStore((s) => s.setSelectedMessage);
   const setShowMessageActions = useChatScreenStore(
@@ -299,12 +301,19 @@ function MessageRow({
     setShowMessageActions(true);
   }, [item, setSelectedMessage, setShowMessageActions]);
 
-  const onSwipeDelete = useCallback(() => {
-    if (!conversationActionId) return;
-    if (window.confirm("Unsend this message for everyone?")) {
-      deleteMessage(conversationActionId, item.id);
-    }
-  }, [conversationActionId, deleteMessage, item.id]);
+  // Mobile browsers do not consistently emit contextmenu for a held finger.
+  // Track the hold without capturing the pointer or preventing normal scrolling.
+  const holdRef = useRef<{ pointerId: number; x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const suppressHoldClickRef = useRef(false);
+  const cancelHold = useCallback(() => {
+    if (holdRef.current) clearTimeout(holdRef.current.timer);
+    holdRef.current = null;
+  }, []);
+  useEffect(() => {
+    suppressHoldClickRef.current = false;
+    lastTapRef.current = 0;
+    return cancelHold;
+  }, [conversationActionId, item.id, currentUser?.id, cancelHold]);
 
   const hasMedia = !!item.media && item.media.length > 0;
 
@@ -334,10 +343,6 @@ function MessageRow({
         className="overflow-hidden rounded-2xl"
         style={{ backgroundColor: bubbleBg }}
         onClick={onDoubleTap}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          onLongPress();
-        }}
       >
         {hasMedia && (
           <div className="p-1">
@@ -368,6 +373,60 @@ function MessageRow({
       </div>
     );
   }
+
+  // Every message type exposes the picker, including shared links. Keep this
+  // separate from tap handling so opening a shared post/story/event still navigates.
+  const messageBody = (
+    <div
+      className="min-w-0 select-none [-webkit-touch-callout:none]"
+      tabIndex={0}
+      role="group"
+      aria-label="Message actions"
+      onKeyDown={(e) => {
+        if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+          e.preventDefault();
+          cancelHold();
+          onLongPress();
+        }
+      }}
+      onPointerDownCapture={(e) => {
+        cancelHold();
+        suppressHoldClickRef.current = false;
+        if (e.pointerType === "mouse" || !e.isPrimary || e.button !== 0) return;
+        const pointerId = e.pointerId;
+        holdRef.current = {
+          pointerId, x: e.clientX, y: e.clientY,
+          timer: setTimeout(() => {
+            holdRef.current = null;
+            suppressHoldClickRef.current = true;
+            lastTapRef.current = 0;
+            onLongPress();
+          }, 400),
+        };
+      }}
+      onPointerMoveCapture={(e) => {
+        const hold = holdRef.current;
+        if (hold && (e.pointerId !== hold.pointerId ||
+            Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 10)) cancelHold();
+      }}
+      onPointerUpCapture={cancelHold}
+      onPointerCancelCapture={cancelHold}
+      onPointerLeave={cancelHold}
+      onClickCapture={(e) => {
+        if (!suppressHoldClickRef.current) return;
+        suppressHoldClickRef.current = false;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        cancelHold();
+        if (!suppressHoldClickRef.current) onLongPress();
+      }}
+    >
+      {inner}
+    </div>
+  );
 
   const reactionPills =
     reactions.length > 0 ? (
@@ -413,15 +472,13 @@ function MessageRow({
                   retryMessage(conversationActionId, item.id);
               }}
             >
-              {inner}
+              {messageBody}
               <p className="mt-0.5 text-[11px] font-semibold text-[#ef4444]">
                 Not sent · Tap to retry
               </p>
             </button>
           ) : (
-            <button onClick={onSwipeDelete} title="Click to unsend">
-              {inner}
-            </button>
+            messageBody
           )}
           {reactionPills}
           {isLastReadByMe && (
@@ -467,7 +524,7 @@ function MessageRow({
             {incomingDisplayName}
           </p>
         )}
-        {inner}
+        {messageBody}
         {reactionPills}
       </div>
     </div>
@@ -656,8 +713,20 @@ export function ChatScreen() {
   const setEditText = useChatScreenStore((s) => s.setEditText);
   const resetChatScreen = useChatScreenStore((s) => s.resetChatScreen);
 
+  useEffect(() => {
+    if (!showMessageActions) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setShowMessageActions(false);
+      setSelectedMessage(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showMessageActions, setShowMessageActions, setSelectedMessage]);
+
   const currentUser = useAuthStore((s) => s.user);
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const sessionLifecycle = useSyncExternalStore(subscribeSessionLifecycle, getSessionLifecycle, getSessionLifecycle);
   const refreshMessageCounts = useRefreshMessageCounts();
 
   const resolvedConvIdRef = useRef<string | null>(null);
@@ -842,6 +911,11 @@ export function ChatScreen() {
     if (!convId || !/^\d+$/.test(convId)) return;
     let cancelled = false;
     const userIntId = getCurrentUserIdSync();
+    const viewerId = currentUserId;
+    if (!sessionLifecycle.ready) return;
+    const sessionEpoch = sessionLifecycle.epoch;
+    const isCurrentViewer = () => !cancelled &&
+      useAuthStore.getState().user?.id === viewerId && getSessionLifecycle().epoch === sessionEpoch;
     const channelId = `chat-${convId}-${Date.now()}`;
 
     const channel = freshChannel(channelId)
@@ -855,7 +929,7 @@ export function ChatScreen() {
         },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (payload: any) => {
-          if (cancelled) return;
+          if (!isCurrentViewer()) return;
           const newMsg = payload.new;
           if (
             userIntId != null &&
@@ -921,13 +995,27 @@ export function ChatScreen() {
             .catch(() => {});
         },
       )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages", filter: `conversation_id=eq.${convId}` },
+        (payload) => {
+          if (!isCurrentViewer()) return;
+          const row = payload.new;
+          if (String(row.conversation_id) !== convId) return;
+          const reactions = reactionsFromMetadata(row.metadata);
+          if (reactions !== undefined) {
+            // Do not skip our own messages: the other participant can react to them.
+            useChatStore.getState().updateMessageReactions(convId, String(row.id), reactions);
+          }
+        },
+      )
       .subscribe();
 
     return () => {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, [activeConvId, mergeRealtimeMessage, refreshMessageCounts]);
+  }, [activeConvId, currentUserId, sessionLifecycle, mergeRealtimeMessage, refreshMessageCounts]);
 
   // ── Live call in this group ──
   // A call started from this chat carries conversation_id on its video_rooms

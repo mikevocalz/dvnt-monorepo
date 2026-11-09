@@ -24,6 +24,10 @@ export interface ParsedDeepLink {
 interface DeepLinkState {
   /** Link waiting for auth to complete before navigation */
   pendingLink: ParsedDeepLink | null;
+  /** Guest intent binds to the first signed-in account; never follows a switch. */
+  pendingAccountKey: string | null;
+  /** Saved by an actual mandatory onboarding redirect, not a room arrival. */
+  pendingOnboarding: boolean;
   /** Last handled URL + timestamp for replay protection */
   lastHandledUrl: string | null;
   lastHandledAt: number;
@@ -34,7 +38,8 @@ interface DeepLinkState {
 
   // Actions
   setOpenedFromShareIntent: (v: boolean) => void;
-  setPendingLink: (link: ParsedDeepLink | null) => void;
+  setPendingLink: (link: ParsedDeepLink | null, accountKey?: string | null, onboarding?: boolean) => void;
+  bindPendingAccount: (accountKey: string) => void;
   consumePendingLink: () => ParsedDeepLink | null;
   markHandled: (url: string) => void;
   isReplay: (url: string) => boolean;
@@ -45,6 +50,8 @@ const REPLAY_WINDOW_MS = 3000; // 3 seconds
 
 export const useDeepLinkStore = create<DeepLinkState>((set, get) => ({
   pendingLink: null,
+  pendingAccountKey: null,
+  pendingOnboarding: false,
   lastHandledUrl: null,
   lastHandledAt: 0,
   authBootstrapComplete: false,
@@ -52,16 +59,20 @@ export const useDeepLinkStore = create<DeepLinkState>((set, get) => ({
 
   setOpenedFromShareIntent: (v) => set({ openedFromShareIntent: v }),
 
-  setPendingLink: (link) => {
+  setPendingLink: (link, accountKey = null, onboarding = false) => {
     console.log("[DeepLink] setPendingLink:", link?.path || "null");
-    set({ pendingLink: link });
+    set({ pendingLink: link, pendingAccountKey: link ? accountKey : null, pendingOnboarding: !!link && onboarding });
+  },
+
+  bindPendingAccount: (accountKey) => {
+    if (get().pendingLink && !get().pendingAccountKey) set({ pendingAccountKey: accountKey });
   },
 
   consumePendingLink: () => {
     const { pendingLink } = get();
     if (pendingLink) {
       console.log("[DeepLink] consumePendingLink:", pendingLink.path);
-      set({ pendingLink: null });
+      set({ pendingLink: null, pendingAccountKey: null, pendingOnboarding: false });
     }
     return pendingLink;
   },

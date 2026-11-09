@@ -14,7 +14,9 @@ and React Native Web. It does **not** replace `next/navigation`, `next/link`, or
 Solito's navigation implementation.
 
 The fixture replaces authentication, the progress API, the Supabase JWT network
-bridge, unrelated marketing chrome, and the native CSS/semantic-element barrel.
+bridge, unread-count services, unrelated marketing chrome, and the native
+CSS/semantic-element barrel. The dedicated unread-navigation-badges fixture
+covers actual count hooks, query providers, realtime, and account transitions.
 Accounts and responses are fictional. Browser network requests to origins other
 than the fixture are blocked. It performs no live sign-in, uploads, or writes.
 

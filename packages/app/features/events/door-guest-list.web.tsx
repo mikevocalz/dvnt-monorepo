@@ -10,17 +10,9 @@
  * callers (functions/get-event-tickets/index.ts:383). One check-in path, one
  * CAS, one audit row, whichever way the door found the ticket.
  *
- * Search is client-side, deliberately. The server matches `qr_token` prefix
- * only — its own comment says name search "is left for a follow-up"
- * (index.ts:284-290) — and a door searches by NAME, because the person in
- * front of you can say their name and cannot read you their token. So the
- * roster is fetched whole and filtered here.
- *
- * That bounds the feature: `pageSize` is clamped server-side to 200
- * (index.ts:262), so this list covers the first 200 tickets of an event. The
- * Saturday door is ~100. A larger event needs either paging in this component
- * or the server-side name search that function defers; it is not silently
- * handled here.
+ * Fetch every server-authorized keyset page before publishing a complete roster.
+ * Local search preserves role-redacted guest/name/email lookup offline; it no
+ * longer silently drops attendees after the first 200 tickets.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -29,7 +21,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { create } from "zustand";
 import { Search, Check, X } from "lucide-react";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { qk } from "@dvnt/app/lib/query/keys";
+import { hasAdmissionPurpose, ticketCategoryLabel } from "@dvnt/app/lib/tickets/ticket-category";
 import { isAdmissible, isListable } from "@dvnt/app/lib/tickets/ticket-access";
 import { REFUND_DOOR_NOTE, REFUND_REASON } from "@dvnt/app/lib/tickets/refund-notice";
 import {
@@ -38,7 +32,21 @@ import {
   type CachedGuest,
 } from "./door-roster-cache.web";
 
-const ROSTER_CEILING = 200;
+const rosterAccount = (user: { id: string | number; authId?: string | null } | null) =>
+  user ? `${user.id}:${user.authId || ""}` : "";
+
+function useCompleteDoorRoster(eventId: string) {
+  const accountKey = useAuthStore((s) => rosterAccount(s.user));
+  const result = useQuery({
+    queryKey: [...doorRosterKey(eventId), "complete-door", accountKey],
+    queryFn: async ({ signal }) => ({ tickets: await ticketsApi.getEventTickets(eventId,
+      () => !signal.aborted && !!accountKey && rosterAccount(useAuthStore.getState().user) === accountKey) }),
+    enabled: !!eventId && !!accountKey,
+    staleTime: 30_000,
+    networkMode: "always",
+  });
+  return { ...result, accountKey };
+}
 
 /**
  * The registry's roster key, not a private one.
@@ -97,60 +105,45 @@ export function DoorGuestList({
   const setFilter = useGuestListStore((s) => s.setFilter);
   const parentRef = useRef<HTMLDivElement | null>(null);
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: doorRosterKey(eventId),
-    queryFn: () =>
-      ticketsApi.getEventTicketsPaginated(eventId, {
-        page: 1,
-        pageSize: ROSTER_CEILING,
-        status: "all",
-      }),
-    enabled: !!eventId,
-    // The camera invalidates nothing here; a door re-reads the list when it
-    // opens it, which is when someone is standing in front of them.
-    staleTime: 30_000,
-    // Run the query even with no connection, so a failure is an ERROR rather
-    // than a pause. React Query's default `networkMode: "online"` parks an
-    // offline query in `isPending` with `isError` false — which meant the
-    // saved-roster fallback below, the one thing that exists for a venue with
-    // no signal, never ran in the only situation it was written for. The scan
-    // mutation already sets this for the same reason (use-tickets.ts).
-    networkMode: "always",
-  });
+  const { data, isLoading, isError, refetch, accountKey, error } = useCompleteDoorRoster(eventId);
 
   /**
    * Live roster when there is one, the device's last snapshot when there is
    * not. A door with no signal and a reloaded phone otherwise has an empty
    * list and no way to look anyone up.
    */
-  const cached = useMemo(() => (isError ? recallRoster(eventId) : null), [isError, eventId]);
+  const denied = [401, 403].includes(Number((error as { status?: number } | null)?.status));
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const cached = useMemo(() => (isError && !denied && offline
+    ? recallRoster(eventId, accountKey) : null), [isError, denied, offline, eventId, accountKey]);
 
   const tickets = useMemo(() => {
     const live = (data?.tickets ?? []).filter((t) => isListable(t.status));
-    if (live.length) return live;
+    if (!isError && data) return live;
     // CachedGuest carries only the fields this list renders; the cast keeps
     // the row component honest about what it may read.
     return (cached?.guests ?? []).filter(
       (g) => isListable(g.status),
     ) as unknown as TicketRecord[];
-  }, [data, cached]);
+  }, [data, cached, isError]);
 
   // Snapshot every successful read, so the fallback is never older than the
   // last time this phone had signal.
   useEffect(() => {
     const live = (data?.tickets ?? []).filter((t) => isListable(t.status));
-    if (live.length) snapshotRoster(eventId, live);
-  }, [data, eventId]);
+    if (data && !isError && accountKey) snapshotRoster(eventId, live, accountKey);
+  }, [data, eventId, accountKey, isError]);
 
-  // Counts describe ADMISSIBLE passes only. A refunded ticket is still listed
+  // Admission progress excludes services/products; All still lists those
+  // credentials for lookup/redemption. A refunded ticket is still listed
   // — staff need to find that person when they turn up insisting they have a
   // ticket — but it is not a guest who is coming, so it must not inflate the
   // denominator that tells the door how far through the queue they are.
   const counts = useMemo(() => {
-    const admissible = tickets.filter((t) => isAdmissible(t.status));
-    const checkedIn = admissible.filter((t) => !!t.checked_in_at).length;
+    const admissible = tickets.filter((t) => isAdmissible(t.status) && hasAdmissionPurpose(t.category));
+    const checkedIn = admissible.filter((t) => t.status === "scanned" || !!t.checked_in_at).length;
     return {
-      all: admissible.length,
+      all: tickets.filter((t) => isAdmissible(t.status)).length,
       in: checkedIn,
       out: admissible.length - checkedIn,
       refunded: tickets.filter((t) => !isAdmissible(t.status)).length,
@@ -191,8 +184,9 @@ export function DoorGuestList({
       // actually coming.
       const admissible = isAdmissible(t.status);
       if (filter === "refunded" ? admissible : !admissible) return false;
-      if (filter === "in" && !t.checked_in_at) return false;
-      if (filter === "out" && t.checked_in_at) return false;
+      if ((filter === "in" || filter === "out") && !hasAdmissionPurpose(t.category)) return false;
+      if (filter === "in" && t.status !== "scanned" && !t.checked_in_at) return false;
+      if (filter === "out" && (t.status === "scanned" || t.checked_in_at)) return false;
       if (!q) return true;
       // Match every name the row can carry, not just the resolved one. An
       // owner/admin roster returns the full ticket, so a guest who bought
@@ -351,12 +345,6 @@ export function DoorGuestList({
         </div>
       )}
 
-      {tickets.length >= ROSTER_CEILING ? (
-        <p className="mt-2 text-[12px] text-white/40">
-          Showing the first {ROSTER_CEILING}. Use the ticket code to find anyone
-          past that.
-        </p>
-      ) : null}
     </section>
   );
 }
@@ -374,7 +362,7 @@ function GuestRow({
   onCheckIn: (qrToken: string) => void;
 }) {
   const when = minutesSince(ticket.checked_in_at);
-  const isIn = !!ticket.checked_in_at;
+  const isIn = ticket.status === "scanned" || !!ticket.checked_in_at;
 
   return (
     <div className="flex min-h-[56px] items-center gap-3 border-b border-white/8 py-2 pr-1">
@@ -383,7 +371,8 @@ function GuestRow({
           {ticket.holder_name ?? "Guest"}
         </p>
         <p className="truncate text-[12px] text-white/50">
-          {ticket.ticket_type_name ?? "General"}
+          {ticket.ticket_type_name ?? ticketCategoryLabel(ticket.category)}
+          {!hasAdmissionPurpose(ticket.category) ? ` · ${ticket.category ? ticketCategoryLabel(ticket.category) : "Purpose not verified"}` : ""}
           {holding && holding.of > 1 ? ` · ticket ${holding.n} of ${holding.of}` : ""}
           {ticket.status === "refunded" ? " · Refunded" : ""}
         </p>
@@ -396,6 +385,10 @@ function GuestRow({
         <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-semibold text-[#F59E0B]">
           <X size={15} aria-hidden />
           Not valid
+        </span>
+      ) : !hasAdmissionPurpose(ticket.category) ? (
+        <span className="shrink-0 text-[12px] font-semibold text-white/65">
+          {isIn ? "Redeemed · no entry" : "Not admission"}
         </span>
       ) : isIn ? (
         // State, not an action: word + glyph, so it is never colour alone and
@@ -424,20 +417,10 @@ function GuestRow({
  * and a list that shows 41.
  */
 export function useDoorRosterCounts(eventId: string) {
-  const { data } = useQuery({
-    queryKey: doorRosterKey(eventId),
-    queryFn: () =>
-      ticketsApi.getEventTicketsPaginated(eventId, {
-        page: 1,
-        pageSize: ROSTER_CEILING,
-        status: "all",
-      }),
-    enabled: !!eventId,
-    staleTime: 30_000,
-  });
-  const tickets = (data?.tickets ?? []).filter((t) => t.status !== "void");
+  const { data, isError } = useCompleteDoorRoster(eventId);
+  const tickets = (isError ? [] : data?.tickets ?? []).filter((t) => isAdmissible(t.status) && hasAdmissionPurpose(t.category));
   return {
     total: tickets.length,
-    checkedIn: tickets.filter((t) => !!t.checked_in_at).length,
+    checkedIn: tickets.filter((t) => t.status === "scanned" || !!t.checked_in_at).length,
   };
 }

@@ -635,7 +635,7 @@ export const usersApi = {
   /**
    * Search users by query
    */
-  async searchUsers(query: string, limit: number = 20) {
+  async searchUsers(query: string, limit: number = 20, options?: { throwOnError?: boolean }) {
     try {
       if (!query || query.length < 1) return { docs: [], totalDocs: 0 };
 
@@ -686,6 +686,7 @@ export const usersApi = {
       return { docs, totalDocs: count || 0 };
     } catch (error) {
       console.error("[Users] searchUsers error:", error);
+      if (options?.throwOnError) throw error;
       return { docs: [], totalDocs: 0 };
     }
   },

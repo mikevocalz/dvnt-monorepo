@@ -9,6 +9,7 @@ on:
       - "apps/mobile/supabase/migrations/*story_share_attribution.sql"
       - "packages/app/components/chat/story-share-bubble.web.tsx"
       - "packages/app/components/story-viewer*"
+      - "packages/ui/src/media/StoryViewer.web.tsx"
       - "packages/app/components/story-shared-source.web.tsx"
       - "packages/app/components/share-to-inbox-sheet.web.tsx"
       - "packages/app/features/story/**"
@@ -36,6 +37,7 @@ on:
       - "scripts/test-guest-event-purchase.cjs"
       - "scripts/story-share-attribution-fixture.cjs"
       - "scripts/fixtures/story-share/**"
+      - "scripts/fixtures/story-controls-video.*"
       - "scripts/test-post-social-actions.cjs"
       - "scripts/test-post-share-identity.cjs"
       - "scripts/test-share-picker-browser.cjs"
@@ -71,6 +73,7 @@ jobs:
           node scripts/test-guest-event-purchase.cjs
           node scripts/test-story-share-attribution-dom.cjs
           node scripts/test-story-reply-identity.cjs
+          node --test packages/app/components/story-viewer-control-layout.test.cjs
       - name: Responsive story playback and tappable attribution
         env:
           NODE_PATH: ${{ runner.temp }}/story/node_modules

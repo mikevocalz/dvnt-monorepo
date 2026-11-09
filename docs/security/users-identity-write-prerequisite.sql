@@ -3,7 +3,8 @@
 -- 20261003150000_users_anon_write_lockdown.sql already sends profile mutations
 -- through verified service-role edge functions, not direct client writes.
 -- This blocks direct client remapping, NOT an unsafe privileged auth-sync/RPC.
--- In particular, auth-sync's email-based rebind remains a separate blocker.
+-- The separately reviewed auth-sync ownership guard must also be installed;
+-- a source-only fix does not protect the deployed privileged writer.
 BEGIN;
 -- An ALL policy also supplies SELECT. Do not silently change read compatibility.
 DO $$ BEGIN

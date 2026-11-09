@@ -23,6 +23,7 @@ import {
   TIER_VISIBILITY_MESSAGES,
 } from "../_shared/tier-visibility.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { tierSaleAvailabilityError } from "../_shared/tier-sale-availability.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const STRIPE_PUBLISHABLE_KEY = Deno.env.get("STRIPE_PUBLISHABLE_KEY") || "";
@@ -139,7 +140,7 @@ Deno.serve(async (req: Request) => {
     // Fetch the existing ticket
     const { data: ticket, error: ticketErr } = await supabase
       .from("tickets")
-      .select("id, event_id, user_id, ticket_type_id, purchase_amount_cents, status")
+      .select("id, event_id, user_id, ticket_type_id, purchase_amount_cents, status, category")
       .eq("id", ticket_id)
       .single();
 
@@ -157,6 +158,24 @@ Deno.serve(async (req: Request) => {
 
     if (String(ticket.ticket_type_id) === String(new_ticket_type_id)) {
       return json({ error: "You already have this tier" }, 400);
+    }
+
+    // Upgrades replace an admission credential; services/add-ons must be bought
+    // independently. Nullish category preserves the schema's legacy admission
+    // default, but an unknown value or missing referenced tier fails closed.
+    if ((ticket.category ?? "admission") !== "admission") {
+      return json({ error: "Only admission tickets can be upgraded", code: "admission_upgrade_only" }, 400);
+    }
+    if (ticket.ticket_type_id) {
+      const { data: sourceType, error: sourceTypeErr } = await supabase
+        .from("ticket_types")
+        .select("id, category")
+        .eq("id", ticket.ticket_type_id)
+        .eq("event_id", ticket.event_id)
+        .single();
+      if (sourceTypeErr || !sourceType || (sourceType.category ?? "admission") !== "admission") {
+        return json({ error: "Only admission tickets can be upgraded", code: "admission_upgrade_only" }, 400);
+      }
     }
 
     // Sales cutoff: upgrades are a purchase — same 30-min-before-end rule.
@@ -181,8 +200,13 @@ Deno.serve(async (req: Request) => {
       return json({ error: "New tier not found for this event" }, 404);
     }
 
-    if (newType.is_active === false) {
-      return json({ error: "This tier is not available" }, 400);
+    if ((newType.category ?? "admission") !== "admission") {
+      return json({ error: "Services and add-ons must be purchased separately", code: "admission_upgrade_only" }, 400);
+    }
+
+    const saleError = tierSaleAvailabilityError(newType);
+    if (saleError) {
+      return json(saleError, 400);
     }
 
     // ── Tier visibility guard (mirror of cart_create_hold v3) ──

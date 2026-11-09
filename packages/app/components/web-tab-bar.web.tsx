@@ -15,6 +15,9 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useVisualViewportBottom } from "./use-visual-viewport-bottom.web";
 import { routeUsesVisualViewportBottom } from "@dvnt/app/lib/web-chrome";
 import { CenterButton } from "./center-button.web";
+import { UnreadBadge } from "./unread-badge";
+import { useBadges } from "@dvnt/app/lib/hooks/use-notifications-query";
+import { unreadAccessibilityLabel } from "@dvnt/app/lib/badges/unread-badge";
 
 const CYAN = "#3FDCFF";
 const MUTED = "rgba(255,255,255,0.55)";
@@ -25,8 +28,34 @@ const LEFT: Tab[] = [
   { href: "/events", Icon: Calendar, label: "Events" },
 ];
 
+function TabItem({ Icon, label, active, activityUnread, onPress }: Tab & {
+  active: boolean; activityUnread: number; onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label === "Activity" ? unreadAccessibilityLabel("Activity", activityUnread) : label}
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={styles.item}
+    >
+      <View style={{ position: "relative" }}>
+        <Icon size={24} strokeWidth={active ? 2.4 : 2} color={active ? CYAN : MUTED} />
+        {label === "Activity" && <UnreadBadge count={activityUnread} />}
+      </View>
+      <Text
+        style={{ fontSize: 11, fontWeight: active ? "700" : "500", color: active ? CYAN : MUTED }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export function WebTabBar() {
   const router = useRouter();
+  const { data: badges } = useBadges();
+  const activityUnread = badges?.unread ?? 0;
   const pathname = usePathname();
   // Top-level resource routes: /feed · /events · /notifications · /profile/{me}.
   const username = useAuthStore((s) => s.user?.username);
@@ -54,26 +83,6 @@ export function WebTabBar() {
   const useVisibleBottom = routeUsesVisualViewportBottom(pathname ?? "");
   useVisualViewportBottom(viewportRef, mounted && isMobile && useVisibleBottom);
 
-  const TabItem = ({ href, Icon, label }: Tab) => {
-    const active = pathname === href;
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        accessibilityState={{ selected: active }}
-        onPress={() => router.push(href)}
-        style={styles.item}
-      >
-        <Icon size={24} strokeWidth={active ? 2.4 : 2} color={active ? CYAN : MUTED} />
-        <Text
-          style={{ fontSize: 11, fontWeight: active ? "700" : "500", color: active ? CYAN : MUTED }}
-        >
-          {label}
-        </Text>
-      </Pressable>
-    );
-  };
-
   if (!mounted) return null;
 
   return createPortal(
@@ -85,11 +94,11 @@ export function WebTabBar() {
     >
       <View style={[styles.bar, isMobile && styles.barMobile]}>
         {LEFT.map((t) => (
-          <TabItem key={t.href} {...t} />
+          <TabItem key={t.href} {...t} active={pathname === t.href} activityUnread={activityUnread} onPress={() => router.push(t.href)} />
         ))}
         <CenterButton Icon={Plus} onPress={() => router.push("/feed/create")} />
         {RIGHT.map((t) => (
-          <TabItem key={t.href} {...t} />
+          <TabItem key={t.href} {...t} active={pathname === t.href} activityUnread={activityUnread} onPress={() => router.push(t.href)} />
         ))}
       </View>
     </nav>,

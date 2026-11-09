@@ -21,6 +21,7 @@ import {
   qrBlock,
   tierBadge,
 } from "./components.ts";
+import { protectText } from "./dark-mode.ts";
 import { brandEmailWrapper } from "./wrapper.ts";
 
 export interface EmailContent {
@@ -154,6 +155,10 @@ export interface TicketLine {
 export interface TicketConfirmationOpts {
   eventTitle: string;
   tickets: TicketLine[];
+  /** Separate purchased entitlements. Links require authenticated ownership;
+   * never pass raw addon QR credentials to this email renderer. */
+  addons?: { name: string; variant?: string | null; quantity: number;
+    status: "unfulfilled" | "fulfilled" | "redeemed"; lookupUrl: string }[];
   flyerUrl?: string | null;
   dominantColor?: string | null;
   dateLine?: string | null;
@@ -241,6 +246,18 @@ export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
       return card(body, { accent: theme.accent });
     })
     .join("");
+
+  const addonCards = opts.addons?.length
+    ? [
+        divider(),
+        paragraph("Your add-ons", { size: 18 }),
+        ...opts.addons.map(addon => card([
+          paragraph(esc(`${addon.name}${addon.variant ? ` · ${addon.variant}` : ""} × ${addon.quantity}`)),
+          paragraph(addon.status === "redeemed" ? "Already redeemed" : addon.status === "fulfilled" ? "Already fulfilled" : "Open your ticket and look under Your add-ons for this purchase and its QR, if redeemable.", { size: 13, color: COLORS.textMuted }),
+          paragraph(`<a href="${esc(addon.lookupUrl)}" style="color:${COLORS.cyan};text-decoration:none">View your add-on in app &rarr;</a>`, { size: 13 }),
+        ].join(""))),
+      ].join("")
+    : "";
 
   const summary =
     opts.summary && opts.summary.length
@@ -381,6 +398,7 @@ export function ticketConfirmation(opts: TicketConfirmationOpts): EmailContent {
         }),
         `<div style="height:20px"></div>`,
         ticketCards,
+        addonCards,
         manage,
         summary,
         nudge,
@@ -539,7 +557,7 @@ export const WELCOME_COPY: ReadonlyArray<{
  * heading(), sized down and emitted as h2 so the email keeps a single h1.
  */
 function sectionHeading(text: string): string {
-  return `<h2 style="margin:32px 0 12px;font-family:${FONTS.display};font-size:17px;line-height:1.3;font-weight:700;letter-spacing:0.04em;color:${COLORS.text};text-align:left">${esc(text)}</h2>`;
+  return `<h2 style="margin:32px 0 12px;font-family:${FONTS.display};font-size:17px;line-height:1.3;font-weight:700;letter-spacing:0.04em;color:${COLORS.text};text-align:left">${protectText(esc(text))}</h2>`;
 }
 
 /**

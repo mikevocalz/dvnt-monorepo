@@ -102,7 +102,7 @@ new verification, re-authentication or change their access as a rollout shortcut
 Prove existing-version compatibility first; anonymous private access cannot be
 retained as a claimed security fix.
 
-## Verified evidence and remaining deployment gate
+## Historical validation (2026-10-30; not current-head or installed-client proof)
 
 - Exact SQL draft at initial PR210 head passed real disposable PostgreSQL CI:
   7 checks, no failures/skips (run 40998311175). It reproduces only synthetic
@@ -143,38 +143,88 @@ compatibility and all privileged functions before choosing. Do not silently
 expand this notification migration to lock down users. This prerequisite makes
 live notification RLS approval premature even if all client CI passes.
 
-## Legacy compatibility facts, not a deployment guarantee
+## Identity claims and compatibility (2026-11-09 source revision)
 
-A read-only aggregate on 2026-10-30 found zero current profiles with null/empty
-`auth_id`. Existing linked profile mappings therefore need no backfill. This
-must not be generalized to every installed client or future unlinked profile.
-Deployed auth-sync v83 still has an unconditional email-based auth_id rebind.
-The proposed smallest nondisruptive safeguard is to refuse replacement of a
-non-null different link while preserving found-by-auth_id and unlinked/new
-flows. The draft now implements this null-only compare-and-set safeguard, with
-14 actual-handler fixture tests and a separate real PostgreSQL concurrent
-predicate test in CI. It is not deployed. Same-account retries are idempotent;
-a different established link fails closed without returning that profile.
-The future unlinked email-matching ownership-proof risk is intentionally not
-solved by this minimal safeguard: no verification requirement was added.
-Do not present this as complete identity assurance for future unlinked accounts.
-No verification prompt or legacy-account mutation has been introduced.
+The coordinating read-only production audit on 2026-11-09 found zero profiles
+with NULL/blank `users.auth_id`; effective anon/authenticated INSERT/UPDATE on
+Better Auth `public."user"`, including email and `emailVerified`, were false.
+This is aggregate/privilege evidence, not an installed-client guarantee. Deployed
+auth-sync v83 still uses an unconditional email rebind. No live change is included.
 
-## Smallest staged proposal (no production execution authorized here)
+The current auth-sync source preserves found-by-auth_id logins and normal new
+profile creation. Matching an existing non-NULL different identity is rejected.
+Only an unlinked row claim now requires strictly boolean true `emailVerified`
+from the server-read Better Auth account for the matched email. Request body,
+metadata, strings and other truthy values cannot supply this proof. The update
+compares both NULL auth_id and unchanged email; concurrent different claimants
+cannot replace the winner. Same-account retries remain idempotent. Failed reads,
+writes or ambiguous matches fail closed without provisioning duplicates or
+returning the other profile.
 
-1. Validate the auth-sync guard and current bridge/browser contracts in CI;
-   validate existing installed clients without asking users to re-auth or update.
-2. Separately approve deploying the linked-account-only auth-sync safeguard.
-   Normal linked login, unlinked matching and new-profile creation stay intact.
-3. Only after supported clients are proven to use service edges for profile
-   writes and signed notification reads, request action-time approval for the
-   users identity-write prerequisite plus notification ownership SQL. Preserve
-   all existing users SELECT access; service profile/signup writes remain.
-4. If installed legacy clients rely on anonymous notification access or direct
-   profile writes, enforcement remains blocked pending a non-disruptive compatible
-   route. Do not retain anonymous private access and call it secure.
+This closes the earlier draft's unverified-email-only claim path within the
+reviewed source trust boundary. It adds no prompt, reauthentication, verification
+campaign, backfill, installed-client requirement or mutation of linked profiles.
+A future unlinked collision without existing proof will receive the existing
+generic sync failure; that behavior change is intentional and must not be
+represented as zero possible user impact.
 
-Read-only current-source scan found no direct client users writes; two
-authenticated RPCs matching users/auth_id resolve ownership and write other
-tables, not users identity links. This is bounded source/metadata evidence,
-not an exhaustive deployed-version or future-privileged-writer guarantee.
+### Why the server flag is trusted in the reviewed source
+
+- Actual auth configuration pins Better Auth 1.6.26. Signup forces false even if
+  the request supplies true; authenticated update-user ignores the verification
+  field and rejects direct email replacement. Change-email is not enabled.
+- Signed email verification binds its token to the email. The configured
+  magic-link plugin consumes a server-issued token before verification.
+- Current Google/Apple library paths use provider verification evidence; they
+  do not accept request-body `emailVerified`. Provider-token validation is not
+  exercised against live providers by these offline fixtures.
+- Repository writers outside Better Auth do not set this flag true. The
+  update-profile mirror writes username only. Checkout provisioning inserts
+  `emailVerified=false`. Read-only metadata reports no client write grants.
+
+The new email-ownership fixture executes the actual edge configuration and the
+pinned Better Auth routes against an in-memory adapter, with outbound email
+captured rather than sent. It proves forged signup/update values do not elevate,
+invalid tokens do not verify, valid signed tokens do, email changes stay disabled,
+and magic-link replay fails. Actual auth-sync tests separately prove verified,
+unverified/missing/malformed, linked-user, new-profile, and concurrent paths.
+No deployed-bundle equivalence or exhaustive future writer guarantee is claimed.
+
+## Integrating current notifications behavior
+
+This revision incorporates master `d1f03d8b95e0f0aa0421b3d08453bbd509d2f73d`
+into the PR210 source branch, without merging the GitHub PR or changing master.
+It preserves stable keyset pagination, transfer payloads, cohost routing,
+read-state rollback, bootstrap cache precedence, visible-query/badge refresh,
+and wildcard shared CORS from current master. Private calls keep canonical
+identity checks, verified JWT transport, account epochs and explicit socket auth.
+A missing bootstrap unread count now fails visibly instead of becoming zero.
+
+The SQL remains outside migrations. `DVNT_SQL_ENGINE=pglite` explicitly runs the
+exact same schema/policy statements in local PGlite; its multi-connection test is
+visibly skipped. Default execution still requires socket-only PostgreSQL and
+fails if the server is absent. CI must exercise the true concurrent CAS test.
+
+## Release sequence and remaining gates
+
+1. Validate this exact source head in CI, including real PostgreSQL concurrency
+   and browser interactions. Current-source fixtures are not deployed assurance.
+2. Confirm deployed Better Auth configuration/writer behavior matches the trust
+   boundary above and supported legacy profiles use service edges for writes.
+   Verify installed-client behavior without asking users to reauth or update.
+3. Separately obtain approval to deploy the auth-sync ownership safeguard and
+   apply the users identity-write prerequisite on the intended project. Protect
+   privileged writers as well as direct grants; neither source publication nor
+   a passing test authorizes a live security-setting/migration change.
+4. Notification ownership SQL has its own compatibility/approval gate. Weekly
+   follower-only projections need trusted users identity plus safe auth-sync;
+   they do not depend on deploying the notification policy draft.
+5. If supported legacy clients depend on direct profile writes or anonymous
+   private notification access, enforcement remains blocked pending a compatible
+   service route. Do not restore unsafe grants and call that a security fix.
+
+Rollback favors a compatible service path. Restoring client-writable identity
+or unconditional privileged email rebinding reopens the vulnerability and must
+not be automatic. Preserve all existing users SELECT access and verified service
+signup/profile updates. Live deployment, RLS changes and installed-device proof
+remain outside this source-only work.

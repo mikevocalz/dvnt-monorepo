@@ -11,12 +11,13 @@ import {
   Platform,
   Alert,
   TextInput,
+  type ScrollView,
 } from "react-native";
 // Galeria → MediaLightbox temporary swap (iOS 26 gesture issue, no native dep)
 import { useEventLynkEntry } from "@dvnt/app/lib/hooks/use-event-lynk-entry";
 import { MediaLightbox as Galeria } from "@dvnt/app/components/media/MediaLightbox";
 import { LegendList } from "@dvnt/app/components/list";
-import React, { useEffect, useCallback, useMemo } from "react";
+import React, { useEffect, useCallback, useMemo, useRef } from "react";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { screenPrefetch } from "@dvnt/app/lib/prefetch";
@@ -46,7 +47,6 @@ import {
   MoreHorizontal,
   Send,
   Ticket,
-  Radio,
   EyeOff,
 } from "lucide-react-native";
 import { publicationBadge } from "@dvnt/app/lib/events/event-publication";
@@ -86,8 +86,10 @@ import {
 } from "@dvnt/app/lib/normalization/safe-entity";
 import { ticketsApi } from "@dvnt/app/lib/api/tickets";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
-import { useTicketViewerId } from "@dvnt/app/lib/hooks/use-tickets";
-import { tierIsHiddenFromBuyers } from "@dvnt/app/lib/tickets/pricing";
+import { resolveTicketAccess } from "@dvnt/app/lib/tickets/ticket-access";
+import { useTicketViewerId, useTicketViewerAuthId } from "@dvnt/app/lib/hooks/use-tickets";
+import { ticketPurchaseAllowance } from "@dvnt/app/lib/tickets/purchase-quantity";
+import { filterBuyerVisibleTiers, tierIsHiddenFromBuyers, tierIsLockedForBuyer, tierIsPurchasable } from "@dvnt/app/lib/tickets/pricing";
 import { qk } from "@dvnt/app/lib/query/keys";
 import * as WebBrowser from "expo-web-browser";
 import { propagateEntity } from "@dvnt/app/lib/cache/propagate";
@@ -125,9 +127,9 @@ import {
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
 import { canHostEventLynk } from "@dvnt/app/lib/events/event-lynk";
-import { EventLynkHostPanel } from "@dvnt/app/features/events/ui/EventLynkHostPanel";
+import { EventLynkCard } from "@dvnt/app/features/events/ui/EventLynkCard";
 import { canScanTickets } from "@dvnt/app/lib/events/event-role";
-import { eventEnded } from "@dvnt/app/lib/events/event-time";
+import { eventEnded, eventSalesClosed } from "@dvnt/app/lib/events/event-time";
 import type {
   TicketTier,
   EventAttendee,
@@ -152,6 +154,7 @@ import {
 } from "@dvnt/app/lib/hooks/use-ticket-upgrade";
 import { useMyTicketStatusForEvent } from "@dvnt/app/lib/hooks/use-tickets";
 import { useTicketTypes } from "@dvnt/app/lib/hooks/use-tickets";
+import { useTicketSaleClock } from "@dvnt/app/lib/hooks/use-ticket-sale-clock";
 import {
   useEventWaitlistStatus,
   useJoinWaitlist,
@@ -330,7 +333,8 @@ function EventDetailScreenContent() {
   // DEV-only loop detection
   useRenderLoopDetector("EventDetail");
 
-  const rawParams = useLocalSearchParams<{ id: string; ref?: string }>();
+  const rawParams = useLocalSearchParams<{ id: string; ref?: string; serviceTier?: string; section?: string }>();
+  const requestedServiceTierId = Array.isArray(rawParams.serviceTier) ? rawParams.serviceTier[0] : rawParams.serviceTier;
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -340,6 +344,26 @@ function EventDetailScreenContent() {
     [rawParams.id],
   );
   const eventId = normalizedParams.id || "";
+  const requestedSection = rawParams.section === "reviews" ? "reviews" : null;
+  const detailsScrollRef = useRef<ScrollView>(null);
+  const sectionLayout = useRef<{ eventId: string; contentY?: number; reviewsY?: number; handled: boolean }>({ eventId, handled: false });
+  if (sectionLayout.current.eventId !== eventId) {
+    sectionLayout.current = { eventId, handled: false };
+  }
+  const scrollToRequestedSection = useCallback(() => {
+    const layout = sectionLayout.current;
+    if (requestedSection !== "reviews" || layout.eventId !== eventId || layout.handled ||
+      layout.contentY === undefined || layout.reviewsY === undefined || !detailsScrollRef.current) return;
+    detailsScrollRef.current.scrollTo({
+      y: Math.max(0, layout.contentY + layout.reviewsY - insets.top - 64),
+      animated: false,
+    });
+    layout.handled = true;
+  }, [eventId, requestedSection, insets.top]);
+  useEffect(() => {
+    sectionLayout.current.handled = false;
+    scrollToRequestedSection();
+  }, [scrollToRequestedSection]);
 
   // A tracked promoter ref follows the buyer into checkout and is also bound
   // to the signed-in account, so login/navigation/device changes do not drop
@@ -403,6 +427,7 @@ function EventDetailScreenContent() {
   );
   const { hasValidTicket, clearTicket } = useTicketStore();
   const viewerId = useTicketViewerId();
+  const viewerAuthId = useTicketViewerAuthId();
   const showToast = useUIStore((s) => s.showToast);
   const isSubscribedToSale = useSaleNotifyStore((s) => s.isSubscribed);
   const toggleSaleSubscription = useSaleNotifyStore((s) => s.toggle);
@@ -429,7 +454,6 @@ function EventDetailScreenContent() {
         );
         return;
       }
-      offlineCheckin.setTokensForEvent(eventId, tokens);
       showToast(
         "success",
         "Downloaded",
@@ -474,7 +498,7 @@ function EventDetailScreenContent() {
   );
 
   // Display only — drives the CTA, never opens a pass.
-  const { primary: myTicketData } = useMyTicketStatusForEvent(eventId);
+  const { primary: myTicketData, tickets: myTickets = [] } = useMyTicketStatusForEvent(eventId);
   const { data: liveTicketTypes = [] } = useTicketTypes(eventId);
   // upgradeOptions computed after upgradeSourceTiers is defined below
   const { mutate: initiateUpgrade, isPending: isUpgradePending } =
@@ -560,6 +584,8 @@ function EventDetailScreenContent() {
     refetchOnMount: "always",
   });
 
+  const saleNow = useTicketSaleClock([...(eventData?.ticketTiers ?? []), ...liveTicketTypes]);
+
   // Server-side RSVP status persists across app restarts
   const serverHasTicket = !!(
     eventData?.userRsvpStatus && eventData.userRsvpStatus !== "none"
@@ -584,6 +610,14 @@ function EventDetailScreenContent() {
     ? myTicketData.status === "active" || myTicketData.status === "scanned"
     : hasValidTicket(eventId) || isRsvped[eventId] || serverHasTicket;
 
+  const ownedTickets = myTickets.filter((ticket) =>
+    resolveTicketAccess({ ticket, viewerId, viewerAuthId }).isHolder,
+  );
+  const hasAdmissionTicket = ownedTickets.some((ticket) =>
+    (ticket.category ?? "admission") === "admission" &&
+    ["active", "scanned"].includes(ticket.status),
+  );
+
   // Fall back to eventData.ticketTiers when the standalone ticket_types query returns empty
   const upgradeSourceTiers =
     useMemo((): import("@dvnt/app/lib/api/ticket-types").TicketTypeRecord[] => {
@@ -600,9 +634,11 @@ function EventDetailScreenContent() {
         quantity_total: t.quantity_total ?? 0,
         quantity_sold: t.quantity_sold ?? 0,
         max_per_user: t.max_per_user || 4,
-        sale_start: t.sale_start || null,
-        sale_end: t.sale_end || null,
-        is_active: t.is_active !== false,
+        sale_start: (t.sale_start !== undefined ? t.sale_start : t.saleStart) ?? null,
+        sale_end: (t.sale_end !== undefined ? t.sale_end : t.saleEnd) ?? null,
+        is_active: (t.is_active !== undefined ? t.is_active : t.isActive) !== false,
+        tier_visibility: t.tier_visibility ?? t.tierVisibility,
+        status: t.status,
         created_at: t.created_at || "",
       }));
     }, [liveTicketTypes, eventData?.ticketTiers, eventId]);
@@ -666,21 +702,20 @@ function EventDetailScreenContent() {
   const ticketTiers = useMemo(() => {
     if (!eventData) return [];
     const dbTiers = eventData.ticketTiers;
-    const buyerDbTiers = Array.isArray(dbTiers)
-      ? dbTiers.filter(
-          (t: any) =>
-            !tierIsHiddenFromBuyers({
-              tier_visibility:
-                t.tier_visibility ?? t.tierVisibility ?? null,
-            }),
-        )
-      : [];
+    const buyerDbTiers = filterBuyerVisibleTiers(
+      (Array.isArray(dbTiers) ? dbTiers : []).map((tier: any) => ({
+        ...tier,
+        ...liveTicketTypes.find((live) => String(live.id) === String(tier.id)),
+      })),
+      undefined,
+      saleNow,
+    ).visible;
     const hasDbTiers = buyerDbTiers.length > 0;
     // If the organizer turned ticketing ON but never configured tiers, don't
     // fabricate a synthetic GA card — it can't actually be sold (no real
     // ticket_type_id for Stripe) and tapping Get Tickets would just toast an
     // error. Better: show an empty state and disable the CTA.
-    if (eventData.ticketingEnabled && !hasDbTiers) return [];
+    if (!hasDbTiers && (eventData.ticketingEnabled || (dbTiers?.length ?? 0) > 0)) return [];
     // If the organizer set a price but ticketing is OFF, also don't
     // fabricate synthetic tiers — sales aren't open yet (NOLA Red Dress Run
     // case: event 44 with price=30 + ticketing_enabled=false). Showing a
@@ -722,7 +757,27 @@ function EventDetailScreenContent() {
     }
     // Fall back to synthetic tiers derived from event price/capacity
     return buildTicketTiers(eventData);
-  }, [safeEvent]);
+  }, [eventData, liveTicketTypes, saleNow]);
+
+  const selectedDbTier = liveTicketTypes.find((tier) => tier.id === selectedTier?.id)
+    ?? eventData?.ticketTiers?.find((tier: any) => tier.id === selectedTier?.id);
+  const selectedAllowance = selectedDbTier
+    ? ticketPurchaseAllowance(selectedDbTier, ownedTickets)
+    : selectedTier?.maxPerOrder ?? 4;
+  const purchaseDisabledReason = requestedServiceTierId && (!selectedTier ||
+    (selectedTier.id === requestedServiceTierId && (!selectedDbTier ||
+      selectedDbTier.category !== "service" || tierIsHiddenFromBuyers(selectedDbTier) || tierIsLockedForBuyer(selectedDbTier) ||
+      (selectedDbTier.event_id != null && String(selectedDbTier.event_id) !== eventId))))
+    ? "Requested service is unavailable. Select an available tier."
+    : eventSalesClosed(eventData)
+    ? "Ticket sales ended"
+    : !selectedTier && (eventData?.ticketTiers?.length ?? 0) > 0
+      ? "No ticket tiers are available yet"
+    : selectedDbTier && (selectedDbTier.is_active === false || !tierIsPurchasable(selectedDbTier))
+      ? "Currently unavailable"
+      : selectedDbTier && selectedAllowance <= 0
+        ? "Maximum per person reached"
+        : undefined;
 
   // Use real attendee avatars from batch payload, fall back to mock
   const realAttendees = useMemo(() => {
@@ -762,17 +817,39 @@ function EventDetailScreenContent() {
     [router, queryClient],
   );
 
+  // A new wallet selection (including Back/Forward on this mounted route)
+  // supersedes an older choice, but later manual selections remain untouched.
+  useEffect(() => {
+    setSelectedTier(null);
+    setTicketQty(1);
+  }, [eventId, requestedServiceTierId, setSelectedTier, setTicketQty]);
+
+  // Clear a stale selection when its sale start is moved into the future.
+  useEffect(() => {
+    if (selectedTier && !ticketTiers.some((tier) => tier.id === selectedTier.id)) {
+      setSelectedTier(null);
+      setTicketQty(1);
+    }
+  }, [ticketTiers, selectedTier, setSelectedTier, setTicketQty]);
+
   // Auto-select first paid tier when paid tiers exist; fall back to first tier
   useEffect(() => {
     if (ticketTiers.length > 0 && !selectedTier) {
+      // Wallet service links never silently select an admission instead.
+      if (requestedServiceTierId) {
+        const service = ticketTiers.find((tier) => tier.id === requestedServiceTierId && tier.category === "service");
+        if (service) setSelectedTier(service);
+        return;
+      }
       const firstPaid = ticketTiers.find((t: any) => (t.price ?? 0) > 0);
       setSelectedTier(firstPaid || ticketTiers[0]);
     }
-  }, [ticketTiers, selectedTier]);
+  }, [ticketTiers, selectedTier, requestedServiceTierId, setSelectedTier]);
 
   const handleSelectTier = useCallback((tier: TicketTier) => {
     setSelectedTier(tier);
-  }, []);
+    setTicketQty(1);
+  }, [setSelectedTier, setTicketQty]);
 
   // ── Waitlist (visible only when the selected tier is sold out) ──
   const waitlistTierId = selectedTier?.id ? String(selectedTier.id) : null;
@@ -912,12 +989,15 @@ function EventDetailScreenContent() {
         pendingCopy();
         return;
       }
+      setTicketQty(1);
       showToast(
         "success",
         outcome.ticketCount > 1
           ? `${outcome.ticketCount} Tickets Confirmed`
           : "Ticket Confirmed",
-        `You're going to ${eventData.title}!`,
+        selectedTier?.category === "service" || selectedTier?.category === "product"
+          ? `${selectedTier.name} is confirmed. Event admission is sold separately.`
+          : `You're going to ${eventData.title}!`,
       );
     } catch (err: any) {
       console.error("[EventDetail] Checkout error:", err);
@@ -935,7 +1015,10 @@ function EventDetailScreenContent() {
     nativeCheckoutKey,
     nativeCheckout,
     selectedTier?.id,
+    selectedTier?.name,
+    selectedTier?.category,
     ticketQty,
+    setTicketQty,
     promoCode,
     queryClient,
     viewerId,
@@ -966,8 +1049,13 @@ function EventDetailScreenContent() {
     // a missing end_date means the event is assumed to run start+6h
     // (the get_events_home convention) — an 8pm event is still live at
     // 8:30pm, not "Ended" at doors or at viewer-local midnight.
-    if (eventEnded(eventData)) {
-      showToast("warning", "Event Ended", "This event has already ended.");
+    if (eventSalesClosed(eventData)) {
+      showToast("warning", "Ticket sales ended", "Ticket sales are closed for this event.");
+      return;
+    }
+
+    if (purchaseDisabledReason || (selectedDbTier && (ticketQty < 1 || ticketQty > selectedAllowance))) {
+      showToast("warning", "Tickets unavailable", purchaseDisabledReason || "Review the quantity for this tier.");
       return;
     }
 
@@ -1115,6 +1203,10 @@ function EventDetailScreenContent() {
     user?.id,
     nativeCheckoutKey,
     handleNativeTicketCheckout,
+    purchaseDisabledReason,
+    selectedDbTier,
+    selectedAllowance,
+    ticketQty,
     verificationStatus,
     setVerifyOpen,
     toggleRsvp,
@@ -1172,7 +1264,6 @@ function EventDetailScreenContent() {
     onError: (message) => showToast("error", "Couldn't open the Lynk", message),
   });
   const openEventLynk = lynkEntry.open;
-  const startEventLynk = lynkEntry.open;
 
   // ── WS-9 safe destructive flows ──────────────────────────────────
   // Cancel (auto-refund) / Postpone (reversible, no refunds) / Delete
@@ -1778,6 +1869,44 @@ function EventDetailScreenContent() {
     return "";
   }, [isPast, hasTicket, isHostUser]);
 
+  const event = safeEvent;
+
+  /**
+   * What the hero chip says about price. `unknown` renders nothing rather than
+   * guessing — a chip that is wrong while loading is worse than no chip.
+   */
+  const heroPrice = useMemo<
+    { kind: "free" } | { kind: "from"; label: string } | { kind: "unknown" }
+  >(() => {
+    const visibleLivePrices = filterBuyerVisibleTiers(liveTicketTypes, undefined, saleNow).visible
+      .map((t) => t.price_cents || 0);
+    const cents = visibleLivePrices.length
+      ? visibleLivePrices
+      : ticketTiers.length
+        ? ticketTiers.map((t) => Math.round((t.price || 0) * 100))
+        : null;
+
+    if (cents && cents.length) {
+      const paid = cents.filter((value) => value > 0);
+      if (paid.length > 0) {
+        return {
+          kind: "from",
+          label: `From ${formatCents(Math.min(...paid))}`,
+        };
+      }
+      return { kind: "free" };
+    }
+    if (isLoading) return { kind: "unknown" };
+    if (event?.price === 0) return { kind: "free" };
+    if (typeof event?.price === "number" && event.price > 0) {
+      return {
+        kind: "from",
+        label: `From ${formatCents(Math.round(event.price * 100))}`,
+      };
+    }
+    return { kind: "unknown" };
+  }, [liveTicketTypes, ticketTiers, isLoading, event?.price, saleNow]);
+
   // Gallery cells follow the window, not the width the app launched with.
   // MUST stay above the loading/error guards below: it used to sit after them,
   // so the skeleton render called one fewer hook than the loaded render and
@@ -1811,51 +1940,6 @@ function EventDetailScreenContent() {
     );
   }
 
-  const event = safeEvent;
-
-  /**
-   * What the hero chip says about price. `unknown` renders nothing rather than
-   * guessing — a chip that is wrong while loading is worse than no chip.
-   */
-  const heroPrice = useMemo<
-    { kind: "free" } | { kind: "from"; label: string } | { kind: "unknown" }
-  >(() => {
-    const visibleLivePrices = liveTicketTypes
-      .filter(
-        (t: any) =>
-          !tierIsHiddenFromBuyers({
-            tier_visibility:
-              t.tier_visibility ?? t.tierVisibility ?? null,
-          }),
-      )
-      .map((t) => t.price_cents || 0);
-    const cents = visibleLivePrices.length
-      ? visibleLivePrices
-      : ticketTiers.length
-        ? ticketTiers.map((t) => Math.round((t.price || 0) * 100))
-        : null;
-
-    if (cents && cents.length) {
-      const paid = cents.filter((value) => value > 0);
-      if (paid.length > 0) {
-        return {
-          kind: "from",
-          label: `From ${formatCents(Math.min(...paid))}`,
-        };
-      }
-      return { kind: "free" };
-    }
-    if (isLoading) return { kind: "unknown" };
-    if (event?.price === 0) return { kind: "free" };
-    if (typeof event?.price === "number" && event.price > 0) {
-      return {
-        kind: "from",
-        label: `From ${formatCents(Math.round(event.price * 100))}`,
-      };
-    }
-    return { kind: "unknown" };
-  }, [liveTicketTypes, ticketTiers, isLoading, event?.price]);
-
   // Two-up off the CONTENT column, not the window. `s.root` caps this screen at
   // CONTENT_MAX_WIDTH, so dividing the 1024pt window gave two 488pt cells that
   // could not both fit in a 768pt column — they wrapped to one photo per row.
@@ -1882,6 +1966,8 @@ function EventDetailScreenContent() {
       {/* Capped reading column. The header below is deliberately OUTSIDE it. */}
       <View style={s.root}>
       <Animated.ScrollView
+        ref={detailsScrollRef}
+        onContentSizeChange={scrollToRequestedSection}
         style={s.scroll}
         showsVerticalScrollIndicator={false}
         onScroll={scrollHandler}
@@ -1992,7 +2078,11 @@ function EventDetailScreenContent() {
         </View>
 
         {/* ── 2. CORE INFO BLOCK ───────────────────────────────── */}
-        <View style={s.content}>
+        <View key={eventId} style={s.content} onLayout={(event) => {
+          if (sectionLayout.current.eventId !== eventId) return;
+          sectionLayout.current.contentY = event.nativeEvent.layout.y;
+          scrollToRequestedSection();
+        }}>
           {/* Identity first. The title used to be the SEVENTH element on
               this screen — below the hero, a cancellation banner, a sale
               card, the tier selector, a promo-code field and an "Upgrade
@@ -2157,7 +2247,7 @@ function EventDetailScreenContent() {
               />
 
               {/* Promo code input */}
-              {selectedTier && selectedTier.price > 0 && !hasTicket && (
+              {selectedTier && selectedTier.price > 0 && (
                 <View style={{ marginTop: 12, gap: 8 }}>
                   <View
                     style={{
@@ -2253,14 +2343,14 @@ function EventDetailScreenContent() {
               )}
 
               {/* Signed-in buyer with no phone on file: shown after checkout asks. */}
-              {selectedTier && !hasTicket ? <CheckoutPhoneField /> : null}
+              {selectedTier ? <CheckoutPhoneField /> : null}
+              {purchaseDisabledReason ? <Text style={{ color: "#a1a1aa", marginTop: 8 }}>{purchaseDisabledReason}</Text> : null}
 
               {/* Quantity selector — shown for all real DB tiers (free and paid).
                   Excluded for the synthetic "free" id which uses the legacy RSVP path. */}
               {selectedTier &&
-                !hasTicket &&
                 selectedTier.id !== "free" &&
-                (selectedTier.maxPerOrder || 4) > 1 && (
+                selectedAllowance > 0 && (
                   <View
                     style={{
                       flexDirection: "row",
@@ -2319,14 +2409,14 @@ function EventDetailScreenContent() {
                         {ticketQty}
                       </Text>
                       <Pressable
-                        onPress={() => setTicketQty(ticketQty + 1)}
-                        disabled={ticketQty >= (selectedTier.maxPerOrder || 4)}
+                        onPress={() => setTicketQty(Math.min(selectedAllowance, ticketQty + 1))}
+                        disabled={ticketQty >= selectedAllowance}
                         style={{
                           width: 32,
                           height: 32,
                           borderRadius: 16,
                           backgroundColor:
-                            ticketQty >= (selectedTier.maxPerOrder || 4)
+                            ticketQty >= selectedAllowance
                               ? "rgba(255,255,255,0.06)"
                               : "rgba(255,255,255,0.12)",
                           alignItems: "center",
@@ -2336,7 +2426,7 @@ function EventDetailScreenContent() {
                         <Text
                           style={{
                             color:
-                              ticketQty >= (selectedTier.maxPerOrder || 4)
+                              ticketQty >= selectedAllowance
                                 ? "#555"
                                 : "#fff",
                             fontSize: 20,
@@ -2515,54 +2605,12 @@ function EventDetailScreenContent() {
             </View>
           )}
 
-          {/* ── Sneaky Lynk — the room this event is hosted in.
-                 Above the details on purpose: when an event HAS a room,
-                 "where do I go" outranks "what's the dress code". The card
-                 says it is private and that entry follows the event's list,
-                 because a guest who taps into a refusal learns that too
-                 late. */}
-          {(event as any).lynkRoomId ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                lynkHost.isTerminal ? "This Lynk has ended" : lynkEntry.isOpening ? "Opening Lynk" : mayHostLynk ? "Open your event's Lynk" : "Join the event's Lynk"
-              }
-              testID="event-lynk-room"
-              disabled={lynkEntry.isOpening || lynkHost.isTerminal}
-              accessibilityState={{ busy: lynkEntry.isOpening, disabled: lynkEntry.isOpening || lynkHost.isTerminal }}
-              onPress={() => void openEventLynk()}
-              className="mx-4 mb-4 flex-row items-center gap-3 rounded-2xl bg-card px-4 py-3 active:opacity-80"
-            >
-              <View className="w-10 h-10 rounded-xl bg-primary/20 items-center justify-center">
-                <Radio size={18} color="#8A40CF" />
-              </View>
-              <View className="flex-1">
-                <Text
-                  className="text-foreground font-semibold"
-                  numberOfLines={1}
-                >
-                  {lynkHost.isTerminal ? "This Lynk has ended" : lynkEntry.isOpening ? "Opening Lynk…" : mayHostLynk ? "Open your event's Lynk" : "Join the event's Lynk"}
-                </Text>
-                <Text className="text-xs text-muted-foreground mt-0.5">
-                  Private video room · only people on this event&apos;s list get
-                  in
-                </Text>
-              </View>
-            </Pressable>
-          ) : null}
-          {(event as any).lynkRoomId && mayHostLynk && lynkHost.isError ? (
-            <Pressable accessibilityRole="button" onPress={() => void lynkHost.refetch()} className="mx-4 mb-4">
-              <Text className="text-sm text-muted-foreground">Couldn&apos;t load the waiting room. Tap to retry.</Text>
-            </Pressable>
-          ) : null}
-          {(event as any).lynkRoomId && mayHostLynk && lynkHost.view && !lynkHost.isTerminal ? (
-            <EventLynkHostPanel
-              waiting={lynkHost.view.waiting}
-              count={lynkHost.view.count}
-              isLive={lynkHost.isLive}
-              isStarting={lynkEntry.isOpening}
-              onStart={() => void startEventLynk()}
-            />
+          {event.lynkRoomId ? (
+            <EventLynkCard roomId={event.lynkRoomId} signedIn={!!user?.id}
+              mayHost={mayHostLynk} view={lynkHost.view} isLoading={lynkHost.isLoading}
+              isError={lynkHost.isError} isLive={lynkHost.isLive} isTerminal={lynkHost.isTerminal}
+              isOpening={lynkEntry.isOpening} onOpen={() => void openEventLynk()}
+              onRetry={() => void lynkHost.refetch()} />
           ) : null}
 
           {/* ── 4. COLLAPSIBLE EVENT DETAILS ─────────────────────── */}
@@ -2662,12 +2710,16 @@ function EventDetailScreenContent() {
           <View style={s.section}>
             <WhoAllOverThere
               eventId={eventId}
-              canUpload={isHost || hasTicket}
+              canUpload={isHost || hasAdmissionTicket}
             />
           </View>
 
           {/* ── Ratings & Reviews ─────────────────────────────────── */}
-          <View style={s.section}>
+          <View style={s.section} onLayout={(event) => {
+            if (sectionLayout.current.eventId !== eventId) return;
+            sectionLayout.current.reviewsY = event.nativeEvent.layout.y;
+            scrollToRequestedSection();
+          }}>
             <View style={s.sectionHeader}>
               <View style={s.sectionHeaderLeft}>
                 <Star size={18} color="#FFD700" />
@@ -2982,8 +3034,9 @@ function EventDetailScreenContent() {
         onGetTickets={handleGetTickets}
         onViewTicket={handleViewTicket}
         onBuyMore={
-          selectedTier && selectedTier.price > 0 ? handleGetTickets : undefined
+          selectedDbTier ? handleGetTickets : undefined
         }
+        purchaseDisabledReason={purchaseDisabledReason}
         waitlistJoined={waitlistJoined}
         onJoinWaitlist={handleJoinWaitlist}
         onLeaveWaitlist={handleLeaveWaitlist}

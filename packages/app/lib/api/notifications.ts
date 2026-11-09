@@ -1,3 +1,4 @@
+import type { ActivityCursor } from "../activity/activity-history";
 import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import { getCurrentUserIdSync } from "./auth-helper";
@@ -15,6 +16,9 @@ export type NotificationType =
   | "event_update"
   | "message"
   | "room_invite"
+  | "lynk_cohost_invited"
+  | "lynk_cohost_accepted"
+  | "lynk_cohost_declined"
   | "sneaky_lynk";
 
 export interface Notification {
@@ -434,13 +438,17 @@ export const notificationsApi = {
    * Get notifications for current user
    * DB schema: recipient_id (int), actor_id (int) → users(id), type enum, entity_type enum, entity_id varchar, read_at timestamp
    */
-  async getNotifications(limit: number = 50) {
+  async getNotifications(limit: number = 50, cursor?: ActivityCursor) {
     try {
       const access = await requireNotificationAccess();
       const { userId } = access;
       access.assertCurrent();
 
-      const { data, error, count } = await supabase
+      if (cursor && (!/^[1-9]\d*$/.test(cursor.id) || !Number.isSafeInteger(Number(cursor.id)) ||
+        !/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.test(cursor.createdAt) || !Number.isFinite(Date.parse(cursor.createdAt)))) {
+        throw new Error("Invalid activity cursor");
+      }
+      let pageQuery = supabase
         .from("notifications")
         .select(
           `
@@ -464,9 +472,13 @@ export const notificationsApi = {
         )
         .eq("recipient_id", userId)
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(limit)
         .setHeader("x-dvnt-bridge-epoch", access.requestEpoch);
-
+      if (cursor) pageQuery = pageQuery.or(
+        `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+      );
+      const { data, error, count } = await pageQuery;
       access.assertCurrent();
 
       if (error) {
@@ -762,7 +774,11 @@ export const notificationsApi = {
       });
 
       access.assertCurrent();
-      return { docs, totalDocs: count || 0 };
+      const last = rawNotifications[rawNotifications.length - 1];
+      return { docs, totalDocs: count || 0, headCursor: rawNotifications[0]
+        ? { createdAt: String(rawNotifications[0].created_at), id: String(rawNotifications[0].id) } : null,
+        nextCursor: rawNotifications.length === limit && last
+        ? { createdAt: String(last.created_at), id: String(last.id) } : null };
     } catch (error) {
       console.error("[Notifications] getNotifications error:", error);
       // Rethrow for the same reason as above — the caller decides how to show
@@ -905,8 +921,8 @@ export const notificationsApi = {
 export const notificationsApiClient = {
   get: async (options: { limit?: number } = {}) =>
     notificationsApi.getNotifications(options.limit || 50),
-  getNotifications: (limit?: number) =>
-    notificationsApi.getNotifications(limit || 50),
+  getNotifications: (limit?: number, cursor?: ActivityCursor) =>
+    notificationsApi.getNotifications(limit || 50, cursor),
   getLikedActivity: (limit?: number) =>
     notificationsApi.getLikedActivity(limit || 50),
   markAsRead: (id: string) => notificationsApi.markAsRead(id),

@@ -20,12 +20,13 @@ test("the per-ticket part of the fee scales with quantity", () => {
   assert.equal(f.buyer_fee, 325, "2.5% of 5000 = 125, plus $1.00 x 2");
 });
 
-test("a free ticket is still charged a $1 service fee — deliberate or not, it is what ships", () => {
-  // Reachable when a $0 admission rides the cart rail (free tier plus an
-  // add-on, or a 100%-off promo). Recording the behaviour rather than
-  // asserting it is correct: a "Free" tier that totals $1.00 is a product
-  // decision, and this test is where it surfaces if someone changes it.
-  const f = computeFees(0, 1);
-  assert.equal(f.buyer_fee, 100);
-  assert.equal(f.customer_charge_amount, 100);
+test("free tickets never carry buyer, organizer or platform fees", () => {
+  for (const quantity of [1, 3, 100]) {
+    const f = computeFees(0, quantity);
+    assert.equal(f.buyer_fee, 0);
+    assert.equal(f.organizer_fee, 0);
+    assert.equal(f.application_fee_amount, 0);
+    assert.equal(f.customer_charge_amount, 0);
+    assert.equal(f.organizer_transfer_amount, 0);
+  }
 });

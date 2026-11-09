@@ -67,6 +67,7 @@ import type { ScanAddonSummary } from "@dvnt/app/lib/api/tickets";
 import { useScanTicket } from "@dvnt/app/lib/hooks/use-tickets";
 import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { OfflineScanConflicts } from "./offline-scan-conflicts";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/auth/identity";
 import {
@@ -560,7 +561,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
               const planKey = data.membership_tier?.planKey ?? null;
               setScanResult({
                 type: "success",
-                kind: data.kind ?? "ticket",
+                kind: data.kind ?? "unknown",
                 name,
                 tierName,
                 addons: data.addons,
@@ -570,7 +571,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
                 planColor: planAccent(planKey),
                 perkLabels: (data.perks ?? []).map((p) => PERK_LABELS[p]),
               });
-              recordSuccess({ kind: data.kind ?? "ticket", name, tierName });
+              recordSuccess({ kind: data.kind ?? "unknown", name, tierName });
               // Seed local knowledge so a re-scan flips instantly.
               offlineStore.markScannedLocal(eventId, qrToken);
             } else {
@@ -586,7 +587,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
                   : ("not_found" as const);
               setScanResult({
                 type: resultType,
-                kind: data.kind ?? "ticket",
+                kind: data.kind ?? "unknown",
                 name:
                   data.kind === "addon" && data.addon
                     ? [data.addon.name, data.addon.variant_name]
@@ -627,10 +628,12 @@ function ScannerActive({ eventId }: { eventId: string }) {
                 offlineStore.markScannedOffline(eventId, qrToken, authUser?.id);
                 setScanResult({
                   type: "success",
-                  name: "Verified Offline",
+                  reason: "offline_pending",
+                  message: "Provisional only. Refunds, transfers and scans on other devices cannot be checked until sync.",
+                  name: "Offline admission queued",
                   tierName: undefined,
                 });
-                recordSuccess({ name: "Verified Offline" });
+                recordSuccess({ name: "Offline admission queued" });
               } else if (offlineStore.isAddonTokenValid(eventId, qrToken)) {
                 // Add-on rail — queue with the kind discriminator.
                 offlineStore.markScannedOffline(
@@ -642,9 +645,11 @@ function ScannerActive({ eventId }: { eventId: string }) {
                 setScanResult({
                   type: "success",
                   kind: "addon",
-                  name: "Add-on Verified Offline",
+                  reason: "offline_pending",
+                  message: "Provisional only. Server confirmation is pending sync.",
+                  name: "Offline redemption queued",
                 });
-                recordSuccess({ kind: "addon", name: "Add-on Verified Offline" });
+                recordSuccess({ kind: "addon", name: "Offline redemption queued" });
               } else {
                 // Amber, NOT red. The downloaded list is active tickets as of
                 // the last refresh, and it is frozen for as long as this phone
@@ -663,7 +668,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
               setScanResult({
                 type: "error",
                 reason: "network_error",
-                message: "Network error. Download tickets for offline scanning.",
+                message: scanVerdictMessage("network_error"),
               });
             }
           },
@@ -838,6 +843,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
       ) : null}
 
       <DoorSyncRow phase={syncPhase} queued={queued} listUpdatedAt={listUpdatedAt} />
+      <OfflineScanConflicts eventId={eventId} />
 
       {/* Manual entry — type / paste a ticket token at the door. Scan mode
           only: in list mode the list IS the fallback. */}
@@ -866,7 +872,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
           disabled={!manualToken.trim() || scanMutation.isPending}
           className="shrink-0 rounded-lg bg-[#3FDCFF] px-3 py-1.5 text-[13px] font-semibold text-black disabled:opacity-40"
         >
-          Check in
+          Check / redeem
         </button>
       </div>
 
@@ -1004,9 +1010,11 @@ function DoorSyncRow({ phase, queued, listUpdatedAt }: {
         }
       : phase === "syncing"
         ? { dot: "bg-[#3FDCFF]", text: "Syncing…" }
-        : phase === "synced"
-          ? { dot: "bg-[#22C55E]", text: "Synced" }
-          : {
+        : queued > 0
+          ? { dot: "bg-[#F59E0B]", text: `${queued} ${queued === 1 ? "scan needs" : "scans need"} sync or staff review — not confirmed` }
+          : phase === "synced"
+            ? { dot: "bg-[#22C55E]", text: "Synced" }
+            : {
               dot: "bg-[#22C55E]",
               text:
                 minutesAgo === null

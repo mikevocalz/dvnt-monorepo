@@ -355,6 +355,7 @@ export interface HostDashboardEvent {
 export interface HostDashboard {
   ok: boolean;
   stats: {
+    platformFees?: import("../../organizer/platform-fees").PlatformFees;
     monthSold: number;
     monthRevenueCents: number;
     scanRate: number | null;
@@ -421,7 +422,8 @@ export type BroadcastAudience = "all" | "scanned" | "unscanned";
 
 export interface CompDeliveryResult {
   recipient: string;
-  status: "delivered" | "failed";
+  /** delivered means provider-accepted, not confirmed inbox receipt. */
+  status: "delivered" | "failed" | "queued" | "not_available";
   error?: string;
 }
 
@@ -434,6 +436,7 @@ export interface CompResult {
    * because a deployed older edge fn doesn't send these fields.
    */
   guest_issued?: number;
+  /** Grouped email outcomes for newly issued member and guest tickets. */
   delivery?: CompDeliveryResult[];
   /** Phone comps newly minted (a resend rotates an existing one and is not counted). */
   phone_guest_issued?: number;

@@ -19,15 +19,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import { voidWalletPass } from "../_shared/wallet-push.ts";
-import {
-  sendResendEmail,
-  ticketConfirmation,
-} from "../_shared/send-resend-email.ts";
+import { deliverTicketReceipts } from "../_shared/ticket-receipt-delivery.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-const SITE_URL =
-  (Deno.env.get("PUBLIC_SITE_URL") || "https://dvntapp.live").replace(/\/$/, "");
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -66,6 +61,14 @@ async function lookupAppUser(
   };
 }
 
+// Notification lookups happen after the ticket transition commits. Their
+// transport failures must never advertise a failed operation or trigger replay.
+async function bestEffortNotification(send: () => Promise<void>): Promise<void> {
+  try { await send(); } catch {
+    console.warn("[transfer-ticket] notification preparation unavailable (non-fatal)");
+  }
+}
+
 /**
  * Send a push notification + insert in-app notification row.
  * Best-effort — failures are logged but don't break the calling action.
@@ -81,17 +84,29 @@ async function notifyTransfer(
     body: string;
     notificationType: string;
     entityId: string;
+    ticketId: string;
   },
 ): Promise<void> {
   try {
     // In-app notification feed entry
-    await supabase.from("notifications").insert({
+    const { data: ticketContext } = await supabase.from("tickets")
+      .select("event_id").eq("id", params.ticketId).maybeSingle();
+    const { error: notificationError } = await supabase.from("notifications").insert({
       recipient_id: params.recipientIntId,
-      sender_id: params.senderIntId,
+      actor_id: params.senderIntId,
       type: params.notificationType,
-      entity_type: "ticket_transfer",
-      entity_id: params.entityId,
+      // Transfers are not a supported notification entity enum. Keep the
+      // event relationship and carry the transfer reference in the payload.
+      entity_type: ticketContext?.event_id ? "event" : null,
+      entity_id: ticketContext?.event_id ? String(ticketContext.event_id) : null,
+      entity_payload: { title: params.title, body: params.body, transfer_id: params.entityId },
     });
+
+    // PostgREST errors resolve instead of throwing. Never silently discard
+    // this result, or report a ticket operation as failed after it committed.
+    if (notificationError) {
+      console.warn("[transfer-ticket] notification insert failed", notificationError.code);
+    }
 
     // Push
     const { data: tokens } = await supabase
@@ -131,7 +146,7 @@ async function notifyTransfer(
       );
     }
   } catch (err) {
-    console.warn("[transfer-ticket] notifyTransfer failed (non-fatal):", err);
+    console.warn("[transfer-ticket] notification unavailable (non-fatal)");
   }
 }
 
@@ -393,6 +408,7 @@ Deno.serve(async (req: Request) => {
         `[transfer-ticket] Transfer initiated: ${ticket_id} from ${userId} to ${recipient.id}`,
       );
 
+      await bestEffortNotification(async () => {
       // Notify recipient — push + in-app feed entry
       const senderUser = await lookupAppUser(supabase, userId);
       const recipientUser = await lookupAppUser(supabase, recipient.id);
@@ -415,8 +431,11 @@ Deno.serve(async (req: Request) => {
           body: `${senderHandle} sent you a ticket for ${eventTitle}. Tap to accept.`,
           notificationType: "ticket_transfer_initiated",
           entityId: String(transfer.id),
+          ticketId: ticket.id,
         });
       }
+
+      });
 
       return json({
         transfer_id: transfer.id,
@@ -479,7 +498,7 @@ Deno.serve(async (req: Request) => {
       // A failed request either leaves a retryable pending transfer or has
       // completed all three changes; never accepted + sender-owned/pending.
       const { data: acceptance, error: acceptanceError } = await supabase.rpc(
-        "accept_ticket_transfer_atomic",
+        "accept_ticket_transfer_with_receipt",
         {
           p_transfer_id: transfer_id,
           p_recipient_id: userId,
@@ -501,83 +520,15 @@ Deno.serve(async (req: Request) => {
         `[transfer-ticket] Transfer accepted: ${ticket.id} now owned by ${userId}`,
       );
 
-      // Email the new owner — the ticket now belongs to them, so it must
-      // also reach their inbox. Best-effort: a failed send never rolls
-      // back the accepted transfer (they can always open My Tickets).
+      // Acceptance enqueues exactly one receipt atomically. Replace, never
+      // duplicate, the former best-effort direct email. Worker retries only mail.
       try {
-        const { data: authUser } = await supabase
-          .from("user")
-          .select("email")
-          .eq("id", userId)
-          .maybeSingle();
-        if (authUser?.email) {
-          const [{ data: evt }, { data: tierRow }, { data: senderRow }] =
-            await Promise.all([
-              supabase
-                .from("events")
-                .select(
-                  "title, date, start_date, location, flyer_image_url, dominant_color",
-                )
-                .eq("id", ticket.event_id)
-                .maybeSingle(),
-              supabase
-                .from("ticket_types")
-                .select("name")
-                .eq("id", ticket.ticket_type_id)
-                .maybeSingle(),
-              supabase
-                .from("users")
-                .select("username")
-                .eq("auth_id", transfer.from_user_id)
-                .maybeSingle(),
-            ]);
-          const eventStart = evt?.start_date ?? evt?.date ?? null;
-          const dateLine = eventStart
-            ? new Date(eventStart).toLocaleString("en-US", {
-                weekday: "short",
-                month: "short",
-                day: "numeric",
-                hour: "numeric",
-                minute: "2-digit",
-              })
-            : null;
-          const senderHandle = senderRow?.username
-            ? `@${senderRow.username}`
-            : "A friend";
-          await sendResendEmail({
-            to: authUser.email,
-            ...ticketConfirmation({
-              eventTitle: evt?.title ?? "your event",
-              flyerUrl: evt?.flyer_image_url ?? null,
-              dominantColor: evt?.dominant_color ?? null,
-              dateLine,
-              location: evt?.location ?? null,
-              toEmail: authUser.email,
-              greeting:
-                `${senderHandle} sent you a ticket for ${evt?.title ?? "this event"} — it's yours now.`,
-              manageUrl: `${SITE_URL}/my-tickets`,
-              // Recipient already has an account — no guest claim nudge.
-              claimUrl: null,
-              tickets: [{
-                tierLabel: tierRow?.name ?? "Ticket",
-                lookupUrl: null,
-              }],
-              calendar: eventStart
-                ? { startIso: new Date(eventStart).toISOString() }
-                : null,
-            }),
-          });
-          console.log(
-            `[transfer-ticket] Ticket email sent to new owner for ${ticket.id}`,
-          );
-        }
-      } catch (emailErr) {
-        console.warn(
-          "[transfer-ticket] recipient email failed (non-fatal):",
-          emailErr,
-        );
+        await deliverTicketReceipts(supabase, acceptance.receipt_ids || []);
+      } catch {
+        console.warn("[transfer-ticket] receipt processing pending");
       }
 
+      await bestEffortNotification(async () => {
       // Notify sender — their transfer was accepted
       const senderApp = await lookupAppUser(supabase, transfer.from_user_id);
       const accepterApp = await lookupAppUser(supabase, userId);
@@ -594,8 +545,11 @@ Deno.serve(async (req: Request) => {
           body: `${accepterHandle} accepted your ticket.`,
           notificationType: "ticket_transfer_accepted",
           entityId: String(transfer_id),
+          ticketId: ticket.id,
         });
       }
+
+      });
 
       return json({
         success: true,
@@ -648,6 +602,7 @@ Deno.serve(async (req: Request) => {
 
       console.log(`[transfer-ticket] Transfer declined: ${transfer_id}`);
 
+      await bestEffortNotification(async () => {
       // Notify sender — their transfer was declined
       const { data: declineTransferRow } = await supabase
         .from("ticket_transfers")
@@ -676,9 +631,12 @@ Deno.serve(async (req: Request) => {
             body: `${declinerHandle} declined your ticket. It's back in your wallet.`,
             notificationType: "ticket_transfer_declined",
             entityId: String(transfer_id),
+            ticketId: transfer.ticket_id,
           });
         }
       }
+
+      });
 
       return json({ success: true });
     }
@@ -727,6 +685,7 @@ Deno.serve(async (req: Request) => {
 
       console.log(`[transfer-ticket] Transfer cancelled: ${transfer_id}`);
 
+      await bestEffortNotification(async () => {
       // Notify recipient — the transfer was cancelled by sender
       const { data: cancelTransferRow } = await supabase
         .from("ticket_transfers")
@@ -755,9 +714,12 @@ Deno.serve(async (req: Request) => {
             body: `${senderHandle} cancelled the ticket transfer.`,
             notificationType: "ticket_transfer_cancelled",
             entityId: String(transfer_id),
+            ticketId: transfer.ticket_id,
           });
         }
       }
+
+      });
 
       return json({ success: true });
     }

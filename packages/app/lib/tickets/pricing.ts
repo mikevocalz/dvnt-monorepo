@@ -41,6 +41,11 @@ export type TierType = (typeof TIER_TYPES)[number];
 /** Minimal visibility shape shared by editor rows and fetched tier records. */
 export interface TierVisibilityInput {
   tier_visibility?: string | null;
+  tierVisibility?: string | null;
+  sale_start?: string | null;
+  saleStart?: string | null;
+  is_active?: boolean | null;
+  isActive?: boolean | null;
 }
 
 export interface TierInventory {
@@ -244,7 +249,13 @@ export function bandRowsToSubAllocations(
 
 /** Hidden tiers NEVER render for buyers (missing/unknown visibility ⇒ public). */
 export function tierIsHiddenFromBuyers(t: TierVisibilityInput): boolean {
-  return t.tier_visibility === "hidden";
+  return (t.tier_visibility ?? t.tierVisibility) === "hidden";
+}
+
+/** Sale-start visibility only. Sold-out, paused and ended tiers stay distinct. */
+export function tierSaleHasStarted(t: TierVisibilityInput, nowMs: number = Date.now()): boolean {
+  const start = t.sale_start !== undefined ? t.sale_start : t.saleStart;
+  return start == null || Date.parse(start) <= nowMs;
 }
 
 /** Locked tiers render only as a "Have a code?" affordance until unlocked. */
@@ -252,12 +263,12 @@ export function tierIsLockedForBuyer(
   t: TierVisibilityInput & { id?: string | number },
   unlockedTierIds?: ReadonlySet<string>,
 ): boolean {
-  if (t.tier_visibility !== "locked") return false;
+  if ((t.tier_visibility ?? t.tierVisibility) !== "locked") return false;
   return !(t.id != null && unlockedTierIds?.has(String(t.id)));
 }
 
 /**
- * Buyer-facing tier list: drops hidden tiers entirely, drops locked tiers the
+ * Buyer-facing tier list: drops inactive, future-sale and hidden tiers, drops locked tiers the
  * buyer hasn't unlocked, and reports whether any locked tier remains so the UI
  * can show the unlock-code affordance. Unlock VALIDATION is server-side only —
  * this never compares codes.
@@ -267,11 +278,18 @@ export function filterBuyerVisibleTiers<
 >(
   tiers: T[],
   unlockedTierIds?: ReadonlySet<string>,
+  nowMs: number = Date.now(),
 ): { visible: T[]; hasLockedTiers: boolean } {
-  const visible = tiers.filter(
+  const started = tiers.filter((t) => {
+    // Organizers also delay/disable tiers without setting a sale-start date.
+    // Keep legacy rows without either flag visible; live snake-case wins.
+    const active = t.is_active !== undefined ? t.is_active : t.isActive;
+    return active !== false && tierSaleHasStarted(t, nowMs);
+  });
+  const visible = started.filter(
     (t) => !tierIsHiddenFromBuyers(t) && !tierIsLockedForBuyer(t, unlockedTierIds),
   );
-  const hasLockedTiers = tiers.some((t) => tierIsLockedForBuyer(t, unlockedTierIds));
+  const hasLockedTiers = started.some((t) => tierIsLockedForBuyer(t, unlockedTierIds));
   return { visible, hasLockedTiers };
 }
 

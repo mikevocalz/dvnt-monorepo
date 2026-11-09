@@ -49,3 +49,19 @@ test("every Lynk path that hosts, joins or re-mints a token runs verified admiss
     assert.match(src.slice(call, call + 400), /admission\.state === "blocked"[\s\S]*?admissionRefusal\(admission\)/, `${fn} does not refuse a blocked verdict`);
   }
 });
+
+
+test('waiting refusals use HTTP status, not English server wording', async () => {
+  const { isEventLynkWaitRefusal } = await import('./event-lynk.ts');
+  for (const status of [400, 401, 403, 404, 409]) {
+    assert.equal(isEventLynkWaitRefusal(Object.assign(new Error('Access changed'), { status })), true);
+  }
+  for (const status of [408, 425, 429, 500, 502, 503]) {
+    assert.equal(isEventLynkWaitRefusal(Object.assign(new Error('Could not check event ticket'), { status })), false);
+  }
+  assert.equal(isEventLynkWaitRefusal(new Error('Network request failed')), false);
+  assert.equal(isEventLynkWaitRefusal(new Error('This event is no longer available')), true);
+  assert.equal(isEventLynkWaitRefusal(new Error('Not authenticated')), true);
+  assert.equal(isEventLynkWaitRefusal({ reason: 'room_ended' }), true);
+  assert.equal(isEventLynkWaitRefusal({ reason: 'waiting_for_host' }), false);
+});

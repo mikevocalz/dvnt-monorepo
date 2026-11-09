@@ -1,3 +1,5 @@
+import { EventLynkSetup } from "@dvnt/app/features/events/ui/EventLynkSetup";
+import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
 import { shouldDiscardPreparedRoom } from "@dvnt/app/lib/events/event-publish-error";
 import { prepareEventLynkRoom } from "@dvnt/app/lib/events/prepare-event-lynk-room";
 import { EVENT_FLYER_ASPECT, EVENT_FLYER_GUIDANCE } from "@dvnt/app/lib/events/flyer-layout";
@@ -48,7 +50,6 @@ import {
   ChevronRight,
   Check,
   Eye,
-  Radio,
 } from "lucide-react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Image } from "expo-image";
@@ -855,7 +856,7 @@ function CreateEventScreenContent() {
           for (const tier of ticketTiers) {
             const createdTier = await ticketTypesApi.create({
               eventId: String(data.id),
-              name: tier.name,
+              name: tier.name || defaultTicketTypeName(tier.category),
               category: tier.category || "admission",
               description: tier.description || undefined,
               priceCents: tier.priceCents,
@@ -1839,40 +1840,8 @@ function CreateEventScreenContent() {
         {/* ==================== STEP 1: MEDIA ==================== */}
         {currentStep === 1 && (
           <>
-            {/* Sneaky Lynk room — same control and copy as the web create
-                screen. Says what it DOES, not what it is: a toggle whose
-                consequence is a second object being created has to name that
-                consequence before the tap, not after. */}
             <View className="mb-6">
-              <Text className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                Sneaky Lynk Room
-              </Text>
-              <Pressable
-                accessibilityRole="switch"
-                accessibilityState={{ checked: attachLynkRoom }}
-                onPress={() => setAttachLynkRoom(!attachLynkRoom)}
-                className="flex-row items-start gap-3 bg-card rounded-2xl px-4 py-4"
-              >
-                <View className="w-10 h-10 rounded-xl bg-primary/20 items-center justify-center">
-                  <Radio size={20} color={colors.primary} />
-                </View>
-                <View className="flex-1">
-                  <Text className="text-foreground font-semibold">
-                    Host this event in a Sneaky Lynk
-                  </Text>
-                  <Text className="text-xs text-muted-foreground mt-0.5 leading-5">
-                    Creates a private video room. Guests RSVP and wait until you start
-                    it from the event page. Leave ticket sales off for free entry.
-                    Your Sneaky Lynk hosting plan’s time and capacity limits still apply.
-                  </Text>
-                </View>
-                <Switch
-                  value={attachLynkRoom}
-                  onValueChange={setAttachLynkRoom}
-                  trackColor={{ false: "#374151", true: colors.primary }}
-                  thumbColor="#fff"
-                />
-              </Pressable>
+              <EventLynkSetup enabled={attachLynkRoom} onChange={setAttachLynkRoom} />
             </View>
 
             {/* YouTube Video URL */}
@@ -2462,6 +2431,8 @@ function CreateEventScreenContent() {
                           return (
                             <Pressable
                               key={option.value}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected }}
                               onPress={() =>
                                 setTicketTiers((prev) =>
                                   prev.map((t) =>
@@ -2515,7 +2486,7 @@ function CreateEventScreenContent() {
                           className="flex-1 text-[11px] font-semibold text-muted-foreground"
                           style={{ letterSpacing: 0.4 }}
                         >
-                          MAX / ORDER
+                          MAX / PERSON
                         </Text>
                       </View>
 
@@ -2692,12 +2663,13 @@ function CreateEventScreenContent() {
                         </View>
                       )}
 
-                      {/* Tier type — v2 enum (GA / VIP / Early Bird / Table / Group) */}
+                      {/* Admission styles do not classify services/products. */}
+                      {isAdmissionCategory(tier.category) ? <>
                       <Text
                         className="text-[11px] font-semibold text-muted-foreground mt-3 mb-1 px-1"
                         style={{ letterSpacing: 0.4 }}
                       >
-                        TIER TYPE
+                        ADMISSION TIER TYPE
                       </Text>
                       <View className="flex-row gap-2 mb-2">
                         {TIER_TYPE_OPTIONS.map((option) => {
@@ -2706,6 +2678,8 @@ function CreateEventScreenContent() {
                           return (
                             <Pressable
                               key={option.value}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected }}
                               onPress={() =>
                                 setTicketTiers((prev) =>
                                   prev.map((t) =>
@@ -2737,6 +2711,7 @@ function CreateEventScreenContent() {
                           );
                         })}
                       </View>
+                      </> : null}
 
                       {/* Visibility — public / hidden / locked (+ unlock code) */}
                       <Text
@@ -2752,6 +2727,8 @@ function CreateEventScreenContent() {
                           return (
                             <Pressable
                               key={option.value}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected }}
                               onPress={() =>
                                 setTicketTiers((prev) =>
                                   prev.map((t) =>
@@ -3327,6 +3304,8 @@ function CreateEventScreenContent() {
             <Text className="text-lg font-semibold text-foreground mb-2">
               Review Your Event
             </Text>
+
+            <EventLynkSetup enabled={attachLynkRoom} />
 
             {/* Title */}
             <View className="bg-card rounded-2xl p-4">

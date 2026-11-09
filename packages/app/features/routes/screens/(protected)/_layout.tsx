@@ -58,6 +58,8 @@ import { DrawerTrigger } from "@dvnt/app/components/drawer-trigger";
 import { VerifiedOnlyPopup } from "@dvnt/app/components/verified-only-popup";
 import { PayoutSetupReminderNative } from "@dvnt/app/components/payout-setup-reminder.native";
 import { fetchNewMemberProgress } from "@dvnt/app/lib/profile/new-member-progress";
+import { parseIncomingUrl, isLynkRoomLink, deepLinkAccountKey } from "@dvnt/app/lib/deep-linking/link-engine";
+import { useDeepLinkStore } from "@dvnt/app/lib/stores/deep-link-store";
 import { useMyTickets } from "@dvnt/app/lib/hooks/use-tickets";
 import {
   buildTicketLibrary,
@@ -336,17 +338,34 @@ export default function ProtectedLayout() {
   useWatchCalls();
 
   const user = useAuthStore((s) => s.user);
+  const memberAccountKey = useAuthStore((s) => s._hasHydrated && s.isAuthenticated && s.authStatus === "authenticated"
+    ? s.user?.authId || s.user?.id : null);
   const memberPath = usePathname();
   const memberRouter = useRouter();
   useEffect(() => {
-    if (!user?.id) return;
+    const accountKey = memberAccountKey;
+    if (!accountKey) return;
     let cancelled = false;
+    const unsubscribe = useAuthStore.subscribe(() => {
+      if (deepLinkAccountKey() !== accountKey) cancelled = true;
+    });
     void fetchNewMemberProgress().then((progress) => {
-      if (cancelled || progress.step === "not_required" ||
+      if (cancelled || deepLinkAccountKey() !== accountKey || progress.step === "not_required" ||
           progress.step === "complete" || progress.step === "pending_verification") return;
       const path = memberPath.toLowerCase();
       // Ticket buying, identity flow and saved tickets must never be blocked.
-      if (/\/(checkout|payment|tickets?|orders?)(\/|$)/.test(path)) return;
+      if (path === "/events/my-tickets" ||
+          /\/(checkout|payment|tickets?|orders?)(\/|$)/.test(path)) return;
+      // Save a room only when this layout actually requires a setup detour.
+      // Ordinary room arrival is already complete, so Back can never replay it.
+      if (/^\/(?:feed\/)?sneaky-lynk\//.test(memberPath)) {
+        const room = parseIncomingUrl(memberPath);
+        const linkStore = useDeepLinkStore.getState();
+        if (room && isLynkRoomLink(room) &&
+            (!linkStore.pendingLink || linkStore.pendingLink.routerPath === room.routerPath)) {
+          linkStore.setPendingLink(room, accountKey, true);
+        }
+      }
       if (progress.step === "photo") {
         if (path !== "/edit-profile" && path !== "/profile/edit") {
           memberRouter.replace("/(protected)/edit-profile" as any);
@@ -361,8 +380,8 @@ export default function ProtectedLayout() {
       // Connectivity is unknown, not completed. Server-side admission still
       // refuses new-member participation until verified progress is saved.
     });
-    return () => { cancelled = true; };
-  }, [user?.id, memberPath, memberRouter]);
+    return () => { cancelled = true; unsubscribe(); };
+  }, [memberAccountKey, memberPath, memberRouter]);
 
 
   // ── Boot-level weather fetch: prime the store as soon as location is available ──

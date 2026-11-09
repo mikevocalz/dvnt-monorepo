@@ -3,7 +3,8 @@
  *
  * The native screen kept this in local `useState`; the web HARD CONVENTION is
  * Zustand only (no useState). Holds the create-room form draft + the invitee
- * search/selection state. `reset()` clears it on a successful create.
+ * search input and selection. Query owns search results. `reset()` clears the
+ * draft when this screen unmounts.
  */
 
 import { create } from "zustand";
@@ -24,8 +25,8 @@ interface CreateLynkStore {
    *  capture protection (see `video_join_room`'s app-only gate). */
   appOnly: boolean;
   isCreating: boolean;
+  createError: string | null;
   inviteSearch: string;
-  inviteResults: LynkInvitee[];
   invitees: LynkInvitee[];
 
   setTitle: (v: string) => void;
@@ -34,8 +35,8 @@ interface CreateLynkStore {
   setIsPublic: (v: boolean) => void;
   setAppOnly: (v: boolean) => void;
   setIsCreating: (v: boolean) => void;
+  setCreateError: (v: string | null) => void;
   setInviteSearch: (v: string) => void;
-  setInviteResults: (v: LynkInvitee[]) => void;
   addInvitee: (user: LynkInvitee) => void;
   removeInvitee: (authId: string) => void;
   reset: () => void;
@@ -48,8 +49,8 @@ export const useCreateLynkStore = create<CreateLynkStore>((set) => ({
   isPublic: true,
   appOnly: false,
   isCreating: false,
+  createError: null,
   inviteSearch: "",
-  inviteResults: [],
   invitees: [],
 
   setTitle: (title) => set({ title }),
@@ -58,16 +59,15 @@ export const useCreateLynkStore = create<CreateLynkStore>((set) => ({
   setIsPublic: (isPublic) => set({ isPublic }),
   setAppOnly: (appOnly) => set({ appOnly }),
   setIsCreating: (isCreating) => set({ isCreating }),
+  setCreateError: (createError) => set({ createError }),
   setInviteSearch: (inviteSearch) => set({ inviteSearch }),
-  setInviteResults: (inviteResults) => set({ inviteResults }),
   addInvitee: (user) =>
     set((state) =>
       state.invitees.some((i) => i.authId === user.authId)
-        ? { inviteSearch: "", inviteResults: [] }
+        ? { inviteSearch: "" }
         : {
             invitees: [...state.invitees, user],
             inviteSearch: "",
-            inviteResults: [],
           },
     ),
   removeInvitee: (authId) =>
@@ -82,8 +82,8 @@ export const useCreateLynkStore = create<CreateLynkStore>((set) => ({
       isPublic: true,
       appOnly: false,
       isCreating: false,
+      createError: null,
       inviteSearch: "",
-      inviteResults: [],
       invitees: [],
     }),
 }));

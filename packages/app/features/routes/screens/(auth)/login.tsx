@@ -11,7 +11,6 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { signIn } from "@dvnt/app/lib/auth-client";
 import { auth } from "@dvnt/app/lib/api/auth";
 import { syncAuthUser } from "@dvnt/app/lib/api/privileged";
-import { replayPendingLink } from "@dvnt/app/lib/deep-linking/link-engine";
 import { useOnboardingV2Store } from "@dvnt/app/lib/stores/onboarding-v2-store";
 import { useDeepLinkStore } from "@dvnt/app/lib/stores/deep-link-store";
 import Logo from "@dvnt/app/components/logo";
@@ -102,8 +101,9 @@ export default function LoginScreen() {
             setUser(hydrateAuthProfile(profile));
             // Replay pending deep link if one was saved, otherwise go to home
             const pending = useDeepLinkStore.getState().pendingLink;
+            // The root owns pending replay after auth/navigation settle.
             if (pending) {
-              replayPendingLink();
+              return;
             } else if (
               // B1/B2: first sign-in on this install → welcome flow. The
               // screen self-skips when the profile already has the data.
@@ -255,9 +255,7 @@ export default function LoginScreen() {
               onSuccess={(user) => {
                 setUser(user);
                 const pending = useDeepLinkStore.getState().pendingLink;
-                if (pending) {
-                  replayPendingLink();
-                } else {
+                if (!pending) {
                   router.replace("/(protected)/(tabs)" as any);
                 }
               }}

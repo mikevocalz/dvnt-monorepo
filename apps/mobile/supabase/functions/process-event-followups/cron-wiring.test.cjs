@@ -15,7 +15,7 @@ const migration = fs.readFileSync(
 test('the worker authenticates with x-cron-secret, not a Bearer token', () => {
   assert.match(fnSrc, /req\.headers\.get\("x-cron-secret"\)\s*!==\s*secret/);
   assert.doesNotMatch(fnSrc, /Bearer \$\{secret\}/);
-  assert.match(fnSrc, /if\(!secret\)[^\n]*status:500/, 'unset CRON_SECRET must fail closed');
+  assert.match(fnSrc, /if\(!secret\)[^\n]*(?:status:500|,500)/, 'unset CRON_SECRET must fail closed');
 });
 
 test('the cron migration schedules the follow-up sweep and sends x-cron-secret', () => {

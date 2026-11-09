@@ -8,6 +8,8 @@
  * rejected and fall back to the default). Also never loop back to /auth.
  */
 
+import { roomReturnPath } from "./room-return.ts";
+
 const DEFAULT = "/feed";
 
 /** Validate + normalize a returnTo to a safe internal path, else the fallback. */
@@ -17,8 +19,15 @@ export function safeReturnTo(
 ): string {
   if (!raw) return fallback;
   let v = String(raw).trim();
+  if (/[\u0000-\u001f\u007f]/.test(raw)) return fallback;
   try {
-    v = decodeURIComponent(v);
+    // URLSearchParams already unwraps returnTo. Do not decode its embedded
+    // query values again (an encoded '&' must remain data, not a new field).
+    if (!v.startsWith("/")) v = decodeURIComponent(v);
+    const decoded = decodeURIComponent(v);
+    if (/[\u0000-\u001f\u007f]/.test(decoded) || decoded.startsWith("//") ||
+        decoded.includes("\\") || /[a-z][a-z0-9+.-]*:/i.test(decoded)) return fallback;
+    if (decodeURIComponent(v.split(/[?#]/, 1)[0]).includes("%")) return fallback;
   } catch {
     return fallback;
   }
@@ -28,9 +37,16 @@ export function safeReturnTo(
   if (v.startsWith("//") || v.includes("\\") || /[a-z][a-z0-9+.-]*:/i.test(v)) {
     return fallback;
   }
-  // Don't bounce back into the auth flow (would loop).
-  if (v === "/auth" || v.startsWith("/auth/")) return fallback;
-  return v;
+  // Normalize dot segments before checking auth loops, and check the same URL
+  // interpretation the browser will use. Controls must not turn '/\t/host'
+  // into a protocol-relative external redirect.
+  try {
+    const url = new URL(v, "https://return.invalid");
+    const pathname = decodeURIComponent(url.pathname);
+    if (url.origin !== "https://return.invalid" || pathname === "/auth" || pathname.startsWith("/auth/")) return fallback;
+    const target = `${url.pathname}${url.search}${url.hash}`;
+    return roomReturnPath(target) ?? target;
+  } catch { return fallback; }
 }
 
 /** Build the login path carrying an internal returnTo (omits it if unsafe). */
@@ -43,8 +59,8 @@ export function loginPathWithReturn(returnTo?: string | null): string {
 export function readReturnToFromUrl(fallback: string = DEFAULT): string {
   if (typeof window === "undefined") return fallback;
   try {
-    const param = new URL(window.location.href).searchParams.get("returnTo");
-    return safeReturnTo(param, fallback);
+    const params = new URL(window.location.href).searchParams.getAll("returnTo");
+    return params.length === 1 ? safeReturnTo(params[0], fallback) : fallback;
   } catch {
     return fallback;
   }
@@ -65,4 +81,19 @@ export function isStaffReturnTo(returnTo: string): boolean {
     path === "/console" ||
     path.startsWith("/console/")
   );
+}
+
+/** Carry the validated destination through optional first-browser welcome. */
+export function welcomePathWithReturn(returnTo?: string | null): string {
+  const safe = safeReturnTo(returnTo, "");
+  return safe ? `/auth/welcome?returnTo=${encodeURIComponent(safe)}` : "/auth/welcome";
+}
+
+/** Auth screens carry intent as URL data, so refreshes/new verification tabs work. */
+export function authPathWithReturn(
+  path: "/auth/signup" | "/auth/verify-email" | "/auth/login" | "/auth/forgot-password" | "/auth/reset-password",
+  returnTo?: string | null,
+): string {
+  const safe = safeReturnTo(returnTo, "");
+  return safe ? `${path}?returnTo=${encodeURIComponent(safe)}` : path;
 }

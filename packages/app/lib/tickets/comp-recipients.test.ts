@@ -9,6 +9,7 @@ import {
   canSubmitComp,
   parseCompRecipients,
   summarizeCompResult,
+  compEmailPresentation,
 } from "./comp-recipients.ts";
 
 test("only owner and admin see the comp control", () => {
@@ -153,4 +154,38 @@ test("three phone tickets keep separate links, labels and issuance counts", () =
   const summary = summarizeCompResult({ issued: 0, phone_guest_issued: 3, claim_links: links, skipped: [] });
   assert.equal(summary.totalIssued, 3);
   assert.equal(summary.claimLinks, 3);
+});
+
+
+test("member and guest email counts represent messages, not issued ticket quantities", () => {
+  const result = { issued: 3, guest_issued: 2, skipped: [], delivery: [
+    { recipient: "@member", status: "delivered" as const },
+    { recipient: "guest@example.invalid", status: "delivered" as const },
+  ] };
+  assert.equal(summarizeCompResult(result).totalIssued, 5);
+  assert.equal(summarizeCompResult(result).delivered, 2);
+  assert.equal(compEmailPresentation(result).detail, "2 accepted for sending");
+  assert.match(compEmailPresentation(result).explanation, /Inbox delivery is not guaranteed/);
+});
+
+test("queued and missing-address outcomes never claim acceptance or undo issuance", () => {
+  const result = { issued: 6, skipped: [], delivery: [
+    { recipient: "@queued", status: "queued" as const },
+    { recipient: "@missing", status: "not_available" as const, error: "No email address on account" },
+  ] };
+  const summary = summarizeCompResult(result);
+  assert.equal(summary.totalIssued, 6);
+  assert.equal(summary.delivered, 0);
+  assert.equal(summary.undelivered, 1);
+  assert.equal(compEmailPresentation(result).detail, "0 accepted for sending · 1 queued · 1 need attention");
+  assert.match(compEmailPresentation(result).failureNotice, /Do not comp again/);
+});
+
+test("legacy missing email outcomes remain unknown and phone email waits for claim", () => {
+  assert.match(compEmailPresentation({issued:3,skipped:[]}).unknown!, /unavailable/);
+  assert.equal(compEmailPresentation({issued:3,skipped:[]}).detail, "— accepted for sending");
+  const phone = compEmailPresentation({issued:0,phone_guest_issued:3,skipped:[]});
+  assert.equal(phone.unknown, null);
+  assert.match(phone.phoneNotice!, /follows account claim/);
+  assert.equal(phone.detail, "0 accepted for sending");
 });

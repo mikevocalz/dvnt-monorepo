@@ -172,7 +172,9 @@ async function runScenarios(page, errors) {
   assert.equal(await postButton().count(), 0, 'photo precedes first post when both are missing');
   await dismissFails();
   count = await requestCount();
+  await update({path:'/public/events/42/reviews'}); await photoButton().waitFor();
   await photoButton().click(); await assertNoDialog();
+  assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('dvnt:review-return')).target), '/feed/events/42/reviews');
   assert.equal(await page.evaluate(() => window.fixture.navigations.at(-1)), '/feed/onboarding/photo');
   await unchangedRequests(count, 'photo action only navigates');
 
@@ -412,6 +414,7 @@ async function runScenarios(page, errors) {
       build.onResolve({ filter: /.*/ }, args => {
         if (Object.hasOwn(boundaries,args.path)) return {path:args.path,namespace:'fixture'};
         if (args.path === '@dvnt/ui') return {path:path.join(ROOT,'packages/ui/src/form/Dialog.web.tsx')};
+        if (args.path === '@dvnt/app/lib/auth/review-return') return {path:path.join(ROOT,'packages/app/lib/auth/review-return.ts')};
         if (args.path === '@dvnt/app/lib/auth/session-lifecycle') return {path:path.join(ROOT,'packages/app/lib/auth/session-lifecycle.ts')};
         if (args.path.startsWith('@dvnt/app/lib/profile/')) return {path:path.join(ROOT,'packages/app/lib/profile',args.path.split('/').at(-1)+'.ts')};
       });

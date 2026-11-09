@@ -16,30 +16,30 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verifySession, corsHeaders } from "../_shared/verify-session.ts";
+import { verifySession, CORS_HEADERS } from "../_shared/verify-session.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 Deno.serve(async (req: Request) => {
+  const responseHeaders = {
+    ...CORS_HEADERS,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+  };
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, Authorization, x-auth-token",
-      },
+      headers: responseHeaders,
     });
   }
 
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: responseHeaders });
   }
 
   const t0 = Date.now();
-  const responseHeaders = { ...corsHeaders(req), "Content-Type": "application/json", "Cache-Control": "no-store" };
 
   try {
     const body = await req.json();
@@ -95,6 +95,7 @@ Deno.serve(async (req: Request) => {
         )
         .eq("recipient_id", intUserId)
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(limit),
 
       // 2. Unread count
@@ -105,7 +106,7 @@ Deno.serve(async (req: Request) => {
         .is("read_at", null),
     ]);
 
-    if (notificationsResult.error || unreadCountResult.error) {
+    if (notificationsResult.error || unreadCountResult.error || unreadCountResult.count == null) {
       // Never cache a permission/schema/network failure as an empty private feed.
       console.warn("[bootstrap-notifications] private feed unavailable");
       return new Response(JSON.stringify({ error: "Could not load private activity. Please retry." }), {
@@ -116,13 +117,13 @@ Deno.serve(async (req: Request) => {
     const isCommentActivity = (notification: any) =>
       notification.type === "comment" || notification.type === "mention";
 
-    // ── Resolve event titles for event_invite / event_update notifications ──
+    // ── Resolve event titles for event activity, including ticket notices ──
     const eventNotifIds = [
       ...new Set(
         notifications
           .filter(
             (n: any) =>
-              (n.type === "event_invite" || n.type === "event_update") &&
+              (n.entity_type === "event" || n.type === "event_invite" || n.type === "event_update") &&
               n.entity_id,
           )
           .map((n: any) => parseInt(String(n.entity_id), 10))
@@ -351,7 +352,7 @@ Deno.serve(async (req: Request) => {
         commentText: commentContext?.content || undefined,
         payload: n.entity_payload ?? null,
         event:
-          (n.type === "event_invite" || n.type === "event_update") && n.entity_id
+          (n.entity_type === "event" || n.type === "event_invite" || n.type === "event_update") && n.entity_id
             ? {
                 id: String(n.entity_id),
                 title: eventTitleById.get(parseInt(String(n.entity_id), 10)) || undefined,

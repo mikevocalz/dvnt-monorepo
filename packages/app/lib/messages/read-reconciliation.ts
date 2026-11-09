@@ -1,39 +1,17 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
 import { messageKeys } from "@dvnt/app/lib/messages/query-keys";
 import {
   patchConversationUnreadFlag,
-  resolveNextUnreadCounts,
   type UnreadSnapshot,
 } from "@dvnt/app/lib/messages/read-reconciliation-core";
 
 export type { UnreadSnapshot } from "@dvnt/app/lib/messages/read-reconciliation-core";
 
-function getBaselineUnreadSnapshot(
-  queryClient: QueryClient,
-  viewerId: string,
-): UnreadSnapshot {
-  const store = useUnreadCountsStore.getState();
-  const unreadKey = messageKeys.unreadCount(viewerId);
-  const queryData =
-    queryClient.getQueryData<UnreadSnapshot>(unreadKey) ?? null;
-  const queryState = queryClient.getQueryState(unreadKey);
-  const storeIsNewer =
-    store.lastMessagesRefresh > (queryState?.dataUpdatedAt ?? 0);
-
-  return {
-    inbox: storeIsNewer
-      ? store.messagesUnread
-      : (queryData?.inbox ?? store.messagesUnread),
-    spam: storeIsNewer ? store.spamUnread : (queryData?.spam ?? store.spamUnread),
-  };
-}
-
 export function reconcileConversationReadState(
   queryClient: QueryClient,
   viewerId: string | undefined,
   conversationId: string,
-  serverUnread?: UnreadSnapshot | null,
+  _serverUnread?: UnreadSnapshot | null,
 ) {
   if (!viewerId || !conversationId) {
     return {
@@ -78,32 +56,26 @@ export function reconcileConversationReadState(
     return result.conversations;
   });
 
-  if (!inboxCleared && !spamCleared && !serverUnread?.authoritative) {
-    return {
-      inboxCleared,
-      spamCleared,
-      nextUnread: undefined,
+  // Only a canonical snapshot proves which counted bucket contained this
+  // thread. Legacy filtered lists and server totals differ in block/history
+  // scope and cannot safely decrement a navigation badge.
+  const key = messageKeys.unreadCount(viewerId);
+  let nextUnread: UnreadSnapshot | undefined;
+  queryClient.setQueryData(key, (current: {
+    inbox: number; spam: number;
+    inboxConversationIds?: string[]; spamConversationIds?: string[];
+  } | undefined) => {
+    if (!current || !Array.isArray(current.inboxConversationIds) || !Array.isArray(current.spamConversationIds)) return current;
+    const inboxIds = current.inboxConversationIds.filter(id => id !== conversationId);
+    const spamIds = current.spamConversationIds.filter(id => id !== conversationId);
+    if (inboxIds.length === current.inboxConversationIds.length && spamIds.length === current.spamConversationIds.length) return current;
+    const next = {
+      ...current, inbox: inboxIds.length, spam: spamIds.length,
+      inboxConversationIds: inboxIds, spamConversationIds: spamIds,
     };
-  }
-
-  const nextUnread = resolveNextUnreadCounts(
-    getBaselineUnreadSnapshot(queryClient, viewerId),
-    { inboxCleared, spamCleared },
-    serverUnread,
-  );
-
-  queryClient.setQueryData(messageKeys.unreadCount(viewerId), {
-    inbox: nextUnread.inbox,
-    spam: nextUnread.spam,
+    nextUnread = next;
+    return next;
   });
-
-  const unreadStore = useUnreadCountsStore.getState();
-  unreadStore.setMessagesUnread(nextUnread.inbox);
-  unreadStore.setSpamUnread(nextUnread.spam);
-
-  return {
-    inboxCleared,
-    spamCleared,
-    nextUnread,
-  };
+  // useRefreshMessageCounts immediately invalidates this key to settle races.
+  return { inboxCleared, spamCleared, nextUnread };
 }

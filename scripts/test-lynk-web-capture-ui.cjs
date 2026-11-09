@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '..');
   const stage = screen.slice(screen.indexOf('function RemotePublisherTile('), screen.indexOf('\nfunction AdmittedRoom('));
   assert(stage.includes('<CaptureErrorBanner'));
   const room = fs.readFileSync(path.join(root, 'packages/app/features/sneaky-lynk/screens/room.web.tsx'), 'utf8');
-  assert.match(room, /setMicOn\(lynk\.micEnabled && !lynk\.microphoneError && canPublish\)/);
+  assert.match(room, /setMicOn\(lynk\.microphoneActive && !lynk\.microphoneError && canPublish\)/);
   assert.match(room, /setCameraOn\(lynk\.cameraActive && !lynk\.cameraError && canPublish && roomHasVideo\)/);
   assert.match(room, /<CaptureErrorBanner error=\{lynk\.captureError\} onRetry=\{lynk\.retryCapture\}/);
   const contents = `import React,{useCallback,useEffect,useState} from 'react'; import {createRoot} from 'react-dom/client';

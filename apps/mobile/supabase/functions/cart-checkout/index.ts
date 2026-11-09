@@ -296,6 +296,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
     const {
       subtotalCents,
       quantity,
+      feeQuantity,
       admissionSubtotalCents,
       admissionQuantity,
     } = pricing;
@@ -365,7 +366,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
     // fee_mode-aware (absorb|pass): in absorb the buyer is charged just
     // the subtotal and the organizer's transfer eats the buyer-side fee;
     // application_fee (DVNT's 5% + $2) is unchanged. Shared entry point.
-    const fees = computeFeesWithMode(effectiveSubtotal, quantity, event.fee_mode);
+    const fees = computeFeesWithMode(effectiveSubtotal, feeQuantity, event.fee_mode);
 
     const { data: organizer, error: organizerError } = await supabase
       .from("organizer_accounts")

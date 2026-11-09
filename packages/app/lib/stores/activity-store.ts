@@ -1,3 +1,4 @@
+import { cohostActivityRoute } from "@dvnt/app/features/sneaky-lynk/cohost-invite-policy";
 import { ticketActivityRoute } from "@dvnt/app/lib/activity/ticket-activity";
 import { eventActivityRoute } from "@dvnt/app/lib/activity/event-activity";
 import { create } from "zustand";
@@ -45,6 +46,9 @@ export type ActivityType =
   | "ticket_comped"
   | "ticket_refunded"
   | "room_invite"
+  | "lynk_cohost_invited"
+  | "lynk_cohost_accepted"
+  | "lynk_cohost_declined"
   | "sneaky_lynk"
   // App-wide announcement. No actor and no entity — the copy travels in
   // `entity_payload` as { title, body }.
@@ -102,7 +106,7 @@ interface ActivityState {
   getUnreadCount: () => number;
   getRouteForActivity: (activity: Activity) => string;
   syncUnreadCount: () => void;
-  subscribeToNotifications: () => (() => void) | undefined;
+  subscribeToNotifications: (onRefresh?: () => void) => (() => void) | undefined;
   fetchFollowingState: () => Promise<void>;
   reset: () => void;
 }
@@ -220,6 +224,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   // Mark single activity as read - persists to backend
   markActivityAsRead: async (activityId) => {
+    const viewerId = getCurrentUserIdSync();
+    const previous = get().activities.find((a) => a.id === activityId)?.isRead;
     // Optimistic update
     set((state) => ({
       activities: state.activities.map((a) =>
@@ -233,7 +239,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       await notificationsApiClient.markAsRead(activityId);
       console.log("[ActivityStore] Marked as read:", activityId);
     } catch (error) {
-      console.error("[ActivityStore] Failed to mark as read:", error);
+      if (getCurrentUserIdSync() === viewerId && previous !== undefined) {
+        set((state) => ({ activities: state.activities.map((a) =>
+          a.id === activityId ? { ...a, isRead: previous } : a) }));
+        get().syncUnreadCount();
+      }
+      throw error;
     }
   },
 
@@ -279,7 +290,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       const activities = allActivities.filter((a) => {
         if (seenIds.has(a.id)) return false;
         seenIds.add(a.id);
-        // Broadcasts are separate messages, even from the same sender/event.
+        // Ticket actions and broadcasts are distinct occurrences, even from the same sender/event.
         // Their notification ID is the only safe deduplication key.
         if (a.type === "event_broadcast" || a.type.startsWith("ticket_")) return true;
         // Composite key: same actor doing the same action on the same entity
@@ -316,6 +327,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   // Get the correct route for an activity item
   getRouteForActivity: (activity) => {
     const { type, entityType, entityId, post, event, user } = activity;
+
+    const cohostRoute = cohostActivityRoute(type, "native");
+    if (cohostRoute) return cohostRoute;
 
     const ticketRoute = ticketActivityRoute(activity, "native");
     if (ticketRoute) return ticketRoute;
@@ -408,7 +422,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   // Private channels are opened only after canonical identity + socket auth.
   // Return cleanup synchronously so unmount during either await cannot leak one.
-  subscribeToNotifications: () => {
+  subscribeToNotifications: (onRefresh) => {
     if (!getCurrentUserIdSync()) return undefined;
     let cancelled = false;
     let channel: ReturnType<typeof freshChannel> | undefined;
@@ -439,7 +453,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
             filter: `recipient_id=eq.${access.userId}`,
           }, async (payload) => {
             if (!current() || String(payload.new?.recipient_id) !== String(access.userId)) return;
-            try { await get().fetchFromBackend(); } catch {
+            try {
+              if (onRefresh) onRefresh();
+              else await get().fetchFromBackend();
+            } catch {
               // A fetch failure is handled by the activity query/retry UI.
               console.warn("[ActivityStore] Notification refresh unavailable");
             }
@@ -449,7 +466,11 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
             if (error) console.warn("[ActivityStore] Notification subscription unavailable");
             // Catch up rows emitted while initial authentication/reconnect ran.
             if (status === "SUBSCRIBED") {
-              void get().fetchFromBackend().catch(() => {
+              void Promise.resolve().then(() => {
+                if (!current()) return;
+                if (onRefresh) onRefresh();
+                else return get().fetchFromBackend();
+              }).catch(() => {
                 console.warn("[ActivityStore] Notification refresh unavailable");
               });
             }

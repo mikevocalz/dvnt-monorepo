@@ -15,6 +15,10 @@ on:
   pull_request:
     paths:
       - "apps/mobile/supabase/**"
+      - "scripts/test-monthly-event-analytics-dom.cjs"
+      - "packages/app/features/events/analytics.web.tsx"
+      - "packages/app/features/routes/screens/(protected)/events/[id]/analytics.tsx"
+      - "packages/app/lib/stores/event-analytics-store.ts"
       - "scripts/verify-edge-functions.mjs"
       - "scripts/verify-users-lockdown.mjs"
       - "scripts/verify-content-lockdown.mjs"
@@ -32,6 +36,9 @@ on:
       - "scripts/verify-cart-addon-followups.mjs"
       - "scripts/verify-event-financials-addons.mjs"
       - "scripts/test-free-rsvp-financials.cjs"
+      - "scripts/test-free-units-always-zero.cjs"
+      - "scripts/test-free-units-cache-repair.cjs"
+      - "docs/ticketing/free-units-*.sql"
       - "scripts/verify-call-capacity.mjs"
       - ".github/workflows/verify-edge-functions.yml"
   push:
@@ -41,6 +48,10 @@ on:
     branches: [master, main]
     paths:
       - "apps/mobile/supabase/**"
+      - "scripts/test-monthly-event-analytics-dom.cjs"
+      - "packages/app/features/events/analytics.web.tsx"
+      - "packages/app/features/routes/screens/(protected)/events/[id]/analytics.tsx"
+      - "packages/app/lib/stores/event-analytics-store.ts"
       - "scripts/verify-edge-functions.mjs"
       - "scripts/verify-users-lockdown.mjs"
       - "scripts/verify-content-lockdown.mjs"
@@ -57,6 +68,9 @@ on:
       - "scripts/verify-cart-addon-followups.mjs"
       - "scripts/verify-event-financials-addons.mjs"
       - "scripts/test-free-rsvp-financials.cjs"
+      - "scripts/test-free-units-always-zero.cjs"
+      - "scripts/test-free-units-cache-repair.cjs"
+      - "docs/ticketing/free-units-*.sql"
       - "scripts/verify-call-capacity.mjs"
 
 jobs:
@@ -68,6 +82,24 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/verify-edge-functions.mjs
+
+  monthly-platform-fee-analytics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Paid-order month boundaries, fee split, Stripe and refund exclusions
+        run: node --test apps/mobile/supabase/functions/event-analytics/index.test.cjs
+      - name: Isolated analytics UI fixtures
+        run: npm install --prefix "$RUNNER_TEMP/analytics-ui" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.0.11 @tanstack/react-query@5.90.5
+      - name: Actual web/native monthly ledger, rolling deploy and stale-response safety
+        env:
+          NODE_PATH: ${{ runner.temp }}/analytics-ui/node_modules
+        run: node scripts/test-monthly-event-analytics-dom.cjs
 
   verification-onboarding-contract:
     # Prevent a recurrence of the 2026-10-08 error: missing Didit secrets
@@ -106,7 +138,27 @@ jobs:
       # both unnecessary (pnpm already supplies @types/node, which is why this
       # passes locally without it) and harmful, because Deno would flatten
       # pnpm's symlink layout. Locally, drop the flag.
-      - run: deno test --node-modules-dir=auto --no-lock --allow-net --allow-env --allow-read apps/mobile/supabase/functions/_shared/
+      # These edge suites do not depend on the app's npm workspace. Prevent
+      # auto-install of unrelated frontend/optional-platform packages while
+      # retaining Deno's dependency-age policy and automatic @types/node support.
+      # Run every shared test with its native runner. CJS tests need the Node
+      # transpiler; do not silently omit them from the previous directory scan.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --prefix "$RUNNER_TEMP/shared-test-deps" --ignore-scripts --no-audit --no-fund typescript@5.9.2 zod@3.25.76
+      - name: All shared Node suites
+        run: |
+          mapfile -d '' tests < <(find apps/mobile/supabase/functions/_shared -type f \( -name '*.test.cjs' -o -name '*.test.mjs' \) -print0)
+          test "${#tests[@]}" -gt 0
+          NODE_PATH="$RUNNER_TEMP/shared-test-deps/node_modules" node --test "${tests[@]}"
+      - name: All shared Deno suites
+        run: |
+          mapfile -d '' tests < <(find apps/mobile/supabase/functions/_shared -type f -name '*.test.ts' -print0)
+          test "${#tests[@]}" -gt 0
+          deno test --node-modules-dir=auto --no-lock --allow-net --allow-env --allow-read "${tests[@]}"
+        env:
+          DENO_NO_PACKAGE_JSON: '1'
 
   call-admission-concurrency:
     # Boots a throwaway cluster from the runner's own Postgres and drives
@@ -292,3 +344,10 @@ jobs:
           sudo systemctl start postgresql
           sudo -u postgres createdb dvnt_free_rsvp_financials
           node scripts/test-free-rsvp-financials.cjs --sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_free_rsvp_financials
+      - name: Strict free units never incur flat fees (isolated PostgreSQL)
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb dvnt_strict_free_financials
+          node scripts/test-free-units-always-zero.cjs --sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d dvnt_strict_free_financials
+      - name: Exact reviewed cache-repair artifact and rollback guards (native PostgreSQL)
+        run: node scripts/test-free-units-cache-repair.cjs

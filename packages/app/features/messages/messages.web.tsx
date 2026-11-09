@@ -42,13 +42,18 @@ import {
   MessageSquare,
   Radio,
   Plus,
+  RefreshCw,
+  Lock,
+  Globe,
+  Video,
+  Headphones,
+  ArrowUpRight,
 } from "lucide-react";
 import { Dialog } from "@dvnt/ui";
 import { useMessagesSheetsStore } from "@dvnt/app/lib/stores/messages-sheets-store";
 import { NewMessageScreen } from "./new-message.web";
 import { NewGroupScreen } from "./new-group.web";
-import { sneakyLynkApi } from "@dvnt/app/features/sneaky-lynk";
-import { useQuery } from "@tanstack/react-query";
+import { useLynkDiscovery, discoveryRoomState, type LynkRecord } from "@dvnt/app/features/sneaky-lynk";
 
 import { messagesApi as messagesApiClient } from "@dvnt/app/lib/api/messages-impl";
 import {
@@ -110,22 +115,20 @@ type TabType = "primary" | "requests" | "lynk";
 // hosts can start a room from this tab (the native affordance was dropped).
 function SneakyLynkTab() {
   const router = useRouter();
-  const { data: rooms = [], isLoading } = useQuery({
-    queryKey: ["sneaky-lynk", "rooms"],
-    queryFn: () => sneakyLynkApi.getLiveRooms(),
-    refetchInterval: 20000,
-    staleTime: 10000,
-  });
+  const { rooms, isLoading, isFetching, isError, refetch } = useLynkDiscovery();
   const showToast = useUIStore((s) => s.showToast);
 
+  const search = useMessagesTabStore((s) => s.search);
+  const query = search.trim().toLowerCase();
+  const visibleRooms = rooms.filter((room) => !query || [room.title, room.topic, room.host?.displayName, room.host?.username].some((value) => value?.toLowerCase().includes(query)));
   const createLynk = () => router.push("/feed/sneaky-lynk/create");
 
-  const openRoom = (r: any) => {
-    if (r.isLive === false || r.status === "ended") {
+  const openRoom = (r: LynkRecord) => {
+    if (!discoveryRoomState(r).actionable) {
       showToast(
         "info",
-        "Lynk Ended",
-        "This Lynk has ended and can't be rejoined",
+        "Room unavailable",
+        "Refresh Lynks to check the current room status.",
       );
       return;
     }
@@ -136,116 +139,57 @@ function SneakyLynkTab() {
     router.push(`/feed/sneaky-lynk/room/${r.id}?${query.toString()}`);
   };
 
-  // Header — "Lynks" + create button (shown above the list and the empty state).
-  const header = (
-    <div className="mb-3 flex items-center justify-between">
-      <span className="flex items-center gap-2">
-        <Radio size={22} color="#FC253A" />
-        <span className="text-lg font-extrabold text-white">Lynks</span>
-      </span>
-      <button
-        type="button"
-        onClick={createLynk}
-        aria-label="Start a Lynk"
-        className="flex h-9 w-9 items-center justify-center rounded-xl text-white transition-transform active:scale-95"
-        style={{
-          backgroundImage: "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)",
-        }}
-      >
-        <Plus size={20} color="#06070d" />
+  const liveRooms = visibleRooms.filter((room) => discoveryRoomState(room).live);
+  const waitingRooms = visibleRooms.filter((room) => { const state = discoveryRoomState(room); return !state.live && !state.ended; });
+  const endedRooms = visibleRooms.filter((room) => discoveryRoomState(room).ended);
+  const focusClass = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#3FDCFF]";
+  const roomCard = (room: LynkRecord) => {
+    const { ended, live, countKnown, label, actionable, actionLabel } = discoveryRoomState(room);
+    return (
+      <button key={room.id} type="button" onClick={() => openRoom(room)} disabled={!actionable}
+        aria-label={`${room.title}. ${actionLabel || label}. ${room.isPublic ? "Public" : "Private"}. ${countKnown ? `${room.listeners} people` : "Participant count unavailable"}.`}
+        className={`group flex w-full min-w-0 flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-left transition-colors enabled:hover:border-white/25 enabled:hover:bg-white/[0.07] disabled:opacity-60 ${focusClass}`}>
+        <span className="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
+          <span className={`flex items-center gap-1.5 rounded-md px-2 py-1 ${live ? "bg-[#FC253A]/15 text-[#FF8793]" : "bg-white/8 text-white/60"}`}>
+            {live && <span className="h-1.5 w-1.5 rounded-full bg-[#FC253A]" />}{label}
+          </span>
+          <span className="flex items-center gap-1 text-white/60">{room.isPublic ? <Globe size={12} /> : <Lock size={12} />}{room.isPublic ? "Public" : "Private"}</span>
+          <span className="ml-auto flex items-center gap-1 text-white/60">{room.hasVideo ? <Video size={13} /> : <Headphones size={13} />}{room.hasVideo ? "Video" : "Audio"}</span>
+        </span>
+        <span className="min-w-0">
+          <span className="block break-words text-lg font-bold leading-6 text-white">{room.title || "Untitled Lynk"}</span>
+          {!!room.topic && <span className="mt-1 block line-clamp-2 break-words text-sm leading-5 text-white/60">{room.topic}</span>}
+        </span>
+        <span className="mt-auto flex min-w-0 items-center gap-2.5 border-t border-white/8 pt-3">
+          {room.host?.avatar ? <img src={room.host.avatar} alt="" loading="lazy" className="h-9 w-9 shrink-0 rounded-lg object-cover" /> : <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white/70">{(room.host?.displayName || room.host?.username || "?").charAt(0).toUpperCase()}</span>}
+          <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-white/85">{room.host?.displayName || room.host?.username || "Host"}</span><span className="block text-xs text-white/50">{countKnown ? `${room.listeners.toLocaleString()}${!ended && room.maxParticipants ? ` / ${room.maxParticipants}` : ""} ${ended ? "joined" : "in room"}` : ended ? "Session ended" : label}</span></span>
+          {actionLabel && <span className="flex shrink-0 items-center gap-1 text-xs font-semibold text-[#3FDCFF]">{actionLabel}<ArrowUpRight size={15} /></span>}
+        </span>
       </button>
-    </div>
-  );
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col">
-        {header}
-        <div className="flex flex-col items-center justify-center py-24">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-[#3FDCFF]" />
-        </div>
-      </div>
     );
-  }
-  if (!rooms.length) {
-    return (
-      <div className="flex flex-col">
-        {header}
-        <div className="flex flex-col items-center justify-center px-8 py-20 text-center">
-          <div
-            className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
-            style={{
-              backgroundImage:
-                "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)",
-            }}
-          >
-            <Radio size={28} color="#06070d" />
-          </div>
-          <p className="text-[17px] font-bold text-white">No Lynks Yet</p>
-          <p className="mt-1 max-w-sm text-sm text-white/55">
-            Start a live conversation with friends.
-          </p>
-          <button
-            type="button"
-            onClick={createLynk}
-            className="mt-5 flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-[#06070d] transition-transform active:scale-95"
-            style={{
-              backgroundImage:
-                "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)",
-            }}
-          >
-            <Plus size={18} color="#06070d" /> Start a Lynk
-          </button>
-        </div>
-      </div>
-    );
-  }
+  };
   return (
-    <div className="flex flex-col">
-      {header}
-      <div className="flex flex-col gap-2">
-        {rooms.map((r: any) => (
-          <button
-            key={r.id}
-            type="button"
-            onClick={() => openRoom(r)}
-            className="group flex items-center gap-3 rounded-2xl border border-[#3FDCFF]/18 bg-white/[0.045] px-3 py-3 text-left transition-colors hover:bg-white/[0.08]"
-          >
-            <span
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
-              style={{
-                backgroundImage:
-                  "linear-gradient(120deg,#3FDCFF,#FF5BFC,#8A40CF)",
-              }}
-            >
-              <Radio size={18} color="#06070d" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[15px] font-bold text-white">
-                {r.title || r.name || r.hostName || "Live room"}
-              </span>
-              <span className="block truncate text-xs text-white/55">
-                {(r.host?.displayName ||
-                  r.host?.username ||
-                  r.hostName ||
-                  r.host_name ||
-                  "") +
-                  (r.listeners != null ? ` · ${r.listeners} listening` : "")}
-              </span>
-            </span>
-            {r.isLive === false || r.status === "ended" ? (
-              <span className="flex items-center gap-1 rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white/45">
-                <span className="h-1.5 w-1.5 rounded-full bg-white/35" /> ended
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 rounded-full bg-[#FF5BFC]/18 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-[#FFC7FB]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#FF5BFC]" /> live
-              </span>
-            )}
-          </button>
-        ))}
+    <section aria-label="Lynk discovery" aria-busy={isLoading} className="flex min-w-0 flex-col gap-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="flex items-center gap-2 text-xl font-bold text-white"><Radio size={22} color="#FC253A" />Lynks</h2><p className="mt-1 text-sm text-white/55">Find your people. Join the conversation.</p></div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => void refetch()} disabled={isFetching} aria-label="Refresh Lynks" className={`flex h-11 w-11 items-center justify-center rounded-lg bg-white/5 text-white/65 disabled:opacity-40 ${focusClass}`}><RefreshCw size={17} className={isFetching ? "motion-safe:animate-spin" : ""} /></button>
+          <button type="button" onClick={createLynk} className={`flex min-h-11 items-center gap-2 rounded-lg px-4 text-sm font-bold text-[#06070d] ${focusClass}`} style={{ backgroundImage: "linear-gradient(100deg,#3FDCFF,#8A40CF,#FF5BFC)" }}><Plus size={17} />Start a Lynk</button>
+        </div>
       </div>
-    </div>
+      {isError && <div role="alert" className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm leading-6 text-amber-100"><p>{rooms.length ? "Couldn’t refresh Lynks. Showing the last available rooms." : "Couldn’t load Lynks. Check your connection and try again."}</p><button type="button" onClick={() => void refetch()} disabled={isFetching} className={`mt-2 min-h-11 font-semibold underline underline-offset-4 disabled:opacity-50 ${focusClass}`}>{isFetching ? "Trying again…" : "Try again"}</button></div>}
+      {isLoading && !rooms.length ? (
+        <div role="status" aria-live="polite"><p className="mb-3 text-sm text-white/60">Finding Lynks…</p><div aria-hidden="true" className="grid gap-3 sm:grid-cols-2">{[0, 1, 2, 3].map((key) => <div key={key} className="h-44 rounded-2xl border border-white/8 bg-white/[0.04] p-4 motion-safe:animate-pulse"><div className="h-4 w-20 rounded bg-white/10" /><div className="mt-6 h-5 w-3/4 rounded bg-white/10" /><div className="mt-3 h-3 w-1/2 rounded bg-white/5" /></div>)}</div></div>
+      ) : query && !visibleRooms.length ? <p role="status" className="rounded-xl border border-white/10 p-4 text-sm text-white/60">No Lynks match your search.</p> : visibleRooms.length ? (
+        <>
+          {liveRooms.length > 0 ? <section aria-label="Live now"><h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-white/55">Live now · {liveRooms.length}</h3><div className="grid items-stretch gap-3 sm:grid-cols-2">{liveRooms.map(roomCard)}</div></section> : !isError && <p className="rounded-xl border border-white/10 p-4 text-sm text-white/60">No live conversations right now. Start a Lynk and invite your people.</p>}
+          {waitingRooms.length > 0 && <section aria-label="Your rooms & invitations"><h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-white/55">Your rooms &amp; invitations</h3><div className="grid items-stretch gap-3 sm:grid-cols-2">{waitingRooms.map(roomCard)}</div></section>}
+          {endedRooms.length > 0 && <section aria-label="Recently ended"><h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-white/45">Recently ended</h3><div className="grid items-stretch gap-3 sm:grid-cols-2">{endedRooms.map(roomCard)}</div></section>}
+        </>
+      ) : !isError ? (
+        <div className="flex flex-col items-center rounded-2xl border border-white/10 bg-white/[0.025] px-6 py-16 text-center"><span className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-[#FC253A]/10"><Radio size={26} color="#FC253A" /></span><h3 className="text-lg font-bold text-white">Make the first connection.</h3><p className="mt-2 max-w-xs text-sm leading-6 text-white/60">No Lynks to show yet. Start an audio or video room, public or just for your people.</p><button type="button" onClick={createLynk} className={`mt-5 min-h-11 rounded-lg bg-white/10 px-5 text-sm font-semibold text-white ${focusClass}`}>Start a Lynk</button></div>
+      ) : null}
+    </section>
   );
 }
 
@@ -828,7 +772,8 @@ export function MessagesScreen() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search messages"
+            placeholder={activeTab === "lynk" ? "Search Lynks" : "Search messages"}
+            aria-label={activeTab === "lynk" ? "Search Lynks" : "Search messages"}
             className="w-full bg-transparent text-sm text-white placeholder:text-white/40 focus:outline-none"
           />
         </div>

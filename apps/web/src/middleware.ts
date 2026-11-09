@@ -3,6 +3,7 @@
 // these redirects only choose the right login origin and preserve the editor URL.
 import { NextResponse, type NextRequest } from 'next/server'
 import { adminLoginRedirect } from '@dvnt/app/lib/auth/admin-entry'
+import { roomReturnPath } from '@dvnt/app/lib/auth/room-return'
 
 const BLOG_HOST = 'blog.dvntapp.live'
 
@@ -55,6 +56,15 @@ export function middleware(req: NextRequest) {
     }
     if (path === '/') return NextResponse.rewrite(new URL('/posts', req.url))
     return NextResponse.rewrite(new URL(`/posts${path}`, req.url))
+  }
+
+  // Next's existing /sl and /sneaky-lynk redirects run before middleware.
+  // Resolve the remaining legacy aliases too and discard query instructions:
+  // a shared room's path is the only authority for its navigation identity.
+  // Authentication, verification, private access and pre-join still run in app.
+  const room = roomReturnPath(path)
+  if (room && (path !== room || url.search)) {
+    return NextResponse.redirect(new URL(room, req.url))
   }
 
   // Send app staff to the SAME Better Auth login the main DVNT app uses.

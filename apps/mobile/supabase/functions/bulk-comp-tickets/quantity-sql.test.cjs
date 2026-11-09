@@ -287,6 +287,51 @@ test(process.env.POSTGRES_SINGLE_USER ? 'comp quantity sequential real PostgreSQ
       assert.equal((await ticketRow(ticket.id)).checked_in_at, null);
     } finally { await a.query('ROLLBACK'); a.release(); b.release(); }
   });
+  await t.test('three comp passes are independent admissions, not three uses of one QR', async () => {
+    const ev = await make(); const issued = await issue('member', ev, 3);
+    const tickets = await Promise.all(issued.tickets.map(t => ticketRow(t.id)));
+    assert.equal(new Set(tickets.map(t => t.qr_token)).size, 3);
+    const first = await scan(tickets[0].qr_token, ev.event);
+    assert.equal(first.result, 'valid');
+    assert.equal((await scan(tickets[0].qr_token, ev.event)).result, 'already_scanned');
+    assert.equal((await ticketRow(tickets[1].id)).status, 'active');
+    assert.equal((await ticketRow(tickets[2].id)).status, 'active');
+    for (const ticket of tickets.slice(1)) assert.equal((await scan(ticket.qr_token, ev.event)).result, 'valid');
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM checkins WHERE event_id=$1 AND result='valid'", [ev.event])).rows[0].n, 3);
+  });
+  await t.test('offline replay after another staff member admitted never overwrites original check-in', async () => {
+    const ev = await make(); const issued = await issue('member', ev, 1);
+    const ticket = await ticketRow(issued.tickets[0].id);
+    const original = await scan(ticket.qr_token, ev.event, 'online-staff');
+    const replay = (await pool.query("SELECT redeem_ticket($1,$2,'offline-staff','offline-device',true) AS r", [ticket.qr_token, ev.event])).rows[0].r;
+    assert.equal(replay.result, 'already_scanned');
+    assert.equal(replay.checkedInBy, 'online-staff'); assert.equal(replay.checkedInAt, original.checkedInAt);
+    const audit = (await pool.query('SELECT result,offline,scanned_by FROM checkins WHERE ticket_id=$1 ORDER BY id', [ticket.id])).rows;
+    assert.deepEqual(audit, [{result:'valid',offline:false,scanned_by:'online-staff'}, {result:'already_scanned',offline:true,scanned_by:'offline-staff'}]);
+  });
+  await t.test('scan waiting behind cancellation-to-void never admits the canceled ticket', async () => {
+    const ev = await make(); const issued = await issue('member', ev, 1);
+    const ticket = await ticketRow(issued.tickets[0].id); const a = await pool.connect(), b = await pool.connect();
+    try {
+      await a.query('BEGIN'); await a.query("UPDATE tickets SET status='void' WHERE id=$1", [ticket.id]);
+      const pending = scan(ticket.qr_token, ev.event, 'scanner', b);
+      await waitBlocked(b.processID); await a.query('COMMIT');
+      assert.equal((await pending).result, 'invalid');
+      const after = await ticketRow(ticket.id); assert.equal(after.status, 'void'); assert.equal(after.checked_in_at, null);
+    } finally { await a.query('ROLLBACK'); a.release(); b.release(); }
+  });
+  await t.test('audit write failure rolls back admission and a retry admits exactly once', async () => {
+    const ev = await make(); const issued = await issue('member', ev, 1);
+    const ticket = await ticketRow(issued.tickets[0].id);
+    await pool.query(`CREATE FUNCTION fixture_reject_checkin() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture checkin failure';END;$$;
+      CREATE TRIGGER fixture_reject_checkin BEFORE INSERT ON checkins FOR EACH ROW EXECUTE FUNCTION fixture_reject_checkin();`);
+    try { await assert.rejects(scan(ticket.qr_token, ev.event), /fixture checkin failure/); }
+    finally { await pool.query('DROP TRIGGER fixture_reject_checkin ON checkins;DROP FUNCTION fixture_reject_checkin();'); }
+    const after = await ticketRow(ticket.id); assert.equal(after.status, 'active'); assert.equal(after.checked_in_at, null);
+    assert.equal((await scan(ticket.qr_token, ev.event)).result, 'valid');
+    assert.equal((await scan(ticket.qr_token, ev.event)).result, 'already_scanned');
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM checkins WHERE ticket_id=$1 AND result='valid'", [ticket.id])).rows[0].n, 1);
+  });
   await t.test('redemption cannot be called directly by anon or authenticated API roles', async () => {
     for (const role of ['anon', 'authenticated']) assert.equal((await pool.query(
       "SELECT has_function_privilege($1,'redeem_ticket(text,integer,text,text,boolean)','EXECUTE') AS allowed", [role],

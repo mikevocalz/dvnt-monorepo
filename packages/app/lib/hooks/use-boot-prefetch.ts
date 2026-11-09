@@ -1,3 +1,4 @@
+import { readViewerScoped } from "@dvnt/app/lib/query/viewer-scoped-read";
 /**
  * Boot Prefetch Hook — Instagram-grade instant boot
  *
@@ -178,30 +179,37 @@ export function useBootPrefetch() {
         }),
     ]).then((r) => logLane(0, r));
 
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const later = (run: () => void, delay: number) => {
+      timers.push(setTimeout(() => {
+        if (useAuthStore.getState().user?.id === userId) run();
+      }, delay));
+    };
+
     // Lane 1: Badge counts — needed for tab bar badges
-    setTimeout(() => {
+    later(() => {
       Promise.allSettled([
         queryClient.prefetchQuery({
           queryKey: messageKeys.unreadCount(userId),
-          queryFn: () => messagesApiClient.getUnreadCounts(),
+          queryFn: ({ signal }) => readViewerScoped(userId, () => messagesApiClient.getUnreadCounts(), signal),
         }),
         queryClient.prefetchQuery({
           queryKey: notificationKeys.badges(userId),
-          queryFn: () => notificationsApi.getBadges(),
+          queryFn: ({ signal }) => readViewerScoped(userId, () => notificationsApi.getBadges(), signal),
         }),
       ]).then((r) => logLane(1, r));
     }, 100);
 
     // Lane 2: Adjacent tabs — conversations + activities
-    setTimeout(() => {
+    later(() => {
       Promise.allSettled([
         queryClient.prefetchQuery({
           queryKey: messageKeys.conversations(userId),
-          queryFn: messagesApiClient.getConversations,
+          queryFn: ({ signal }) => readViewerScoped(userId, () => messagesApiClient.getConversations(), signal),
         }),
         queryClient.prefetchQuery({
           queryKey: activityKeys.list(userId),
-          queryFn: async () => {
+          queryFn: ({ signal }) => readViewerScoped(userId, async () => {
             // Shared transform — see tab-prefetches. An inline copy here
             // dropped `payload`, which is the only place a broadcast's copy
             // lives, so a boot prefetch could blank an announcement.
@@ -214,17 +222,17 @@ export function useBootPrefetch() {
             return (result.docs || [])
               .map(notificationToActivity)
               .filter(Boolean);
-          },
+          }, signal),
         }),
         queryClient.prefetchQuery({
           queryKey: [...messageKeys.all(userId), "filtered", "primary"],
-          queryFn: () => messagesApiClient.getFilteredConversations("primary"),
+          queryFn: ({ signal }) => readViewerScoped(userId, () => messagesApiClient.getFilteredConversations("primary"), signal),
         }),
       ]).then((r) => logLane(2, r));
     }, 400);
 
     // Lane 3: Secondary data — profile posts, bookmarks, events
-    setTimeout(() => {
+    later(() => {
       Promise.allSettled([
         queryClient.prefetchQuery({
           queryKey: postKeys.profilePosts(userId),
@@ -241,10 +249,10 @@ export function useBootPrefetch() {
         }),
         queryClient.prefetchQuery({
           queryKey: notificationKeys.list(userId),
-          queryFn: async () => {
+          queryFn: ({ signal }) => readViewerScoped(userId, async () => {
             const response = await notificationsApi.get({ limit: 50 });
             return response.docs || [];
-          },
+          }, signal),
         }),
         queryClient.prefetchQuery({
           queryKey: [...eventKeys.all, "mine"] as const,
@@ -262,7 +270,7 @@ export function useBootPrefetch() {
     }, 1000);
 
     // Lane 4: Chat message prefetch for top 3 conversations (lowest priority)
-    setTimeout(() => {
+    later(() => {
       try {
         const conversations = queryClient.getQueryData<any[]>(
           messageKeys.conversations(userId),
@@ -290,5 +298,9 @@ export function useBootPrefetch() {
             : " (initial load)"),
       );
     }, 2000);
+    return () => {
+      timers.forEach(clearTimeout);
+      hasPrefetched.current = false;
+    };
   }, [userId, queryClient]);
 }

@@ -34,6 +34,10 @@ import {
 import Logo from "@dvnt/app/components/logo";
 import { WebTabBar } from "./web-tab-bar.web";
 import { WebTopBar } from "./web-top-bar.web";
+import { UnreadBadge } from "./unread-badge";
+import { useBadges } from "@dvnt/app/lib/hooks/use-notifications-query";
+import { useUnreadMessageCount } from "@dvnt/app/lib/hooks/use-messages";
+import { unreadAccessibilityLabel } from "@dvnt/app/lib/badges/unread-badge";
 
 const ACCENT = "#379ED8"; // teal-blue (refined brand)
 const HEADER_FONT = "Republica-Minor"; // the display font (Create CTA)
@@ -68,6 +72,52 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
+function NavRow({ Icon, label, active, expanded, unreadCount, onPress }: NavItem & {
+  active: boolean; expanded: boolean; unreadCount: number; onPress: () => void;
+}) {
+  return (
+    <button
+      onClick={onPress}
+      title={label}
+      aria-label={label === "Activity" || label === "Messages" ? unreadAccessibilityLabel(label, unreadCount) : label}
+      aria-current={active ? "page" : undefined}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 16,
+        width: "100%",
+        padding: expanded ? "13px 16px" : "13px 0",
+        justifyContent: expanded ? "flex-start" : "center",
+        borderRadius: 12,
+        background: active ? "rgba(55,158,216,0.10)" : "transparent",
+        boxShadow: active ? `inset 2px 0 0 ${ACCENT}` : undefined,
+        // White text in both states (active reads via weight + tint + accent
+        // icon); inactive is a hair softer so the active row still leads.
+        color: active ? "#FFFFFF" : "rgba(255,255,255,0.92)",
+        fontFamily: MENU_FONT,
+        fontWeight: active ? 700 : 600,
+        fontSize: 15.5,
+        letterSpacing: 0.2,
+        cursor: "pointer",
+        border: "none",
+        transition: "background 140ms ease, color 140ms ease",
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <span style={{ position: "relative", display: "flex" }}>
+        <Icon size={24} strokeWidth={active ? 2.4 : 2} color={active ? ACCENT : "rgba(255,255,255,0.82)"} />
+        <UnreadBadge count={unreadCount} />
+      </span>
+      {expanded ? <span>{label}</span> : null}
+    </button>
+  );
+}
+
 export function AppShell({
   children,
   aside,
@@ -76,6 +126,8 @@ export function AppShell({
   aside?: React.ReactNode;
 }) {
   const { width } = useWindowDimensions();
+  const { data: badges } = useBadges();
+  const { data: messagesUnread } = useUnreadMessageCount();
   const router = useRouter();
   const pathname = usePathname() ?? "/";
 
@@ -112,47 +164,6 @@ export function AppShell({
       label: "Profile",
     },
   ];
-
-  const NavRow = ({ href, Icon, label }: NavItem) => {
-    const active = isActive(pathname, href);
-    return (
-      <button
-        onClick={() => router.push(href)}
-        title={label}
-        aria-current={active ? "page" : undefined}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          width: "100%",
-          padding: expanded ? "13px 16px" : "13px 0",
-          justifyContent: expanded ? "flex-start" : "center",
-          borderRadius: 12,
-          background: active ? "rgba(55,158,216,0.10)" : "transparent",
-          boxShadow: active ? `inset 2px 0 0 ${ACCENT}` : undefined,
-          // White text in both states (active reads via weight + tint + accent
-          // icon); inactive is a hair softer so the active row still leads.
-          color: active ? "#FFFFFF" : "rgba(255,255,255,0.92)",
-          fontFamily: MENU_FONT,
-          fontWeight: active ? 700 : 600,
-          fontSize: 15.5,
-          letterSpacing: 0.2,
-          cursor: "pointer",
-          border: "none",
-          transition: "background 140ms ease, color 140ms ease",
-        }}
-        onMouseEnter={(e) => {
-          if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.05)";
-        }}
-        onMouseLeave={(e) => {
-          if (!active) e.currentTarget.style.background = "transparent";
-        }}
-      >
-        <Icon size={24} strokeWidth={active ? 2.4 : 2} color={active ? ACCENT : "rgba(255,255,255,0.82)"} />
-        {expanded ? <span>{label}</span> : null}
-      </button>
-    );
-  };
 
   return (
     <div
@@ -223,7 +234,14 @@ export function AppShell({
         {/* 40px breathing room between the logo and the first nav item. */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 40 }}>
           {items.map((it) => (
-            <NavRow key={it.href} {...it} />
+            <NavRow
+              key={it.href}
+              {...it}
+              active={isActive(pathname, it.href)}
+              expanded={expanded}
+              unreadCount={it.label === "Activity" ? (badges?.unread ?? 0) : it.label === "Messages" ? messagesUnread : 0}
+              onPress={() => router.push(it.href)}
+            />
           ))}
         </div>
 

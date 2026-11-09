@@ -1,3 +1,4 @@
+import type { ScanCredentialKind } from "@dvnt/app/lib/tickets/scan-verdict";
 import { create } from "zustand"
 import type { ScanAddonSummary } from "@dvnt/app/lib/api/tickets"
 
@@ -15,7 +16,7 @@ export type ScanResultType = "success" | "error" | "already_scanned" | "not_foun
 export interface ScanResult {
   type: ScanResultType
   /** "addon" when the scanned QR was an order_addons redemption. */
-  kind?: "ticket" | "addon"
+  kind?: ScanCredentialKind
   name?: string
   tierName?: string
   message?: string
@@ -51,7 +52,7 @@ export interface ScanResult {
 export interface ScanHistoryEntry {
   id: string
   type: ScanResultType
-  kind?: "ticket" | "addon"
+  kind?: ScanCredentialKind
   name?: string
   tierName?: string
   timestamp: number

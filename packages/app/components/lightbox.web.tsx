@@ -2,7 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { X, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Volume2, VolumeX } from "lucide-react";
 import { useLightboxStore } from "@dvnt/app/lib/stores/lightbox-store";
 import { LivePhotoBadge, LivePhotoMedia, useLivePhoto } from "./feed/live-photo-player.web";
 import { useFeedVideo } from "./feed/use-feed-video.web";
@@ -72,7 +72,7 @@ export function Lightbox() {
           close();
         }}
         aria-label="Close"
-        className="absolute right-4 z-10 w-10 h-10 rounded-xl flex items-center justify-center active:scale-95 border border-white/20"
+        className="absolute right-4 z-10 w-11 h-11 rounded-xl flex items-center justify-center active:scale-95 border border-white/20"
         style={{
           top: "calc(env(safe-area-inset-top) + 14px)",
           background: "rgba(255,255,255,0.12)",
@@ -138,19 +138,39 @@ export function Lightbox() {
 
 function LightboxVideo({ source, poster, loop }: { source: string; poster?: string; loop: boolean }) {
   // This is the foreground player; opening it suspends the feed/carousel below.
-  const { ref, muted } = useFeedVideo(source, { pauseForLightbox: false });
+  const { ref, muted, toggleSound } = useFeedVideo(source, { pauseForLightbox: false });
   return (
-    <video
-      ref={ref}
-      src={source}
-      poster={poster}
-      controls
-      muted={muted}
-      loop={loop}
-      playsInline
-      onClick={(e) => e.stopPropagation()}
-      className="max-w-[100vw] max-h-dvh bg-black"
-    />
+    <>
+      {/* Mobile browsers can place native sound controls at the video's top
+          edge. Keep the entire media/control surface below our close toolbar,
+          and provide a separate 44px sound target beside (never over) Close. */}
+      <button
+        type="button"
+        aria-label={muted ? "Unmute video" : "Mute video"}
+        onClick={(event) => { event.stopPropagation(); toggleSound(); }}
+        className="absolute right-[72px] z-10 w-11 h-11 rounded-xl border border-white/20 bg-white/10 flex items-center justify-center"
+        style={{ top: "calc(env(safe-area-inset-top) + 14px)" }}
+      >
+        {muted ? <VolumeX size={20} color="#fff" /> : <Volume2 size={20} color="#fff" />}
+      </button>
+      <div className="w-screen h-dvh flex items-center justify-center" style={{
+        paddingTop: "calc(env(safe-area-inset-top) + 72px)",
+        paddingBottom: "calc(env(safe-area-inset-bottom) + 12px)",
+      }}>
+        <video
+          ref={ref}
+          src={source}
+          poster={poster}
+          controls
+          muted={muted}
+          loop={loop}
+          playsInline
+          onClick={(e) => e.stopPropagation()}
+          className="max-w-[100vw] bg-black"
+          style={{ maxHeight: "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 84px)" }}
+        />
+      </div>
+    </>
   );
 }
 

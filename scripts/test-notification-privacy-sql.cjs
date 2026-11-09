@@ -1,21 +1,36 @@
-// Disposable socket-only PostgreSQL, never a remote URL. Fails rather than skips.
+// Default: disposable socket-only PostgreSQL, never a remote URL; missing server fails.
+// Explicit DVNT_SQL_ENGINE=pglite runs the exact same SQL locally, but cannot prove
+// multi-connection locking. That single concurrency test is visibly skipped.
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {execFileSync,spawnSync}=require('node:child_process');
-const {Pool}=require('pg');
+const embedded=process.env.DVNT_SQL_ENGINE==='pglite';
+if(process.env.DVNT_SQL_ENGINE && !embedded)throw Error('Unsupported DVNT_SQL_ENGINE');
 function bins(){for(const dir of [process.env.POSTGRES_BIN,'',...[18,17,16,15,14].map(v=>`/usr/lib/postgresql/${v}/bin`)].filter(x=>x!==undefined))if(['initdb','pg_ctl','postgres'].every(n=>spawnSync(path.join(dir,n),['--version']).status===0))return dir;throw Error('PostgreSQL server unavailable: notification privacy tests NOT RUN');}
 test('metadata-matched permissive baseline then least-privilege notification draft',{timeout:120000},async t=>{
- const bin=bins(),data=fs.mkdtempSync(path.join(os.tmpdir(),'notify-privacy-db-')),socket=fs.mkdtempSync(path.join(os.tmpdir(),'notify-privacy-sock-'));
- const run=(n,args)=>execFileSync(path.join(bin,n),args,{encoding:'utf8',stdio:['ignore','pipe','pipe']});let pool;
+ let pool, close=async()=>{};
  try{
-  run('initdb',['-D',data,'-U','harness','--auth=trust','--no-sync']);
-  run('pg_ctl',['-D',data,'-o',`-k ${socket} -c listen_addresses='' -c fsync=off`,'-w','-l',path.join(data,'server.log'),'start']);
-  pool=new Pool({host:socket,user:'harness',database:'postgres'});
+  if(embedded){
+   const {PGlite}=require('@electric-sql/pglite');const db=new PGlite();
+   close=()=>db.close();
+   const query=async(sql,params)=>{
+    const r=params?.length?await db.query(sql,params):(await db.exec(sql)).at(-1);
+    return {...r,rowCount:r?.rows?.length || r?.affectedRows || 0};
+   };
+   pool={query,connect:async()=>({query,release(){}})};
+  }else{
+   const bin=bins(),data=fs.mkdtempSync(path.join(os.tmpdir(),'notify-privacy-db-')),socket=fs.mkdtempSync(path.join(os.tmpdir(),'notify-privacy-sock-'));
+   const run=(n,args)=>execFileSync(path.join(bin,n),args,{encoding:'utf8',stdio:['ignore','pipe','pipe']});
+   close=async()=>{if(pool)await pool.end();try{run('pg_ctl',['-D',data,'-m','immediate','stop']);}catch{}fs.rmSync(data,{recursive:true,force:true});fs.rmSync(socket,{recursive:true,force:true});};
+   run('initdb',['-D',data,'-U','harness','--auth=trust','--no-sync']);
+   run('pg_ctl',['-D',data,'-o',`-k ${socket} -c listen_addresses='' -c fsync=off`,'-w','-l',path.join(data,'server.log'),'start']);
+   const {Pool}=require('pg');pool=new Pool({host:socket,user:'harness',database:'postgres'});
+  }
   await pool.query(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
    CREATE SCHEMA auth; GRANT USAGE ON SCHEMA auth TO authenticated;
    CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$ SELECT coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb $$;
-   CREATE TABLE users(id integer PRIMARY KEY,auth_id text UNIQUE,first_name text,role text DEFAULT 'member');
+   CREATE TABLE users(id integer PRIMARY KEY,auth_id text UNIQUE,email text DEFAULT 'identity@example.test',first_name text,role text DEFAULT 'member');
    INSERT INTO users(id,auth_id) VALUES(1,'better-auth-A'),(2,'better-auth-B'),(3,'better-auth-C');
    GRANT SELECT,INSERT,UPDATE ON users TO anon,authenticated;
    GRANT ALL ON users TO service_role;
@@ -123,7 +138,18 @@ test('metadata-matched permissive baseline then least-privilege notification dra
    await as('authenticated',{sub:'better-auth-B'},async c=>{const r=await c.query('SELECT recipient_id FROM notifications');assert.deepEqual(r.rows,[{recipient_id:2}]);});
    await as('service_role',{},async c=>{assert.equal((await c.query("INSERT INTO notifications(recipient_id,actor_id,type,entity_type,entity_id) VALUES(1,NULL,'ticket_comped','event','80') RETURNING id")).rowCount,1);assert.equal((await c.query('SELECT * FROM notifications')).rowCount,3);});
   });
-  await t.test('service null-only identity CAS has one concurrent winner and never rebinds established links',async()=>{
+  await t.test('service null-only identity CAS links once and preserves established identities',async()=>{
+   await as('service_role',{},async c=>{
+    await c.query("INSERT INTO users(id,auth_id) VALUES(20,NULL),(21,'existing-link')");
+    assert.equal((await c.query("UPDATE users SET auth_id='new-link' WHERE id=20 AND auth_id IS NULL AND email='identity@example.test' RETURNING id")).rowCount,1);
+    assert.equal((await c.query("UPDATE users SET auth_id='other-link' WHERE id=20 AND auth_id IS NULL AND email='identity@example.test' RETURNING id")).rowCount,0);
+    assert.equal((await c.query("UPDATE users SET auth_id='other-link' WHERE id=21 AND auth_id IS NULL AND email='identity@example.test' RETURNING id")).rowCount,0);
+    await c.query("INSERT INTO users(id,auth_id,email) VALUES(22,NULL,'changed@example.test')");
+    assert.equal((await c.query("UPDATE users SET auth_id='stale-email-claim' WHERE id=22 AND auth_id IS NULL AND email='identity@example.test' RETURNING id")).rowCount,0);
+    assert.deepEqual((await c.query('SELECT auth_id FROM users WHERE id IN (20,21) ORDER BY id')).rows,[{auth_id:'new-link'},{auth_id:'existing-link'}]);
+   });
+  });
+  await t.test('service null-only identity CAS has one concurrent winner and never rebinds established links',{skip:embedded?'PGlite is single-connection; real PostgreSQL concurrency remains a required CI gate':false},async()=>{
    // Real PostgreSQL predicate/concurrency evidence, not complete auth service E2E.
    await as('service_role',{},async c=>{
     await c.query("INSERT INTO users(id,auth_id) VALUES(10,NULL),(11,'established-account')");
@@ -137,7 +163,7 @@ test('metadata-matched permissive baseline then least-privilege notification dra
     assert.equal(before.rows[0].auth_id,null);
     if(++arrived===claimants.length)release();
     await barrier;
-    const result=await c.query('UPDATE users SET auth_id=$1 WHERE id=10 AND auth_id IS NULL RETURNING id',[authId]);
+    const result=await c.query("UPDATE users SET auth_id=$1 WHERE id=10 AND auth_id IS NULL AND email='identity@example.test' RETURNING id",[authId]);
     return {authId,count:result.rowCount};
    })));
    assert.equal(results.filter(result=>result.count===1).length,1);
@@ -145,16 +171,16 @@ test('metadata-matched permissive baseline then least-privilege notification dra
    const winner=results.find(result=>result.count===1).authId;
    await as('service_role',{},async c=>{
     // Same-account retry loses the CAS but can confirm its own winning link.
-    assert.equal((await c.query('UPDATE users SET auth_id=$1 WHERE id=10 AND auth_id IS NULL RETURNING id',[winner])).rowCount,0);
+    assert.equal((await c.query("UPDATE users SET auth_id=$1 WHERE id=10 AND auth_id IS NULL AND email='identity@example.test' RETURNING id",[winner])).rowCount,0);
     assert.deepEqual((await c.query('SELECT id,auth_id FROM users WHERE id=10')).rows,[{id:10,auth_id:winner}]);
     for(const authId of claimants.filter(id=>id!==winner)) {
-     assert.equal((await c.query('UPDATE users SET auth_id=$1 WHERE id=10 AND auth_id IS NULL RETURNING id',[authId])).rowCount,0);
+     assert.equal((await c.query("UPDATE users SET auth_id=$1 WHERE id=10 AND auth_id IS NULL AND email='identity@example.test' RETURNING id",[authId])).rowCount,0);
      assert.notEqual((await c.query('SELECT auth_id FROM users WHERE id=10')).rows[0].auth_id,authId);
     }
-    assert.equal((await c.query("UPDATE users SET auth_id='foreign-account' WHERE id=11 AND auth_id IS NULL RETURNING id")).rowCount,0);
+    assert.equal((await c.query("UPDATE users SET auth_id='foreign-account' WHERE id=11 AND auth_id IS NULL AND email='identity@example.test' RETURNING id")).rowCount,0);
     assert.deepEqual((await c.query('SELECT auth_id FROM users WHERE id=11')).rows,[{auth_id:'established-account'}]);
     assert.equal((await c.query('SELECT auth_id FROM users WHERE id=10')).rows[0].auth_id,winner);
    });
   });
- }finally{if(pool)await pool.end();try{run('pg_ctl',['-D',data,'-m','immediate','stop']);}catch{}fs.rmSync(data,{recursive:true,force:true});fs.rmSync(socket,{recursive:true,force:true});}
+ }finally{await close();}
 });

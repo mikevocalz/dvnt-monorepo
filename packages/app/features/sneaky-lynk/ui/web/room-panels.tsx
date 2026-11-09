@@ -19,15 +19,17 @@
  * className only, no <View>/<Text>. Avatars are rounded squares.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
-  Ban,
-  Check,
+  AlertCircle,
+  ArrowDown,
   Crown,
   Hand,
+  LoaderCircle,
   MessageCircle,
   Mic,
   MicOff,
+  Search,
   Send,
   UserMinus,
   Users,
@@ -37,12 +39,52 @@ import {
 
 import { getSneakyUserLabel } from "@dvnt/app/lib/user-label";
 import { buildHandQueue, HAND_QUEUE_COPY } from "../hand-queue";
+import { participantModeration } from "../moderation-permissions";
 import type { RoomComment } from "../../api/comments";
 
 /** DVNT tokens — docs/dvnt-design-system.md §1. */
 const ACCENT = "#3FDCFF";
 const MAGENTA = "#FF5BFC";
+const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3FDCFF]";
 
+// Reference-count background isolation so overlapping panels can close in
+// either order without unlocking the room beneath the remaining dialog.
+const isolatedBranches = new WeakMap<HTMLElement, { count: number; wasInert: boolean }>();
+const panelStack: Array<{ root: HTMLElement; panel: HTMLElement }> = [];
+
+type RoomActionResult = void | boolean | Promise<void | boolean>;
+
+/** Lock by member, including repeated clicks before React commits busy state. */
+function useParticipantActions(externalPending?: ReadonlySet<string>) {
+  const inFlight = useRef(new Set<string>());
+  const externalPendingRef = useRef(externalPending);
+  externalPendingRef.current = externalPending;
+  const [localPending, setPending] = useState<Set<string>>(() => new Set());
+  // The room owns shared requests across panel dismissal/reopening. Local
+  // state also locks repeated clicks before the parent's update commits.
+  const pending = new Set([...localPending, ...(externalPending ?? [])]);
+  const [error, setError] = useState<string | null>(null);
+  const run = async (id: string, action: () => RoomActionResult) => {
+    const shared = externalPendingRef.current;
+    if (inFlight.current.has(id) || inFlight.current.has("*") || shared?.has(id) || shared?.has("*") ||
+      (id === "*" && (inFlight.current.size || shared?.size))) return false;
+    inFlight.current.add(id);
+    setPending(new Set(inFlight.current));
+    setError(null);
+    try {
+      const result = await action();
+      if (result === false) setError("The change wasn't saved. You can try again.");
+      return result !== false;
+    } catch {
+      setError("Couldn't update this Lynk. Check your connection and try again.");
+      return false;
+    } finally {
+      inFlight.current.delete(id);
+      setPending(new Set(inFlight.current));
+    }
+  };
+  return { run, pending, error, isPending: (id: string) => pending.has(id) || pending.has("*") };
+}
 
 export interface WebMember {
   userId: string;
@@ -65,23 +107,44 @@ export function SquareAvatar({
   name: string;
   size: number;
 }) {
-  if (uri) {
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  const initial = Array.from(name.trim())[0]?.toLocaleUpperCase() || "?";
+  if (uri && uri !== failedUri) {
     return (
       <img
         src={uri}
         alt={name}
-        className="rounded-2xl object-cover"
+        width={size}
+        height={size}
+        onError={() => setFailedUri(uri)}
+        className="shrink-0 rounded-xl object-cover bg-white/10"
         style={{ width: size, height: size }}
       />
     );
   }
   return (
     <span
-      className="rounded-2xl bg-white/10 flex items-center justify-center font-semibold text-white"
+      role="img"
+      aria-label={name}
+      className="flex shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.08] font-semibold text-white/80"
       style={{ width: size, height: size, fontSize: size * 0.4 }}
     >
-      {(name?.[0] ?? "?").toUpperCase()}
+      <span aria-hidden="true">{initial}</span>
     </span>
+  );
+}
+
+function PanelEmptyState({ icon, title, children }: {
+  icon: React.ReactNode;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mx-auto flex max-w-xs flex-col items-center px-4 py-10 text-center">
+      <span aria-hidden="true" className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-[#3FDCFF]">{icon}</span>
+      <p className="text-base font-semibold text-white">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-white/60">{children}</p>
+    </div>
   );
 }
 
@@ -98,18 +161,48 @@ export function SidePanel({
   icon?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLElement>(null);
+  const titleId = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const previousFocus = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
+    const root = rootRef.current;
+    if (!panel || !root) return;
+    panelStack.push({ root, panel });
+    for (const entry of panelStack) entry.root.inert = entry.panel !== panel;
+    // Make aria-modal real: hide every background branch from pointer,
+    // keyboard and assistive-technology navigation while keeping the scrim active.
+    const background: HTMLElement[] = [];
+    let branch = rootRef.current as HTMLElement | null;
+    while (branch?.parentElement) {
+      for (const sibling of Array.from(branch.parentElement.children)) {
+        if (sibling !== branch && sibling instanceof HTMLElement && !sibling.hasAttribute("data-room-side-panel-root") && !sibling.hasAttribute("data-secure-capture-overlay-root")) {
+          const state = isolatedBranches.get(sibling);
+          if (state) state.count += 1;
+          else isolatedBranches.set(sibling, { count: 1, wasInert: sibling.inert });
+          background.push(sibling);
+          sibling.inert = true;
+        }
+      }
+      branch = branch.parentElement;
+      if (branch === document.body) break;
+    }
     const focusable = () => Array.from(panel?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]',
-    ) ?? []);
-    focusable()[0]?.focus({ preventScroll: true });
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    ) ?? []).filter((element) => !element.closest('[hidden], [inert], [aria-hidden="true"]'));
+    (focusable()[0] ?? panel)?.focus({ preventScroll: true });
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || panelStack.at(-1)?.panel !== panel) return;
+      // Capture recovery is above this panel, including events from the page
+      // rather than a focused element. Do not steal Tab or Escape from it.
+      if (document.querySelector('[data-secure-capture-overlay-root] [role="dialog"]')) return;
+      // A later confirmation dialog may be rendered in a portal above this one.
+      const targetDialog = (event.target as HTMLElement | null)?.closest?.('[role="dialog"], [role="alertdialog"]');
+      if (targetDialog && targetDialog !== panel) return;
       if (event.key === "Escape") {
         event.preventDefault();
         onCloseRef.current();
@@ -117,55 +210,73 @@ export function SidePanel({
         const items = focusable();
         const first = items[0];
         const last = items[items.length - 1];
-        if (!first) { event.preventDefault(); return; }
-        if (event.shiftKey && document.activeElement === first) {
+        if (!first) { event.preventDefault(); panel?.focus(); return; }
+        const active = document.activeElement;
+        if (event.shiftKey && (active === first || active === panel || !panel?.contains(active))) {
           event.preventDefault(); last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
+        } else if (!event.shiftKey && (active === last || !panel?.contains(active))) {
           event.preventDefault(); first.focus();
         }
       }
     };
-    panel?.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown);
     return () => {
-      panel?.removeEventListener("keydown", onKeyDown);
-      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+      document.removeEventListener("keydown", onKeyDown);
+      const wasTop = panelStack.at(-1)?.panel === panel;
+      const index = panelStack.findIndex((entry) => entry.panel === panel);
+      if (index >= 0) panelStack.splice(index, 1);
+      for (const element of background) {
+        const state = isolatedBranches.get(element);
+        if (state && --state.count === 0) {
+          element.inert = state.wasInert;
+          isolatedBranches.delete(element);
+        }
+      }
+      const next = panelStack.at(-1);
+      if (next) next.root.inert = false;
+      const restoreFocus = next && !next.panel.contains(previousFocus) ? next.panel : previousFocus;
+      if (wasTop && restoreFocus?.isConnected && !restoreFocus.closest('[inert]')) {
+        restoreFocus.focus({ preventScroll: true });
+      }
     };
   }, [open]);
   if (!open) return null;
   return (
-    <>
+    <div ref={rootRef} data-room-side-panel-root className="contents">
       <button
         type="button"
-        aria-label="Close panel"
+        tabIndex={-1}
+        aria-hidden="true"
         onClick={onClose}
-        className="absolute inset-0 z-40 bg-black/50 sm:bg-black/30"
+        className="absolute inset-0 z-40 cursor-default bg-black/60 sm:bg-black/40"
       />
       <aside
         ref={panelRef}
+        tabIndex={-1}
         aria-modal="true"
         style={{ paddingLeft: "env(safe-area-inset-left)", paddingRight: "env(safe-area-inset-right)" }}
-        className="absolute inset-x-0 bottom-0 z-50 flex h-[85%] max-h-full w-full flex-col overflow-hidden rounded-t-3xl border-t border-white/10 bg-[#0b0d14] shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:max-h-none sm:max-w-md sm:rounded-none sm:border-l sm:border-t-0"
+        className="absolute inset-x-0 bottom-0 z-50 flex h-[85%] max-h-full w-full flex-col overflow-hidden rounded-t-3xl border-t border-white/10 bg-[#0b0d14] outline-none sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:max-h-none sm:max-w-md sm:rounded-none sm:border-l sm:border-t-0"
         role="dialog"
-        aria-label={title}
+        aria-labelledby={titleId}
       >
-        <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/25 sm:hidden" aria-hidden="true" />
-        <header className="flex shrink-0 items-center justify-between border-b border-white/8 px-4 pb-2 pt-2 sm:pt-[calc(var(--lynk-safe-top,env(safe-area-inset-top))+8px)]">
-          <span className="flex items-center gap-2 text-base font-semibold text-white">
-            {icon}
+        <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-lg bg-white/25 sm:hidden" aria-hidden="true" />
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 pb-3 pt-2 sm:pt-[calc(var(--lynk-safe-top,env(safe-area-inset-top))+12px)]">
+          <h2 id={titleId} className="flex min-w-0 items-center gap-2.5 text-base font-semibold text-white">
+            <span aria-hidden="true" className="shrink-0">{icon}</span>
             {title}
-          </span>
+          </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/8 text-white hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]"
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-white/80 hover:bg-white/10 hover:text-white ${FOCUS_RING}`}
           >
-            <X size={16} />
+            <X size={18} aria-hidden="true" />
           </button>
         </header>
         {children}
       </aside>
-    </>
+    </div>
   );
 }
 
@@ -189,6 +300,7 @@ export function ChatPanel({
   loading = false,
   error = null,
   disabled = false,
+  roomId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -198,14 +310,40 @@ export function ChatPanel({
   loading?: boolean;
   error?: string | null;
   disabled?: boolean;
+  /** Optional identity boundary for a room reused without remounting. */
+  roomId?: string;
 }) {
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [draftLength, setDraftLength] = useState(0);
+  const draftRef = useRef("");
   const sendingRef = useRef(false);
+  const composingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinnedToLatest = useRef(true);
+  const previousIds = useRef<Set<number>>(new Set());
+  const draftScope = `${roomId ?? ""}:${currentUserId ?? ""}`;
+  const scopeRef = useRef(draftScope);
+  const scopeVersion = useRef(0);
   const [hasNewMessages, setHasNewMessages] = useState(false);
-  const lastMessageId = comments.at(-1)?.id;
+  const composerHintId = useId();
+  const sendErrorId = useId();
+
+  useEffect(() => {
+    if (scopeRef.current === draftScope) return;
+    scopeRef.current = draftScope;
+    scopeVersion.current += 1;
+    draftRef.current = "";
+    composingRef.current = false;
+    if (inputRef.current) inputRef.current.value = "";
+    sendingRef.current = false;
+    setSending(false);
+    setSendError(null);
+    setDraftLength(0);
+  }, [draftScope]);
+
+  useEffect(() => { if (!open) composingRef.current = false; }, [open]);
 
   const jumpToLatest = useCallback(() => {
     pinnedToLatest.current = true;
@@ -214,105 +352,124 @@ export function ChatPanel({
     if (list) list.scrollTop = list.scrollHeight;
   }, []);
 
-  // Reopening chat starts at the latest message. Incoming messages only follow
-  // while already pinned; a busy room must not yank someone out of history.
+  // Do not yank a reader out of history. A deletion or an older-history
+  // snapshot also must not be announced as a new message.
   useEffect(() => {
     if (open) jumpToLatest();
-  }, [open, jumpToLatest]);
+  }, [open, draftScope, jumpToLatest]);
   useEffect(() => {
+    const lastMessageId = comments.at(-1)?.id;
+    const hasIncoming = lastMessageId !== undefined && !previousIds.current.has(lastMessageId);
+    previousIds.current = new Set(comments.map((comment) => comment.id));
     if (!open) return;
     if (pinnedToLatest.current) jumpToLatest();
-    else if (lastMessageId !== undefined) setHasNewMessages(true);
-  }, [open, comments.length, lastMessageId, jumpToLatest]);
+    else if (hasIncoming) setHasNewMessages(true);
+  }, [open, comments, jumpToLatest]);
 
   const submit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      const el = inputRef.current;
-      if (!el) return;
-      // Guarded: the input fed onSend raw, so Enter on an empty field posted a
-      // blank message into the room.
-      const body = el.value.trim();
-      if (!body || disabled || sendingRef.current) return;
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      const input = inputRef.current;
+      const body = input?.value.trim();
+      if (!input || !body || disabled || sendingRef.current || composingRef.current) return;
+      draftRef.current = input.value;
+      const submissionScope = scopeVersion.current;
       sendingRef.current = true;
       setSending(true);
+      setSendError(null);
       jumpToLatest();
       try {
-        if (await onSend(body)) {
-          if (el.value.trim() === body) el.value = "";
+        const sent = await onSend(body);
+        if (scopeVersion.current !== submissionScope) return;
+        if (sent) {
+          // Keep text typed while sending, including after close/reopen.
+          if (draftRef.current.trim() === body) {
+            draftRef.current = "";
+            if (inputRef.current) inputRef.current.value = "";
+            setDraftLength(0);
+          }
+        } else {
+          setSendError("Message not sent. Your draft is saved here. Try sending again.");
+        }
+      } catch {
+        if (scopeVersion.current === submissionScope) {
+          setSendError("Message not sent. Your draft is saved here. Try sending again.");
         }
       } finally {
-        sendingRef.current = false;
-        setSending(false);
+        if (scopeVersion.current === submissionScope) {
+          sendingRef.current = false;
+          setSending(false);
+        }
       }
     },
     [onSend, disabled, jumpToLatest],
   );
 
   return (
-    <SidePanel
-      open={open}
-      onClose={onClose}
-      title="Chat"
-      icon={<MessageCircle size={18} color="#3FDCFF" />}
-    >
+    <SidePanel open={open} onClose={onClose} title="Chat" icon={<MessageCircle size={18} color={ACCENT} />}>
+      <div className="shrink-0 border-b border-white/[0.06] px-4 py-3">
+        <p className="text-xs leading-5 text-white/60">Messages are visible to everyone in this Lynk.</p>
+      </div>
       <div
         ref={scrollRef}
         data-room-chat-messages
+        role="log"
+        tabIndex={0}
+        aria-label="Room messages"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-busy={loading && comments.length === 0}
         onScroll={(event) => {
           const list = event.currentTarget;
           pinnedToLatest.current = list.scrollHeight - list.clientHeight - list.scrollTop < 40;
           if (pinnedToLatest.current) setHasNewMessages(false);
         }}
-        className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-4 py-3"
+        className={`min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-4 py-3 ${FOCUS_RING}`}
       >
         {comments.length === 0 ? (
-          <p className="mt-8 text-center text-sm text-white/40">
-            {loading ? "Loading chat…" : "No messages yet. Say hi 👋"}
-          </p>
+          <PanelEmptyState
+            icon={loading ? <LoaderCircle size={22} className="animate-spin motion-reduce:animate-none" /> : error ? <AlertCircle size={22} /> : <MessageCircle size={22} />}
+            title={loading ? "Opening chat" : error ? "Chat is unavailable" : "Break the ice"}
+          >
+            {loading ? "Loading the latest room messages…" : error ? "Messages will appear here when chat reconnects." : "Say hello, share a thought, or keep the conversation going."}
+          </PanelEmptyState>
         ) : (
-          comments.map((c, idx) => {
-            const isOwn = c.authorId === currentUserId;
-            const prev = comments[idx - 1];
-            // Same author in an unbroken run reads as one turn, not N turns.
-            const grouped = !!prev && prev.authorId === c.authorId;
-            const name = isOwn ? "You" : getSneakyUserLabel(c.author);
-            const time = c.createdAt
-              ? new Date(c.createdAt).toLocaleTimeString([], {
-                  hour: "numeric",
-                  minute: "2-digit",
-                })
-              : null;
+          comments.map((comment, index) => {
+            const isOwn = comment.authorId === currentUserId;
+            const previous = comments[index - 1];
+            const created = new Date(comment.createdAt);
+            const previousTime = previous ? new Date(previous.createdAt) : null;
+            const validTime = Number.isFinite(created.getTime());
+            const sameDay = validTime && previousTime?.toDateString() === created.toDateString();
+            const gap = previousTime ? created.getTime() - previousTime.getTime() : Infinity;
+            const grouped = !!previous && previous.authorId === comment.authorId && sameDay && gap >= 0 && gap < 5 * 60_000;
+            const name = isOwn ? "You" : getSneakyUserLabel(comment.author);
+            const time = validTime ? created.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
             return (
-              <div key={c.id} className={grouped ? "flex gap-2" : "mt-3 flex gap-2"}>
-                <span className="w-7 shrink-0">
-                  {grouped ? null : (
-                    <SquareAvatar uri={c.author?.avatar} name={name} size={28} />
-                  )}
-                </span>
-                <div className="min-w-0 flex-1">
-                  {grouped ? null : (
-                    <span className="flex items-baseline gap-2">
-                      <span className="truncate text-xs font-semibold text-white/70">
-                        {name}
-                      </span>
-                      {time ? (
-                        // Mono for the clock — the design system's rule for
-                        // temporal data, and it stops timestamps jittering as
-                        // digits change width.
-                        <span className="shrink-0 font-mono text-[10px] text-white/30">
-                          {time}
-                        </span>
-                      ) : null}
-                    </span>
-                  )}
-                  <p
-                    className={`mt-0.5 break-words rounded-2xl px-3 py-1.5 text-sm ${
-                      isOwn ? "bg-[#3FDCFF]/20 text-white" : "bg-white/8 text-white/90"
-                    } ${c.isOptimistic ? "opacity-60" : ""}`}
-                  >
-                    {c.body}
+              <div key={comment.id}>
+                {validTime && !sameDay ? (
+                  <p className="flex items-center gap-3 py-3 text-[11px] text-white/50">
+                    <span aria-hidden="true" className="h-px flex-1 bg-white/[0.08]" />
+                    <time dateTime={created.toISOString()}>{created.toLocaleDateString([], { month: "short", day: "numeric" })}</time>
+                    <span aria-hidden="true" className="h-px flex-1 bg-white/[0.08]" />
                   </p>
+                ) : null}
+                <div className={grouped ? "flex gap-2.5" : "mt-3 flex gap-2.5"}>
+                  <span className="w-7 shrink-0" aria-hidden="true">
+                    {grouped ? null : <SquareAvatar uri={comment.author?.isAnonymous ? undefined : comment.author?.avatar} name={name} size={28} />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    {grouped ? <span className="sr-only">{name}: </span> : (
+                      <div className="mb-1 flex items-baseline gap-2">
+                        <span className="truncate text-xs font-semibold text-white/80">{name}</span>
+                        {time ? <time dateTime={created.toISOString()} title={created.toLocaleString()} className="shrink-0 font-mono text-[10px] text-white/50">{time}</time> : null}
+                      </div>
+                    )}
+                    <p className={`whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm leading-6 [overflow-wrap:anywhere] ${isOwn ? "bg-[#3FDCFF]/15 text-white" : "bg-white/[0.06] text-white/90"} ${comment.isOptimistic ? "opacity-60" : ""}`}>
+                      {comment.body}
+                    </p>
+                    {comment.isOptimistic ? <p className="mt-1 text-[11px] text-white/50">Sending…</p> : null}
+                  </div>
                 </div>
               </div>
             );
@@ -320,34 +477,59 @@ export function ChatPanel({
         )}
       </div>
       {hasNewMessages ? (
-        <button type="button" onClick={jumpToLatest} aria-label="Jump to latest messages" className="mx-4 min-h-11 shrink-0 rounded-lg bg-[#3FDCFF]/20 px-3 text-sm font-semibold text-[#3FDCFF] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FDCFF]">
-          New messages · Jump to latest
+        <button type="button" onClick={jumpToLatest} aria-label="Jump to latest messages" className={`mx-4 mb-3 flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-[#3FDCFF]/25 bg-[#3FDCFF]/10 px-3 text-sm font-semibold text-[#3FDCFF] ${FOCUS_RING}`}>
+          <ArrowDown size={16} aria-hidden="true" /> New messages · Jump to latest
         </button>
       ) : null}
-      {error ? <p role="alert" className="px-4 py-2 text-sm text-red-300">{error}</p> : null}
+      {error || sendError ? (
+        <p id={sendErrorId} role="alert" className="mx-4 mb-3 rounded-lg border border-red-300/20 bg-red-300/[0.06] px-3 py-2 text-sm leading-5 text-red-200">{sendError || error}</p>
+      ) : null}
       <form
         onSubmit={submit}
-        className="flex shrink-0 items-center gap-2 border-t border-white/8 px-3 pt-3"
+        className="shrink-0 border-t border-white/10 px-4 pt-3"
         style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 12px)" }}
       >
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="Message…"
-          aria-label="Message"
-          disabled={disabled || sending}
-          maxLength={500}
-          className="min-w-0 flex-1 rounded-lg bg-white/8 px-4 py-2.5 text-base text-white placeholder:text-white/40 focus:outline-none focus:ring-1 focus:ring-[#3FDCFF]"
-        />
-        <button
-          type="submit"
-          aria-label="Send message"
-          disabled={disabled || sending}
-          // The hover colour matched the base, so the control gave no feedback.
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#3FDCFF] text-black transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
-        >
-          <Send size={18} />
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            defaultValue={draftRef.current}
+            onChange={(event) => {
+              draftRef.current = event.currentTarget.value;
+              setDraftLength(event.currentTarget.value.length);
+              setSendError(null);
+            }}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={() => { composingRef.current = false; }}
+            onKeyDown={(event) => {
+              // Some IMEs finish composition before dispatching the committing
+              // Enter. Safari's legacy 229 code still identifies that key.
+              if (event.key === "Enter" && (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229)) {
+                event.preventDefault();
+              }
+            }}
+            type="text"
+            placeholder={disabled ? "Chat is not ready…" : "Say something…"}
+            aria-label="Message"
+            aria-describedby={`${composerHintId}${error || sendError ? ` ${sendErrorId}` : ""}`}
+            disabled={disabled}
+            maxLength={500}
+            autoComplete="off"
+            className="min-h-11 min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2.5 text-base text-white placeholder:text-white/50 focus:border-[#3FDCFF]/60 focus:outline-none focus:ring-1 focus:ring-[#3FDCFF]/60 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            aria-label="Send message"
+            disabled={disabled || sending}
+            className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold bg-[#3FDCFF] text-black transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none ${FOCUS_RING}`}
+          >
+            {sending ? <LoaderCircle size={18} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Send size={18} aria-hidden="true" />}
+            <span>Send</span>
+          </button>
+        </div>
+        <div className="mt-2 flex min-h-4 items-center justify-between gap-2 text-[11px] text-white/50">
+          <p id={composerHintId} role="status">{disabled ? "Chat is not ready. Your draft stays here." : sending ? "Sending message…" : "Send a message to the room."}</p>
+          {draftLength >= 400 ? <span className="shrink-0 font-mono" aria-label={`${500 - draftLength} characters remaining`}>{draftLength}/500</span> : null}
+        </div>
       </form>
     </SidePanel>
   );
@@ -358,6 +540,8 @@ export function HandQueuePanel({
   onClose,
   order,
   members,
+  localUserId,
+  externalPending,
   onInviteToSpeak,
   onLowerHand,
   onLowerAll,
@@ -366,14 +550,20 @@ export function HandQueuePanel({
   onClose: () => void;
   order: string[];
   members: WebMember[];
-  onInviteToSpeak: (userId: string) => void;
+  localUserId?: string;
+  /** Room-wide in-flight targets, retained across panel switches. "*" is bulk. */
+  externalPending?: ReadonlySet<string>;
+  /** Existing room callback grants co-host; the action names that authority. */
+  onInviteToSpeak: (userId: string) => RoomActionResult;
   onLowerHand: (userId: string) => void;
   onLowerAll: () => void;
 }) {
+  const actions = useParticipantActions(externalPending);
+  const actorRole = members.find((member) => member.userId === localUserId && member.status === "active")?.role;
   // Queue semantics, labels and copy are shared with native — see ui/hand-queue.
   const queue = buildHandQueue(
     order,
-    members.map((m) => ({
+    members.filter((m) => m.status === "active").map((m) => ({
       userId: m.userId,
       username: m.username,
       displayName: m.displayName,
@@ -383,66 +573,79 @@ export function HandQueuePanel({
     })),
   );
 
+  const waiting = queue.filter((entry) => !entry.departed).length;
+
   return (
     <SidePanel
       open={open}
       onClose={onClose}
-      title={`${HAND_QUEUE_COPY.title} · ${queue.length}`}
+      title={`${HAND_QUEUE_COPY.title} · ${waiting}`}
       icon={<Hand size={18} color={MAGENTA} />}
     >
-      <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
+      {queue.length > 0 ? (
+        <div className="shrink-0 border-b border-white/[0.06] px-4 py-3">
+          <p className="text-sm font-medium text-white/80">{waiting} {waiting === 1 ? "person" : "people"} waiting to speak</p>
+          <p className="mt-1 text-xs leading-5 text-white/60">Oldest hand first. Co-hosts help moderate this Lynk. {HAND_QUEUE_COPY.dismissalHint}</p>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
         {queue.length === 0 ? (
-          <p className="mt-8 text-center text-sm text-white/40">
+          <PanelEmptyState icon={<Hand size={22} />} title="Everyone's caught up">
             {HAND_QUEUE_COPY.empty}
-          </p>
+          </PanelEmptyState>
         ) : (
-          queue.map((entry) => (
-            <div
-              key={entry.userId}
-              className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2"
-            >
-              <span className="w-4 shrink-0 text-center font-mono text-xs font-bold text-white/40">
-                {entry.position}
-              </span>
-              <SquareAvatar uri={entry.avatar} name={entry.label} size={36} />
-              <span
-                className={`flex-1 truncate text-sm font-medium ${
-                  entry.departed ? "italic text-white/40" : "text-white"
-                }`}
-              >
-                {entry.label}
-              </span>
-              {entry.departed ? null : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => onInviteToSpeak(entry.userId)}
-                    className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
-                    style={{ backgroundColor: `${ACCENT}20`, color: ACCENT }}
-                  >
-                    <Crown size={13} /> {HAND_QUEUE_COPY.invite}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onLowerHand(entry.userId)}
-                    aria-label={`${HAND_QUEUE_COPY.lower} ${entry.label}`}
-                    className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-semibold text-white/60 transition-colors hover:bg-white/[0.08] hover:text-white"
-                  >
-                    {HAND_QUEUE_COPY.lower}
-                  </button>
-                </>
-              )}
-            </div>
-          ))
+          <ol className="space-y-3" aria-label="Raised hands, oldest first">
+            {queue.map((entry) => {
+              const member = members.find((member) => member.userId === entry.userId && member.status === "active");
+              const canPromote = !!member && member.role !== "co-host" && participantModeration(actorRole, localUserId, member.userId, member.role).changeRole;
+              const busy = actions.isPending(entry.userId);
+              return (
+                <li key={entry.userId} aria-busy={busy} className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                  <div className="flex items-center gap-3">
+                    <span aria-label={`Position ${entry.position}`} className="w-5 shrink-0 text-center font-mono text-xs text-white/60">{entry.position}</span>
+                    <span aria-hidden="true"><SquareAvatar uri={entry.avatar} name={entry.label} size={36} /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className={`truncate text-sm font-medium ${entry.departed ? "text-white/50" : "text-white"}`}>{entry.label}</p>
+                      <p className="mt-0.5 text-xs text-white/50">{entry.departed ? "No longer waiting" : "Wants to speak"}</p>
+                    </div>
+                    {!entry.departed ? <Hand size={16} color={MAGENTA} aria-hidden="true" /> : null}
+                  </div>
+                  {entry.departed ? (
+                    <button type="button" disabled={busy} onClick={() => onLowerHand(entry.userId)} aria-label={`Clear position ${entry.position} from your queue`} className={`mt-3 min-h-11 rounded-lg border border-white/10 px-4 text-xs font-semibold text-white/70 hover:bg-white/[0.08] ${FOCUS_RING}`}>
+                      Clear from queue
+                    </button>
+                  ) : (
+                    <div className="mt-3 flex gap-2">
+                      {canPromote ? <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void actions.run(entry.userId, () => onInviteToSpeak(entry.userId))}
+                        aria-label={`Make ${entry.label} a co-host`}
+                        className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg bg-[#3FDCFF]/10 px-3 py-2 text-xs font-semibold text-[#3FDCFF] hover:bg-[#3FDCFF]/20 disabled:cursor-wait disabled:opacity-40 ${FOCUS_RING}`}
+                      >
+                        {busy ? <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Crown size={15} aria-hidden="true" />} {busy ? "Updating…" : HAND_QUEUE_COPY.invite}
+                      </button> : null}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onLowerHand(entry.userId)}
+                        aria-label={`Dismiss ${entry.label} from your queue`}
+                        className={`min-h-11 rounded-lg border border-white/10 px-4 py-2 text-xs font-semibold text-white/70 hover:bg-white/[0.08] hover:text-white ${FOCUS_RING}`}
+                      >
+                        {HAND_QUEUE_COPY.lower}
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
         )}
       </div>
+      {actions.error ? <p role="alert" className="shrink-0 px-4 py-2 text-sm text-red-300">{actions.error}</p> : null}
       {queue.length > 0 ? (
-        <footer className="border-t border-white/10 px-4 py-3">
-          <button
-            type="button"
-            onClick={onLowerAll}
-            className="w-full rounded-lg bg-white/[0.08] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/15"
-          >
+        <footer className="shrink-0 border-t border-white/10 px-4 pt-3" style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 12px)" }}>
+          <button type="button" disabled={actions.pending.size > 0} onClick={onLowerAll} aria-label="Clear raised hands from your view" className={`min-h-11 w-full disabled:opacity-40 rounded-lg bg-white/[0.08] px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/15 ${FOCUS_RING}`}>
             {HAND_QUEUE_COPY.lowerAll}
           </button>
         </footer>
@@ -459,9 +662,8 @@ export function HandQueuePanel({
  * looking for the people who can talk, and a flat list buries them. Section
  * headers carry counts so "how many are here" is answered without counting.
  *
- * Per-row status ("speaking", "muted", "muted by you") because a mic glyph
- * alone cannot distinguish someone who chose to mute from someone the host
- * muted, and those need different actions.
+ * Voice activity is shown only when supplied by the live presence source.
+ * Do not infer mute state from a person being quiet: silence is not a mute.
  *
  * Mute-everyone lives in a footer, separated from per-row controls: it is the
  * one action here that affects people who are not on screen.
@@ -471,6 +673,7 @@ export function ParticipantsPanel({
   onClose,
   members,
   localUserId,
+  externalPending,
   onPromote,
   onDemote,
   onKick,
@@ -483,143 +686,129 @@ export function ParticipantsPanel({
   onClose: () => void;
   members: WebMember[];
   localUserId: string | undefined;
-  onPromote: (userId: string) => void;
-  onDemote: (userId: string) => void;
-  onKick: (userId: string) => void;
-  onMute: (userId: string) => void;
-  onUnmute: (userId: string) => void;
-  onMuteAll?: () => void;
+  /** Room-wide in-flight targets, retained across panel switches. "*" is bulk. */
+  externalPending?: ReadonlySet<string>;
+  onPromote: (userId: string) => RoomActionResult;
+  onDemote: (userId: string) => RoomActionResult;
+  onKick: (userId: string) => RoomActionResult;
+  onMute: (userId: string) => RoomActionResult;
+  onUnmute: (userId: string) => RoomActionResult;
+  onMuteAll?: () => RoomActionResult;
   /** Live voice activity, so a row can say "speaking" rather than just showing a mic. */
   speakingByUserId?: Record<string, boolean>;
 }) {
+  const [search, setSearch] = useState("");
+  const actions = useParticipantActions(externalPending);
   const active = members.filter((m) => m.status === "active");
   // Use the authoritative active roster, not the initial join role: promotion,
   // demotion and removal must update controls without leaving the room.
   const actorRole = active.find((m) => m.userId === localUserId)?.role;
   const isHost = actorRole === "host";
   const canModerate = isHost || actorRole === "co-host" || actorRole === "moderator";
-  const onStage = active.filter((m) => m.role !== "listener");
-  const listening = active.filter((m) => m.role === "listener");
+  const query = search.trim().toLocaleLowerCase();
+  const matches = (member: WebMember) => getSneakyUserLabel(member).toLocaleLowerCase().includes(query);
+  const roleRank = (role: string) => role === "host" ? 0 : role === "co-host" ? 1 : role === "moderator" ? 2 : 3;
+  const onStage = active.filter((member) => member.role !== "listener" && matches(member)).sort((a, b) => roleRank(a.role) - roleRank(b.role));
+  const listening = active.filter((member) => member.role === "listener" && matches(member));
+  const matchCount = onStage.length + listening.length;
+  const controlClass = `flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-lg bg-white/[0.06] px-1 py-2 text-[10px] font-medium text-white/80 hover:bg-white/10 hover:text-white disabled:cursor-wait disabled:opacity-40 ${FOCUS_RING}`;
 
-  const row = (m: WebMember) => {
-    const isSelf = m.userId === localUserId;
-    const isRoomHost = m.role === "host";
-    const name = getSneakyUserLabel(m);
-    const speaking = !!speakingByUserId?.[m.userId];
+  const row = (member: WebMember) => {
+    const busy = actions.isPending(member.userId);
+    const isSelf = member.userId === localUserId;
+    const isRoomHost = member.role === "host";
+    const name = getSneakyUserLabel(member);
+    const speaking = member.role !== "listener" && !!speakingByUserId?.[member.userId];
+    const roleLabel = isRoomHost ? "Host" : member.role === "co-host" ? "Co-host" : member.role === "moderator" ? "Moderator" : member.role === "listener" ? "Listening" : "On stage";
     return (
-      <div
-        key={m.userId}
-        className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2"
-      >
-        <SquareAvatar uri={m.avatar} name={name} size={36} />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-white">
-            {name}
-            {isSelf ? " (you)" : ""}
-          </span>
-          <span className="flex items-center gap-1.5 text-[11px] text-white/45">
-            {m.role !== "listener" ? (
-              <span className="uppercase tracking-wide text-[#3FDCFF]/80">{m.role}</span>
-            ) : null}
-            {speaking ? <span className="text-[#3FDCFF]">speaking</span> : null}
-          </span>
-        </span>
+      <li key={member.userId} aria-busy={busy} className={`rounded-xl border p-3 ${speaking ? "border-[#3FDCFF]/30 bg-[#3FDCFF]/[0.04]" : "border-white/10 bg-white/[0.04]"}`}>
+        <div className="flex items-center gap-3">
+          <span aria-hidden="true"><SquareAvatar uri={member.isAnonymous ? undefined : member.avatar} name={name} size={40} /></span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-white" title={`${name}${isSelf ? " (you)" : ""}`}>
+              {name}{isSelf ? <span className="font-normal text-white/50"> (you)</span> : null}
+            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-white/60">
+              <span className={isRoomHost || member.role === "co-host" ? "text-[#3FDCFF]" : undefined}>{roleLabel}</span>
+              {speaking ? <span className="flex items-center gap-1 text-[#3FDCFF]"><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[#3FDCFF]" /> Speaking</span> : null}
+              {member.handRaised ? <span className="flex items-center gap-1 text-[#FF5BFC]"><Hand size={12} aria-hidden="true" /> Hand raised</span> : null}
+              {busy ? <span role="status">Updating…</span> : null}
+            </div>
+          </div>
+          {isRoomHost ? <Crown size={16} color={ACCENT} aria-hidden="true" /> : null}
+        </div>
         {canModerate && !isSelf && !isRoomHost ? (
-          <span className="flex shrink-0 items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => onUnmute(m.userId)}
-              aria-label={`Let ${name} unmute`}
-              title="Lift the mute — they choose when to speak"
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
-            >
-              <Mic size={14} />
+          <div role="group" aria-label={`Manage ${name}`} className="mt-3 grid grid-flow-col auto-cols-fr gap-1.5 border-t border-white/[0.06] pt-3">
+            <button type="button" disabled={busy} onClick={() => void actions.run(member.userId, () => onUnmute(member.userId))} aria-label={`Let ${name} unmute`} title="Allow them to unmute their own microphone" className={controlClass}>
+              <Mic size={16} aria-hidden="true" /> Allow mic
             </button>
-            <button
-              type="button"
-              onClick={() => onMute(m.userId)}
-              aria-label={`Mute ${name}`}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
-            >
-              <MicOff size={14} />
+            <button type="button" disabled={busy} onClick={() => void actions.run(member.userId, () => onMute(member.userId))} aria-label={`Mute ${name}`} title={`Mute ${name}`} className={controlClass}>
+              <MicOff size={16} aria-hidden="true" /> Mute
             </button>
-            {isHost && m.role === "co-host" ? (
-              <button
-                type="button"
-                onClick={() => onDemote(m.userId)}
-                aria-label={`Remove co-host from ${name}`}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/8 text-white/80 hover:bg-white/15"
-              >
-                <UserMinus size={14} />
+            {isHost && member.role === "co-host" ? (
+              <button type="button" disabled={busy} onClick={() => void actions.run(member.userId, () => onDemote(member.userId))} aria-label={`Remove co-host from ${name}`} title="Remove co-host role; keep them on stage" className={controlClass}>
+                <UserMinus size={16} aria-hidden="true" /> Remove role
               </button>
             ) : null}
-            {isHost && m.role !== "co-host" ? (
-              <button
-                type="button"
-                onClick={() => onPromote(m.userId)}
-                aria-label={`Make ${name} a co-host`}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#3FDCFF]/20 text-[#3FDCFF] hover:bg-[#3FDCFF]/30"
-              >
-                <Crown size={14} />
+            {isHost && member.role !== "co-host" ? (
+              <button type="button" disabled={busy} onClick={() => void actions.run(member.userId, () => onPromote(member.userId))} aria-label={`Make ${name} a co-host`} title="Give co-host moderation controls" className={`${controlClass} !bg-[#3FDCFF]/10 !text-[#3FDCFF] hover:!bg-[#3FDCFF]/20`}>
+                <Crown size={16} aria-hidden="true" /> Co-host
               </button>
             ) : null}
-            {!(actorRole === "moderator" && m.role === "moderator") ? (
-              <button
-                type="button"
-                onClick={() => onKick(m.userId)}
-                aria-label={`Remove ${name} from the room`}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FC253A]/20 text-[#FC253A] hover:bg-[#FC253A]/30"
-              >
-                <UserX size={14} />
+            {!(actorRole === "moderator" && member.role === "moderator") ? (
+              <button type="button" disabled={busy} onClick={() => void actions.run(member.userId, () => onKick(member.userId))} aria-label={`Remove ${name} from the room`} title={`Remove ${name} from the room`} className={`${controlClass} !bg-[#FC253A]/10 !text-red-300 hover:!bg-[#FC253A]/20`}>
+                <UserX size={16} aria-hidden="true" /> Remove
               </button>
             ) : null}
-          </span>
+          </div>
         ) : null}
-      </div>
+      </li>
     );
   };
 
-  const section = (label: string, rows: WebMember[]) =>
-    rows.length ? (
-      <section className="space-y-2">
-        <h3 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-white/40">
-          {label} · {rows.length}
-        </h3>
-        {rows.map(row)}
-      </section>
-    ) : null;
+  const section = (label: string, rows: WebMember[]) => rows.length ? (
+    <section className="space-y-2">
+      <h3 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-white/60">{label} <span className="ml-1 font-mono text-white/40">{rows.length}</span></h3>
+      <ul className="space-y-2" aria-label={label}>{rows.map(row)}</ul>
+    </section>
+  ) : null;
 
   return (
-    <SidePanel
-      open={open}
-      onClose={onClose}
-      title={`In the room · ${active.length}`}
-      icon={<Users size={18} color="#3FDCFF" />}
-    >
-      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
+    <SidePanel open={open} onClose={onClose} title={`In the room · ${active.length}`} icon={<Users size={18} color={ACCENT} />}>
+      {active.length > 8 || search ? (
+        <div className="shrink-0 border-b border-white/[0.06] px-4 py-3">
+          <label className="flex min-h-11 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 focus-within:border-[#3FDCFF]/60">
+            <Search size={16} className="shrink-0 text-white/50" aria-hidden="true" />
+            <input type="search" value={search} onChange={(event) => setSearch(event.currentTarget.value)} aria-label="Search people in this Lynk" placeholder="Find someone" className="min-w-0 flex-1 bg-transparent py-2.5 text-base text-white outline-none placeholder:text-white/50" />
+          </label>
+          {query ? <p role="status" className="mt-2 text-xs text-white/60">{matchCount} {matchCount === 1 ? "person" : "people"} found</p> : null}
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4">
         {active.length === 0 ? (
-          <p className="mt-8 text-center text-sm text-white/40">
-            Nobody else is here yet.
-          </p>
-        ) : (
-          <>
-            {section("On stage", onStage)}
-            {section("Listening", listening)}
-          </>
-        )}
+          <PanelEmptyState icon={<Users size={22} />} title="The room is quiet">
+            People will appear here as they join.
+          </PanelEmptyState>
+        ) : matchCount === 0 ? (
+          <div>
+            <PanelEmptyState icon={<Search size={22} />} title="No matching names">
+              Try another display name or clear your search.
+            </PanelEmptyState>
+            <button type="button" onClick={() => setSearch("")} className={`min-h-11 w-full rounded-lg bg-white/[0.08] px-3 text-sm font-semibold text-white ${FOCUS_RING}`}>Clear search</button>
+          </div>
+        ) : <>{section("On stage", onStage)}{section("Listening", listening)}</>}
       </div>
-      {isHost && onMuteAll && active.length > 1 ? (
-        <footer className="border-t border-white/10 px-4 py-3">
-          <button
-            type="button"
-            onClick={onMuteAll}
-            className="w-full rounded-lg bg-white/[0.08] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/15"
-          >
-            Mute everyone
-          </button>
+      {actions.error ? <p role="alert" className="shrink-0 px-4 py-2 text-sm text-red-300">{actions.error}</p> : null}
+      {canModerate ? (
+        <footer className="shrink-0 space-y-3 border-t border-white/10 px-4 pt-3" style={{ paddingBottom: "calc(var(--lynk-safe-bottom, env(safe-area-inset-bottom)) + 12px)" }}>
+          <p className="text-xs leading-5 text-white/60">Allow mic lifts a host mute. Each person chooses when to turn their microphone on.</p>
+          {isHost && onMuteAll && active.length > 1 ? (
+            <button type="button" disabled={actions.pending.size > 0} onClick={() => void actions.run("*", onMuteAll)} className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-white/[0.08] px-3 py-2.5 text-sm font-semibold text-white hover:bg-white/15 ${FOCUS_RING}`}>
+              <MicOff size={16} aria-hidden="true" /> Mute everyone
+            </button>
+          ) : null}
         </footer>
       ) : null}
     </SidePanel>
   );
 }
-

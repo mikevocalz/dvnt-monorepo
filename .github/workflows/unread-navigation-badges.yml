@@ -1,0 +1,79 @@
+name: Unread navigation badges
+on:
+  pull_request:
+    paths:
+      - 'packages/app/components/*badge*'
+      - 'packages/app/components/*header*'
+      - 'packages/app/components/*top-bar*'
+      - 'packages/app/components/*tab-bar*'
+      - 'packages/app/components/app-shell.web.tsx'
+      - 'packages/app/features/routes/screens/(protected)/(tabs)/_layout.tsx'
+      - 'packages/app/lib/badges/**'
+      - 'packages/app/lib/messages/**'
+      - 'packages/app/lib/notifications/query-keys.ts'
+      - 'packages/app/lib/query/viewer-scoped-read.ts'
+      - 'packages/app/lib/hooks/use-boot-prefetch.ts'
+      - 'packages/app/lib/hooks/use-app-resume.ts'
+      - 'packages/app/lib/perf/tab-prefetches.ts'
+      - 'scripts/test-viewer-scoped-read.cjs'
+      - 'packages/app/lib/hooks/use-*messages*'
+      - 'packages/app/lib/hooks/use-*notifications*'
+      - 'packages/app/lib/hooks/use-bootstrap-feed.ts'
+      - 'packages/app/lib/hooks/use-unread-realtime.ts'
+      - 'packages/app/lib/api/messages-impl.ts'
+      - 'packages/app/lib/api/notifications.ts'
+      - 'scripts/*unread*badges*.cjs'
+      - 'scripts/test-unread-badge-boundaries.cjs'
+      - '.github/workflows/unread-navigation-badges.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unread-badges:
+    # The pinned Playwright release supports Ubuntu 24.04.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated fixture dependencies
+        run: >-
+          npm install --prefix "$RUNNER_TEMP/badge-fixtures" --no-package-lock --no-save
+          esbuild@0.25.11 react@19.2.3 react-dom@19.2.3 react-native-web@0.21.2
+          lucide-react@0.468.0 zustand@5.0.11 @tanstack/react-query@5.90.16
+          happy-dom@20.8.4 typescript@5.9.3 @types/react@19.2.14 @types/react-dom@19.2.3
+          playwright@1.56.1 eslint@9.39.1 @typescript-eslint/parser@8.49.0
+          eslint-plugin-react-hooks@7.0.1 @supabase/supabase-js@2.95.3
+      - name: Counts, metadata paging, scopes and formatting
+        run: node --test packages/app/lib/messages/*.test.ts packages/app/lib/badges/*.test.ts
+      - name: Focused hook types and Rules of Hooks
+        env:
+          NODE_PATH: ${{ runner.temp }}/badge-fixtures/node_modules
+        run: node scripts/check-unread-badges.cjs
+      - name: Native root push and count API boundaries
+        env:
+          NODE_PATH: ${{ runner.temp }}/badge-fixtures/node_modules
+        run: node scripts/test-unread-badge-boundaries.cjs
+      - name: Delayed prefetch and account-switch boundaries
+        env:
+          NODE_PATH: ${{ runner.temp }}/badge-fixtures/node_modules
+        run: node scripts/test-viewer-scoped-read.cjs
+      - name: Mounted chrome lifecycle, read and account races
+        env:
+          NODE_PATH: ${{ runner.temp }}/badge-fixtures/node_modules
+          BADGE_TEST_DOM: '1'
+        run: node scripts/test-unread-navigation-badges.cjs
+      - name: Install isolated browser
+        run: $RUNNER_TEMP/badge-fixtures/node_modules/.bin/playwright install --with-deps chromium
+      - name: Browser responsive chrome and focus regression
+        env:
+          NODE_PATH: ${{ runner.temp }}/badge-fixtures/node_modules
+          BADGE_SCREENSHOT_DIR: ${{ runner.temp }}/badge-evidence
+        run: node scripts/test-unread-navigation-badges.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unread-badge-synthetic-chrome
+          path: ${{ runner.temp }}/badge-evidence
+          if-no-files-found: ignore

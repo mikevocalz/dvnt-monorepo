@@ -30,9 +30,13 @@ test("a failure is never confused with a bad ticket", () => {
   }
 });
 
-test("failure copy tells staff the ticket was NOT checked", () => {
-  for (const r of ["unauthorized", "rate_limited", "server_error", "network_error"]) {
+test("pre-admission failures say not checked; lost responses explicitly remain unknown", () => {
+  for (const r of ["unauthorized", "rate_limited"]) {
     assert.match(scanVerdictMessage(r), /NOT checked/);
+  }
+  for (const reason of ["server_error", "network_error"]) {
+    assert.match(scanVerdictMessage(reason), /may have completed/);
+    assert.doesNotMatch(scanVerdictMessage(reason), /NOT checked/);
   }
   assert.match(scanVerdictMessage("forbidden"), /door staff/);
 });
@@ -53,10 +57,10 @@ test("a rejection and a no-verdict never share a title", () => {
   const noVerdict = scanVerdictTitle("no_verdict", "server_error");
   assert.notEqual(rejected, noVerdict);
   assert.match(rejected, /already scanned/i);
-  assert.match(noVerdict, /^Not checked in/);
+  assert.match(noVerdict, /^Scan outcome unknown/);
 });
 
-test("every no-verdict title states the ticket was not checked in, first", () => {
+test("no-verdict title distinguishes pre-admission refusal from uncertain committed outcome", () => {
   for (const reason of [
     "unauthorized",
     "forbidden",
@@ -67,8 +71,8 @@ test("every no-verdict title states the ticket was not checked in, first", () =>
   ]) {
     assert.match(
       scanVerdictTitle("no_verdict", reason),
-      /^Not checked in/,
-      `no-verdict title for ${String(reason)} must open with "Not checked in"`,
+      ["unauthorized", "forbidden", "rate_limited"].includes(reason ?? "") ? /^Not checked in/ : /^Scan outcome unknown/,
+      `no-verdict title for ${String(reason)} must accurately describe admission uncertainty`,
     );
   }
 });
@@ -83,7 +87,7 @@ test("red titles name the rejection, because each sends the guest elsewhere", ()
 
 test("admitted leads with the verdict, and add-ons are their own outcome", () => {
   assert.match(scanVerdictTitle("success", null), /^Admitted/);
-  assert.equal(scanVerdictTitle("success", null, "addon"), "Add-on redeemed");
+  assert.equal(scanVerdictTitle("success", null, "addon"), "Add-on redeemed — not event entry");
 });
 
 test("an unknown token while offline is a no-verdict, never a rejection", () => {
@@ -97,4 +101,17 @@ test("an unknown token while offline is a no-verdict, never a rejection", () => 
   assert.match(scanVerdictMessage(OFFLINE_UNVERIFIED), /may be out of date/i);
   // It must never read as a claim about the ticket's authenticity.
   assert.doesNotMatch(scanVerdictMessage(OFFLINE_UNVERIFIED), /not a valid ticket/i);
+});
+
+test("services and products are redeemed, never event admission", () => {
+  assert.equal(scanVerdictTitle("success", null, "service"), "Service redeemed — not event entry");
+  assert.equal(scanVerdictTitle("success", null, "product"), "Product redeemed — not event entry");
+  assert.equal(scanVerdictTitle("success", null, "unknown"), "Credential redeemed — verify entry separately");
+});
+
+test("old scanner capability refusal is a retryable update requirement, not invalid admission", () => {
+  assert.equal(scanFailureReasonForStatus(426), "scanner_update_required");
+  assert.equal(isScanFailure("scanner_update_required"), true);
+  assert.match(scanVerdictTitle("no_verdict", "scanner_update_required"), /update scanner/);
+  assert.match(scanVerdictMessage("scanner_update_required"), /current web scanner/);
 });

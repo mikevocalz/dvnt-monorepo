@@ -1,3 +1,4 @@
+import type { ScanCredentialKind } from "@dvnt/app/lib/tickets/scan-verdict";
 /**
  * Ticket Scanner Screen — VisionCamera QR Code Scanner
  *
@@ -47,6 +48,7 @@ import { useEvent } from "@dvnt/app/lib/hooks/use-events";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { scannerAccessGate } from "@dvnt/app/lib/events/scanner-access";
+import { OfflineScanConflicts } from "@dvnt/app/features/events/offline-scan-conflicts";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 import { getCurrentUserIdSync } from "@dvnt/app/lib/auth/identity";
 import * as Haptics from "expo-haptics";
@@ -81,7 +83,7 @@ const hasVisionCamera =
 type ScanResult = {
   type: "success" | "error" | "already_scanned" | "not_found";
   /** "addon" when the scanned QR was an order_addons redemption. */
-  kind?: "ticket" | "addon";
+  kind?: ScanCredentialKind;
   name?: string;
   tierName?: string;
   message?: string;
@@ -608,7 +610,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
               };
               setScanResult({
                 type: "success",
-                kind: data.kind ?? "ticket",
+                kind: data.kind ?? "unknown",
                 name,
                 tierName,
                 addons: data.addons,
@@ -635,7 +637,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                   : ("not_found" as const);
               setScanResult({
                 type: resultType,
-                kind: data.kind ?? "ticket",
+                kind: data.kind ?? "unknown",
                 name:
                   data.kind === "addon" && data.addon
                     ? [data.addon.name, data.addon.variant_name]
@@ -698,7 +700,9 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
                 setScanResult({
                   type: "success",
-                  name: "Verified Offline",
+                  reason: "offline_pending",
+                  message: "Provisional only. Refunds, transfers and scans on other devices cannot be checked until sync.",
+                  name: "Offline admission queued",
                   tierName: undefined,
                 });
                 setScanCount((c) => c + 1);
@@ -707,7 +711,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                     {
                       id: `${Date.now()}`,
                       type: "success" as const,
-                      name: "Verified Offline",
+                      name: "Offline admission queued",
                       timestamp: Date.now(),
                     },
                     ...h,
@@ -725,7 +729,9 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                 setScanResult({
                   type: "success",
                   kind: "addon",
-                  name: "Add-on Verified Offline",
+                  reason: "offline_pending",
+                  message: "Provisional only. Server confirmation is pending sync.",
+                  name: "Offline redemption queued",
                 });
                 setScanCount((c) => c + 1);
                 setScanHistory((h) =>
@@ -733,7 +739,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
                     {
                       id: `${Date.now()}`,
                       type: "success" as const,
-                      name: "Add-on Verified Offline",
+                      name: "Offline redemption queued",
                       timestamp: Date.now(),
                     },
                     ...h,
@@ -768,8 +774,7 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
               setScanResult({
                 reason: "network_error",
                 type: "error",
-                message:
-                  "Network error. Download tickets for offline scanning.",
+                message: scanVerdictMessage("network_error"),
               });
             }
           },
@@ -864,6 +869,10 @@ function ScannerWithCamera({ eventId }: { eventId: string }) {
             <Zap size={18} color="#fff" />
           )}
         </Pressable>
+      </View>
+
+      <View style={{ position: "absolute", top: insets.top + 64, left: 16, right: 16 }}>
+        <OfflineScanConflicts eventId={eventId} />
       </View>
 
       {/* Bottom stats + history */}

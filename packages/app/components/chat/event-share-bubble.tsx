@@ -14,6 +14,7 @@ import type { EventShareContext } from "@dvnt/app/lib/stores/chat-store";
 interface EventShareBubbleProps {
   eventShare: EventShareContext;
   isOwnMessage: boolean;
+  onLongPress?: () => void;
 }
 
 function formatEventDate(iso?: string | null): string {
@@ -32,6 +33,7 @@ function formatEventDate(iso?: string | null): string {
 export function EventShareBubble({
   eventShare,
   isOwnMessage,
+  onLongPress,
 }: EventShareBubbleProps) {
   const router = useRouter();
 
@@ -46,6 +48,8 @@ export function EventShareBubble({
   return (
     <Pressable
       onPress={handlePress}
+      onLongPress={onLongPress}
+      delayLongPress={400}
       style={({ pressed }) => [styles.container, pressed && { opacity: 0.88 }]}
     >
       {/* Cover image */}

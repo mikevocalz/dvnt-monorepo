@@ -1,3 +1,4 @@
+import { deliverTicketReceipts } from "../_shared/ticket-receipt-delivery.ts";
 /**
  * claim-comp-ticket Edge Function
  *
@@ -87,7 +88,7 @@ Deno.serve(async (req: Request) => {
       return refuse(403, r.code, r.message, req);
     }
 
-    const { data, error } = await supabase.rpc("claim_comp_ticket", {
+    const { data, error } = await supabase.rpc("claim_comp_ticket_with_receipt", {
       p_token: body.token,
       p_user_id: userId,
     });
@@ -98,6 +99,48 @@ Deno.serve(async (req: Request) => {
     if (!data?.ok) {
       const r = claimRefusal(data?.code);
       return refuse(r.status, r.code, r.message, req);
+    }
+
+    // A phone ticket gets an email only after a verified account claims it.
+    // Atomic claim enqueues the receipt once; replay cannot create another.
+    try {
+      await deliverTicketReceipts(supabase, data.receipt_ids || []);
+    } catch {
+      console.warn("[claim-comp-ticket] receipt processing pending");
+    }
+
+    // Only the winning claim emits activity. A replay must not add duplicate
+    // rows, and a notification outage must not turn a committed claim into a
+    // failed ticket response. The claimant's canonical profile owns the feed;
+    // neither a phone number nor the bearer claim token identifies a feed.
+    if (data.already_claimed !== true) {
+      try {
+        const { data: recipient, error: recipientError } = await supabase
+          .from("users").select("id").eq("auth_id", userId).maybeSingle();
+        if (recipientError || !recipient?.id) {
+          console.warn("[claim-comp-ticket] notification recipient unavailable:", recipientError?.code || "profile_missing");
+        } else {
+          // Attribute the original issuer, not the claimant or an assumed host.
+          const { data: claimLink, error: linkError } = await supabase.from("ticket_claim_links")
+            .select("issued_by").eq("ticket_id", data.ticket_id)
+            .eq("claimed_by", userId).maybeSingle();
+          const { data: issuer, error: issuerError } = !linkError && claimLink?.issued_by
+            ? await supabase.from("users").select("id")
+              .eq("auth_id", claimLink.issued_by).maybeSingle()
+            : { data: null, error: null };
+          const { error: notificationError } = await supabase.from("notifications").insert({
+            recipient_id: recipient.id,
+            actor_id: issuerError ? null : issuer?.id ?? null,
+            type: "ticket_comped",
+            entity_type: "event",
+            entity_id: String(data.event_id),
+            entity_payload: { ticket_id: data.ticket_id },
+          });
+          if (notificationError) console.warn("[claim-comp-ticket] notification insert failed:", notificationError.code || "insert_failed");
+        }
+      } catch {
+        console.warn("[claim-comp-ticket] notification unavailable");
+      }
     }
 
     return json({

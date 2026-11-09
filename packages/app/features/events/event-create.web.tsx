@@ -1,3 +1,5 @@
+import { EventLynkSetup } from "./ui/EventLynkSetup.web";
+import { isAdmissionCategory, defaultTicketTypeName } from "@dvnt/app/lib/tickets/ticket-category";
 import { shouldDiscardPreparedRoom } from "@dvnt/app/lib/events/event-publish-error";
 import { prepareEventLynkRoom } from "@dvnt/app/lib/events/prepare-event-lynk-room";
 import { webEventDetailRoute } from "@dvnt/app/lib/events/event-detail-route";
@@ -60,6 +62,7 @@ import { usePlacesAutocomplete } from "@dvnt/app/lib/hooks/use-places-autocomple
 import type { PlacesLocationData } from "@dvnt/app/lib/places/types";
 import {
   ticketTypesApi,
+  TICKET_TYPE_CATEGORIES,
   TIER_TYPE_OPTIONS,
   TIER_VISIBILITY_OPTIONS,
 } from "@dvnt/app/lib/api/ticket-types";
@@ -498,7 +501,8 @@ export function CreateEventScreen() {
               const createdTier = await withTimeout(
                 ticketTypesApi.create({
                   eventId: String(id),
-                  name: tier.name || "General Admission",
+                  name: tier.name || defaultTicketTypeName(tier.category),
+                  category: tier.category || "admission",
                   priceCents: tier.priceCents,
                   quantityTotal: tier.quantity > 0 ? tier.quantity : 0,
                   maxPerUser:
@@ -1080,27 +1084,7 @@ export function CreateEventScreen() {
               </Field>
 
               <Field label="Sneaky Lynk room">
-                <label className="flex items-start gap-3 rounded-xl bg-white/[0.04] px-4 py-3">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-[#8A40CF]"
-                    checked={s.attachLynkRoom}
-                    onChange={(e) => s.setAttachLynkRoom(e.target.checked)}
-                  />
-                  <span className="flex-1">
-                    <span className="block text-sm font-medium text-white">
-                      Host this event in a Sneaky Lynk
-                    </span>
-                    {/* Says what it DOES, not what it is. A checkbox whose
-                        consequence is a second object being created has to
-                        name that consequence before the tap, not after. */}
-                    <span className="mt-0.5 block text-xs text-white/55">
-                      Creates a private video room. Guests RSVP and wait until you start
-                      it from the event page. Leave ticket sales off for free entry.
-                      Your Sneaky Lynk hosting plan’s time and capacity limits still apply.
-                    </span>
-                  </span>
-                </label>
+                <EventLynkSetup enabled={s.attachLynkRoom} onChange={s.setAttachLynkRoom} />
               </Field>
 
               <Field label="YouTube video (optional)">
@@ -1496,6 +1480,7 @@ export function CreateEventScreen() {
                 </div>
               </div>
             </div>
+            {s.attachLynkRoom ? <div className="mt-3"><EventLynkSetup enabled /></div> : null}
             {s.ticketingEnabled ? (
               <div className="mt-2 text-sm text-white/60">
                 {parseFloat(s.ticketPrice) > 0
@@ -1666,6 +1651,21 @@ function TicketTiersEditor() {
               <Trash2 size={16} />
             </button>
           </div>
+          <div className="flex flex-wrap gap-1.5" aria-label="Ticket category">
+            {TICKET_TYPE_CATEGORIES.map((option) => {
+              const selected = (tier.category || "admission") === option.value;
+              return (
+                <button key={option.value} type="button" aria-pressed={selected}
+                  onClick={() => update(idx, { category: option.value })}
+                  className={`flex-1 h-8 rounded-lg text-[11px] font-semibold border ${selected ? "bg-[#3FDCFF] text-black border-transparent" : "text-white/50 border-white/12"}`}>
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-white/50">
+            {TICKET_TYPE_CATEGORIES.find((option) => option.value === (tier.category || "admission"))?.hint}
+          </p>
           <div className="grid grid-cols-3 gap-2">
             <input
               className="h-9 rounded-lg bg-white/8 px-2 text-sm text-white outline-none"
@@ -1740,9 +1740,9 @@ function TicketTiersEditor() {
             </label>
           </div>
 
-          {/* Tier type — v2 enum (GA / VIP / Early Bird / Table / Group). */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] text-white/55">Tier type</span>
+          {/* Admission styles do not classify separately sold services/products. */}
+          {isAdmissionCategory(tier.category) ? <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-white/55">Admission tier type</span>
             <div className="flex flex-wrap gap-1.5">
               {TIER_TYPE_OPTIONS.map((o) => {
                 const selected = (tier.tierType ?? "ga") === o.value;
@@ -1762,7 +1762,7 @@ function TicketTiersEditor() {
                 );
               })}
             </div>
-          </div>
+          </div> : null}
 
           {/* Visibility — public / hidden / locked (+ unlock code). */}
           <div className="flex flex-col gap-1">

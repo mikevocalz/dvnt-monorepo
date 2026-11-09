@@ -32,6 +32,7 @@ interface StoryReplyBubbleProps {
   storyReply: StoryReplyContext;
   replyText: string;
   isOwnMessage: boolean;
+  onLongPress?: () => void;
 }
 
 const THUMB_W = 44;
@@ -41,6 +42,7 @@ export function StoryReplyBubble({
   storyReply,
   replyText,
   isOwnMessage,
+  onLongPress,
 }: StoryReplyBubbleProps) {
   const router = useRouter();
 
@@ -85,6 +87,8 @@ export function StoryReplyBubble({
           affordance — a 44pt-wide thumbnail is too small to be the only target. */}
       <Pressable
         onPress={storyReply.isExpired ? handleProfilePress : handleStoryPress}
+        onLongPress={onLongPress}
+        delayLongPress={400}
         accessibilityRole="button"
         accessibilityLabel={
           storyReply.isExpired ? `${label}. Story no longer available.` : label

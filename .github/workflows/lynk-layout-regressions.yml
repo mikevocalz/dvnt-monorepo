@@ -5,6 +5,21 @@ on:
       - 'packages/app/features/sneaky-lynk/**'
       - 'packages/app/features/routes/screens/(protected)/sneaky-lynk/room/**'
       - 'packages/app/lib/secure-capture/**'
+      - 'packages/app/lib/web-chrome*'
+      - 'packages/app/components/app-shell.web.tsx'
+      - 'packages/app/components/web-app-shell.web.tsx'
+      - 'packages/app/components/web-top-bar.web.tsx'
+      - 'packages/app/components/web-tab-bar.web.tsx'
+      - 'apps/web/src/components/site-chrome.tsx'
+      - 'apps/web/src/app/(frontend)/video/room/**'
+      - 'apps/web/src/app/(frontend)/sneaky-lynk/**'
+      - 'apps/web/src/app/(frontend)/sl/**'
+      - 'apps/web/src/middleware.ts'
+      - 'apps/web/next.config.*'
+      - 'packages/app/features/messages/messages.web.tsx'
+      - 'packages/app/features/routes/screens/(protected)/_layout.tsx'
+      - 'packages/app/features/routes/screens/(protected)/sneaky-lynk/_layout.tsx'
+      - 'scripts/test-lynk-shell-chrome.cjs'
       - 'packages/app/components/media/DVNTLiquidGlass.tsx'
       - 'packages/ui/src/video/RoomTimer*'
       - 'scripts/test-lynk-layout-browser.cjs'
@@ -31,7 +46,7 @@ jobs:
         with:
           node-version: 24
       - name: Install isolated rendering tools
-        run: npm install --prefix "$RUNNER_TEMP/lynk-layout" --no-save --no-package-lock esbuild@0.25.11 @playwright/test@1.56.1 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 lucide-react@1.17.0 @tanstack/react-virtual@3.14.2 react-native-web@0.21.2 postcss@8.5.26 tailwindcss@4.3.0 @tailwindcss/postcss@4.3.0 react-anticapture@0.1.5 happy-dom@20.10.3
+        run: npm install --prefix "$RUNNER_TEMP/lynk-layout" --no-save --no-package-lock esbuild@0.25.11 @playwright/test@1.56.1 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 lucide-react@1.17.0 @tanstack/react-virtual@3.14.2 react-native-web@0.21.2 postcss@8.5.26 tailwindcss@4.3.0 @tailwindcss/postcss@4.3.0 happy-dom@20.10.3 @tanstack/react-query@5.99.0 typescript@5.9.3
       - name: Install Chromium
         run: "$RUNNER_TEMP/lynk-layout/node_modules/.bin/playwright install --with-deps chromium"
       - name: Native dock and crowd geometry
@@ -50,6 +65,10 @@ jobs:
         run: |
           node scripts/test-lynk-guest-gallery-dom.cjs
           node scripts/test-lynk-watermark-dom.cjs
+          node scripts/test-lynk-shell-chrome.cjs
+          node --test packages/app/lib/web-chrome.test.ts
+          node -e "require('esbuild').buildSync({entryPoints:['packages/app/lib/secure-capture/useSecureCaptureGuard.test.ts'],bundle:true,platform:'node',format:'cjs',outfile:process.env.RUNNER_TEMP+'/lynk-capture-policy.cjs',nodePaths:[process.env.NODE_PATH]})"
+          node --test "$RUNNER_TEMP/lynk-capture-policy.cjs"
           node scripts/test-lynk-chat-scroll.cjs
           node scripts/test-lynk-native-moderation.cjs
           node scripts/test-lynk-native-countdown.cjs

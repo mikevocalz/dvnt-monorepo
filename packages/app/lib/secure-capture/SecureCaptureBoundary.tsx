@@ -2,7 +2,6 @@
 
 import { useRef } from "react";
 import type { ReactNode } from "react";
-import AntiCapture from "react-anticapture";
 import { addSentryBreadcrumb } from "@dvnt/observability";
 import {
   SecureCaptureProvider,
@@ -88,34 +87,9 @@ function SecureCaptureBoundaryInner({
       ? process.env?.EXPO_PUBLIC_SNEAKY_LYNK_WEB_CAPTURE_PROTECTION
       : undefined;
   const protectionEnabled = enabled && shouldEnableWebSecureCapture(rawFlag);
-  /**
-   * STRUCK 2026-09-04: `devtoolsPrevent` is off, permanently.
-   *
-   * `react-anticapture` implements it by REPLACING document.body:
-   *
-   *     document.body.innerHTML =
-   *       '<p>Please close devtools/console to continue.</p>'
-   *
-   * Not the boundary — the whole document. And the detection is a heuristic on
-   * viewport geometry, which mobile Safari trips on its own: granting camera
-   * access shows a permission banner, the viewport resizes, and the guard wipes
-   * the app. Reported from a real phone on dvntapp.live with the room never
-   * rendering at all.
-   *
-   * The precondition this feature needs — reliable devtools detection in a
-   * browser — does not exist. Its failure mode is destroying the page for a
-   * legitimate user, while the thing it deters costs an attacker one line to
-   * undo (it only blanks the DOM; the data is already in the client). A guard
-   * whose false positives are worse than its true positives is not deterrence.
-   *
-   * The deterrence that DOES hold is untouched and is what this boundary is
-   * actually for: screenshot/clipboard blocking, text selection, blackout on
-   * focus loss and tab hide, the forensic watermark, and the tiered capture
-   * signals in `useSecureCaptureGuard`.
-   */
-  const devtoolsPrevent = false;
-
-  const { blackoutReason } = useSecureCaptureGuard({
+  // The scoped guard owns capture deterrence. The third-party wrapper started
+  // every room behind an Enter-only alert, including on touch-only devices.
+  const { blackoutReason, clearBlackout } = useSecureCaptureGuard({
     enabled: protectionEnabled,
     rootRef,
     roomId,
@@ -134,18 +108,20 @@ function SecureCaptureBoundaryInner({
     return <>{children}</>;
   }
 
-  const protectedContent = (
+  return (
     <div
       ref={rootRef}
       data-secure-capture-boundary={mode}
-      className="relative h-full w-full select-none overflow-hidden"
+      className="relative flex h-full min-h-0 w-full flex-1 flex-col select-none overflow-hidden"
       style={{
         WebkitUserSelect: "none",
         userSelect: "none",
         WebkitTouchCallout: "none",
       }}
     >
-      {children}
+      <div data-secure-capture-content className="relative flex h-full min-h-0 w-full flex-1 flex-col">
+        {children}
+      </div>
       {watermark ? (
         <SneakyLynkWatermarkOverlay
           roomId={roomId}
@@ -154,19 +130,8 @@ function SecureCaptureBoundaryInner({
           userHandle={userHandle}
         />
       ) : null}
-      <SneakyLynkBlackoutOverlay reason={blackoutReason} />
+      <SneakyLynkBlackoutOverlay reason={blackoutReason} onReturn={clearBlackout} />
     </div>
-  );
-
-  return (
-    <AntiCapture
-      screenshotPrevent
-      clipboardPrevent
-      devtoolsPrevent={devtoolsPrevent}
-      userSelect
-    >
-      {protectedContent}
-    </AntiCapture>
   );
 }
 

@@ -1,0 +1,6 @@
+const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const ts=require('typescript');
+const m={exports:{}};new Function('exports','module',ts.transpileModule(fs.readFileSync(__dirname+'/receipt-managed-orders.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(m.exports,m);
+function db(rows,error=null){const calls=[];const q={select:x=>(calls.push(['select',x]),q),eq:(...x)=>(calls.push(['eq',...x]),q),in:(...x)=>(calls.push(['in',...x]),Promise.resolve({data:rows,error}))};return {calls,from:x=>(calls.push(['from',x]),q)}}
+test('only future outbox comp orders leave legacy retry; unrelated checkout history retained',async()=>{const d=db([{source_id:'comp'}]);assert.deepEqual(await m.exports.excludeReceiptManagedOrders(d,[{id:'comp'},{id:'checkout'}]),[{id:'checkout'}]);assert.deepEqual(d.calls.at(-1),['in','source_id',['comp','checkout']]);assert.deepEqual(d.calls[2],['eq','source_kind','guest_comp']);});
+test('queue read failure defers rather than duplicates any email',async()=>assert.deepEqual(await m.exports.excludeReceiptManagedOrders(db(null,{code:'offline'}),[{id:'comp'}]),[]));
+test('empty orders perform no query',async()=>{const d=db([]);assert.deepEqual(await m.exports.excludeReceiptManagedOrders(d,[]),[]);assert.equal(d.calls.length,0);});

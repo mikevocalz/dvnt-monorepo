@@ -10,7 +10,7 @@
  * Cache hydration strategy:
  * 1. Call bootstrap-feed edge function (1 request)
  * 2. Seed the infinite feed query cache with posts
- * 3. Seed the unread counts cache with viewer context
+ * 3. Leave unread totals to the authoritative viewer-scoped query
  * 4. Seed like state cache per post
  * 5. Return stories data for the StoriesBar
  */
@@ -22,10 +22,8 @@ import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { isFeatureEnabled } from "@dvnt/app/lib/feature-flags";
 import { bootstrapApi, type BootstrapFeedResponse } from "@dvnt/app/lib/api/bootstrap";
 import { postKeys } from "@dvnt/app/lib/hooks/use-posts";
-import { messageKeys } from "@dvnt/app/lib/hooks/use-messages";
 import { seedLikeState } from "@dvnt/app/lib/hooks/usePostLikeState";
 import { useScreenTrace } from "@dvnt/app/lib/perf/screen-trace";
-import { useUnreadCountsStore } from "@dvnt/app/lib/stores/unread-counts-store";
 import {
   normalizeTextPostTheme,
   resolveTextPostPresentation,
@@ -139,16 +137,8 @@ function hydrateFromBootstrap(
     );
   }
 
-  // 2. Seed unread counts only when backend confirms the source is authoritative.
-  if (data.viewer?.unreadMessagesAuthoritative) {
-    queryClient.setQueryData(messageKeys.unreadCount(userId), {
-      inbox: data.viewer.unreadMessages,
-      spam: 0,
-    });
-    const store = useUnreadCountsStore.getState();
-    store.setMessagesUnread(data.viewer.unreadMessages);
-    store.setSpamUnread(0);
-  }
+  // Unread totals are fetched independently. This accelerator's bounded
+  // history count must not overwrite the canonical inbox/Requests snapshot.
 
   // 3. Seed like state per post
   data.posts.forEach((post) => {
