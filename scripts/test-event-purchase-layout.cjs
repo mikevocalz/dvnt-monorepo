@@ -373,6 +373,29 @@ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="540" height="960" view
       evidence.checks.push(size.name+': wallet service URL selects Coat Check for active/scanned comp; explicit checkout and Escape preserve original admission');
       await page.evaluate(()=>history.replaceState(null,'',location.pathname));
 
+      // Organizer hides/deletes a sales tier after a member bought it. The
+      // actual selector must stop selling it without removing the held pass.
+      for (const mode of ['inactive','deleted']) {
+        await page.evaluate(({mode,paidId})=>{
+          const f=window.fixture;f.reset();
+          f.configure({authenticated:true,ownedTicket:f.ownedTicket});
+          // Keep stale embedded event tiers to verify authoritative query rows
+          // win when a tier is disabled or removed from the current catalog.
+          f.configure({tiers:mode==='inactive'
+            ? f.baseEvent.ticketTiers.map(t=>t.id===paidId?{...t,is_active:false}:t)
+            : f.baseEvent.ticketTiers.filter(t=>t.id!==paidId)});
+        },{mode,paidId:PAID});
+        await tick(page);
+        assert.equal(await page.getByTestId('ticket-tier-'+PAID).count(),0,mode+' tier must not remain for sale');
+        await page.getByTestId('ticket-tier-'+FREE).waitFor();
+        const retained=purchase.getByRole('button',{name:'View ticket',exact:true});
+        await retained.waitFor();await retained.click();await tick(page);
+        assert.deepEqual(await page.evaluate(()=>window.fixture.routes),['/feed/ticket/fixture-ticket'],mode+' tier preserves purchased pass route');
+        assert.equal(await page.evaluate(()=>window.fixture.ui.getState().checkoutOpen),false);
+        assert.deepEqual(await page.evaluate(()=>window.fixture.checkouts),[]);
+      }
+      evidence.checks.push(size.name+': inactive and deleted catalog tiers disappear despite stale embedded data; purchased ticket remains viewable without checkout');
+
       await page.evaluate(()=>window.fixture.reset());await tick(page);
       // Stress realistic long names/descriptions without changing production markup.
       await page.evaluate(()=>{

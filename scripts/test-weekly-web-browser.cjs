@@ -69,6 +69,13 @@ window.weekly={state,useAuth,mount,publishSessionBoundary:publishBoundary};
  await reset('web');await page.evaluate(()=>window.weekly.state.pending=true);
  await button("Approve First's follow request").click();
  await page.waitForFunction(()=>window.weekly.state.calls.length===1);
+ // React Query notifies observers asynchronously after entering the API stub.
+ // Await the committed pending UI, then require every action to stay locked
+ // until the deliberately held server response is released.
+ await page.getByText('Approving request…',{exact:true}).waitFor();
+ assert.equal(await button("Approve First's follow request").getAttribute('aria-busy'),'true');
+ assert.equal(await button("Approve First's follow request").isDisabled(),true);
+ assert.equal(await button("Decline First's follow request").isDisabled(),true);
  assert.equal(await button('Refresh follow requests').isDisabled(),true);
  await page.evaluate(()=>window.weekly.state.releases.splice(0).forEach(r=>r()));
  await page.getByText('Request approved.',{exact:false}).waitFor();
@@ -100,6 +107,7 @@ window.weekly={state,useAuth,mount,publishSessionBoundary:publishBoundary};
  await page.evaluate(()=>window.weekly.app.render('web-feed'));
  await button('Request to FOLLOW').first().waitFor();assert.equal(await page.getByText('PERMITTED_SYNTHETIC_POST',{exact:true}).count(),0);
  await page.evaluate(()=>{const f=window.weekly;f.publishSessionBoundary({ready:true,authId:'auth-b'});f.useAuth.setState({user:{id:'owner-b',authId:'auth-b',username:'Other'},isAuthenticated:true});});
+ await page.waitForFunction(()=>window.weekly.state.postReads.filter(r=>r.owner==='owner-b').length===2);
  await button('Request to FOLLOW').first().waitFor();
  assert.equal(await page.getByText('PERMITTED_SYNTHETIC_POST',{exact:true}).count(),0);
  // Native HTML dialog, keyboard dismissal, disclosure, explicit consent and stop.
