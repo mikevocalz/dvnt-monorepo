@@ -297,8 +297,10 @@ export function useEventTickets(eventId: string) {
 /** Ticket types for an event */
 export function useTicketTypes(eventId: string) {
   return useQuery({
-    queryKey: qk.tickets.types(eventId),
+    queryKey: [...qk.tickets.types(eventId), "active-v2"],
     queryFn: () => ticketsApi.getTicketTypes(eventId),
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     enabled: !!eventId,
     staleTime: STALE_TIMES.events,
     gcTime: GC_TIMES.short,

@@ -191,10 +191,10 @@ export const ticketTypesApi = {
   /**
    * Get all ticket types for an event
    */
-  async getByEvent(eventId: string): Promise<TicketTypeRecord[]> {
+  async getByEvent(eventId: string, publicOnly = false): Promise<TicketTypeRecord[]> {
     try {
       const { data, error } = await supabase
-        .from("ticket_types")
+        .from(publicOnly ? "ticket_types_public" : "ticket_types")
         .select("*")
         .eq("event_id", parseInt(eventId))
         .order("price_cents", { ascending: true });

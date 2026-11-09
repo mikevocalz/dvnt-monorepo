@@ -1,3 +1,4 @@
+import { resetFollowAccessCaches } from "./reset-follow-access-caches";
 /**
  * Hooks for managing user settings (notifications, privacy, messages, likes/comments)
  * Uses TanStack Query for data fetching and mutations with optimistic updates.
@@ -99,11 +100,7 @@ async function fetchUserSettings(): Promise<Record<string, unknown>> {
   });
 
   if (error || !data?.ok) {
-    console.warn(
-      "[user-settings] fetch failed, returning defaults:",
-      error?.message || data?.error?.message,
-    );
-    return {};
+    throw new Error(error?.message || data?.error?.message || "Could not load privacy settings");
   }
   return data?.data?.settings || {};
 }
@@ -229,6 +226,7 @@ export function useUpdatePrivacySettings() {
       return updateUserSettings({ privacy: settings });
     },
     onMutate: async (newSettings) => {
+      if (newSettings.privateAccount !== undefined) await resetFollowAccessCaches(queryClient, false);
       const key = settingsKeys.all(user?.id || "");
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<Record<string, unknown>>(key);
@@ -251,7 +249,8 @@ export function useUpdatePrivacySettings() {
       }
       showToast("error", "Error", "Failed to update privacy settings");
     },
-    onSettled: () => {
+    onSettled: async (_data, _error, settings) => {
+      if (settings.privateAccount !== undefined) await resetFollowAccessCaches(queryClient);
       queryClient.invalidateQueries({
         queryKey: settingsKeys.all(user?.id || ""),
       });

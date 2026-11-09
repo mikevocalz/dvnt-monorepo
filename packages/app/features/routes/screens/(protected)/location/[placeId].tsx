@@ -1,3 +1,5 @@
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
  * Location Discovery Screen
  * Shows posts at a specific location (Instagram-style location page)
@@ -134,6 +136,7 @@ function PostGridItem({
   /** Cell size from the screen's responsive grid — never a module constant. */
   size: number;
 }) {
+  if (useSpicyPostLocked(post)) return <View style={{ width: size }}><SpicyFollowGate author={post.author} height={size} /></View>;
   const imageUri = post.thumbnail || post.media?.[0]?.url;
   const isVideo = post.type === "video";
 

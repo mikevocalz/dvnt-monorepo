@@ -1,3 +1,4 @@
+import { isSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
  * Image Prefetch — Warm image caches for off-screen content
  *
@@ -165,11 +166,12 @@ export function prefetchImagesRN(urls: string[]) {
  * Focuses on the first media item per post (the hero image).
  */
 export function extractFeedImageUrls(
-  posts: { media?: { url: string; type: string }[] }[],
+  posts: { isNSFW?: boolean; isSpicyLocked?: boolean; spicyAccessViewerId?: string | null; media?: { url: string; type: string }[] }[],
 ): string[] {
   const urls: string[] = [];
 
   for (const post of posts) {
+    if (isSpicyPostLocked(post)) continue;
     if (!post.media?.length) continue;
     const firstMedia = post.media[0];
     // Skip GIFs — expo-image's iOS prefetch path runs SDWebImage

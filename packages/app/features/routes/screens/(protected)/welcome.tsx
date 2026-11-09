@@ -190,6 +190,7 @@ export default function WelcomeScreen() {
     await locationAccess.setOverall(true);
     if (!locationAllowedFor(owner)) return;
     const generation = useLocationAccessStore.getState().generation;
+    const observationSession = useLocationAccessStore.getState().settings?.sessionKey;
     const allowed = () => useAuthStore.getState().user?.authId === owner && locationAllowedFor(owner) && useLocationAccessStore.getState().generation === generation;
     s.setLocating(true);
     try {
@@ -209,7 +210,7 @@ export default function WelcomeScreen() {
       const { latitude, longitude } = loc.coords;
       const { setDeviceLocation, setLocationMode, setActiveCity } =
         useEventsLocationStore.getState();
-      setDeviceLocation(latitude, longitude);
+      setDeviceLocation(latitude, longitude, { observedAt: loc.timestamp, ownerAuthId: owner, sessionKey: observationSession });
       setLocationMode("device");
       const cities: City[] = await citiesApi.getCities();
       let nearest: City | null = null;

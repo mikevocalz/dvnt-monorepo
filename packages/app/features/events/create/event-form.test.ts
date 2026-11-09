@@ -88,3 +88,10 @@ test("attendee visibility accepts only literal boolean true", () => {
     assert.equal(buildEventInsert(draft({ eventType: "sex_party", showAttendees: showAttendees as unknown as boolean })).showAttendees, false);
   }
 });
+
+test("adult categories default to Spicy even in restored Sweet drafts", () => {
+  for (const eventType of ["bate_session", "sex_party", "kink_fetish_party", "glory_hole", "cruising", "cum_dump"] as const) {
+    assert.equal(buildEventInsert(draft({ eventType, isNsfw: false })).nsfw, true);
+  }
+  assert.equal(buildEventInsert(draft({ eventType: "party", isNsfw: false })).nsfw, undefined);
+});

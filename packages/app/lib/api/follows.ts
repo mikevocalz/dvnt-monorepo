@@ -1,10 +1,10 @@
 import { supabase } from "../supabase/client";
-import { DB } from "../supabase/db-map";
-import { getCurrentUserIdSync, resolveUserIdInt } from "./auth-helper";
+import { resolveUserIdInt } from "./auth-helper";
 import { requireBetterAuthToken } from "../auth/identity";
 
 interface ToggleFollowResponseData {
   following: boolean;
+  followRequestStatus: "none" | "pending" | "approved";
   targetUserId: string;
   targetUsername: string;
   viewerFollows: boolean;
@@ -25,6 +25,7 @@ interface ToggleFollowResponse {
 export interface FollowMutationResult {
   success: boolean;
   following: boolean;
+  followRequestStatus: "none" | "pending" | "approved";
   targetUsername: string;
   targetFollowersCount: number;
   targetFollowingCount: number;
@@ -34,6 +35,24 @@ export interface FollowMutationResult {
 }
 
 export const followsApi = {
+  async requestAction(action: "status" | "requests" | "approve" | "decline", targetUserId?: string) {
+    const token = await requireBetterAuthToken();
+    const { data, error } = await supabase.functions.invoke("toggle-follow", {
+      body: { action, ...(targetUserId ? { targetUserId: await resolveUserIdInt(targetUserId) } : {}) },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (error || !data?.ok || !data.data) throw new Error(data?.error?.message || error?.message || "Follow request failed");
+    return data.data;
+  },
+  async getFollowRequestStatus(targetUserId: string): Promise<{ following: boolean; followRequestStatus: "none" | "pending" | "approved" }> {
+    return followsApi.requestAction("status", targetUserId);
+  },
+  async getFollowRequests(): Promise<Array<{ follower_id: number; created_at: string; requester: { username: string } | null }>> {
+    return (await followsApi.requestAction("requests")).requests;
+  },
+  async respondToFollowRequest(requesterId: string, action: "approve" | "decline") {
+    return followsApi.requestAction(action, requesterId);
+  },
   /**
    * Follow/unfollow user via Edge Function.
    * Accepts explicit action for race-free, idempotent mutations.
@@ -89,6 +108,7 @@ export const followsApi = {
     const result: FollowMutationResult = {
       success: true,
       following: data.data.following,
+      followRequestStatus: data.data.followRequestStatus ?? "none",
       targetUsername: data.data.targetUsername,
       targetFollowersCount: data.data.targetFollowersCount,
       targetFollowingCount: data.data.targetFollowingCount,
@@ -117,20 +137,8 @@ export const followsApi = {
    */
   async isFollowing(targetUserId: string): Promise<boolean> {
     try {
-      const currentUserId = getCurrentUserIdSync();
-      if (!currentUserId) return false;
-
-      const { data, error } = await supabase
-        .from(DB.follows.table)
-        .select("id")
-        .eq(DB.follows.followerId, currentUserId)
-        .eq(DB.follows.followingId, await resolveUserIdInt(targetUserId))
-        .single();
-
-      return !!data && !error;
-    } catch (error) {
-      return false;
-    }
+      return (await followsApi.getFollowRequestStatus(targetUserId)).following;
+    } catch { return false; }
   },
 
   /**

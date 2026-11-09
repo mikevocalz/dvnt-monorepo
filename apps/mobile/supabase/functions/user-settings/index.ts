@@ -6,6 +6,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { isSettingsObject, mergeSettings } from "./merge-settings.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -91,29 +92,41 @@ Deno.serve(async (req) => {
         return errorResponse("internal_error", "Failed to fetch settings");
       }
 
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from("users").select("is_private").eq("auth_id", authId).maybeSingle();
+      if (profileError) return errorResponse("internal_error", "Failed to fetch privacy settings");
+      const saved = isSettingsObject(data?.settings) ? data.settings : {};
+      const privacy = isSettingsObject(saved.privacy) ? saved.privacy : {};
+      const flag = privacy.privateAccount;
+      const privateAccount = profile?.is_private === true || (flag != null && flag !== false && flag !== "false");
       return jsonResponse({
         ok: true,
-        data: { settings: data?.settings || {} },
+        data: { settings: mergeSettings(saved, { privacy: { privateAccount } }) },
       });
     }
 
     if (action === "update") {
-      if (!body.settings || typeof body.settings !== "object") {
+      if (!isSettingsObject(body.settings)) {
         return errorResponse("validation_error", "settings object is required");
+      }
+      if (body.settings.privacy !== undefined && (!isSettingsObject(body.settings.privacy)
+        || (body.settings.privacy.privateAccount !== undefined && typeof body.settings.privacy.privateAccount !== "boolean"))) {
+        return errorResponse("validation_error", "Privacy preferences must be an object and privateAccount must be boolean");
       }
 
       // Fetch existing settings first
-      const { data: existing } = await supabaseAdmin
+      let { data: existing, error: readError } = await supabaseAdmin
         .from("user_settings")
         .select("settings")
         .eq("auth_id", authId)
         .single();
 
-      // Deep merge: existing settings + new partial settings
-      const mergedSettings = {
-        ...(existing?.settings || {}),
-        ...body.settings,
-      };
+      // Do not overwrite saved privacy/notification preferences when the read
+      // failed. A genuinely new member has no row and may use defaults.
+      if (readError && readError.code !== "PGRST116") {
+        console.error("[user-settings] UPDATE read error:", readError);
+        return errorResponse("internal_error", "Could not load your saved settings");
+      }
 
       // Growth-message opt-out. Only brand campaigns in brand_message_outbox
       // read this; ticket email, receipts and order mail never route through
@@ -143,28 +156,56 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Upsert
-      const { data, error } = await supabaseAdmin
-        .from("user_settings")
-        .upsert(
-          {
-            auth_id: authId,
-            settings: mergedSettings,
-          },
-          { onConflict: "auth_id" },
-        )
-        .select("settings")
-        .single();
-
-      if (error) {
-        console.error("[user-settings] UPSERT error:", error);
-        return errorResponse("internal_error", "Failed to save settings");
+      // Compare-and-swap keeps rapid, concurrent sibling toggles from restoring
+      // an older privacy object. A newly created row uses INSERT, never UPSERT,
+      // so a simultaneous first update must reread instead of erasing it.
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        let baseSettings = isSettingsObject(existing?.settings) ? existing.settings : {};
+        const privacyPatch = isSettingsObject(body.settings.privacy) ? body.settings.privacy : {};
+        if (!Object.prototype.hasOwnProperty.call(privacyPatch, "privateAccount")) {
+          // A legacy row may say Public while users.is_private still says
+          // Private. A notification/sibling toggle is not a Public choice.
+          // Normalize that saved preference before the atomic sync trigger can
+          // see it. Reread on CAS retries rather than retaining an old verdict.
+          const { data: profile, error: profileError } = await supabaseAdmin
+            .from("users").select("is_private").eq("auth_id", authId).maybeSingle();
+          if (profileError) return errorResponse("internal_error", "Failed to fetch privacy settings");
+          const privacy = isSettingsObject(baseSettings.privacy) ? baseSettings.privacy : {};
+          const flag = privacy.privateAccount;
+          const privateAccount = profile?.is_private === true || (flag != null && flag !== false && flag !== "false");
+          baseSettings = mergeSettings(baseSettings, { privacy: { privateAccount } });
+        }
+        const mergedSettings = mergeSettings(baseSettings, body.settings);
+        const table = supabaseAdmin.from("user_settings");
+        let write;
+        if (existing) {
+          const update = table.update({ settings: mergedSettings }).eq("auth_id", authId);
+          write = existing.settings == null
+            ? update.is("settings", null)
+            : update.eq("settings", JSON.stringify(existing.settings));
+        } else {
+          write = table.insert({ auth_id: authId, settings: mergedSettings });
+        }
+        const { data, error } = await write.select("settings").maybeSingle();
+        if (!error && data) {
+          return jsonResponse({ ok: true, data: { settings: data.settings } });
+        }
+        // A missed compare-and-swap or first-write uniqueness race is safe to
+        // retry against current preferences. Every other error stops the write.
+        if (error && error.code !== "23505") {
+          console.error("[user-settings] UPDATE error:", error);
+          return errorResponse("internal_error", "Failed to save settings");
+        }
+        ({ data: existing, error: readError } = await supabaseAdmin
+          .from("user_settings")
+          .select("settings")
+          .eq("auth_id", authId)
+          .single());
+        if (readError && readError.code !== "PGRST116") {
+          return errorResponse("internal_error", "Could not load your saved settings");
+        }
       }
-
-      return jsonResponse({
-        ok: true,
-        data: { settings: data?.settings || mergedSettings },
-      });
+      return errorResponse("conflict", "Your settings changed. Please try again.");
     }
 
     return errorResponse(

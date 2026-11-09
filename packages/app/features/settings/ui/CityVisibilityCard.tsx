@@ -1,3 +1,5 @@
+import { useExactDistanceConsent } from "@dvnt/app/lib/hooks/use-exact-distance-consent";
+import { EXACT_DISTANCE_COPY } from "@dvnt/app/lib/stores/exact-distance-store";
 /**
  * City discovery visibility — the settings control, native (iOS + Android).
  *
@@ -29,6 +31,7 @@ import {
 export function CityVisibilityCard() {
   // Native privacy settings commit explicit publish/revoke while the screen is visible.
   useSyncMemberProximityPresence();
+  const exact = useExactDistanceConsent();
   const activeCity = useEventsLocationStore((s) => s.activeCity);
   const durationId = useEventsLocationStore((s) => s.visibilityDurationId);
   const setDuration = useEventsLocationStore((s) => s.setVisibilityDuration);
@@ -50,6 +53,14 @@ export function CityVisibilityCard() {
 
   return (
     <View className="mb-6 rounded-xl border border-border bg-card">
+      <View className="p-4">
+        <Text className="text-sm text-muted-foreground">{EXACT_DISTANCE_COPY}</Text>
+        <Pressable accessibilityRole="button" disabled={exact.busy || (!exact.enabled && !exact.withdrawalPending && (!grant || !hasDeviceLocation || !preciseOptIn || preciseOwner !== authId))}
+          onPress={() => void exact.update(!(exact.enabled || exact.withdrawalPending))} className="mt-3 rounded-full border border-border px-4 py-2">
+          <Text className="text-foreground">{exact.withdrawalPending ? "Retry Stop exact distances" : exact.enabled ? "Stop exact distances" : "I agree: allow exact distances"}</Text>
+        </Pressable>
+        {exact.error ? <Text accessibilityRole="alert" className="text-red-500">{exact.error}</Text> : null}
+      </View>
       <View className="flex-row items-center justify-between p-4">
         <View className="flex-1 pr-4">
           <Text className="font-semibold text-foreground">

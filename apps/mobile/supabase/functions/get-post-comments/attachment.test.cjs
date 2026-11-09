@@ -17,7 +17,7 @@ function setup() {
     return { select(columns) { if (columns.includes('content')) assert.ok(columns.includes('attachment')); return this; }, eq() { return this; }, in() { return this; }, is() { roots = true; return this; }, order() { return this; }, limit() { return this; }, single: async () => ({ data: root }), maybeSingle: async () => ({ data: root }), then(resolve) { resolve({ data: roots ? [root] : replies }); } };
   } };
   const source = fs.readFileSync(`${__dirname}/index.ts`, 'utf8').replace(/^import .*?;\n/gm, '');
-  new Function('createClient', 'verifySession', 'resolveOrProvisionUser', 'normalizeCommentAttachment', 'Deno', stripTypeScriptTypes(source))(() => client, async () => null, async () => null, normalizeCommentAttachment, { env: { get: () => 'test' }, serve(fn) { handler = fn; } });
+  new Function('projectVisiblePosts', 'createClient', 'verifySession', 'resolveOrProvisionUser', 'normalizeCommentAttachment', 'Deno', stripTypeScriptTypes(source))(async (_db, rows) => rows, () => client, async () => null, async () => null, normalizeCommentAttachment, { env: { get: () => 'test' }, serve(fn) { handler = fn; } });
   return async body => (await handler(new Request('https://test/get-post-comments', { method: 'POST', body: JSON.stringify(body) }))).json();
 }
 test('root and reply reads include safe attachments, legacy text remains readable, malformed stored metadata is omitted', async () => {

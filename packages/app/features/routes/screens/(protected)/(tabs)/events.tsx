@@ -64,7 +64,7 @@ import { eventEnded } from "@dvnt/app/lib/events/event-time";
 import { pastTabEvents } from "@dvnt/app/lib/events/past-tab";
 import { EventCollectionRow } from "@dvnt/app/features/events";
 import { EventsMapSheet } from "@dvnt/app/features/events";
-import { MapSharingConsent } from "@dvnt/app/features/events/ui/map-sharing-consent";
+import { MapSharingConsent } from "@dvnt/app/features/events/map-sharing-consent";
 import { EventFilterSheet } from "@dvnt/app/features/events";
 import { SpotlightSection } from "@dvnt/app/features/events";
 import { PromoteEventSheet } from "@dvnt/app/features/events";
@@ -510,7 +510,7 @@ function EventsScreenContent() {
   // 20 ended public events). It used to filter the home RPC above, which only
   // returns events that ended in the last 24 hours, so native Past held at
   // most a day of history while web showed the full list.
-  const { data: pastEvents = [] } = usePastEvents();
+  const { data: pastEvents = [] } = usePastEvents(nsfwFilter === true);
 
   // Spotlight + promoted event IDs
   const { data: spotlightItems = [] } = useSpotlightFeed();

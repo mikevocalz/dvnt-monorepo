@@ -13,7 +13,7 @@ test('native Events entry follows tab focus', () => {
 });
 test('only entry surfaces auto-prompt; map retains manual controls', () => {
  for(const platform of ['', '.web']) {
-  const source = read(`packages/app/features/events/ui/map-sharing-consent${platform}.tsx`);
+  const source = read(`packages/app/features/events/map-sharing-consent${platform}.tsx`);
   assert.match(source, /promptOnly = false/);
   assert.match(source, /useMapSharingPrompt\(owner, active, promptOnly\)/);
   assert.match(source, /!promptOnly/);

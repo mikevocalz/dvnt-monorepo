@@ -218,7 +218,7 @@ async function enrichEventsWithTierPrices<
   if (eventIds.length === 0) return events;
 
   const { data, error } = await supabase
-    .from("ticket_types")
+    .from("ticket_types_public")
     .select("event_id, price_cents, is_active")
     .in("event_id", eventIds)
     .eq("is_active", true);
@@ -307,7 +307,7 @@ export const eventsApi = {
         p_search: filters?.search || null,
         p_category: category || null,
         p_sort: filters?.sort || "soonest",
-        p_nsfw: filters?.nsfw ?? null,
+        p_nsfw: filters?.nsfw ?? false,
       });
 
       if (error) throw error;
@@ -575,6 +575,7 @@ export const eventsApi = {
         .from(DB.events.table)
         .select("*")
         .eq(DB.events.hostId, hostAuthId)
+        .or("nsfw.is.null,nsfw.eq.false")
         .order(DB.events.startDate, { ascending: false })
         .limit(limit);
       if (error) throw error;
@@ -619,7 +620,7 @@ export const eventsApi = {
   /**
    * Get past events
    */
-  async getPastEvents(limit: number = 20) {
+  async getPastEvents(limit: number = 20, nsfw = false) {
     try {
       const now = new Date().toISOString();
       // "Past" is end-aware: events with no end_date are assumed to run
@@ -634,6 +635,7 @@ export const eventsApi = {
         .or(
           `end_date.lt.${now},and(end_date.is.null,start_date.lt.${assumedEndBefore})`,
         )
+        .or(nsfw ? "nsfw.eq.true" : "nsfw.is.null,nsfw.eq.false")
         .order(DB.events.startDate, { ascending: false })
         .limit(limit);
 

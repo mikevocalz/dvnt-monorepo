@@ -12,8 +12,10 @@
  * semantic tags + Tailwind only. bg #06070d, accent cyan #3FDCFF.
  */
 "use client";
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { isVideoKind } from "@dvnt/app/lib/media/types";
 import { useResponsiveGrid } from "@dvnt/app/lib/hooks/use-responsive-grid.web";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -107,6 +109,14 @@ function coverFor(post: Post): string {
   return "";
 }
 
+
+function LocationPostGate({ post, height, children }: { post: Post; height: number; children: ReactNode }) {
+  // Same per-post boundary as native: account changes and revoked access also
+  // erase detached media overlays before protected content can paint again.
+  return useSpicyPostLocked(post)
+    ? <SpicyFollowGate author={post.author} height={height} />
+    : <>{children}</>;
+}
 
 export function LocationDetailScreen() {
   const router = useRouter();
@@ -364,6 +374,7 @@ export function LocationDetailScreen() {
                     paddingBottom: GAP,
                   }}
                 >
+                  <LocationPostGate post={post} height={cellHeight(post)}>
                   <div
                     onClick={() => openPost(post)}
                     role="button"
@@ -395,6 +406,7 @@ export function LocationDetailScreen() {
                       </span>
                     ) : null}
                   </div>
+                  </LocationPostGate>
                 </div>
               );
             })}

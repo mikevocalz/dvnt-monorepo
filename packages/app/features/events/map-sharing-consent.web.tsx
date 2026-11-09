@@ -1,14 +1,14 @@
 "use client";
 import { useEffect, useId, useRef } from "react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { MAP_SHARING_DISCLOSURE, useMapSharingPrompt } from "./map-sharing-prompt";
+import { MAP_SHARING_DISCLOSURE, useMapSharingPrompt } from "./ui/map-sharing-prompt";
 
 export function MapSharingConsent({ active, promptOnly = false }: { active: boolean; promptOnly?: boolean }) {
   const owner = useAuthStore(state => state.user?.authId);
   return owner ? <OwnedConsent key={owner} owner={owner} active={active} promptOnly={promptOnly} /> : null;
 }
 function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: boolean; promptOnly: boolean }) {
-  // Only the Events-page instance auto-prompts. The map keeps manual controls.
+  // Only Home/Events entry instances auto-prompt once per sign-in. The map keeps manual controls.
   const flow = useMapSharingPrompt(owner, active, promptOnly);
   const dialogId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -26,7 +26,7 @@ function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: bo
       <p className="text-sm">Avatar sharing is on until {new Date(flow.location.settings!.shareUntil!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. Your avatar appears when a fresh location is available.</p>
       <button type="button" disabled={flow.location.busy} onClick={flow.stop} className="min-h-11 rounded-xl border border-white/30 px-4">Stop sharing</button>
     </> : <>
-      <p className="text-sm text-white/70">Show your avatar on this map for 4 hours. Sharing is optional.</p>
+      <p className="text-sm text-white/70">Show your avatar for this sign-in. Sharing stops when you sign out or your sign-in expires. Sharing is optional.</p>
       <button type="button" disabled={!flow.available || busy} onClick={flow.show} className="min-h-11 rounded-xl bg-[#379ED8] px-4 font-semibold text-black disabled:opacity-40">Show my avatar</button>
     </>}
     {flow.success && flow.location.sharing ? <p role="status">Your approximate location was shared. Your avatar will appear as the map refreshes.</p> : null}

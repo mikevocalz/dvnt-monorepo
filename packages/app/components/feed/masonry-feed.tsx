@@ -1,3 +1,5 @@
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
  * MasonryFeed
  *
@@ -341,7 +343,10 @@ interface MasonryCellProps {
   onPress: (id: string) => void;
 }
 
-const MasonryCell = memo(function MasonryCell({
+const MasonryCell = memo(function MasonryCell(props: MasonryCellProps) {
+  return useSpicyPostLocked(props.post) ? <View style={{ width: props.width, marginBottom: COLUMN_GAP }}><SpicyFollowGate author={props.post.author} height={props.height} /></View> : <UnlockedMasonryCell {...props} />;
+});
+const UnlockedMasonryCell = memo(function UnlockedMasonryCell({
   post,
   width,
   height,
@@ -600,9 +605,10 @@ export function MasonryFeed() {
   const scrollToTopTrigger = useFeedScrollStore((s) => s.scrollToTopTrigger);
 
   useEffect(() => {
-    if (scrollToTopTrigger > 0 && listRef.current) {
+    if (scrollToTopTrigger > useFeedScrollStore.getState().consumedTrigger && listRef.current) {
       listRef.current.scrollToOffset?.({ offset: 0, animated: true });
       resetFeedScroll();
+      useFeedScrollStore.getState().consumeScrollToTop(scrollToTopTrigger);
     }
   }, [scrollToTopTrigger]);
 

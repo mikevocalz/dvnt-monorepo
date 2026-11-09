@@ -14,7 +14,6 @@ import {
   useQuery,
   useMutation,
   useQueryClient,
-  keepPreviousData,
 } from "@tanstack/react-query";
 import {
   eventsApi as eventsApiClient,
@@ -125,8 +124,7 @@ function findEventInCache(
 }
 
 // Fetch all events with optional filters
-// placeholderData: keepPreviousData keeps old results visible while new filter query loads
-// This prevents UI "jump" when toggling filter pills
+// Mode changes must not retain results from the previous Sweet/Spicy query.
 // Haversine distance between two lat/lng points in km
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -147,7 +145,7 @@ const LOCATION_FILTER_FETCH_LIMIT = 200;
 
 export function useEvents(filters?: EventFilters) {
   return useQuery({
-    queryKey: eventKeys.list(filters),
+    queryKey: [...eventKeys.list(filters), "spicy-v2"],
     queryFn: async () => {
       const hasClientSideLocationFilter =
         !!filters?.cityName || (filters?.cityLat != null && filters?.cityLng != null);
@@ -225,14 +223,15 @@ export function useEvents(filters?: EventFilters) {
     // Web has no pull-to-refresh — refetch when the tab regains focus so new
     // (or cancelled) events show without a manual reload.
     refetchOnWindowFocus: Platform.OS === "web",
-    placeholderData: keepPreviousData,
+    // Do not keep Spicy results visible while switching back to Sweet.
+    placeholderData: undefined,
   });
 }
 
 // Personalized "For You" events (scored by social + affinity + recency)
 export function useForYouEvents() {
   return useQuery({
-    queryKey: eventKeys.forYou(),
+    queryKey: [...eventKeys.forYou(), "spicy-v2"],
     queryFn: () => eventsApiClient.getForYouEvents(),
     // Same rationale as useEvents — events can be cancelled at any time
     // by hosts, so the personalized list must also revalidate on mount.
@@ -289,10 +288,10 @@ export function useUpcomingEvents() {
 }
 
 // Fetch past events
-export function usePastEvents() {
+export function usePastEvents(nsfw = false) {
   return useQuery({
-    queryKey: eventKeys.past(),
-    queryFn: () => eventsApiClient.getPastEvents(),
+    queryKey: [...eventKeys.past(), { nsfw }],
+    queryFn: () => eventsApiClient.getPastEvents(20, nsfw),
   });
 }
 

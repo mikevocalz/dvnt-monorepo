@@ -1,3 +1,5 @@
+import { MemberDistanceBadge } from "@dvnt/app/components/feed/member-distance-badge";
+import { useFollowRequestStatus } from "@dvnt/app/lib/hooks/use-follow-requests";
 import { followButtonLabel } from "@dvnt/app/lib/profile/follow-relationship";
 import * as Haptics from "expo-haptics";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
@@ -405,7 +407,9 @@ function UserProfileScreenComponent() {
     typeof (resolvedUserData as any)?.isFollowing === "boolean"
       ? Boolean((resolvedUserData as any)?.isFollowing)
       : previewIsFollowing;
-  const isFollowing = resolvedFollowState === true;
+  const followStatus = useFollowRequestStatus(String((resolvedUserData as any)?.authId || (resolvedUserData as any)?.id || previewAuthId || ""));
+  const isFollowing = followStatus.following === true;
+  const requestPending = followStatus.data === "pending";
 
   const shouldKeepPreviewCounts =
     isPlaceholderUserData &&
@@ -595,9 +599,9 @@ function UserProfileScreenComponent() {
   const handleFollowPress = useCallback(() => {
     if (!followTargetId || !username) return;
 
-    const action = isFollowing ? "unfollow" : "follow";
+    const action = isFollowing || requestPending ? "unfollow" : "follow";
     followMutate({ userId: followTargetId, action, username });
-  }, [followMutate, followTargetId, isFollowing, username]);
+  }, [followMutate, followTargetId, isFollowing, requestPending, username]);
 
   // State for message button loading
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
@@ -990,6 +994,7 @@ function UserProfileScreenComponent() {
                 inline
               />
             </View>
+            <MemberDistanceBadge username={isOwnProfile ? null : user.username} />
             {user.bio && (
               <Text className="mt-1 text-sm text-foreground/90">
                 {user.bio}
@@ -1042,7 +1047,7 @@ function UserProfileScreenComponent() {
                 ) : (
                   <Motion.Pressable
                     onPress={handleFollowPress}
-                    disabled={followMutation.isPending || !followTargetId}
+                    disabled={followMutation.isPending || followStatus.isLoading || !followTargetId}
                     style={{ flex: 1 }}
                   >
                     <Motion.View
@@ -1071,7 +1076,7 @@ function UserProfileScreenComponent() {
                           ? followVars?.action === "follow"
                             ? "Following…"
                             : "Unfollowing…"
-                          : followButtonLabel({ isFollowing, followsYou: Boolean((user as any)?.followsYou) })}
+                          : requestPending ? "Requested · Cancel" : followButtonLabel({ isFollowing, followsYou: Boolean((user as any)?.followsYou) })}
                       </Text>
                     </Motion.View>
                   </Motion.Pressable>

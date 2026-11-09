@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
-import { viewerMaySeeSpicy, withoutHiddenSpicy } from "../_shared/spicy-access.ts";
+import { projectVisiblePosts } from "../_shared/post-access.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -21,7 +21,7 @@ interface ApiResponse<T = unknown> {
 function jsonResponse<T>(data: ApiResponse<T>, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, no-store" },
   });
 }
 
@@ -89,10 +89,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // SPICY slides go to a signed-in viewer with no under-18 ID on file
-    // (spicy-access.ts).
-    const maySeeSpicy = await viewerMaySeeSpicy(supabaseAdmin, viewerAuthId);
-    const allowedPostIds = withoutHiddenSpicy(posts || [], { userId: viewerUserId, maySeeSpicy })
+    // Authorize the parent before reading any slide content.
+    const allowedPostIds = (await projectVisiblePosts(supabaseAdmin, posts || [], { authId: viewerAuthId, userId: viewerUserId }))
       .filter((post: any) => {
         const visibility = String(post?.visibility || "public");
         return visibility === "public" || post?.author_id === viewerUserId;

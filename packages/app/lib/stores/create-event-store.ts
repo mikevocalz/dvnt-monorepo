@@ -5,6 +5,7 @@
  * Draft auto-saves on every field change. User can resume after app restart.
  */
 
+import { isSpicyEventType } from "../events/event-spicy";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
@@ -38,6 +39,9 @@ export type EventType =
   | "bate_session"
   | "sex_party"
   | "kink_fetish_party"
+  | "glory_hole"
+  | "cruising"
+  | "cum_dump"
   | "training"
   | "cooking_class"
   | "mixology"
@@ -450,12 +454,14 @@ export const useCreateEventStore = create<CreateEventState>()(
       setFlyerFallbackImage: (v) => set({ flyerFallbackImage: v }),
       setEventType: (v) => set((s) => ({
         eventType: v,
+        ...(isSpicyEventType(v) ? { isNsfw: true } : {}),
         ...(!isSensitiveAttendanceEvent({ eventType: s.eventType, lynkRoomId: s.attachLynkRoom ? "draft-room" : null }) &&
-          isSensitiveAttendanceEvent({ eventType: v, lynkRoomId: s.attachLynkRoom ? "draft-room" : null })
+          isSensitiveAttendanceEvent({ eventType: v,
+        ...(isSpicyEventType(v) ? { isNsfw: true } : {}), lynkRoomId: s.attachLynkRoom ? "draft-room" : null })
           ? { showAttendees: false } : {}),
       })),
       setDisclaimers: (v) => set({ disclaimers: v }),
-      setIsNsfw: (v) => set({ isNsfw: v }),
+      setIsNsfw: (v) => set((s) => ({ isNsfw: v || isSpicyEventType(s.eventType) })),
       setServerDraftMeta: (id, revision) =>
         set({ serverDraftId: id, serverDraftRevision: revision }),
       setPromoterTemplates: (v) =>

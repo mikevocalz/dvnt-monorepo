@@ -82,6 +82,8 @@ export interface Activity {
     summary?: string;
     changes?: string[];
     ticket_id?: string;
+    event_id?: string | number;
+    eventId?: string | number;
   } | null;
 }
 

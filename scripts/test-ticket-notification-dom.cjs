@@ -95,8 +95,8 @@ const boundaries = {
  import {ActivityItem} from './packages/app/features/routes/screens/(protected)/(tabs)/activity';
  import {notificationToActivity,getRouteForActivity} from './packages/app/lib/hooks/use-activities-query';
  window.routes=[];window.profiles=[];const root=createRoot(document.getElementById('root'));
- window.renderTicket=(index)=>{const activity=notificationToActivity(${JSON.stringify(dtos)}[index]);const props={activity,isFollowed:false,isFollowPending:false,onUserPress:u=>window.profiles.push(u),onPostPress:()=>{},onFollowBack:()=>{}};
- flushSync(()=>root.render(<><section id="web"><ActivityRow {...props} onActivityPress={a=>window.routes.push(webRouteForActivity(a))}/></section><section id="native"><ActivityItem {...props} onActivityPress={a=>window.routes.push(getRouteForActivity(a))}/></section></>))};`,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),define:{'process.env.NODE_ENV':'"test"','process.env.NEXT_PUBLIC_BUNNY_CDN_URL':'""','process.env.EXPO_PUBLIC_BUNNY_CDN_URL':'""'},plugins:[{name:'fixtures',setup(build){
+ window.renderActivity=(activity)=>{const props={activity,isFollowed:false,isFollowPending:false,onUserPress:u=>window.profiles.push(u),onPostPress:()=>{},onFollowBack:()=>{}};
+ flushSync(()=>root.render(<><section id="web"><ActivityRow {...props} onActivityPress={a=>window.routes.push(webRouteForActivity(a))}/></section><section id="native"><ActivityItem {...props} onActivityPress={a=>window.routes.push(getRouteForActivity(a))}/></section></>))};window.renderTicket=index=>window.renderActivity(notificationToActivity(${JSON.stringify(dtos)}[index]));`,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),define:{'process.env.NODE_ENV':'"test"','process.env.NEXT_PUBLIC_BUNNY_CDN_URL':'""','process.env.EXPO_PUBLIC_BUNNY_CDN_URL':'""'},plugins:[{name:'fixtures',setup(build){
   build.onResolve({filter:/.*/},args=>{if(Object.hasOwn(boundaries,args.path))return {path:args.path,namespace:'fixture'};if(args.path.startsWith('@dvnt/app/'))return {path:path.join(ROOT,'packages/app',args.path.slice('@dvnt/app/'.length))+'.ts'};});
   build.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:boundaries[args.path],loader:'tsx',resolveDir:ROOT}));
  }}]});
@@ -113,6 +113,28 @@ const boundaries = {
     for(let repeat=0;repeat<2;repeat++){const before=window.routes.length;target.click();assert.equal(window.routes.length,before+1);assert.equal(window.routes.at(-1),expected);}
    }
   }
+  const fixtures = [
+   {type:'like',postId:'42',web:'/feed/post/42',native:'/(protected)/post/42'},
+   {type:'event_broadcast',entityType:'event',entityId:'90',web:'/feed/events/90',native:'/(protected)/events/90'},
+  ];
+  for(const fixture of fixtures){
+   window.renderActivity({...fixture,id:'fixture',user:{username:'actor',avatar:''},timeAgo:'now',isRead:false});
+   for(const platform of ['web','native']){
+    const section=window.document.querySelector('#'+platform);
+    for(let repeat=0;repeat<2;repeat++){
+     section.firstElementChild.click();assert.equal(window.routes.at(-1),fixture[platform]);
+     const before=window.routes.length;
+     const avatar=section.querySelector('img');assert.ok(avatar);avatar.parentElement.click();
+     assert.equal(window.profiles.at(-1),'actor');assert.equal(window.routes.length,before,'profile must not also open activity');
+    }
+    if(platform==='web'){
+     const row=section.firstElementChild;
+     row.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+     assert.equal(window.routes.at(-1),fixture.web);
+    }
+   }
+  }
+  console.log('PASS: postId fallback, broadcast activity/profile separation, repeated clicks and keyboard');
   console.log('PASS: 5 ticket notification types through actual DTO + actual web/native rows, 20 repeated click route assertions');
  }finally{await window.happyDOM.abort();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

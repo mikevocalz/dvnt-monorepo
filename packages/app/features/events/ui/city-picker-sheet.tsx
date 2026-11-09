@@ -85,6 +85,7 @@ export const CityPickerSheet: React.FC<CityPickerSheetProps> = ({
   const handleUseDeviceLocation = useCallback(async () => {
     const owner = useAuthStore.getState().user?.authId;
     const generation = useLocationAccessStore.getState().generation;
+    const observationSession = useLocationAccessStore.getState().settings?.sessionKey;
     if (!locationAllowedFor(owner)) { useUIStore.getState().showToast("info", "Location is off", "Enable Use device location in Privacy settings first."); return; }
     setRequestingLocation(true);
     try {
@@ -98,7 +99,7 @@ export const CityPickerSheet: React.FC<CityPickerSheetProps> = ({
         accuracy: Location.Accuracy.Balanced,
       });
       if (useAuthStore.getState().user?.authId !== owner || !locationAllowedFor(owner) || useLocationAccessStore.getState().generation !== generation) return;
-      setDeviceLocation(location.coords.latitude, location.coords.longitude);
+      setDeviceLocation(location.coords.latitude, location.coords.longitude, { observedAt: location.timestamp, ownerAuthId: owner, sessionKey: observationSession });
       setLocationMode("device");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 

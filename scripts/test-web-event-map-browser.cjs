@@ -53,7 +53,7 @@ const rawLocation = e => ({
 });
 const fixtureData = { all, past, forYou, locations: [...all, ...past, ...forYou].filter(e => e.id !== '207').map(rawLocation) };
 const mocks = {
-  './map-sharing-consent': `export const MapSharingConsent=()=>null;`,
+  '../map-sharing-consent': `export const MapSharingConsent=()=>null;`,
   // Only persistence transport is synthetic; execute the real saved-city store.
   '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage={getItem:()=>null,setItem:()=>{},removeItem:()=>{}};`,
   '@vis.gl/react-google-maps': require('./fixtures/member-map/google-overlay-boundary.cjs'),

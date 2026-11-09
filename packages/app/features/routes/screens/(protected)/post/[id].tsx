@@ -1,3 +1,5 @@
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
   View,
@@ -1983,6 +1985,12 @@ function PostDetailScreenContent() {
 export default function PostDetailScreen() {
   const router = useRouter();
 
+  const params = useLocalSearchParams();
+  const normalized = normalizeRouteParams(params);
+  const validated = validatePostParams(normalized);
+  const { data: post } = usePost(validated.valid ? validated.postId : "");
+  const locked = useSpicyPostLocked(post ?? {});
+  if (post && locked) return <View style={{ flex: 1, padding: 16 }}><Pressable accessibilityRole="button" onPress={() => router.back()}><Text>Back</Text></Pressable><SpicyFollowGate author={post.author} /></View>;
   return (
     <ErrorBoundary
       screenName="PostDetail"

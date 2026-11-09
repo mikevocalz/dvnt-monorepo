@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useExactDistanceStore } from "@dvnt/app/lib/stores/exact-distance-store";
+import { getSessionLifecycle, subscribeSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AppState, Platform } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { memberMapApi, type LocationSettings } from "@dvnt/app/lib/api/member-map";
@@ -15,15 +17,26 @@ const serialize = <T,>(fn: () => Promise<T>): Promise<T> => {
 };
 export const memberMapKeys = { settings: (owner: string) => ["member-map-settings", owner] as const, nearby: (owner: string) => ["member-map-nearby", owner] as const };
 function clearLocalLocation() {
-  useEventsLocationStore.setState({ deviceLat: null, deviceLng: null, locationMode: "city", preciseProximityGrant: false, preciseProximityOwnerAuthId: null, cityVisibility: null });
+  useEventsLocationStore.setState({ deviceLat: null, deviceLng: null, deviceObservation: null, locationMode: "city", preciseProximityGrant: false, preciseProximityOwnerAuthId: null, cityVisibility: null });
   const city = useEventsLocationStore.getState().activeCity;
   if (city && city.id < 0) useEventsLocationStore.setState({ activeCity: null });
 }
 function selectLocationOwner(owner: string | null) {
+  const previousOwner = useLocationAccessStore.getState().owner;
+  const exact = useExactDistanceStore.getState();
+  if ((previousOwner && previousOwner !== owner) || (exact.owner && owner && exact.owner !== owner)) exact.clear();
   if (useLocationAccessStore.getState().owner !== owner) clearLocalLocation();
   useLocationAccessStore.getState().selectOwner(owner);
 }
-function currentOwner() { return useAuthStore.getState().user?.authId ?? null; }
+function currentOwner() { return getSessionLifecycle().ready ? useAuthStore.getState().user?.authId ?? null : null; }
+// Invalidate in-flight location work synchronously before sign-out or a new
+// sign-in can reuse the same account ID. Session identity comes from the server.
+subscribeSessionLifecycle(() => {
+  permissionProof = null;
+  useExactDistanceStore.getState().clear();
+  useLocationAccessStore.getState().stop();
+  clearLocalLocation();
+});
 
 /** Stops immediately even if a location provider is still awaiting a fix. */
 function withdrawMapPermission(owner: string, client: ReturnType<typeof useQueryClient>) {
@@ -49,6 +62,7 @@ function withdrawMapPermission(owner: string, client: ReturnType<typeof useQuery
 }
 
 export function useLocationSettings() {
+  const session = useSyncExternalStore(subscribeSessionLifecycle, getSessionLifecycle, getSessionLifecycle);
   const owner = useAuthStore((s) => s.user?.authId ?? null);
   const state = useLocationAccessStore();
   const client = useQueryClient();
@@ -64,7 +78,7 @@ export function useLocationSettings() {
     setError(null); setFailedEnable(null);
   }, [owner]);
   const query = useQuery({
-    queryKey: memberMapKeys.settings(owner || ""), enabled: !!owner,
+    queryKey: memberMapKeys.settings(owner || ""), enabled: !!owner && session.ready,
     staleTime: 0, retry: 1, refetchInterval: 30_000, refetchOnWindowFocus: true,
     queryFn: async () => {
       if (currentOwner() !== owner) throw new Error("Account changed.");
@@ -76,24 +90,29 @@ export function useLocationSettings() {
       if (currentOwner() === owner && latest.generation === generation) {
         // A failed withdrawal is sticky until a successful retry, not undone by polling.
         latest.accept(owner!, data, true);
-        if (!data.locationEnabled) clearLocalLocation();
+        if (!data.locationEnabled) { clearLocalLocation(); useExactDistanceStore.getState().clear(); useExactDistanceStore.getState().confirmWithdrawal(owner!); }
       }
       return data;
     },
   });
   useEffect(() => { if (query.isError && useLocationAccessStore.getState().owner === owner) { useLocationAccessStore.getState().stop(); clearLocalLocation(); } }, [query.isError, owner]);
+  useEffect(() => {
+    if (session.ready && owner) void query.refetch({ cancelRefetch: true });
+  }, [session.epoch, session.ready, owner]);
   const settings = state.owner === owner ? state.settings : null;
-  const enabled = state.owner === owner && !state.blocked && settings?.locationEnabled === true && !query.isError;
+  const enabled = session.ready && state.owner === owner && !state.blocked && settings?.locationEnabled === true && !query.isError;
   const sharing = enabled && mapGrantActive(settings, now);
   const update = useCallback(async (kind: "overall" | "sharing", next: boolean) => {
     if (!owner || currentOwner() !== owner) return;
     errorGeneration.current += 1;
     setBusy(true); setError(null); setFailedEnable(null);
+    const operationSession = useLocationAccessStore.getState().settings?.sessionKey;
     let mutationGeneration = useLocationAccessStore.getState().generation;
     if (!next) {
+      if (kind === "overall") useExactDistanceStore.getState().beginWithdrawal(owner);
       useLocationAccessStore.getState().stop("Stopping sharing has not yet been confirmed by the server.", true);
       mutationGeneration = useLocationAccessStore.getState().generation;
-      clearLocalLocation();
+      if (kind === "overall") clearLocalLocation();
       await client.cancelQueries({ queryKey: ["member-map-nearby"] });
       client.removeQueries({ queryKey: ["member-map-nearby"] });
     }
@@ -110,10 +129,11 @@ export function useLocationSettings() {
             expectedRevision: fresh.revision,
             locationEnabled: kind === "overall" ? true : fresh.locationEnabled,
             eventsMapEnabled: kind === "sharing",
-            ...(kind === "sharing" ? { consentVersion: "events-map-v1" as const, shareDurationHours: 4 as const } : {}),
+            ...(kind === "sharing" ? { consentVersion: "events-map-session-v2" as const, expectedSessionId: operationSession } : {}),
           });
         }
         if (currentOwner() !== owner) return;
+        if (!next && kind === "overall") useExactDistanceStore.getState().confirmWithdrawal(owner);
         useLocationAccessStore.getState().accept(owner, result, true, mutationGeneration);
         if (next && kind === "sharing" && useLocationAccessStore.getState().generation === mutationGeneration) useLocationAccessStore.getState().activateAvatarSession(owner);
         client.setQueryData(memberMapKeys.settings(owner), result);
@@ -174,10 +194,10 @@ export function useMapSharingConsent(active: boolean) {
   const share = useCallback(async (): Promise<boolean> => {
     if (pending.current || !isForeground() || !activeRef.current || !owner || currentOwner() !== owner) return false;
     const initial = useLocationAccessStore.getState();
-    if (initial.owner !== owner || !initial.hydrationReady || !initial.settings || initial.pendingWithdrawal || locationDurabilityError() || (initial.blocked && initial.settings.locationEnabled)) {
+    if (initial.owner !== owner || !initial.hydrationReady || !initial.settings || !initial.settings.sessionKey || !initial.settings.sessionExpiresAt || Date.parse(initial.settings.sessionExpiresAt) <= Date.now() || initial.pendingWithdrawal || locationDurabilityError() || (initial.blocked && initial.settings.locationEnabled)) {
       setError("Location privacy settings are not ready. Reload settings or retry stopping sharing first."); return false;
     }
-    if (mapGrantActive(initial.settings, Date.now())) return false;
+    if (mapGrantActive(initial.settings, Date.now()) && initial.settings.consentVersion !== "events-map-v1") return false;
     const request = { owner, revision: initial.settings.revision, writing: false }; pending.current = request;
     const run = lifetime.current, generation = initial.generation;
     const sameOwner = () => currentOwner() === owner && useLocationAccessStore.getState().owner === owner;
@@ -196,8 +216,8 @@ export function useMapSharingConsent(active: boolean) {
       await serialize(() => commitMapConsent({
         allowed, sameOwner, point,
         settings: () => memberMapApi.settings(owner),
-        enable: (revision) => { request.writing = true; return memberMapApi.updateSettings(owner, { expectedRevision: revision, locationEnabled: true, eventsMapEnabled: true, consentVersion: "events-map-v1", shareDurationHours: 4 }); },
-        publish: (settings, coarse) => memberMapApi.publish(owner, { ...coarse, revision: settings.revision }),
+        enable: (revision) => { request.writing = true; return memberMapApi.updateSettings(owner, { expectedRevision: revision, locationEnabled: true, eventsMapEnabled: true, consentVersion: "events-map-session-v2", expectedSessionId: initial.settings!.sessionKey }); },
+        publish: (settings, coarse) => memberMapApi.publish(owner, { ...coarse, revision: settings.revision, expectedSessionId: initial.settings!.sessionKey }),
         revoke: async (owned) => {
           const stopped = await memberMapApi.updateSettings(owner, { expectedRevision: owned.revision, locationEnabled: owned.locationEnabled, eventsMapEnabled: false });
           if (sameOwner()) { useLocationAccessStore.getState().accept(owner, stopped, true, useLocationAccessStore.getState().generation); client.setQueryData(memberMapKeys.settings(owner), stopped); }
@@ -378,7 +398,7 @@ export function useMemberMapPresence(active: boolean) {
       try { await serialize(async () => {
         const state = useLocationAccessStore.getState();
         if (!allowed() || !mapGrantActive(state.settings, Date.now())) return;
-        await memberMapApi.publish(owner, { ...coarse, revision: state.settings!.revision, observedAt: new Date(point.timestamp).toISOString() });
+        await memberMapApi.publish(owner, { ...coarse, revision: state.settings!.revision, expectedSessionId: state.settings!.sessionKey, observedAt: new Date(point.timestamp).toISOString() });
         if (allowed()) await client.invalidateQueries({ queryKey: memberMapKeys.nearby(owner) });
       }); } catch (cause) {
         // Local centering and public avatar publication are separate. A failed

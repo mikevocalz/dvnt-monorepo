@@ -18,6 +18,7 @@ interface HashtagTextProps {
   textStyle?: any;
   color?: string; // Explicit text color - REQUIRED for visibility
   numberOfLines?: number;
+  adjustsFontSizeToFit?: boolean;
 }
 
 // Default text color for visibility on dark backgrounds
@@ -31,6 +32,7 @@ export function HashtagText({
   textStyle,
   color = DEFAULT_TEXT_COLOR,
   numberOfLines,
+  adjustsFontSizeToFit,
 }: HashtagTextProps) {
   const router = useRouter();
 
@@ -67,6 +69,7 @@ export function HashtagText({
       selectable
       style={[styles.container, style, textStyle, { color }]}
       numberOfLines={numberOfLines}
+      adjustsFontSizeToFit={adjustsFontSizeToFit}
     >
       {parts.map((part, index) => {
         if (part.type === "hashtag") {

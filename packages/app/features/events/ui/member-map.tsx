@@ -1,3 +1,4 @@
+import { nearbyEventPins } from "./nearby-event-pins";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useImage } from "expo-image";
@@ -9,7 +10,7 @@ import { eventMapIds, eventMapPins, eventListAllowsMap, attachEventMapFlyers } f
 import { useRouter } from "expo-router";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { savedMapArea } from "./member-map-area";
-import { MapSharingConsent } from "./map-sharing-consent";
+import { MapSharingConsent } from "../map-sharing-consent";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dvnt/app/lib/hooks/use-member-map";
 import { mapAvatarUrl, mapMemberInitials, mapMemberProfilePath, visibleMapMembers, type MapMember } from "./member-map-render-policy";
@@ -63,6 +64,10 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   // A public event venue is not evidence of the viewer's location. Without a
   // fresh permitted center, use the saved city only as a labeled viewport.
   const ownArea = presence.area || center;
+  const freshArea = presence.area || (center && nearby.data?.expiresAt
+    ? { ...center, expiresAt: nearby.data.expiresAt } : null);
+  const nearEvents = nearbyEventPins(eventPins, freshArea, now);
+  const nearMembers = members.filter(member => member.id !== nearby.data?.self?.id);
   const viewportArea = ownArea || savedArea;
   const cameraPosition = useMemo(() => ({
     coordinates: { latitude: viewportArea?.latitude ?? 39.5, longitude: viewportArea?.longitude ?? -98.35 },
@@ -145,7 +150,13 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
           {eventPins.map(pin => <Pressable key={pin.id} accessibilityRole="button" accessibilityLabel={`Open event ${pin.title}`} onPress={() => openEvent(pin.id)} style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             {pin.flyerUrl ? <Image source={{ uri: pin.flyerUrl }} style={{ width: 44, height: 58, borderRadius: MAP_MARKER_RADIUS }} /> : null}<Text style={{ color: '#fff', flex: 1 }}>{pin.title}</Text>
           </Pressable>)}
-          {members.map((member) => <Pressable key={member.id} accessibilityRole="button" accessibilityLabel={`Open ${member.displayName || member.username}'s profile`} onPress={() => open(member)} style={{ minHeight: 60, padding: 8, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#ffffff22', borderRadius: 12 }}><Avatar member={member} /><View style={{ flex: 1 }}><Text style={{ color: '#fff', fontWeight: '600' }}>{member.displayName || member.username}</Text><Text style={{ color: '#aaa' }}>@{member.username} · approximate area</Text></View></Pressable>)}
+          <Text accessibilityRole="header" style={{ color: '#fff', fontSize: 20, fontWeight: '600' }}>Near You</Text>
+          <Text style={{ color: '#bbb' }}>{freshArea ? 'Public events within about 25 miles of your approximate area.' : 'Allow device location to find events near you. A saved city is not your current location.'}</Text>
+          {freshArea && nearEvents.length === 0 ? <Text style={{ color: '#bbb' }}>No public events within about 25 miles in the current event list.</Text> : null}
+          {nearEvents.map(pin => <Pressable key={`near:${pin.id}`} accessibilityRole="button" onPress={() => openEvent(pin.id)} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>{pin.title}</Text></Pressable>)}
+          <Text accessibilityRole="header" style={{ color: '#fff', fontWeight: '600' }}>People near you</Text>
+          {sharing && nearMembers.length === 0 ? <Text style={{ color: '#bbb' }}>No other members are sharing a fresh approximate location nearby.</Text> : null}
+          {nearMembers.map((member) => <Pressable key={member.id} accessibilityRole="button" accessibilityLabel={`Open ${member.displayName || member.username}'s profile`} onPress={() => open(member)} style={{ minHeight: 60, padding: 8, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#ffffff22', borderRadius: 12 }}><Avatar member={member} /><View style={{ flex: 1 }}><Text style={{ color: '#fff', fontWeight: '600' }}>{member.displayName || member.username}</Text><Text style={{ color: '#aaa' }}>@{member.username} · approximate area</Text></View></Pressable>)}
         </>
       ) : null}
     </ScrollView>

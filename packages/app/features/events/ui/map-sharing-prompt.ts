@@ -2,43 +2,43 @@ import { useEffect, useRef, useState } from "react";
 import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
 import { useLocationSettings, useMapSharingConsent } from "@dvnt/app/lib/hooks/use-member-map";
 
-export const MAP_SHARING_DISCLOSURE = "Your avatar, profile name and approximate location (about 1 km) will be visible to eligible nearby DVNT members for 4 hours. Only foreground updates are used. Your pin disappears after 15 minutes without a fresh location. You can stop sharing anytime. This also turns on DVNT device location; device permission alone never makes you visible.";
-const COOLDOWN = 7 * 24 * 60 * 60 * 1000;
-// Negative prompt preference only: never persist coordinates or permission grants.
-const dismissed = new Map<string, number>();
+export const MAP_SHARING_DISCLOSURE = "Your avatar, profile name and approximate location (about 1 km) will be visible to eligible nearby DVNT members for this sign-in, until you sign out or this sign-in expires. Only foreground updates are used. Your pin disappears after 15 minutes without a fresh location. If you sign out while offline, the last pin may remain for up to 15 minutes. You can stop sharing anytime. This also turns on DVNT device location; device permission alone never makes you visible. This does not enable precise distance sharing.";
+// Negative preference only, keyed by the server-verified non-secret session ID.
+// A new sign-in gets a new invitation; token refresh is not a new agreement.
+const dismissed = new Set<string>();
 export function useMapSharingPrompt(owner: string, active: boolean, autoPrompt = true) {
   const location = useLocationSettings();
   const consent = useMapSharingConsent(active);
   const [open, setOpen] = useState(false);
   const [success, setSuccess] = useState(false);
-  const attempted = useRef(false);
+  const attempted = useRef<string | null>(null);
   const mounted = useRef(true);
+  const sessionKey = location.settings?.sessionKey;
+  const promptKey = sessionKey ? `member-map-session-prompt:${owner}:${sessionKey}` : null;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const available = active && !location.loading && !!location.settings && !location.error && !location.needsLocationStop;
+  useEffect(() => { consent.cancel(); setOpen(false); setSuccess(false); attempted.current = null; }, [promptKey]);
+  const available = active && !!promptKey && !location.loading && !!location.settings && !location.error && !location.needsLocationStop &&
+    !!location.settings.sessionExpiresAt && Date.parse(location.settings.sessionExpiresAt) > Date.now();
   const suppress = () => {
-    const until = Date.now() + COOLDOWN;
-    dismissed.set(owner, until);
-    try { void Promise.resolve(mmkvStorage?.setItem(`member-map-prompt:${owner}`, { state: { until }, version: 1 })).catch(() => {}); } catch { /* In-memory suppression still prevents repeat prompts this session. */ }
+    if (!promptKey) return;
+    dismissed.add(promptKey);
+    try { void Promise.resolve(mmkvStorage?.setItem(promptKey, { state: { dismissed: true }, version: 2 })).catch(() => {}); } catch { /* In-memory negative preference remains effective. */ }
   };
   useEffect(() => {
-    if (!autoPrompt || !available || attempted.current) return;
-    // Expired grants are never renewed or accompanied by an automatic popup.
-    if (location.sharing || location.settings?.shareUntil || location.settings?.eventsMapEnabled) { attempted.current = true; return; }
+    if (!autoPrompt || !available || !promptKey || attempted.current === promptKey) return;
+    if (location.sharing && location.settings?.consentVersion !== "events-map-v1") { attempted.current = promptKey; return; }
     let current = true;
     void (async () => {
       try {
-        if (!mmkvStorage) return;
-        const saved = await mmkvStorage.getItem(`member-map-prompt:${owner}`);
+        const saved = await mmkvStorage?.getItem(promptKey);
         if (!current) return;
-        attempted.current = true;
-        const until = (saved?.state as { until?: unknown } | undefined)?.until;
-        if (until !== undefined && (typeof until !== "number" || !Number.isFinite(until))) return;
-        if ((dismissed.get(owner) || 0) > Date.now() || (typeof until === "number" && until > Date.now())) return;
-        if (current) { suppress(); setOpen(true); }
-      } catch { /* Unreadable dismissal preference must not cause repeat prompts. */ }
+        attempted.current = promptKey;
+        if (dismissed.has(promptKey) || (saved?.state as { dismissed?: unknown } | undefined)?.dismissed === true) return;
+        suppress(); setOpen(true);
+      } catch { /* Unreadable preferences do not cause unwanted repeated prompts. */ }
     })();
     return () => { current = false; };
-  }, [autoPrompt, available, owner, location.sharing, location.settings?.shareUntil, location.settings?.eventsMapEnabled]);
+  }, [autoPrompt, available, promptKey, location.sharing, location.settings?.consentVersion]);
   useEffect(() => { if (!active) { consent.cancel(); setOpen(false); } }, [active]);
   const dismiss = () => { consent.cancel(); suppress(); setOpen(false); };
   const share = async () => {
@@ -48,5 +48,5 @@ export function useMapSharingPrompt(owner: string, active: boolean, autoPrompt =
   };
   const stop = () => { consent.cancel(); suppress(); setSuccess(false); void location.setSharing(false); };
   return { location, consent, available, open, success, dismiss, share, stop,
-    show: () => { setSuccess(false); setOpen(true); } };
+    show: () => { if (available) { setSuccess(false); setOpen(true); } } };
 }

@@ -116,7 +116,7 @@ test('a creator whose hosting is closed publishes nothing', async () => {
 const eventTypeSource = fs.readFileSync(`${__dirname}/../../../../../packages/app/lib/events/event-type.ts`, 'utf8');
 const canonicalTypes = [...eventTypeSource.matchAll(/^  (\w+): "/gm)].map(match => match[1]);
 test('every canonical Event Type survives create, replay, and storage without collapsing to Other', async () => {
-  assert.equal(canonicalTypes.length, 27);
+  assert.equal(canonicalTypes.length, 30);
   for (const eventType of canonicalTypes) {
     const h = harness();
     const payload = { ...draft, event_type: eventType, category: 'music' };
@@ -198,4 +198,15 @@ test('authoritative room expiry race clears safely only for the specific trigger
     const result=await h.publish({...draft,lynkRoomId:preparedRoom.uuid});
     assert.equal(result.ok,false);assert.equal(result.error.code,expected);assert.equal(h.rows.length,0);
   }
+});
+
+test('adult event types cannot publish as Sweet even with explicit nsfw false', async () => {
+  for (const event_type of ['bate_session','sex_party','kink_fetish_party','glory_hole','cruising','cum_dump']) {
+    for (const nsfw of [false, undefined]) {
+      const result = await harness().publish({...draft, event_type, nsfw});
+      assert.equal(result.ok, true);
+      assert.equal(result.data.event.nsfw, true, event_type);
+    }
+  }
+  assert.equal((await harness().publish({...draft,event_type:'party',nsfw:false})).data.event.nsfw, false);
 });

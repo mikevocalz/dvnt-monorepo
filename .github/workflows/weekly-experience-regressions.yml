@@ -1,0 +1,71 @@
+name: weekly experience regressions
+
+on:
+  pull_request:
+    paths:
+      - "packages/app/**"
+      - "apps/mobile/supabase/functions/**"
+      - "apps/web/src/app/(frontend)/feed/[username]/post/[id]/**"
+      - "apps/web/src/app/(frontend)/p/[id]/**"
+      - "apps/mobile/supabase/migrations/**"
+      - "scripts/test-*.cjs"
+      - ".github/workflows/weekly-experience-regressions.yml"
+  push:
+    branches: [master, main]
+    paths:
+      - "packages/app/**"
+      - "apps/mobile/supabase/functions/**"
+      - "apps/web/src/app/(frontend)/feed/[username]/post/[id]/**"
+      - "apps/web/src/app/(frontend)/p/[id]/**"
+      - "apps/mobile/supabase/migrations/**"
+      - "scripts/test-*.cjs"
+      - ".github/workflows/weekly-experience-regressions.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-regressions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install isolated fixture tools
+        run: >-
+          npm install --prefix "$RUNNER_TEMP/weekly" --ignore-scripts --no-audit --no-fund --no-save
+          typescript@5.9.3 esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
+          zustand@5.0.14 @tanstack/react-query@5.90.16 happy-dom@20.0.11
+          @electric-sql/pglite@0.3.14
+      - name: Settings, event, location and navigation regressions
+        env:
+          NODE_PATH: ${{ runner.temp }}/weekly/node_modules
+        run: |
+          node --test apps/mobile/supabase/functions/user-settings/index.test.cjs
+          node --test apps/mobile/supabase/functions/toggle-follow/index.test.cjs
+          node --test apps/mobile/supabase/functions/create-event/index.test.cjs
+          node --test packages/app/lib/events/*.test.ts packages/app/features/events/create/event-form.test.ts
+          node --test packages/app/lib/api/ticket-types-read.test.ts
+          node --test packages/app/lib/location/*.test.ts packages/app/features/events/ui/nearby-event-pins.test.ts
+          node --test packages/app/lib/activity/event-activity.test.ts packages/app/lib/posts/text-post-layout.test.ts
+          node scripts/test-weekly-event-visibility-sql.cjs
+          node scripts/test-weekly-post-follow-sql.cjs
+          node scripts/test-weekly-post-share-metadata.cjs
+          node scripts/test-private-follow-requests-sql.cjs
+          node scripts/test-spicy-follow-server.cjs
+          node scripts/test-follow-hook.cjs
+          node scripts/test-follow-requests-dom.cjs
+          node scripts/test-weekly-spicy-ui.cjs
+          node scripts/test-member-map-session-sql.cjs
+          node scripts/test-member-map-session-dom.cjs
+          node scripts/test-exact-distance-sql.cjs
+          node scripts/test-exact-distance-hooks.cjs
+          node scripts/test-proximity-observation-hooks.cjs
+          node --test apps/mobile/supabase/functions/member-proximity/exact-consent.test.cjs apps/mobile/supabase/functions/_shared/location-session.test.ts
+          node scripts/test-weekly-location-dom.cjs
+          node scripts/test-weekly-location-consent-dom.cjs
+          node scripts/test-weekly-home-reset.cjs
+          node scripts/test-weekly-logo-actions.cjs
+          node scripts/test-ticket-notification-dom.cjs

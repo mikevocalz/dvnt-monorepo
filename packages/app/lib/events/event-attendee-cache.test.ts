@@ -232,8 +232,10 @@ test("privacy revisions isolate events and invalidate all callbacks at a session
 
 test("persisted query caches predating attendee privacy are invalidated", () => {
   const source = readFileSync(new URL("../query-persistence.ts", import.meta.url), "utf8");
-  assert.match(source, /buster: "v12"/);
-  assert.match(source, /currentVersion = "v12"/);
+  const buster = source.match(/buster: "v(\d+)"/)?.[1];
+  const otaVersion = source.match(/currentVersion = "v(\d+)"/)?.[1];
+  assert.ok(Number(buster) >= 12, "must invalidate caches from before attendee privacy");
+  assert.equal(otaVersion, buster, "OTA and query persistence must use the same revision");
 });
 
 

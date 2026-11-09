@@ -1,3 +1,4 @@
+import type { DeviceObservation } from "@dvnt/app/lib/location/device-observation";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
@@ -33,6 +34,8 @@ interface EventsLocationState {
   locationMode: LocationMode;
   deviceLat: number | null;
   deviceLng: number | null;
+  /** Never persisted. Unknown or restored coordinates are not a fresh sample. */
+  deviceObservation: DeviceObservation | null;
   recentCities: City[];
   /**
    * Whether other members can see the city this member picked. Off by default,
@@ -54,7 +57,7 @@ interface EventsLocationState {
   // Actions
   setActiveCity: (city: City) => void;
   setLocationMode: (mode: LocationMode) => void;
-  setDeviceLocation: (lat: number, lng: number) => void;
+  setDeviceLocation: (lat: number, lng: number, observation?: DeviceObservation) => void;
   addRecentCity: (city: City) => void;
   setVisibilityDuration: (id: VisibilityDurationId) => void;
   /** Separate explicit opt-in for device-coordinate proximity, never implicit from city visibility. */
@@ -84,6 +87,7 @@ export const useEventsLocationStore = create<EventsLocationState>()(
       locationMode: "city",
       deviceLat: null,
       deviceLng: null,
+      deviceObservation: null,
       recentCities: [],
       cityVisibility: null,
       preciseProximityGrant: PRECISE_PROXIMITY_GRANT_DEFAULT,
@@ -105,7 +109,7 @@ export const useEventsLocationStore = create<EventsLocationState>()(
       // heads of everyone who adds a location mode later.
       setLocationMode: (mode) => set((s) => applyFindEventsMode(s, mode)),
 
-      setDeviceLocation: (lat, lng) => set({ deviceLat: lat, deviceLng: lng }),
+      setDeviceLocation: (lat, lng, observation) => set({ deviceLat: lat, deviceLng: lng, deviceObservation: observation ?? null }),
 
       addRecentCity: (city) =>
         set((s) => {
@@ -161,6 +165,7 @@ export const useEventsLocationStore = create<EventsLocationState>()(
     {
       name: "events-location",
       storage: mmkvStorage,
+      merge: (persisted, current) => ({ ...current, ...(persisted as Partial<EventsLocationState>), deviceObservation: null }),
       partialize: (state) => ({
         activeCity: state.activeCity,
         locationMode: state.locationMode,

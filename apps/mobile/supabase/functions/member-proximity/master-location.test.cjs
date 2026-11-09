@@ -13,6 +13,7 @@ function harness(masters) {
     if(table==='blocks') return {data:null};
     if(table==='identity_verifications') return {data:{status:'passed',date_of_birth:'1990-01-01'}};
     if(table==='member_map_settings') return masters[filters.user_id]===undefined?{data:null}:{data:{location_enabled:masters[filters.user_id]}};
+    if(table==='member_exact_distance_consent') return {data:null};
     if(table==='member_proximity_presence') return {data:{latitude:40,longitude:-74,share_until:new Date(Date.now()+60000).toISOString()}};
     throw new Error(table);
    }};return q;
@@ -21,7 +22,7 @@ function harness(masters) {
  vm.runInNewContext(source,{exports:{},Response,console,
   Deno:{env:{get:()=> 'test'},serve:fn=>handler=fn},
   require:name=>name.includes('supabase-js')?{createClient:()=>db}
-  :name.includes('verify-session')?{verifySessionDetailed:async()=>({ok:true,userId:'viewer'})}
+  :name.includes('location-session')?{verifyLocationSession:async()=>({ok:true,userId:'viewer',sessionId:'vs',expiresAt:new Date(Date.now()+60000).toISOString()})}
   :name.includes('resolve-user')?{resolveOrProvisionUser:async()=>({id:1,auth_id:'viewer'})}
   :name.includes('verified-admission')?{resolveVerifiedAdmission:async()=>({state:'allowed'})}
   :name.includes('db-rate-limit')?{consumeDbRateLimit:async()=>({allowed:true})}

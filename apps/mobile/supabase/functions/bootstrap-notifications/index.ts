@@ -1,3 +1,4 @@
+import { projectVisiblePosts } from "../_shared/post-access.ts";
 /**
  * Bootstrap Notifications Edge Function
  *
@@ -251,12 +252,20 @@ Deno.serve(async (req: Request) => {
       ),
     ];
 
-    const postThumbnailById: Record<string, string> = {};
+    const visiblePostIds = new Set<string>();
     if (resolvedPostIds.length > 0) {
+      const result = await supabase.from("posts").select("id, author_id, visibility, is_nsfw").in("id", resolvedPostIds);
+      if (!result.error) {
+        const visible = await projectVisiblePosts(supabase, result.data || [], { authId: sessionUserId, userId: intUserId });
+        for (const post of visible) visiblePostIds.add(String(post.id));
+      }
+    }
+    const postThumbnailById: Record<string, string> = {};
+    if (visiblePostIds.size > 0) {
       const { data: mediaRows } = await supabase
         .from("posts_media")
         .select("_parent_id, type, url, _order")
-        .in("_parent_id", resolvedPostIds)
+        .in("_parent_id", [...visiblePostIds])
         .order("_order", { ascending: true });
 
       for (const row of mediaRows || []) {
@@ -345,8 +354,8 @@ Deno.serve(async (req: Request) => {
           n.entity_type === "comment" && n.entity_id
             ? String(n.entity_id)
             : commentContext?.commentId,
-        commentText: commentContext?.content || undefined,
-        payload: n.entity_payload ?? null,
+        commentText: resolvedPostId && visiblePostIds.has(resolvedPostId) ? commentContext?.content || undefined : undefined,
+        payload: resolvedPostId && !visiblePostIds.has(resolvedPostId) ? null : n.entity_payload ?? null,
         event:
           (n.entity_type === "event" || n.type === "event_invite" || n.type === "event_update") && n.entity_id
             ? {

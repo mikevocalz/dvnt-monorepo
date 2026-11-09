@@ -1,3 +1,4 @@
+import { projectVisiblePosts } from "../_shared/post-access.ts";
 /**
  * Edge Function: add-comment
  * Add a comment to a post with Better Auth verification
@@ -129,6 +130,12 @@ Deno.serve(async (req) => {
 
     const userId = userData.id;
     console.log("[Edge:add-comment] User:", userId, "Post:", postId);
+
+    const parent = await supabaseAdmin.from("posts").select("id, author_id, visibility, is_nsfw").eq("id", postId).maybeSingle();
+    const visible = parent.error || !parent.data ? [] : await projectVisiblePosts(
+      supabaseAdmin, [parent.data], { authId: authUserId, userId },
+    );
+    if (visible.length === 0) return errorResponse("forbidden", "Post unavailable", 403);
 
     let normalizedParentId: number | null = null;
     let rootId: number | null = null;

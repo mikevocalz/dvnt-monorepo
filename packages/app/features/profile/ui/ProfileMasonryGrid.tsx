@@ -1,3 +1,5 @@
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
  * ProfileMasonryGrid
  *
@@ -210,6 +212,7 @@ const GridCell = memo(function GridCell({
   onPress,
 }: GridCellProps) {
   const handlePress = useCallback(() => onPress(tile.id), [tile.id, onPress]);
+  if (useSpicyPostLocked(tile)) return <View style={{ width }}><SpicyFollowGate author={tile.author} height={height} /></View>;
 
   return (
     <ZoomCard

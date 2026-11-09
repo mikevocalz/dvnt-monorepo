@@ -40,17 +40,13 @@ try {
  * Keep this list tight — only data needed for instant boot.
  */
 const PERSISTED_KEY_PREFIXES = [
+  // Post payloads and activity previews must be reauthorized after every launch.
   "stories", // stories bar (above the fold — must render instantly)
-  "posts", // feed pages
   "messages", // unread counts, conversations, filtered inbox
   "profile", // my profile
-  "notifications", // notification list
   "badges", // notification badges
   "events", // events list, my events, liked events
   "tickets", // holder tickets + QR payloads (ticketKeys.all=["tickets"]) — WS-8 door flow must work cold/offline; refreshed by the WS-11 ticket-freshness background job
-  "profilePosts", // user's own posts grid on profile tab
-  "bookmarks", // saved/bookmarked post IDs
-  "activities", // transformed notification activities for instant notifications tab
 ];
 
 /**
@@ -141,7 +137,7 @@ export const queryPersister = createSyncStoragePersister({
 export const persistOptions = {
   persister: queryPersister,
   maxAge: 30 * 60 * 1000, // 30 min — matches gcTime
-  buster: "v12", // v12: evict pre-attendee-privacy event profile previews
+  buster: "v13", // v13: evict post payloads predating per-viewer follow authorization
 };
 
 /**
@@ -159,7 +155,7 @@ export function checkAndClearCacheOnOTAUpdate(): void {
     if (!queryMmkv) return;
 
     const previousVersion = queryMmkv.getString(OTA_VERSION_KEY);
-    const currentVersion = "v12"; // Must match buster version
+    const currentVersion = "v13"; // Must match buster version
 
     if (previousVersion !== currentVersion) {
       console.log(

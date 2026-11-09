@@ -60,6 +60,8 @@ export interface Notification {
   commentId: string | null;
   /** Inline activity payload (e.g. broadcast body, change summary). */
   payload?: {
+    event_id?: string | number;
+    eventId?: string | number;
     title?: string;
     body?: string;
     summary?: string;

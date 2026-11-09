@@ -1,4 +1,7 @@
 "use client";
+import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
+import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
+
 
 /**
  * ProfileMasonryGrid — WEB variant (port of
@@ -210,6 +213,7 @@ function GridCell({
   interactive: boolean;
   onPress: () => void;
 }) {
+  if (useSpicyPostLocked(tile)) return <SpicyFollowGate author={tile.author} height={fallbackHeight} />;
   const isVideo = tile.kind === "video";
   const isCarousel = tile.kind === "carousel";
 

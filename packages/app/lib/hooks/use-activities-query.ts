@@ -103,6 +103,8 @@ export interface Activity {
   createdAt?: string;
   /** Inline content carried by certain activity types (e.g. broadcast). */
   payload?: {
+    event_id?: string | number;
+    eventId?: string | number;
     title?: string;
     body?: string;
     summary?: string;
@@ -405,8 +407,8 @@ export function getRouteForActivity(activity: Activity): string {
   switch (type) {
     case "like":
     case "tag":
-      if (post?.id) {
-        return getPostDetailRoute(post.id);
+      if (commentsPostId) {
+        return getPostDetailRoute(commentsPostId);
       }
       return `/(protected)/profile/${user.username}`;
     case "comment":
@@ -415,6 +417,8 @@ export function getRouteForActivity(activity: Activity): string {
         return getPostDetailCommentsRoute(commentsPostId, commentId);
       }
       return `/(protected)/profile/${user.username}`;
+    case "system":
+      return "";
     case "follow":
       return `/(protected)/profile/${user.username}`;
     case "event_invite":

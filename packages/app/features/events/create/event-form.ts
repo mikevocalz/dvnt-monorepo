@@ -14,6 +14,7 @@
  *    computation produces a negative organizer transfer at checkout.
  */
 
+import { isSpicyEventType } from "../../../lib/events/event-spicy.ts";
 import type { EventType } from "@dvnt/app/lib/stores/create-event-store";
 import {
   deviceTimeZone,
@@ -263,7 +264,7 @@ export function buildEventInsert(d: EventFormDraft, media: BuiltEventMedia = {})
     lineup: d.lineup.length > 0 ? d.lineup : undefined,
     perks: d.perks.length > 0 ? d.perks : undefined,
     disclaimers: d.disclaimers.trim() || undefined,
-    nsfw: d.isNsfw || undefined,
+    nsfw: d.isNsfw || isSpicyEventType(d.eventType) || undefined,
   };
 }
 

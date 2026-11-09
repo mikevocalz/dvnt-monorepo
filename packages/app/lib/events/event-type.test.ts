@@ -3,7 +3,7 @@ import test from "node:test";
 import { EVENT_TYPE_OPTIONS, eventTypeLabel, eventTypeOptions, eventCardActionLabel, storedEventType, eventTypeUpdate, realtimeEventType } from "./event-type.ts";
 
 test("canonical card labels use human names instead of raw identifiers", () => {
-  assert.equal(EVENT_TYPE_OPTIONS.length, 27);
+  assert.equal(EVENT_TYPE_OPTIONS.length, 30);
   for (const option of EVENT_TYPE_OPTIONS) assert.equal(eventTypeLabel(option.value), option.label);
   assert.equal(eventTypeLabel("game_night"), "Game Night");
   assert.equal(eventTypeLabel("party"), "Party");
@@ -19,7 +19,7 @@ test("edit/reopen choices preserve legacy categories without changing unrelated 
     const selected = choices.find(option => option.value === "party")!;
     const reopened = eventTypeOptions(selected.value);
     assert.ok(reopened.some(option => option.value === "party"));
-    assert.equal(reopened.length, 27);
+    assert.equal(reopened.length, 30);
   }
 });
 test("paid card CTA displays price, free uses RSVP, ended wins", () => {

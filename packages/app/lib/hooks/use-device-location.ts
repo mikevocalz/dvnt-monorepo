@@ -33,6 +33,7 @@ export function useDeviceLocation() {
   const requestLocation = useCallback(async (): Promise<boolean> => {
     const owner = useAuthStore.getState().user?.authId;
     const generation = useLocationAccessStore.getState().generation;
+    const observationSession = useLocationAccessStore.getState().settings?.sessionKey;
     if (!locationAllowedFor(owner)) { showToast("info", "Location is off", "Enable Use device location in Privacy settings first."); return false; }
     try {
       let permission = await Location.getForegroundPermissionsAsync();
@@ -63,7 +64,7 @@ export function useDeviceLocation() {
         accuracy: Location.Accuracy.Balanced,
       });
       if (useAuthStore.getState().user?.authId !== owner || !locationAllowedFor(owner) || useLocationAccessStore.getState().generation !== generation) return false;
-      setDeviceLocation(loc.coords.latitude, loc.coords.longitude);
+      setDeviceLocation(loc.coords.latitude, loc.coords.longitude, { observedAt: loc.timestamp, ownerAuthId: owner, sessionKey: observationSession });
       setLocationMode("device");
       return true;
     } catch (err) {

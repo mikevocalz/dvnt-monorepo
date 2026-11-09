@@ -1,13 +1,13 @@
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
-import { MAP_SHARING_DISCLOSURE, useMapSharingPrompt } from "./map-sharing-prompt";
+import { MAP_SHARING_DISCLOSURE, useMapSharingPrompt } from "./ui/map-sharing-prompt";
 
 export function MapSharingConsent({ active, promptOnly = false }: { active: boolean; promptOnly?: boolean }) {
   const owner = useAuthStore(state => state.user?.authId);
   return owner ? <OwnedConsent key={owner} owner={owner} active={active} promptOnly={promptOnly} /> : null;
 }
 function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: boolean; promptOnly: boolean }) {
-  // Only the Events-page instance auto-prompts. The map keeps manual controls.
+  // Only Home/Events entry instances auto-prompt once per sign-in. The map keeps manual controls.
   const flow = useMapSharingPrompt(owner, active, promptOnly);
   const busy = flow.consent.busy || flow.location.busy;
   return <View accessibilityLabel="Map sharing" style={promptOnly ? undefined : { borderWidth: 1, borderColor: '#ffffff30', borderRadius: 12, padding: 16, gap: 12 }}>
@@ -16,7 +16,7 @@ function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: bo
       <Text style={{ color: '#ddd' }}>Avatar sharing is on until {new Date(flow.location.settings!.shareUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Your avatar appears when a fresh location is available.</Text>
       <Pressable accessibilityRole="button" disabled={flow.location.busy} onPress={flow.stop} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>Stop sharing</Text></Pressable>
     </> : <>
-      <Text style={{ color: '#ddd' }}>Show your avatar on this map for 4 hours. Sharing is optional.</Text>
+      <Text style={{ color: '#ddd' }}>Show your avatar for this sign-in. Sharing stops when you sign out or your sign-in expires. Sharing is optional.</Text>
       <Pressable accessibilityRole="button" disabled={!flow.available || busy} onPress={flow.show} style={{ minHeight: 44, justifyContent: 'center', opacity: !flow.available || busy ? 0.4 : 1 }}><Text style={{ color: '#3FDCFF' }}>Show my avatar</Text></Pressable>
     </>}
     {flow.success && flow.location.sharing ? <Text accessibilityLiveRegion="polite" style={{ color: '#ddd' }}>Your approximate location was shared. Your avatar will appear as the map refreshes.</Text> : null}

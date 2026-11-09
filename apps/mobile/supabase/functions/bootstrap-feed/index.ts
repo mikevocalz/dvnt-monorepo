@@ -19,7 +19,7 @@
 import { withSentry } from "../_shared/sentry.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
-import { viewerMaySeeSpicy } from "../_shared/spicy-access.ts";
+import { projectVisiblePosts } from "../_shared/post-access.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -244,58 +244,13 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
       { intUserId, authUserId },
     );
 
-    // ⚠️ POLICY DIVERGENCE — DEFERRED, do not "fix" by copying either side.
-    //   Here (edge):    spicy = only authors you follow (gate below).
-    //   Client query:   spicy = ALL public spicy posts
-    //                   (packages/app/lib/api/posts.ts, getFeedPostsPaginated).
-    // Because this returns 0 for a viewer who follows no spicy authors, the
-    // client no longer seeds an empty bootstrap result — see
-    // use-bootstrap-feed.ts. Resolve the policy before removing that guard.
-    // ── NSFW follow gate: resolve which author IDs viewer may see spicy from ──
-    // Spicy posts are only shown to logged-in users who follow the author (or are the author).
-    // Guests (intUserId=null) requesting include_nsfw=true get an empty feed.
-    let spicyAuthorIds: number[] | null = null;
-    if (include_nsfw) {
-      if (!intUserId) {
-        // Guest cannot see spicy content — return empty feed immediately
-        return new Response(
-          JSON.stringify({
-            posts: [],
-            stories: [],
-            hasMore: false,
-            totalCount: 0,
-            unreadMessages: 0,
-            unreadNotifications: 0,
-            viewerProfile: null,
-            ms: Date.now() - t0,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      // A signed-in member with no under-18 ID on file may view SPICY
-      // (spicy-access.ts). The follow gate below is the separate, deferred
-      // feed policy noted above.
-      if (!(await viewerMaySeeSpicy(supabase, sessionUserId))) {
-        spicyAuthorIds = [intUserId];
-      } else {
-        // Fetch the set of author IDs the viewer follows + themselves
-        const { data: followRows } = await supabase
-          .from("follows")
-          .select("following_id")
-          .eq("follower_id", intUserId);
-        const followedIds = (followRows || []).map((r: any) => Number(r.following_id));
-        followedIds.push(intUserId); // own posts always visible
-        spicyAuthorIds = followedIds;
-      }
-    }
-
     // ── Fire ALL queries in parallel — never sequential ──────────
 
     let postsQuery = supabase
       .from("posts")
       .select(
         `
-          id, content, post_kind, text_theme, created_at, visibility, is_nsfw, location,
+          id, author_id, content, post_kind, text_theme, created_at, visibility, is_nsfw, location,
           likes_count, comments_count,
           author:users!posts_author_id_users_id_fk(
             id, username, first_name, verified,
@@ -322,11 +277,9 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
 
     // Strict spicy contract:
     //   include_nsfw=false → ONLY safe posts (is_nsfw=false OR NULL)
-    //   include_nsfw=true  → ONLY spicy posts (is_nsfw=true) from followed authors
-    if (include_nsfw && spicyAuthorIds !== null) {
-      postsQuery = postsQuery
-        .eq("is_nsfw", true)
-        .in("author_id", spicyAuthorIds);
+    //   include_nsfw=true  → spicy posts; projection strips originals for nonfollowers
+    if (include_nsfw) {
+      postsQuery = postsQuery.eq("is_nsfw", true);
     } else {
       postsQuery = postsQuery.or("is_nsfw.is.false,is_nsfw.is.null");
     }
@@ -402,7 +355,7 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
 
     // ── Build response ─────────────────────────────────────────────
 
-    const posts = postsResult.data || [];
+    const posts = await projectVisiblePosts(supabase, postsResult.data || [], { authId: sessionUserId, userId: intUserId }, { placeholders: true });
     const totalPosts = postsResult.count || 0;
 
     // Build liked/bookmarked sets for O(1) lookup
@@ -447,6 +400,8 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
         textSlides,
         createdAt: p.created_at,
         isNSFW: p.is_nsfw || false,
+        isSpicyLocked: p.isSpicyLocked === true,
+        spicyAccessViewerId: p.spicyAccessViewerId ?? null,
         location: p.location || null,
         likes: p.likes_count || 0,
         commentsCount: p.comments_count || 0,
@@ -537,7 +492,7 @@ Deno.serve(withSentry("bootstrap-feed", async (req: Request) => {
       status: 200,
       headers: {
         "Content-Type": "application/json",
-        "Cache-Control": "private, max-age=30",
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (err: any) {
