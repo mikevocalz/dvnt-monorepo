@@ -142,10 +142,29 @@ async function browserChecks(bundle) {
       const title=t=>page.getByRole('heading',{name:t,exact:true,level:1});
       const close=()=>page.getByRole('button',{name:'Close',exact:true});
       const route=path=>page.evaluate(path=>settingsShell.router.push(path),path);
+      const closeGeometry=()=>close().evaluate(el=>{
+        const r=el.getBoundingClientRect();
+        return {width:r.width,height:r.height,visible:r.top>=0&&r.bottom<=innerHeight,hit:el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),
+          viewport:innerWidth,owner:settingsShell.state().owner,route:location.pathname,
+          headerWidth:el.parentElement.getBoundingClientRect().width,
+          contentWidth:el.closest('main')?.getBoundingClientRect().width,
+          flexShrink:getComputedStyle(el).flexShrink,
+          mode:document.querySelector('[data-dvnt-tab-bar]')?'phone':document.querySelector('nav[aria-label="Primary"]')?'rail':'guest'};
+      });
       const hitClose=async()=>{
-        const hit=await close().evaluate(el=>{const r=el.getBoundingClientRect();return {width:r.width,height:r.height,visible:r.top>=0&&r.bottom<=innerHeight,hit:el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}});
+        const hit=await closeGeometry();
         assert.ok(hit.width>=36&&hit.height>=36&&hit.visible&&hit.hit,JSON.stringify(hit));
         assert.equal(await page.locator('header').count(),0,'no competing global header');
+      };
+      const waitResponsiveMode=async(viewport,owner)=>{
+        // CDP resolves setViewportSize before RN-web's Dimensions listener can
+        // commit AppShell's React branch. Wait for that branch, never for the
+        // desired Close geometry: a settled layout regression must still fail.
+        await page.waitForFunction(({viewport,owner})=>{
+          const tabs=!!document.querySelector('[data-dvnt-tab-bar]');
+          const rail=!!document.querySelector('nav[aria-label="Primary"]:not([data-dvnt-tab-bar])');
+          return innerWidth===viewport&&tabs===!!(owner&&viewport<768)&&rail===!!(owner&&viewport>=768);
+        },{viewport,owner},{timeout:5000});
       };
       await page.locator('header').waitFor();
       // The synthetic public page must clear the real marketing header before
@@ -183,7 +202,13 @@ async function browserChecks(bundle) {
         await page.evaluate(owner=>settingsShell.set({owner}),owner);
         await page.waitForFunction(owner=>owner?!!document.querySelector('[aria-label="Primary"]'):!!document.querySelector('[data-fixture-footer]'),owner);
         await close().evaluate(el=>el.dataset.preserved='yes');
-        for(const next of [390,768,1280,width]){await page.setViewportSize({width:next,height:844});await hitClose();assert.equal(await close().getAttribute('data-preserved'),'yes')}
+        for(const next of [390,768,1280,width]){
+          await page.setViewportSize({width:next,height:844});
+          const before=await closeGeometry();
+          await waitResponsiveMode(next,owner);
+          await hitClose();assert.equal(await close().getAttribute('data-preserved'),'yes');
+          console.log('RESIZE settings shell '+JSON.stringify({before,settled:await closeGeometry()}));
+        }
       }
       await route('/privacy');await page.locator('header').waitFor();
       await route('/auth/login');assert.equal(await page.locator('header').count(),0);
