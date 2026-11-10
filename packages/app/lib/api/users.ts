@@ -71,7 +71,7 @@ async function getFollowRelationship(viewerId: number | null, targetId: number) 
     .select("follower_id, following_id")
     .in(DB.follows.followerId, [viewerId, targetId])
     .in(DB.follows.followingId, [viewerId, targetId]);
-  if (error) console.error("[Users] relationship lookup failed:", error);
+  if (error) throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
   return resolveFollowRelationship(data ?? [], viewerId, targetId);
 }
 
@@ -112,44 +112,19 @@ function buildDisplayNameParts(displayName: string | null | undefined) {
 }
 
 async function getLiveProfileCounts(targetUserId: number | null | undefined) {
-  if (!targetUserId || !Number.isFinite(targetUserId)) {
-    return null;
-  }
-
-  const [
-    { count: followersCount, error: followersError },
-    { count: followingCount, error: followingError },
-    { count: postsCount, error: postsError },
-  ] = await Promise.all([
-    supabase
-      .from(DB.follows.table)
-      .select(DB.follows.id, { count: "exact", head: true })
-      .eq(DB.follows.followingId, targetUserId),
-    supabase
-      .from(DB.follows.table)
-      .select(DB.follows.id, { count: "exact", head: true })
-      .eq(DB.follows.followerId, targetUserId),
-    supabase
-      .from(DB.posts.table)
-      .select(DB.posts.id, { count: "exact", head: true })
-      .eq(DB.posts.authorId, targetUserId),
-  ]);
-
-  if (followersError || followingError || postsError) {
-    console.error("[Users] getLiveProfileCounts error:", {
-      targetUserId,
-      followersError,
-      followingError,
-      postsError,
-    });
-  }
-
+  if (!targetUserId || !Number.isFinite(targetUserId)) return null;
+  // Counts remain public profile metadata. Counting RLS-filtered relationship
+  // rows would incorrectly show zero or partial counts to nonfollowers.
+  const { data, error } = await supabase
+    .from(DB.users.table)
+    .select(`${DB.users.followersCount}, ${DB.users.followingCount}, ${DB.users.postsCount}`)
+    .eq(DB.users.id, targetUserId)
+    .maybeSingle();
+  if (error || !data) return null;
   return {
-    followersCount:
-      typeof followersCount === "number" ? followersCount : undefined,
-    followingCount:
-      typeof followingCount === "number" ? followingCount : undefined,
-    postsCount: typeof postsCount === "number" ? postsCount : undefined,
+    followersCount: Number(data[DB.users.followersCount]) || 0,
+    followingCount: Number(data[DB.users.followingCount]) || 0,
+    postsCount: Number(data[DB.users.postsCount]) || 0,
   };
 }
 
@@ -267,6 +242,7 @@ export const usersApi = {
 
       return null;
     } catch (error) {
+      if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
       console.error("[Users] getProfileByUsername error:", error);
       return null;
     }
@@ -366,6 +342,7 @@ export const usersApi = {
         createdAt: data[DB.users.createdAt],
       };
     } catch (error) {
+      if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
       console.error("[Users] getProfileById error:", error);
       return null;
     }
@@ -499,6 +476,7 @@ export const usersApi = {
         createdAt: authUser.createdAt,
       };
     } catch (error) {
+      if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
       console.error("[Users] getProfileByAuthUserId error:", error);
       return null;
     }

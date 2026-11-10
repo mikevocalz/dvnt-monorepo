@@ -245,12 +245,12 @@ for (const [label, options, expected] of [
   ["staged mode still respects age", { ready: false, minor: true }, "hidden"],
   ["public follower", { follow: true }, "visible"],
   ["private retained legacy follower", { private: true, follow: true, legacy: true }, "visible"],
-  ["legacy cannot replace live follow", { private: true, legacy: true }, "locked"],
+  ["legacy cannot replace live follow", { private: true, legacy: true }, "hidden"],
   ["legacy still respects block", { private: true, follow: true, legacy: true, block: true }, "hidden"],
   ["legacy still respects age", { private: true, follow: true, legacy: true, minor: true }, "hidden"],
   ["legacy still respects admission", { private: true, follow: true, legacy: true, denied: true }, "hidden"],
   ["missing readiness fails closed", { private: true, follow: true, legacy: true, notReady: true }, "hidden"],
-  ["private raw follower", { private: true, follow: true }, "locked"],
+  ["private raw follower", { private: true, follow: true }, "hidden"],
   [
     "private approved follower",
     { private: true, follow: true, approved: true },
@@ -259,10 +259,10 @@ for (const [label, options, expected] of [
   [
     "private approved without follow",
     { private: true, approved: true },
-    "locked",
+    "hidden",
   ],
-  ["settings private", { preference: true, follow: true }, "locked"],
-  ["malformed privacy", { preference: "garbage", follow: true }, "locked"],
+  ["settings private", { preference: true, follow: true }, "hidden"],
+  ["malformed privacy", { preference: "garbage", follow: true }, "hidden"],
   ["minor follower", { minor: true, follow: true }, "hidden"],
   ["denied follower", { denied: true, follow: true }, "hidden"],
   ["guest", { guest: true }, "hidden"],
@@ -426,3 +426,22 @@ test('settings read failure never becomes Public defaults', async () => {
     await assert.rejects(exports.fetch({ assertCurrent() {}, authId: 'fixture-owner' }));
   }
 });
+
+for (const name of ["get-posts", "bootstrap-feed", "bootstrap-profile", "get-bookmarks"]) {
+  test(`${name} does not advertise private post identifiers to nonfollowers`, async () => {
+    const f = fixture({private:true});
+    const body = name === "get-posts" ? {mode:"profile",userId:2,includeNsfw:true}
+      : name === "bootstrap-profile" ? {user_id:2,include_nsfw:true}
+      : name === "get-bookmarks" ? {withPosts:true} : {include_nsfw:true};
+    const response=await f.run(name,body);
+    const data=await response.json();
+    assert.equal(response.status,200);
+    assert.equal(JSON.stringify(data).includes(secret),false);
+    if (name === "bootstrap-profile") {
+      assert.equal(data.profile.isPrivate,true);
+      assert.deepEqual(data.posts,[]);
+    } else if (name === "get-posts" || name === "bootstrap-feed") {
+      assert.deepEqual(data.posts,[]);
+    }
+  });
+}

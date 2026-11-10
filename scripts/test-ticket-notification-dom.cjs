@@ -44,6 +44,9 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/
 });
 const icons = ['Heart','MessageCircle','UserPlus','AtSign','Bell','BellOff','CheckCheck','Calendar','Radio','ImageOff','Megaphone'].map(name => `export const ${name}=()=>null;`).join('\n');
 const boundaries = {
+  '@dvnt/app/features/settings/follow-requests-setting.web': 'export const FollowRequestsSetting=()=>null;',
+  '@dvnt/app/features/settings/follow-requests-setting': 'export const FollowRequestsSetting=()=>null;',
+
   'zustand': 'export const create=()=>()=>({});',
   'solito/navigation': 'export const useRouter=()=>({});',
   'expo-router': 'export const useRouter=()=>({});export const useFocusEffect=()=>{};',
@@ -90,13 +93,20 @@ const boundaries = {
   row.type=type;row.entity_payload={ticket_id:'00000000-0000-4000-8000-000000000001',transfer_id:'transfer-1'};
   dtos.push((await exportsApi.notificationsApiClient.getNotifications()).docs[0]);
  }
+ const followDtos=[];
+ for(const type of ['follow_request','follow_request_approved']) {
+  row.type=type;row.entity_type='user';row.entity_id='613';row.entity_payload={};
+  const dto=(await exportsApi.notificationsApiClient.getNotifications()).docs[0];
+  assert.equal(dto.type,type);assert.equal(dto.sender.username,'deviantevents');
+  followDtos.push(dto);
+ }
  const build=await esbuild.build({stdin:{contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {flushSync} from 'react-dom';
  import {ActivityRow,webRouteForActivity} from './packages/app/features/activity/activity.web';
  import {ActivityItem} from './packages/app/features/routes/screens/(protected)/(tabs)/activity';
  import {notificationToActivity,getRouteForActivity} from './packages/app/lib/hooks/use-activities-query';
  window.routes=[];window.profiles=[];const root=createRoot(document.getElementById('root'));
  window.renderActivity=(activity)=>{const props={activity,isFollowed:false,isFollowPending:false,onUserPress:u=>window.profiles.push(u),onPostPress:()=>{},onFollowBack:()=>{}};
- flushSync(()=>root.render(<><section id="web"><ActivityRow {...props} onActivityPress={a=>window.routes.push(webRouteForActivity(a))}/></section><section id="native"><ActivityItem {...props} onActivityPress={a=>window.routes.push(getRouteForActivity(a))}/></section></>))};window.renderTicket=index=>window.renderActivity(notificationToActivity(${JSON.stringify(dtos)}[index]));`,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),define:{'process.env.NODE_ENV':'"test"','process.env.NEXT_PUBLIC_BUNNY_CDN_URL':'""','process.env.EXPO_PUBLIC_BUNNY_CDN_URL':'""'},plugins:[{name:'fixtures',setup(build){
+ flushSync(()=>root.render(<><section id="web"><ActivityRow {...props} onActivityPress={a=>window.routes.push(webRouteForActivity(a))}/></section><section id="native"><ActivityItem {...props} onActivityPress={a=>window.routes.push(getRouteForActivity(a))}/></section></>))};window.renderTicket=index=>window.renderActivity(notificationToActivity(${JSON.stringify(dtos)}[index]));window.renderFollow=index=>window.renderActivity(notificationToActivity(${JSON.stringify(followDtos)}[index]));`,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),define:{'process.env.NODE_ENV':'"test"','process.env.NEXT_PUBLIC_BUNNY_CDN_URL':'""','process.env.EXPO_PUBLIC_BUNNY_CDN_URL':'""'},plugins:[{name:'fixtures',setup(build){
   build.onResolve({filter:/.*/},args=>{if(Object.hasOwn(boundaries,args.path))return {path:args.path,namespace:'fixture'};if(args.path.startsWith('@dvnt/app/'))return {path:path.join(ROOT,'packages/app',args.path.slice('@dvnt/app/'.length))+'.ts'};});
   build.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:boundaries[args.path],loader:'tsx',resolveDir:ROOT}));
  }}]});
@@ -113,7 +123,18 @@ const boundaries = {
     for(let repeat=0;repeat<2;repeat++){const before=window.routes.length;target.click();assert.equal(window.routes.length,before+1);assert.equal(window.routes.at(-1),expected);}
    }
   }
+  for(let i=0;i<2;i++){
+   window.renderFollow(i);
+   for(const platform of ['web','native']){
+    const section=window.document.querySelector('#'+platform);
+    assert.ok(section.textContent.includes(i===0?' requested to follow you.':' accepted your follow request.'));
+    section.firstElementChild.click();
+    assert.equal(window.routes.at(-1),i===0?(platform==='web'?'/settings/privacy#follow-requests':'/settings/privacy'):(platform==='web'?'/profile/deviantevents':'/(protected)/profile/deviantevents'));
+   }
+  }
   const fixtures = [
+   {type:'follow_request',entityType:'user',entityId:'42',web:'/settings/privacy#follow-requests',native:'/settings/privacy',text:' requested to follow you.'},
+   {type:'follow_request_approved',entityType:'user',entityId:'42',web:'/profile/actor',native:'/(protected)/profile/actor',text:' accepted your follow request.'},
    {type:'like',postId:'42',web:'/feed/post/42',native:'/(protected)/post/42'},
    {type:'event_broadcast',entityType:'event',entityId:'90',web:'/feed/events/90',native:'/(protected)/events/90'},
   ];
@@ -121,6 +142,10 @@ const boundaries = {
    window.renderActivity({...fixture,id:'fixture',user:{username:'actor',avatar:''},timeAgo:'now',isRead:false});
    for(const platform of ['web','native']){
     const section=window.document.querySelector('#'+platform);
+    if(fixture.text){
+      assert.ok(section.textContent.includes(fixture.text));
+      assert.equal([...section.querySelectorAll('button')].some(button=>['Follow','Following','Follow Back'].includes(button.textContent.trim())),false,'request/approval rows must not offer a misleading follow-back action');
+    }
     for(let repeat=0;repeat<2;repeat++){
      section.firstElementChild.click();assert.equal(window.routes.at(-1),fixture[platform]);
      const before=window.routes.length;
@@ -134,7 +159,7 @@ const boundaries = {
     }
    }
   }
-  console.log('PASS: postId fallback, broadcast activity/profile separation, repeated clicks and keyboard');
+  console.log('PASS: follow request/approval copy and routes, no misleading follow-back, activity/profile separation, repeated clicks and keyboard');
   console.log('PASS: 5 ticket notification types through actual DTO + actual web/native rows, 20 repeated click route assertions');
  }finally{await window.happyDOM.abort();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

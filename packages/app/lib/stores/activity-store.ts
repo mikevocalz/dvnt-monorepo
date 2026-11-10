@@ -24,6 +24,8 @@ export type ActivityType =
   | "like"
   | "comment"
   | "follow"
+  | "follow_request"
+  | "follow_request_approved"
   | "mention"
   | "tag"
   | "event_invite"
@@ -330,6 +332,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   getRouteForActivity: (activity) => {
     const { type, entityType, entityId, post, event, user } = activity;
 
+    if (type === "follow_request") return "/settings/privacy";
     const cohostRoute = cohostActivityRoute(type, "native");
     if (cohostRoute) return cohostRoute;
 
@@ -366,6 +369,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         }
         return `/(protected)/profile/${user.username}`;
       case "follow":
+      case "follow_request_approved":
         return `/(protected)/profile/${user.username}`;
       case "event_invite":
       case "event_update":

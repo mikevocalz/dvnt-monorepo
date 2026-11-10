@@ -62,3 +62,21 @@ test('verified private requests pass, but expiry or signout before dispatch bloc
   await assert.rejects(send('https://fixture.invalid/rest/v1/notifications'),/private activity/);
   assert.equal(calls,1);
 });
+
+for (const failure of ['null', 'throw', 'expired']) test(`relationship reads fail closed on ${failure} mint and retry after recovery`, async () => {
+  const bridge=createBridgeTransport('anon');const a=jwt('A');let calls=0;
+  bridge.setMinter(async()=>{if(failure==='throw')throw Error('offline');return failure==='expired'?jwt('A',1):null;});
+  const send=bridge.guardFetch(async()=>{calls++;return new Response('[]');});
+  const bearer=await bridge.accessToken();
+  await assert.rejects(send('https://fixture.invalid/rest/v1/follows?follower_id=eq.1',{headers:{Authorization:`Bearer ${bearer}`}}),/relationships could not be verified/);
+  assert.equal(calls,0);
+  bridge.setToken(a);bridge.setMinter(async()=>a);
+  await send('https://fixture.invalid/rest/v1/follows?follower_id=eq.1',{headers:{Authorization:`Bearer ${await bridge.accessToken()}`}});
+  assert.equal(calls,1);
+});
+test('relationship reads reject signout between token selection and dispatch', async()=>{
+ const bridge=createBridgeTransport('anon');const a=jwt('A');bridge.setToken(a);bridge.setMinter(async()=>a);
+ const bearer=await bridge.accessToken();bridge.setToken(null);
+ const send=bridge.guardFetch(async()=>{throw Error('must not dispatch');});
+ await assert.rejects(send('https://fixture.invalid/rest/v1/follows',{headers:{Authorization:`Bearer ${bearer}`}}),/relationships could not be verified/);
+});

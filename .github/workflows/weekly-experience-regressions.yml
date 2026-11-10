@@ -83,6 +83,8 @@ jobs:
           node --test apps/mobile/supabase/functions/user-settings/index.test.cjs
           node scripts/test-user-settings-account-switch.cjs
           node --test apps/mobile/supabase/functions/toggle-follow/index.test.cjs
+          node --test apps/mobile/supabase/functions/toggle-follow/notifications.test.cjs
+          node --test packages/supabase/src/bridge-transport.test.ts packages/app/lib/messages/unread-counts.test.ts packages/app/lib/profile/follow-read-failure.test.ts
           node --test packages/app/lib/api/follows-account.test.ts
           node --test apps/mobile/supabase/functions/create-event/index.test.cjs
           node --test packages/app/lib/events/*.test.ts packages/app/features/events/create/event-form.test.ts
@@ -96,6 +98,9 @@ jobs:
           node scripts/test-spicy-follow-server.cjs
           node scripts/test-follow-hook.cjs
           node scripts/test-follow-requests-dom.cjs
+          node scripts/test-private-profile-presentation.cjs
+          node scripts/test-private-social-graph-sql.cjs
+          node --test apps/mobile/supabase/functions/_shared/profile-social-access.test.cjs
           node scripts/test-weekly-spicy-ui.cjs
           node scripts/test-member-map-session-sql.cjs
           node scripts/test-member-map-session-dom.cjs

@@ -28,7 +28,8 @@ import { slugify } from "@dvnt/app/lib/slug";
 
 import { FollowStatusRefresh } from "@dvnt/app/components/feed/follow-status-refresh";
 import { useFollowRequestStatus } from "@dvnt/app/lib/hooks/use-follow-requests";
-import { followButtonLabel } from "@dvnt/app/lib/profile/follow-relationship";
+import { privateProfilePresentation } from "@dvnt/app/lib/profile/private-profile";
+import { PrivateProfileNotice } from "./private-profile-notice.web";
 import { useWindowScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
 import { useCallback, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "solito/navigation";
@@ -136,27 +137,6 @@ export function UserProfileScreen() {
     variables: followVars,
   } = useFollow();
 
-  // Eager prefetch followers/following once the profile resolves.
-  useEffect(() => {
-    if (!userId) return;
-    queryClient.prefetchInfiniteQuery({
-      queryKey: ["users", "followers", userId],
-      queryFn: async () => {
-        const result = await usersApi.getFollowers(userId, 1);
-        return { users: result.docs || [], nextPage: result.hasNextPage ? 2 : null };
-      },
-      initialPageParam: 1,
-    });
-    queryClient.prefetchInfiniteQuery({
-      queryKey: ["users", "following", userId],
-      queryFn: async () => {
-        const result = await usersApi.getFollowing(userId, 1);
-        return { users: result.docs || [], nextPage: result.hasNextPage ? 2 : null };
-      },
-      initialPageParam: 1,
-    });
-  }, [userId, queryClient]);
-
   // Redirect to own profile when viewing yourself (matches native).
   useEffect(() => {
     if (!isOwnProfile) return;
@@ -181,6 +161,36 @@ export function UserProfileScreen() {
   const followStatus = useFollowRequestStatus(String(user?.authId || user?.id || ""));
   const isFollowing = followStatus.following === true;
   const requestPending = followStatus.data === "pending";
+  const privateProfile = privateProfilePresentation({
+    isPrivate: user?.isPrivate,
+    isOwnProfile,
+    following: isFollowing,
+    requestPending,
+    mutationPending: isFollowPending,
+    mutationAction: followVars?.action,
+    followsYou: Boolean(user?.followsYou),
+  });
+  // Eager prefetch followers/following once the profile resolves.
+  useEffect(() => {
+    if (!userId || privateProfile.locked) return;
+    queryClient.prefetchInfiniteQuery({
+      queryKey: ["users", "followers", userId],
+      queryFn: async () => {
+        const result = await usersApi.getFollowers(userId, 1);
+        return { users: result.docs || [], nextPage: result.hasNextPage ? 2 : null };
+      },
+      initialPageParam: 1,
+    });
+    queryClient.prefetchInfiniteQuery({
+      queryKey: ["users", "following", userId],
+      queryFn: async () => {
+        const result = await usersApi.getFollowing(userId, 1);
+        return { users: result.docs || [], nextPage: result.hasNextPage ? 2 : null };
+      },
+      initialPageParam: 1,
+    });
+  }, [userId, queryClient, privateProfile.locked]);
+
   const profileAvatarUrl = resolveAvatarUrl(user?.avatar);
   const displayName = user?.name || user?.username || safeUsername || "";
   const displayPostsCount =
@@ -226,12 +236,14 @@ export function UserProfileScreen() {
   }, [safeUsername, followTargetId, queryClient, router, showToast]);
 
   const goFollowers = () => {
+    if (privateProfile.locked) return;
     if (!userId) return;
     router.push(
       `/feed/profile/followers?userId=${userId}&username=${encodeURIComponent(safeUsername || "")}`,
     );
   };
   const goFollowing = () => {
+    if (privateProfile.locked) return;
     if (!userId) return;
     router.push(
       `/feed/profile/following?userId=${userId}&username=${encodeURIComponent(safeUsername || "")}`,
@@ -292,7 +304,7 @@ export function UserProfileScreen() {
               label="Posts"
               loading={typeof displayPostsCount !== "number" && isLoading}
             />
-            <button onClick={goFollowers}>
+            <button onClick={goFollowers} disabled={privateProfile.locked}>
               <Stat
                 value={
                   typeof displayFollowersCount === "number"
@@ -305,7 +317,7 @@ export function UserProfileScreen() {
                 loading={typeof displayFollowersCount !== "number" && isLoading}
               />
             </button>
-            <button onClick={goFollowing}>
+            <button onClick={goFollowing} disabled={privateProfile.locked}>
               <Stat
                 value={
                   typeof displayFollowingCount === "number"
@@ -367,11 +379,7 @@ export function UserProfileScreen() {
             {/* While the request is in flight the control shows the state it is
                 MOVING TO, not one it has reached — "Now Following" claimed the
                 server had agreed before it answered. */}
-            {isFollowPending
-              ? followVars?.action === "follow"
-                ? "Following…"
-                : "Unfollowing…"
-              : requestPending ? "Requested · Cancel" : followButtonLabel({ isFollowing, followsYou: Boolean(user?.followsYou) })}
+            {privateProfile.buttonLabel}
           </button>
           <button
             onClick={handleMessagePress}
@@ -476,7 +484,9 @@ export function UserProfileScreen() {
         ) : (
           /* Posts grid */
           <div className="pt-2">
-            {isLoading || isLoadingPosts ? (
+            {privateProfile.locked ? (
+              <PrivateProfileNotice pending={requestPending} />
+            ) : isLoading || isLoadingPosts ? (
               <GridSkeleton />
             ) : (
               <ProfileMasonryGrid

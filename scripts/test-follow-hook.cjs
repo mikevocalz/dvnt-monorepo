@@ -107,6 +107,7 @@ test('all protected payload families and detached overlays clear before cancella
   ['postTags',1],['search','posts','query'],['search','v2','discover'],
   ['search','v2','results','query'],['comments','post',1],['comments','thread',2],
   ['bookmarks','posts','a'],['activities','a'],['likedPosts','a'],['notifications','a'],
+  ['users','followers','private-owner'],['users','following','private-owner'],
  ];
  const releases=[]; const invalidated=[]; const cancel=h.client.cancelQueries.bind(h.client);
  h.client.cancelQueries=(filter,options)=>{h.lifecycle.push('cancel:'+filter.queryKey[0]);cancel(filter,options);return new Promise(resolve=>releases.push(resolve));};
@@ -114,11 +115,13 @@ test('all protected payload families and detached overlays clear before cancella
  try {
   for(const key of keys)h.client.setQueryData(key,{secret:'protected media or identity'});
   h.client.setQueryData(['events','public'],{title:'Keep unrelated event cache'});
+  h.client.setQueryData(['users','profile','public-owner'],{username:'Keep public header'});
   const pending=h.reset(h.client);
   assert.equal(h.lifecycle[0],'overlays-cleared');
   for(const key of keys)assert.equal(h.client.getQueryData(key),undefined,JSON.stringify(key)+' must clear synchronously');
   assert.equal(invalidated.length,0,'no refetch before cancellation settles');
   assert.equal(h.client.getQueryData(['events','public']).title,'Keep unrelated event cache');
+  assert.equal(h.client.getQueryData(['users','profile','public-owner']).username,'Keep public header');
   releases.splice(0).forEach(resolve=>resolve());await pending;
   assert.deepEqual(new Set(invalidated),new Set(keys.map(key=>key[0])));
  }finally{releases.splice(0).forEach(resolve=>resolve());h.client.clear();}

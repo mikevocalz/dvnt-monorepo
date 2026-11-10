@@ -70,7 +70,9 @@ export async function projectVisiblePosts(
       !own &&
       privateAuthors.has(Number(post.author_id)) &&
       !allowedAuthors.has(Number(post.author_id));
-    if (privateLocked && post.is_nsfw !== true) return [];
+    // A private profile must not advertise individual posts, even as empty
+    // Spicy tiles. Public Spicy posts retain their follower-only placeholders.
+    if (privateLocked) return [];
     if (
       own ||
       (post.is_nsfw !== true && !privateLocked) ||

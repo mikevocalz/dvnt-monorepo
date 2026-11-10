@@ -20,7 +20,13 @@ function harness({ authenticated = true, rpcError = false, allowed = true, relat
         eq: (key, value) => { filters.push({ table, key, value }); return q; },
         order: () => q,
         limit: () => q,
-        insert: async values => { inserts.push({ table, values }); return { error: null }; },
+        insert: async values => {
+          if (table === 'notifications') {
+            assert.equal(Object.hasOwn(values, 'sender_id'), false, 'production notifications has actor_id, never sender_id');
+            assert.equal(typeof values.actor_id, 'number');
+          }
+          inserts.push({ table, values }); return { error: null };
+        },
         single: async () => ({ data: { username: 'fixture', followers_count: 3, following_count: 4 } }),
         then(resolve) { return Promise.resolve({ data: [] }).then(resolve); },
       };
@@ -155,6 +161,7 @@ test('actual legacy handler round-trips the real SQL mutation for public and pri
       assert.equal(result.data.followRequestStatus, 'none');
     }
     assert.equal(actor.inserts.filter(row => row.table === 'notifications').length, 2);
+    assert.ok(actor.inserts.filter(row => row.table === 'notifications').every(row => row.values.actor_id === 1 && !Object.hasOwn(row.values, 'sender_id')));
     for (const followRequestStatus of ['pending', 'none', 'pending']) {
       const result = await actor.invoke({ targetAuthId: 'private-auth', p_actor: 4 });
       assert.equal(result.ok, true);

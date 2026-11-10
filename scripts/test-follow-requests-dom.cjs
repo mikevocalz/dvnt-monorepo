@@ -271,6 +271,23 @@ if (require.main === module) (async () => {
         f.state.loadHold = true;
         if (platform === "web") window.location.hash = "#follow-requests";
         await flush(() => app.render(platform));
+        const guidance = node.textContent.replace(/\s+/g, " ");
+        assert.match(
+          guidance,
+          /Approve new follow requests to let members see your private posts\./,
+        );
+        assert.match(
+          guidance,
+          /Existing followers keep their access, including when you switch from Public to Private\./,
+        );
+        assert.match(
+          guidance,
+          /If they unfollow or are removed, they will need your approval to follow again while your account is Private\./,
+        );
+        assert.doesNotMatch(
+          guidance,
+          /Existing followers need your approval too/,
+        );
         if (platform === "web")
           assert.equal(
             document.activeElement.id,

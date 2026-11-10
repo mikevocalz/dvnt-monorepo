@@ -78,8 +78,10 @@ function Requests() {
         )}
       </div>
       <p className="mt-1 text-sm text-white/60">
-        Approve members to let them see your private posts. Existing followers
-        need your approval too.
+        Approve new follow requests to let members see your private posts.
+        Existing followers keep their access, including when you switch from
+        Public to Private. If they unfollow or are removed, they will need your
+        approval to follow again while your account is Private.
       </p>
       {query.isLoading ? (
         <p role="status" className="mt-3 text-sm text-white/60">

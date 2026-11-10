@@ -1,7 +1,8 @@
 import { MemberDistanceBadge } from "@dvnt/app/components/feed/member-distance-badge";
 import { FollowStatusRefresh } from "@dvnt/app/components/feed/follow-status-refresh";
 import { useFollowRequestStatus } from "@dvnt/app/lib/hooks/use-follow-requests";
-import { followButtonLabel } from "@dvnt/app/lib/profile/follow-relationship";
+import { privateProfilePresentation } from "@dvnt/app/lib/profile/private-profile";
+import { PrivateProfileNotice } from "@dvnt/app/features/profile/private-profile-notice";
 import * as Haptics from "expo-haptics";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 import {
@@ -473,33 +474,6 @@ function UserProfileScreenComponent() {
   // Get userId for follow queries
   const userId = (resolvedUserData as any)?.id;
 
-  // Eager prefetch followers/following when profile resolves — data in cache before user taps
-  useEffect(() => {
-    if (!userId) return;
-    queryClient.prefetchInfiniteQuery({
-      queryKey: ["users", "followers", userId],
-      queryFn: async () => {
-        const result = await usersApi.getFollowers(userId, 1);
-        return {
-          users: result.docs || [],
-          nextPage: result.hasNextPage ? 2 : null,
-        };
-      },
-      initialPageParam: 1,
-    });
-    queryClient.prefetchInfiniteQuery({
-      queryKey: ["users", "following", userId],
-      queryFn: async () => {
-        const result = await usersApi.getFollowing(userId, 1);
-        return {
-          users: result.docs || [],
-          nextPage: result.hasNextPage ? 2 : null,
-        };
-      },
-      initialPageParam: 1,
-    });
-  }, [userId, queryClient]);
-
   // CRITICAL: Redirect to tabs profile if viewing own profile
   // This ensures consistent UI/UX and correct avatar display
   useEffect(() => {
@@ -590,6 +564,42 @@ function UserProfileScreenComponent() {
     isPending: isFollowPending,
     mutate: followMutate,
   };
+  const privateProfile = privateProfilePresentation({
+    isPrivate: (resolvedUserData as any)?.isPrivate,
+    isOwnProfile,
+    following: isFollowing,
+    requestPending,
+    mutationPending: followMutation.isPending,
+    mutationAction: followVars?.action,
+    followsYou: Boolean((resolvedUserData as any)?.followsYou),
+  });
+  // Eager prefetch followers/following when profile resolves — data in cache before user taps
+  useEffect(() => {
+    if (!userId || privateProfile.locked) return;
+    queryClient.prefetchInfiniteQuery({
+      queryKey: ["users", "followers", userId],
+      queryFn: async () => {
+        const result = await usersApi.getFollowers(userId, 1);
+        return {
+          users: result.docs || [],
+          nextPage: result.hasNextPage ? 2 : null,
+        };
+      },
+      initialPageParam: 1,
+    });
+    queryClient.prefetchInfiniteQuery({
+      queryKey: ["users", "following", userId],
+      queryFn: async () => {
+        const result = await usersApi.getFollowing(userId, 1);
+        return {
+          users: result.docs || [],
+          nextPage: result.hasNextPage ? 2 : null,
+        };
+      },
+      initialPageParam: 1,
+    });
+  }, [userId, queryClient, privateProfile.locked]);
+
   const followTargetId = String(
     (user as any).authId || user.id || previewAuthId || "",
   );
@@ -901,8 +911,10 @@ function UserProfileScreenComponent() {
                 </View>
                 <Pressable
                   className="items-center"
+                  disabled={privateProfile.locked}
+                  accessibilityState={{ disabled: privateProfile.locked }}
                   onPress={() => {
-                    if (userId) {
+                    if (userId && !privateProfile.locked) {
                       // Prefetch before navigation — data in cache when screen mounts
                       queryClient.prefetchInfiniteQuery({
                         queryKey: ["users", "followers", userId],
@@ -940,8 +952,10 @@ function UserProfileScreenComponent() {
                 </Pressable>
                 <Pressable
                   className="items-center"
+                  disabled={privateProfile.locked}
+                  accessibilityState={{ disabled: privateProfile.locked }}
                   onPress={() => {
-                    if (userId) {
+                    if (userId && !privateProfile.locked) {
                       // Prefetch before navigation — data in cache when screen mounts
                       queryClient.prefetchInfiniteQuery({
                         queryKey: ["users", "following", userId],
@@ -1072,12 +1086,8 @@ function UserProfileScreenComponent() {
                         {/* Same state-labelled control as web: the pending text
                             is the state being moved TO, not one already
                             reached. Native and web must not drift here — they
-                            share followButtonLabel for exactly that reason. */}
-                        {followMutation.isPending
-                          ? followVars?.action === "follow"
-                            ? "Following…"
-                            : "Unfollowing…"
-                          : requestPending ? "Requested · Cancel" : followButtonLabel({ isFollowing, followsYou: Boolean((user as any)?.followsYou) })}
+                            share privateProfilePresentation for that reason. */}
+                        {privateProfile.buttonLabel}
                       </Text>
                     </Motion.View>
                   </Motion.Pressable>
@@ -1196,7 +1206,9 @@ function UserProfileScreenComponent() {
         ) : null}
 
         {/* Posts Grid — Masonry */}
-        {activeTab === "posts" && (isLoading || isLoadingPosts) ? (
+        {activeTab === "posts" && privateProfile.locked ? (
+          <PrivateProfileNotice pending={requestPending} />
+        ) : activeTab === "posts" && (isLoading || isLoadingPosts) ? (
           <View className="flex-row flex-wrap">
             {Array.from({ length: 6 }).map((_, i) => (
               <View

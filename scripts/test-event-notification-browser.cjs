@@ -47,6 +47,8 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/
 });
 const icons = ['Heart','MessageCircle','UserPlus','AtSign','Bell','BellOff','CheckCheck','Calendar','Radio','ImageOff','Megaphone'].map(name => `export const ${name}=()=>null;`).join('\n');
 const boundaries = {
+ '@dvnt/app/features/settings/follow-requests-setting.web': `export const FollowRequestsSetting=()=>null;`,
+ '@dvnt/app/features/settings/follow-requests-setting': `export const FollowRequestsSetting=()=>null;`,
   'zustand': 'export const create=()=>()=>({});',
   'solito/navigation': 'export const useRouter=()=>({});',
   'expo-router': 'export const useRouter=()=>({});export const useFocusEffect=()=>{};',
