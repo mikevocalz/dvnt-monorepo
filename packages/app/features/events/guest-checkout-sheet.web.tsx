@@ -213,6 +213,7 @@ export function GuestCheckoutSheet() {
           <input
             disabled={s.loading}
             type="tel"
+            aria-label="Phone number"
             inputMode="tel"
             autoComplete="tel"
             maxLength={32}
