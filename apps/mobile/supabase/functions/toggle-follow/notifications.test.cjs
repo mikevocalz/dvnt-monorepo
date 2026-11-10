@@ -121,7 +121,7 @@ function pushHarness({request=true,blocked=false,errorTable=null,fetchFailure=fa
 }
 
 test('push routes and recipients match transitions, never insert duplicate activity',async()=>{
-  for(const approved of [false,true]) {
+  for(const approved of [false]) {
     const h=pushHarness();
     await h.push({notifyRequest:!approved,notifyApproval:approved,notificationVersion:'2026-11-10T00:00:00Z'});
     assert.equal(h.sent.length,1);
@@ -137,12 +137,12 @@ test('push fails closed for retired requests, blocks and read errors; provider f
     const h=pushHarness(config);await h.push({notifyRequest:true,notificationVersion:'version'});assert.deepEqual(h.sent,[]);
   }
   const noVersion=pushHarness(); await noVersion.push({notifyRequest:true});assert.deepEqual(noVersion.sent,[]);
-  const failed=pushHarness({fetchFailure:true});await assert.rejects(failed.push({notifyApproval:true,notificationVersion:'version'}),/503/);
+  const failed=pushHarness({fetchFailure:true});await assert.rejects(failed.push({notifyRequest:true,notificationVersion:'version'}),/503/);
 });
 
 
 test('successful request/approval stays successful when push provider fails; no decline/cancel/repeat push',async()=>{
-  for(const action of ['follow','approve']) {
+  for(const action of ['follow']) {
     const h=pushHarness({fetchFailure:true,relationship:{following:false,followRequestStatus:'pending',notifyRequest:action==='follow',notifyApproval:action==='approve',notificationVersion:'version'}});
     assert.equal((await h.invoke(action)).ok,true); assert.equal(h.sent.length,1);
     assert.ok(h.calls.find(c=>c.table==='push_tokens').filters.some(([k,v])=>k==='user_id'&&v===1),'push goes to the other account');
@@ -200,12 +200,13 @@ test('notification insert failure rolls back the entire request and approval tra
 });
 
 
-test('approval push uses an encoded canonical username and safe Activity fallback',async()=>{
-  for(const username of ['owner name',null,'']) {
-    const h=pushHarness({username});
-    await h.push({notifyApproval:true,notificationVersion:'version'});
-    assert.equal(h.sent[0][0].data.url,username?'https://dvntapp.live/profile/owner%20name':'https://dvntapp.live/activity');
-    assert.equal(h.sent[0][0].data.senderUsername,username || undefined);
+test('approval push remains disabled, including malformed mixed transition flags',async()=>{
+  for(const transition of [{notifyApproval:true},{notifyApproval:true,notifyRequest:true},{}]) {
+    const h=pushHarness({relationship:{...transition,notificationVersion:'version'}});
+    await h.push({...transition,notificationVersion:'version'});
+    assert.deepEqual(h.sent,[]);
+    assert.equal((await h.invoke('approve')).ok,true);
+    assert.deepEqual(h.sent,[]);
   }
 });
 

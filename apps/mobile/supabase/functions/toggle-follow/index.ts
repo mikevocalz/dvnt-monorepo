@@ -163,7 +163,8 @@ Deno.serve(async (req) => {
     if (mutationError || !relationship) return errorResponse("internal_error", "Could not update follow relationship");
     // Activity rows are committed by SQL. Push is best-effort only and must
     // never turn an already successful relationship mutation into an error.
-    if (relationship.notifyRequest === true || relationship.notifyApproval === true) {
+    // Only request push is enabled. Approval push requires separate authorization.
+    if (relationship.notifyRequest === true && relationship.notifyApproval !== true) {
       await sendFollowRequestPush(supabaseAdmin, userId, targetUserId, relationship)
         .catch((error) => console.error("[Edge:toggle-follow] Follow request push failed", error));
     }
@@ -297,7 +298,7 @@ async function sendFollowRequestPush(
   targetId: number,
   transition: { notifyRequest?: boolean; notifyApproval?: boolean; notificationVersion?: string },
 ) {
-  if (!transition.notificationVersion) return;
+  if (transition.notifyRequest !== true || transition.notifyApproval === true || !transition.notificationVersion) return;
   const approved = transition.notifyApproval === true;
   const followerId = approved ? targetId : actorId;
   const ownerId = approved ? actorId : targetId;
