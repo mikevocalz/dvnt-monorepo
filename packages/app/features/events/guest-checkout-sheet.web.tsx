@@ -1,13 +1,14 @@
 "use client";
 /**
  * GuestCheckoutSheet (web) — signed-out ticket purchase (Phase 5.6.3).
- * Collects buyer email, optional name and quantity, calls guest-checkout
+ * Collects buyer email, full name, phone and quantity, calls guest-checkout
  * (which returns a hosted Stripe Checkout Session URL, or issues a free ticket
  * directly), and redirects the browser there. Card data never touches us; on
  * payment the stripe-webhook issues and emails the ticket(s). Account creation
  * is optional and separate; guest purchases send no profile-provisioning fields.
  * State lives in useGuestCheckoutStore (Zustand, no useState).
  */
+import { checkFullName, checkPhone } from "@dvnt/app/lib/checkout/profile-fields";
 import { useEffect } from "react";
 import { Minus, Plus, Lock, CheckCircle2 } from "lucide-react";
 import { supabase } from "@dvnt/app/lib/supabase/client";
@@ -74,6 +75,12 @@ export function GuestCheckoutSheet() {
       s.patch({ error: "Enter a valid email." });
       return;
     }
+    const name = checkFullName(s.name);
+    const phone = checkPhone(s.phone);
+    if (!name.ok || !phone.ok) {
+      s.patch({ error: !name.ok ? name.message : !phone.ok ? phone.message : "Check your contact details." });
+      return;
+    }
     if (namesRequired) {
       for (let i = 0; i < s.quantity; i++) {
         if (!(s.attendeeNames[i] ?? "").trim()) {
@@ -91,7 +98,8 @@ export function GuestCheckoutSheet() {
         ticket_type_id: s.tierId,
         quantity: s.quantity,
         guest_email: email,
-        guest_name: s.name.trim(),
+        guest_name: name.value,
+        guest_phone: phone.value,
         idempotency_key: s.requestKey,
         discount_code: s.discountCode,
         promoter_code: s.trackedPromoterCode,
@@ -188,7 +196,7 @@ export function GuestCheckoutSheet() {
         </label>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium uppercase tracking-wide text-white/45">Name (optional)</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-white/45">Full name</span>
           <input
             disabled={s.loading}
             type="text"
@@ -198,6 +206,23 @@ export function GuestCheckoutSheet() {
             onChange={(e) => s.patch({ name: e.target.value, error: null })}
             className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#3FDCFF]"
           />
+        </label>
+
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium uppercase tracking-wide text-white/45">Phone number</span>
+          <input
+            disabled={s.loading}
+            type="tel"
+            aria-label="Phone number"
+            inputMode="tel"
+            autoComplete="tel"
+            maxLength={32}
+            value={s.phone}
+            onChange={(e) => s.patch({ phone: e.target.value, error: null })}
+            placeholder="+1 212 555 0123"
+            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#3FDCFF]"
+          />
+          <span className="text-[11px] text-white/40">Used for ticket lookup at the door. No account or username required.</span>
         </label>
 
         <div className="flex items-center justify-between">

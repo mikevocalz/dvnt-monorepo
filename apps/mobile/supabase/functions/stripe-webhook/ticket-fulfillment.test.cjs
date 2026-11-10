@@ -261,3 +261,11 @@ test('signed hosted guest PI then session events issue exactly one full bundle',
   assert.equal(f.tickets.length, 2);
   assert.equal(f.sent.length, 1);
 });
+
+test('hosted guest phone persists into atomic ticket rows without a member identity', async () => {
+  const f = fixture({ hostedSession: true });
+  f.order.guest_phone = '+12125550123';
+  assert.equal((await f.run('evt_contact', 'session')).status, 200);
+  assert.equal(f.tickets.length, 2);
+  assert.ok(f.tickets.every(t => t.guest_phone === '+12125550123' && t.user_id == null));
+});

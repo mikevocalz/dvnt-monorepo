@@ -1,5 +1,5 @@
 /**
- * Guest paid-checkout sheet state (Phase 5.6.3). Collects buyer email/name/qty
+ * Guest paid-checkout sheet state (Phase 5.6.3). Collects buyer email/name/phone/qty
  * for a tier, then guest-checkout returns a hosted Stripe URL we redirect to.
  * Zustand, no useState (matches the other event-detail UI stores).
  */
@@ -16,6 +16,7 @@ interface GuestCheckoutState {
   priceCents: number;
   email: string;
   name: string;
+  phone: string;
   quantity: number;
   attendeeNames: string[];
   /** off | optional | required — fetched from the event when the sheet opens. */
@@ -60,6 +61,7 @@ const base = {
   priceCents: 0,
   email: "",
   name: "",
+  phone: "",
   quantity: 1,
   attendeeNames: [] as string[],
   nameRequirement: "off",
