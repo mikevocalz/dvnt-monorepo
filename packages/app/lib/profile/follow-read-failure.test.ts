@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { URL } from 'node:url';
 import vm from 'node:vm';
 
 const shared = fs.readFileSync(new URL('../api/users.ts',import.meta.url),'utf8');
