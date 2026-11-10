@@ -280,13 +280,7 @@ export function CreatePostScreen() {
           <X size={22} />
         </button>
         <h1 className="text-[17px] font-semibold">New Post</h1>
-        <button
-          onClick={handlePost}
-          disabled={!isValid || busy || pendingMedia || handoffPending}
-          className="rounded-xl px-4 py-2 text-[15px] font-bold bg-cyan-500 text-white disabled:bg-white/8 disabled:text-white/30"
-        >
-          {busy ? "Posting…" : "Share"}
-        </button>
+        <span className="w-[22px]" aria-hidden="true" />
       </div>
 
       <div className="mx-auto w-full max-w-2xl px-4 pb-32">
@@ -517,6 +511,18 @@ export function CreatePostScreen() {
             {!captionValidation.valid ? <p role="alert" className="mt-1 text-xs text-red-400">{captionValidation.error}</p> : null}
           </div>
         ) : null}
+        {/* Publish after reviewing the draft, without returning to the header.
+            Bottom content padding keeps this above the mobile navigation. */}
+        <div className="mt-6" data-testid="composer-publish-footer">
+          <button
+            type="button"
+            onClick={handlePost}
+            disabled={!isValid || busy || pendingMedia || handoffPending}
+            className="min-h-12 w-full rounded-xl px-4 py-3 text-[16px] font-bold bg-cyan-500 text-white disabled:bg-white/8 disabled:text-white/30"
+          >
+            {busy ? "Posting…" : "Share"}
+          </button>
+        </div>
       </div>
 
     </div>
