@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { checkPhone } from "@dvnt/app/lib/checkout/profile-fields";
+import { hasAdmissionPurpose } from "@dvnt/app/lib/tickets/ticket-category";
 import { isAdmissible } from "@dvnt/app/lib/tickets/ticket-access";
 
 /** Contact lookup is online, explicit-submit, ephemeral and never roster-cached. */
@@ -58,7 +59,7 @@ export function DoorContactLookup({ eventId, onCheckIn, checkingInToken }: {
     {s.rows && <div aria-live="polite" className="mt-2">
       {s.rows.length === 0 ? <p className="text-sm text-white/60">No matching tickets for this event.</p> : s.rows.map(t => <div key={t.id} className="flex items-center justify-between gap-2 border-t border-white/10 py-2">
         <div><p className="text-sm">{t.holder_name || "Ticket holder"}</p><p className="text-xs text-white/60">{t.ticket_type_name || "Ticket"} · {t.status}</p></div>
-        <button type="button" disabled={!isAdmissible(t.status) || t.status === "scanned" || !!checkingInToken || !t.qr_token} onClick={() => { edit({ value: "" }); onCheckIn(t.qr_token); }} className="rounded-lg bg-white/10 px-3 py-2 text-sm disabled:opacity-40">{checkingInToken === t.qr_token ? "Checking…" : t.status === "scanned" ? "Checked in" : "Check in"}</button>
+        <button type="button" disabled={!hasAdmissionPurpose(t.category) || !isAdmissible(t.status) || t.status === "scanned" || !!checkingInToken || !t.qr_token} onClick={() => { edit({ value: "" }); onCheckIn(t.qr_token); }} className="rounded-lg bg-white/10 px-3 py-2 text-sm disabled:opacity-40">{!hasAdmissionPurpose(t.category) ? "Use service redemption" : checkingInToken === t.qr_token ? "Checking…" : t.status === "scanned" ? "Checked in" : "Check in"}</button>
       </div>)}
       <button type="button" onClick={() => edit({ value: "" })} className="mt-2 text-sm text-white/70">Clear contact lookup</button>
     </div>}
