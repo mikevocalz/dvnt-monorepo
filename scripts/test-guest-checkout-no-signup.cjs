@@ -39,16 +39,16 @@ afterEach(async()=>{await React.act(async()=>root.unmount());dom.window.close();
 async function open(patch={},total=0){
  await React.act(async()=>{
   store.getState().openSheet({eventId:'42',eventTitle:'Fixture',tierId:'tier',tierName:'Admission',priceCents:total});
-  store.getState().patch({email:'guest@example.test',...patch});
+  store.getState().patch({email:'guest@example.test',name:'Guest Buyer',phone:'+12125550123',...patch});
   const state=store.getState();state.patch({quote:{quote_key:'a'.repeat(64),total_cents:total},quoteSelectionKey:guestQuoteSelectionKey(state)});
   root.render(React.createElement(GuestCheckoutSheet));
  });
 }
 async function submit(){await React.act(async()=>[...document.querySelectorAll('button')].find(b=>/^(Get free tickets|Pay \$)/.test(b.textContent)).click());}
-test('email-only free guest purchase does not collect or send signup fields',async()=>{
- await open();assert.equal(document.querySelectorAll('input').length,2);
- assert.match(document.body.textContent,/Name \(optional\)/);assert.doesNotMatch(document.body.textContent,/MOBILE NUMBER|set up your DVNT profile|USERNAME/);
- await submit();assert.equal(calls.length,1);assert.equal(calls[0].guest_email,'guest@example.test');assert.equal(calls[0].guest_name,'');
+test('free guest purchase captures contact without signup fields',async()=>{
+ await open();assert.equal(document.querySelectorAll('input').length,3);
+ assert.match(document.body.textContent,/Full name/);assert.doesNotMatch(document.body.textContent,/MOBILE NUMBER|set up your DVNT profile|USERNAME/);
+ await submit();assert.equal(calls.length,1);assert.equal(calls[0].guest_email,'guest@example.test');assert.equal(calls[0].guest_name,'Guest Buyer');assert.equal(calls[0].guest_phone,'+12125550123');
  for(const key of ['username','full_name','phone'])assert.equal(Object.hasOwn(calls[0],key),false);
  assert.match(document.body.textContent,/Creating a DVNT account is optional/);
 });
@@ -58,4 +58,6 @@ test('paid guest request retains buyer name and quote without provisioning field
 });
 test('invalid email still blocks submission',async()=>{await open({email:'bad'});await submit();assert.equal(calls.length,0);assert.match(document.body.textContent,/Enter a valid email/);});
 test('event-required attendee names still block submission',async()=>{requireNames='required';await open();await submit();assert.equal(calls.length,0);assert.match(document.body.textContent,/Enter a name for each ticket/);});
-test('reopening clears buyer details rather than reusing another purchase',async()=>{await open({name:'Previous Buyer'});await open();assert.equal(store.getState().name,'');});
+test('reopening clears buyer details rather than reusing another purchase',async()=>{await open({name:'Previous Buyer'});await open({name:'',phone:''});assert.equal(store.getState().name,'');assert.equal(store.getState().phone,'');});
+
+test('missing or invalid contact blocks guest submission without signup',async()=>{await open({name:''});await submit();assert.equal(calls.length,0);assert.match(document.body.textContent,/Enter your full name/);await open({phone:'123'});await submit();assert.equal(calls.length,0);});

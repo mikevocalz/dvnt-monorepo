@@ -24,7 +24,7 @@ const boundaries={
  '@dvnt/app/lib/supabase/client':`export const supabase={from:()=>({select:()=>({eq:()=>({single:()=>Promise.resolve({data:{attendee_name_requirement:'off',refund_policy:'none'}})})})}),functions:{invoke:async(_,options)=>{const response=await fetch('/fixture-api',{method:'POST',body:JSON.stringify(options.body),signal:options.signal});const data=await response.json();return {data,error:null};}}};`,
 };
 (async()=>{
- const build=await esbuild.build({stdin:{contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {GuestCheckoutSheet} from './packages/app/features/events/guest-checkout-sheet.web';import {useGuestCheckoutStore} from './packages/app/lib/stores/guest-checkout-store';window.begin=(args={})=>{useGuestCheckoutStore.getState().openSheet({eventId:'1',eventTitle:'Fixture',tierId:'${TIER}',tierName:'Admission',priceCents:3000,...args});useGuestCheckoutStore.getState().patch({email:'${EMAIL}'});};window.store=useGuestCheckoutStore;createRoot(document.getElementById('root')).render(<GuestCheckoutSheet/>);`,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',define:{'process.env.NODE_ENV':'"test"'},plugins:[{name:'explicit-boundaries',setup(build){
+ const build=await esbuild.build({stdin:{contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {GuestCheckoutSheet} from './packages/app/features/events/guest-checkout-sheet.web';import {useGuestCheckoutStore} from './packages/app/lib/stores/guest-checkout-store';window.begin=(args={})=>{useGuestCheckoutStore.getState().openSheet({eventId:'1',eventTitle:'Fixture',tierId:'${TIER}',tierName:'Admission',priceCents:3000,...args});useGuestCheckoutStore.getState().patch({email:'${EMAIL}',name:'Guest Buyer',phone:'+12125550123'});};window.store=useGuestCheckoutStore;createRoot(document.getElementById('root')).render(<GuestCheckoutSheet/>);`,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',define:{'process.env.NODE_ENV':'"test"'},plugins:[{name:'explicit-boundaries',setup(build){
   build.onResolve({filter:/.*/},args=>{
    if(Object.hasOwn(boundaries,args.path))return{path:args.path,namespace:'fixture-boundary'};
    if(args.path.startsWith('@dvnt/app/'))return{path:path.join(ROOT,'packages/app',args.path.slice('@dvnt/app/'.length))+(/\.(tsx?|js)$/.test(args.path)?'':'.ts')};
@@ -63,7 +63,7 @@ const boundaries={
   await page.getByRole('button',{name:'Done',exact:true}).click();
   await page.evaluate(()=>window.begin());
   assert.equal(await page.getByRole('textbox',{name:/username|mobile number/i}).count(),0);
-  await page.getByRole('textbox',{name:'Name (optional)',exact:true}).fill('Guest Buyer');
+  await page.getByRole('textbox',{name:'Full name',exact:true}).fill('Guest Buyer');
   const code=page.getByRole('textbox',{name:'Promo or promoter code'});
   await page.getByRole('button',{name:'Pay $31.75',exact:true}).waitFor();
   await code.fill('save10');await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent?.includes('Pay $31.75')&&b.disabled),{},{timeout:5000});

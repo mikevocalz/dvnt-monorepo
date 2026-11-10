@@ -1,0 +1,32 @@
+name: Ticket contact lookup
+on:
+  pull_request:
+    paths:
+      - 'packages/app/features/events/**'
+      - 'packages/app/lib/stores/guest-checkout-store.ts'
+      - 'packages/app/lib/api/tickets.ts'
+      - 'apps/mobile/supabase/functions/**'
+      - 'apps/mobile/supabase/migrations/**'
+      - 'scripts/test-*contact*.cjs'
+      - '.github/workflows/ticket-contact-lookup.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contact-regressions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --prefix "$RUNNER_TEMP/contact" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.25.12 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 jsdom@26.1.0 @electric-sql/pglite@0.3.14
+      - name: Exact-match authorization and UI races
+        env:
+          NODE_PATH: ${{ runner.temp }}/contact/node_modules
+        run: |
+          node --test scripts/test-scanner-contact-lookup.cjs
+          node --test apps/mobile/supabase/functions/get-event-tickets/index.test.cjs apps/mobile/supabase/functions/get-event-tickets/offline.test.cjs
+          node scripts/test-scanner-contact-dom.cjs
+          node scripts/test-guest-contact-sql.cjs
+          node --test apps/mobile/supabase/functions/guest-checkout/contact.test.cjs

@@ -278,6 +278,7 @@ export const ticketsApi = {
         | "transfer_pending"
         | "void";
       search?: string;
+      contactLookup?: { kind: "email" | "phone"; value: string };
       /** WS-2 sort key; defaults server-side to `purchased_at`. */
       sort?: "purchased_at" | "checked_in" | "ticket_tier" | "status";
       /**
@@ -311,6 +312,7 @@ export const ticketsApi = {
       pageSize: opts.pageSize ?? 50,
       status: opts.status ?? "all",
       search: opts.search ?? "",
+      ...(opts.contactLookup ? { contact_lookup: opts.contactLookup } : {}),
       sort: opts.sort ?? "purchased_at",
       cursor: opts.cursor ?? null,
     });

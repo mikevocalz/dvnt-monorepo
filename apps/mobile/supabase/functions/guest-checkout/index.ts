@@ -8,9 +8,12 @@
  * already issues guest tickets from. Paid buyers use Stripe's page; the webhook
  * issues + emails their ticket(s). No card data touches us, no account required.
  *
- *   POST { event_id, ticket_type_id, quantity, guest_email, guest_name?,
+ *   POST { event_id, ticket_type_id, quantity, guest_email, guest_name?, guest_phone?,
  *          username?, full_name?, phone? }
  *   -> { ok, url }   // redirect the browser to `url`
+ *
+ * guest_phone: optional E.164-normalizable ticket contact, with guest_name.
+ * It stays on the private order/ticket and never provisions a profile.
  *
  * username/full_name/phone: send all three or none. With them, the buyer gets
  * a restricted profile once the ticket is issued (_shared/checkout-profile.ts).
@@ -31,7 +34,7 @@ import { tierSaleAvailabilityError } from "../_shared/tier-sale-availability.ts"
 import { isUnpublished } from "../_shared/event-access.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
-import { parseCheckoutProfileFields } from "../_shared/checkout-profile-fields.ts";
+import { checkFullName, checkPhone, parseCheckoutProfileFields } from "../_shared/checkout-profile-fields.ts";
 import {
   provisionCheckoutProfile,
   recordCheckoutProfileIntake,
@@ -136,6 +139,16 @@ Deno.serve(async (req) => {
       return err("invalid_quantity", "Choose between 1 and 10 tickets.", 400);
     const guestEmail = String(body.guest_email || "").trim().toLowerCase();
     const guestName = body.guest_name ? String(body.guest_name).trim() : "";
+    // Independent contact field: never routes a guest into profile creation.
+    // Older clients may omit it; new web clients send a validated name/phone pair.
+    let guestPhone: string | null = null;
+    if (!isQuote && Object.prototype.hasOwnProperty.call(body, "guest_phone")) {
+      const phone = checkPhone(body.guest_phone);
+      const name = checkFullName(guestName);
+      if (!phone.ok) return err(phone.code, phone.message, 400);
+      if (!name.ok) return err(name.code, name.message, 400);
+      guestPhone = phone.value;
+    }
     const attendeeNames: string[] = Array.isArray(body.attendee_names)
       ? body.attendee_names.slice(0, quantity).map((n: unknown) => (n == null ? "" : String(n).trim()))
       : [];
@@ -309,6 +322,7 @@ Deno.serve(async (req) => {
           user_id: null,
           guest_email: guestEmail,
           guest_name: guestName || null,
+          guest_phone: guestPhone,
           attendee_name: attendeeNames[i] || guestName || null,
           guest_lookup_token: crypto.randomUUID(),
           status: "active",
@@ -327,6 +341,7 @@ Deno.serve(async (req) => {
           p_ticket_rows: ticketRows,
           p_order: {
             guest_email: guestEmail,
+            guest_phone: guestPhone,
             quantity,
             subtotal_cents: 0,
             total_cents: 0,
@@ -516,6 +531,7 @@ Deno.serve(async (req) => {
     const { error: guestOrderError } = await supabase.from("orders").insert({
       user_id: null,
       guest_email: guestEmail,
+      guest_phone: guestPhone,
       type: "event_ticket",
       status: "payment_pending",
       quantity,

@@ -18,6 +18,7 @@ import {
   ticketConfirmation,
 } from "./send-resend-email.ts";
 import { deliverTicketBundleEmail } from "./ticket-email-delivery.ts";
+import { normalizePhoneE164 } from "./checkout-profile-fields.ts";
 import { finalizeCheckoutProfile } from "./checkout-profile.ts";
 import {
   recordPromoterEarning,
@@ -136,7 +137,7 @@ export async function issueTicketsForCheckoutSession(
   // order_id link (pre-migration rows used only the Stripe links).
   const { data: orderRow, error: orderError } = await supabase
     .from("orders")
-    .select("id, ticket_email_status")
+    .select("id, ticket_email_status, guest_phone")
     .eq("stripe_checkout_session_id", session.id)
     .maybeSingle();
 
@@ -161,6 +162,7 @@ export async function issueTicketsForCheckoutSession(
       user_id: userId,
       guest_email: guestEmail,
       guest_name: guestName,
+      guest_phone: isGuestPurchase ? normalizePhoneE164(orderRow.guest_phone) : null,
       guest_lookup_token: isGuestPurchase ? crypto.randomUUID() : null,
       status: "active",
       qr_token: qrToken,

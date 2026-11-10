@@ -20,6 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { create } from "zustand";
 import { Search, Check, X } from "lucide-react";
+import { DoorContactLookup } from "./door-contact-lookup.web";
 import { ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { qk } from "@dvnt/app/lib/query/keys";
@@ -237,6 +238,7 @@ export function DoorGuestList({
 
   return (
     <section className="mt-3">
+      <DoorContactLookup key={eventId} eventId={eventId} onCheckIn={onCheckIn} checkingInToken={checkingInToken} />
       {cached && tickets.length ? (
         <p role="status" className="mb-2 rounded-lg bg-[#FEF3C7] px-3 py-2 text-[12px] font-medium text-[#78350F]">
           Offline — showing the list saved{" "}
@@ -251,7 +253,7 @@ export function DoorGuestList({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search a name, email, or ticket code"
+          placeholder="Search a name or ticket code"
           className="h-8 w-full bg-transparent text-[15px] text-white placeholder:text-white/35 focus:outline-none"
         />
       </label>

@@ -104,6 +104,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST") return errorResponse("Method not allowed", 405);
 
+  let contactLookupRequest = false;
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -122,6 +123,7 @@ Deno.serve(async (req: Request) => {
       pageSize?: number;
       status?: string;
       search?: string;
+      contact_lookup?: { kind: "email" | "phone"; value: string };
       /** WS-2 sort key. Defaults to `purchased_at` (the historic order). */
       sort?: string;
       /** WS-2 keyset cursor — `{ value, id }` from the previous page's last row. */
@@ -131,6 +133,12 @@ Deno.serve(async (req: Request) => {
       body = await req.json();
     } catch {
       return errorResponse("Invalid JSON body", 400);
+    }
+
+    contactLookupRequest = body.contact_lookup !== undefined;
+    if (body.contact_lookup !== undefined && (!body.contact_lookup || typeof body.contact_lookup !== "object"
+      || Array.isArray(body.contact_lookup) || body.offline || body.summary)) {
+      return errorResponse("Contact lookup requires a normal online roster request", 400);
     }
 
     const eventIdNum = Number(body.event_id);
@@ -256,7 +264,16 @@ Deno.serve(async (req: Request) => {
     // SETOF tickets preserves the ticket_types relationship and existing sort,
     // cursor, status and response projections; no global profile lookup or
     // unbounded ticket-ID list is sent through a PostgREST URL.
-    let query = search
+    const contact = body.contact_lookup;
+    if (contact && (typeof contact !== "object" || !["email", "phone"].includes(contact.kind)
+      || typeof contact.value !== "string" || contact.value.length > 254 || search)) {
+      return errorResponse("Enter one complete email or phone number", 400);
+    }
+    let query = contact
+      ? supabase.rpc("lookup_event_tickets_contact", {
+          p_event_id: eventIdNum, p_auth_id: authId, p_kind: contact.kind, p_value: contact.value,
+        }, { count: "exact" }).select("*, ticket_types(name, category)")
+      : search
       ? supabase.rpc("search_event_tickets", {
           p_event_id: eventIdNum, p_auth_id: authId, p_search: search,
         }, { count: "exact" }).select("*, ticket_types(name, category)")
@@ -310,6 +327,10 @@ Deno.serve(async (req: Request) => {
 
     const { data, error, count } = await query;
     if (error) {
+      if (contact) {
+        // Do not log query arguments or contact-containing database details.
+        return errorResponse(error.code === "P0001" ? "Too many contact lookups. Try again shortly." : "Contact lookup unavailable", error.code === "P0001" ? 429 : 503);
+      }
       console.error("[get-event-tickets] query error:", error);
       return errorResponse("Could not fetch tickets", 500);
     }
@@ -419,7 +440,7 @@ Deno.serve(async (req: Request) => {
       // with tier === null and therefore gets [].
       const perks = isAdmission ? resolvePerks(tier?.rank ?? null, perkConfig) : [];
 
-      if (isScanner) {
+      if (isScanner || contact) {
         // Scanner role (Phase-0 decision, option 3): holder name + membership
         // tier + add-on info, so the door can work the priority lane. Still no
         // emails, no purchase amounts, no Stripe references. Note this is a
@@ -446,7 +467,7 @@ Deno.serve(async (req: Request) => {
       };
     });
 
-    return jsonResponse({
+    const response = jsonResponse({
       ok: true,
       tickets,
       page,
@@ -470,8 +491,11 @@ Deno.serve(async (req: Request) => {
             }
           : null,
     });
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
   } catch (err) {
-    console.error("[get-event-tickets] unexpected:", err);
+    if (contactLookupRequest) console.error("[get-event-tickets] contact lookup failed");
+    else console.error("[get-event-tickets] unexpected:", err);
     return errorResponse("Internal error", 500);
   }
 });
