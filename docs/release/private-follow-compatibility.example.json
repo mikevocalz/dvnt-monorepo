@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "scope": "recorded-devices-only",
+  "activationPerformed": false,
+  "status": "held",
+  "candidateSourceCommit": "",
+  "supportedCohorts": [
+    {"id": "ios-awaiting-inventory", "platform": "ios", "build": "UNVERIFIED", "runtimeVersion": "UNVERIFIED"},
+    {"id": "android-awaiting-inventory", "platform": "android", "build": "UNVERIFIED", "runtimeVersion": "UNVERIFIED"}
+  ],
+  "devices": [],
+  "fleetReview": {
+    "status": "pending",
+    "anonymousLegacyClientsRemaining": true,
+    "inventoryEvidenceUrl": "",
+    "unsupportedClientDispositionEvidenceUrl": "",
+    "reviewer": "",
+    "reviewedAt": ""
+  }
+}

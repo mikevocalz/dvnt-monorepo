@@ -39,7 +39,7 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
   });
   const eventPins = attachEventMapFlyers(eventMapPins(locations.isError ? [] : locations.data || [], ids), events);
   const openEvent = (id: string) => onOpenEvent ? onOpenEvent(id) : router.push(`/(protected)/events/${id}` as any);
-  const { sharing } = useLocationSettings();
+  const { sharing, enabled } = useLocationSettings();
   const savedCity = useEventsLocationStore((state) => state.activeCity);
   const savedArea = savedMapArea(savedCity);
   const presence = useMemberMapPresence(Boolean(NativeMap));
@@ -116,8 +116,9 @@ export default function MemberMap({ events = [], onOpenEvent }: { events?: Event
       {!NativeMap ? <LocationControls allowSharing={false} /> : null}
       {!NativeMap ? <Text accessibilityRole="alert" style={{ color: '#ddd' }}>This map requires a build with native maps. No location is collected here. You can still turn sharing off.</Text> : null}
       {presence.error ? <Text accessibilityRole="alert" style={{ color: '#ffb4b4' }}>{presence.error}</Text> : null}
+      {NativeMap && enabled ? <Pressable accessibilityRole="button" disabled={presence.isUpdating} onPress={() => void presence.requestLocation()} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>{presence.isUpdating ? 'Updating location…' : 'Update my location'}</Text></Pressable> : null}
       {nearby.isError ? <View><Text accessibilityRole="alert" style={{ color: '#ddd' }}>Nearby people could not be refreshed. Member locations have been hidden.</Text><Pressable accessibilityRole="button" onPress={() => void nearby.refetch()} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>Retry nearby people</Text></Pressable></View> : null}
-      {NativeMap && sharing && !center && !nearby.isError ? <View style={{ gap: 8 }}>{presence.isUpdating || nearby.isPending ? <ActivityIndicator /> : null}<Text style={{ color: '#bbb' }}>A fresh location is needed to show nearby people.</Text></View> : null}
+      {NativeMap && sharing && !center && !nearby.isError && !presence.error ? <View style={{ gap: 8 }}>{presence.isUpdating || nearby.isPending ? <ActivityIndicator /> : null}<Text style={{ color: '#bbb' }}>A fresh location is needed to show nearby people.</Text></View> : null}
       {NativeMap ? (
         <>
           {visualPins.map(pin => <MapIcon key={`${pin.id}:${pin.image}:${pin.monogram}`} id={pin.id} source={pin.image || null} label={pin.monogram} color={pin.tint} height={pin.id.startsWith("event:") ? 58 : 44} register={registerIcon} />)}

@@ -13,7 +13,7 @@ function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: bo
   return <View accessibilityLabel="Map sharing" style={promptOnly ? undefined : { borderWidth: 1, borderColor: '#ffffff30', borderRadius: 12, padding: 16, gap: 12 }}>
     {!promptOnly ? <>
       {flow.location.sharing ? <>
-      <Text style={{ color: '#ddd' }}>Avatar sharing is on until {new Date(flow.location.settings!.shareUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Your avatar appears when a fresh location is available.</Text>
+      <Text style={{ color: '#ddd' }}>Avatar sharing is enabled for this sign-in, until {new Date(flow.location.settings!.shareUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. This is your sharing preference, not confirmation of a current location. Your avatar appears only while a fresh permitted location is available.</Text>
       <Pressable accessibilityRole="button" disabled={flow.location.busy} onPress={flow.stop} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>Stop sharing</Text></Pressable>
     </> : <>
       <Text style={{ color: '#ddd' }}>Show your avatar for this sign-in. Sharing stops when you sign out or your sign-in expires. Sharing is optional.</Text>

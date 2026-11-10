@@ -1,3 +1,5 @@
+-- SOURCE-ONLY: legacy-readable copy does not supply review UI to old native builds.
+-- Keep producer activation held until native compatibility release checks pass.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
@@ -27,7 +29,7 @@ BEGIN
   IF TG_OP='DELETE' THEN
     -- Cancellation, decline, or retirement removes an actionable request. An
     -- approval notification is historical activity, not an access grant.
-    DELETE FROM public.notifications WHERE type='follow_request'
+    DELETE FROM public.notifications WHERE (type='follow_request' OR (type='system' AND entity_payload->>'semantic_type'='follow_request'))
       AND recipient_id=OLD.following_id AND actor_id=OLD.follower_id;
     RETURN OLD;
   END IF;
@@ -37,14 +39,17 @@ BEGIN
   END IF;
   IF TG_OP='INSERT' AND NEW.status='pending' THEN
     INSERT INTO public.notifications(recipient_id,actor_id,type,entity_type,entity_id,entity_payload)
-      VALUES(NEW.following_id,NEW.follower_id,'follow_request','user',NEW.follower_id::text,
-        jsonb_build_object('url','/settings/privacy#follow-requests'));
+      VALUES(NEW.following_id,NEW.follower_id,'system','user',NEW.follower_id::text,
+        jsonb_build_object('semantic_type','follow_request','title',coalesce((SELECT username FROM public.users WHERE id=NEW.follower_id),'Someone') || ' requested to follow you',
+          'body','Someone requested to follow you. To review, open dvntapp.live in your browser and go to Settings > Privacy > Follow requests.',
+          'url','/settings/privacy#follow-requests'));
   ELSIF TG_OP='UPDATE' AND OLD.status='pending' AND NEW.status='approved' THEN
-    DELETE FROM public.notifications WHERE type='follow_request'
+    DELETE FROM public.notifications WHERE (type='follow_request' OR (type='system' AND entity_payload->>'semantic_type'='follow_request'))
       AND recipient_id=NEW.following_id AND actor_id=NEW.follower_id;
     INSERT INTO public.notifications(recipient_id,actor_id,type,entity_type,entity_id,entity_payload)
-      VALUES(NEW.follower_id,NEW.following_id,'follow_request_approved','user',NEW.following_id::text,
-        '{}'::jsonb);
+      VALUES(NEW.follower_id,NEW.following_id,'system','user',NEW.following_id::text,
+        jsonb_build_object('semantic_type','follow_request_approved','title',coalesce((SELECT username FROM public.users WHERE id=NEW.following_id),'A member') || ' accepted your follow request',
+          'body','Your follow request was accepted. Open this member’s profile to view it.'));
   END IF;
   RETURN NEW;
 END;

@@ -330,7 +330,7 @@ async function sendFollowRequestPush(
     to: entry.token,
     title: approved ? "Follow request accepted" : "Follow request",
     body: approved ? `${actor?.username || "A member"} accepted your follow request`
-      : `${actor?.username || "Someone"} requested to follow you`,
+      : `${actor?.username || "Someone"} requested to follow you. Review on dvntapp.live in your browser: Settings > Privacy > Follow requests.`,
     data: { type, senderId: String(actorId), senderUsername: username || undefined, entityType: "user", entityId: String(actorId), url },
     sound: "default",
     channelId: "default",

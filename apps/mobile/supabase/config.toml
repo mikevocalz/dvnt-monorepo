@@ -600,3 +600,7 @@ verify_jwt = false
 
 [functions.get-posts]
 verify_jwt = false
+
+# Authenticated internally with verified Better Auth session, never caller IDs.
+[functions.get-follow-relationships]
+verify_jwt = false

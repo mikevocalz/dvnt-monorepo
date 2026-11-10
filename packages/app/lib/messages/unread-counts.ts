@@ -40,6 +40,7 @@ export async function fetchUnreadConversationCounts(
   client: SupabaseClient,
   authId: string,
   viewerId: number,
+  loadFollowingIds: () => Promise<number[]>,
 ): Promise<UnreadConversationCounts> {
   const [memberships, reads] = await Promise.all([
     allRows(() => client.from("conversations_rels")
@@ -77,12 +78,11 @@ export async function fetchUnreadConversationCounts(
   if (directIds.length === 0) return snapshot(inboxIds, spamIds);
 
   const [follows, blocks] = await Promise.all([
-    allRows(() => client.from("follows").select("following_id")
-      .eq("follower_id", viewerId).order("following_id")),
+    loadFollowingIds(),
     allRows(() => client.from("blocks").select("id,blocker_id,blocked_id")
       .or(`blocker_id.eq.${viewerId},blocked_id.eq.${viewerId}`).order("id")),
   ]);
-  const followed = new Set(follows.map(row => String(row.following_id)));
+  const followed = new Set(follows.map(String));
   const blocked = new Set(blocks.map(row => String(
     Number(row.blocker_id) === viewerId ? row.blocked_id : row.blocker_id,
   )));

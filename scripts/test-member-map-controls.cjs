@@ -12,7 +12,7 @@ const mocks = {
   '@dvnt/app/lib/api/member-map': `const f=()=>window.fixture; const call=async(action,owner,input)=>{f().calls.push({action,owner,input}); if(owner!==f().owner)throw Error('Account changed');if(action==='settings'){if(f().failSettings)throw Error('Settings offline');return {...f().settings}}if(action==='revoke'){if(f().failRevoke)throw Error('Network offline');f().settings={...f().settings,eventsMapEnabled:false,locationEnabled:input==='overall'?false:f().settings.locationEnabled,revision:f().settings.revision+1,shareUntil:null};return {...f().settings}}if(action==='update'){if(input.expectedRevision!==f().settings.revision)throw Object.assign(Error('Settings changed. Refresh and retry.'),{status:409,code:'settings_changed'});if(f().failUpdate)throw Object.assign(Error('Map sharing is off, expired, or requires a verified public adult profile.'),{status:403,code:'map_consent_required'});f().settings={...f().settings,locationEnabled:input.locationEnabled,eventsMapEnabled:input.eventsMapEnabled,revision:f().settings.revision+1,shareUntil:input.eventsMapEnabled?new Date(Date.now()+(input.shareDurationHours||1)*3600000).toISOString():null};return {...f().settings}}if(action==='publish' && f().failPublish)throw Error('Publish offline');if(action==='publish')return {published:true,expiresAt:new Date(Date.now()+900000).toISOString()};if(action==='nearby')return {members:[],center:null,expiresAt:null};};export const memberMapApi={settings:o=>call('settings',o),revoke:(o,s)=>call('revoke',o,s),updateSettings:(o,x)=>call('update',o,x),publish:(o,x)=>call('publish',o,x),nearby:o=>call('nearby',o)};`,
 };
 (async()=>{
- const bundle=expoKey=>build({stdin:{contents:`import React,{useSyncExternalStore} from 'react';import {createRoot} from 'react-dom/client';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';import {LocationControls} from './packages/app/features/settings/ui/LocationControls.web.tsx';import {useMemberMapPresence} from './packages/app/lib/hooks/use-member-map.ts';import {useLocationAccessStore} from './packages/app/lib/stores/location-access-store.ts';import {useEventsLocationStore} from '@dvnt/app/lib/stores/events-location-store';const q=new QueryClient({defaultOptions:{queries:{retry:false}}});window.fixture.queryClient=q;window.fixture.access=useLocationAccessStore;window.fixture.location=useEventsLocationStore;function Presence(){const active=useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>window.fixture.active);const p=useMemberMapPresence(active);window.fixture.presence=p;return <><button onClick={()=>p.refresh()}>Update my location</button><p role="status">{p.error}</p></>}createRoot(document.getElementById('root')).render(<QueryClientProvider client={q}><LocationControls/><Presence/></QueryClientProvider>);`,resolveDir:root,loader:'tsx'},bundle:true,write:false,format:'iife',platform:'browser',define:{'process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY':'undefined','process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY':JSON.stringify(expoKey)},jsx:'automatic',nodePaths:[process.env.NODE_PATH||path.join(root,'node_modules')],plugins:[{name:'mocks',setup(b){b.onResolve({filter:/.*/},a=>{if(a.path==='@dvnt/ui/google-maps-public-config')return {path:path.join(root,'packages/ui/src/google-maps-public-config.ts')};if(mocks[a.path])return {path:a.path,namespace:'mock'};if(a.path.startsWith('@dvnt/app/'))return {path:path.join(root,'packages/app',a.path.slice('@dvnt/app/'.length))+'.ts'};});b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:mocks[a.path],loader:'js',resolveDir:root}));}}]});
+ const bundle=expoKey=>build({stdin:{contents:`import React,{useSyncExternalStore} from 'react';import {createRoot} from 'react-dom/client';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';import {LocationControls} from './packages/app/features/settings/ui/LocationControls.web.tsx';import {useMemberMapPresence} from './packages/app/lib/hooks/use-member-map.ts';import {useLocationAccessStore} from './packages/app/lib/stores/location-access-store.ts';import {useEventsLocationStore} from '@dvnt/app/lib/stores/events-location-store';const q=new QueryClient({defaultOptions:{queries:{retry:false}}});window.fixture.queryClient=q;window.fixture.access=useLocationAccessStore;window.fixture.location=useEventsLocationStore;function Presence(){const active=useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>window.fixture.active);const p=useMemberMapPresence(active);window.fixture.presence=p;return <><button onClick={()=>p.requestLocation()}>Update my location</button><p role="status">{p.error}</p></>}createRoot(document.getElementById('root')).render(<QueryClientProvider client={q}><LocationControls/><Presence/></QueryClientProvider>);`,resolveDir:root,loader:'tsx'},bundle:true,write:false,format:'iife',platform:'browser',define:{'process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY':'undefined','process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY':JSON.stringify(expoKey)},jsx:'automatic',nodePaths:[process.env.NODE_PATH||path.join(root,'node_modules')],plugins:[{name:'mocks',setup(b){b.onResolve({filter:/.*/},a=>{if(a.path==='@dvnt/ui/google-maps-public-config')return {path:path.join(root,'packages/ui/src/google-maps-public-config.ts')};if(mocks[a.path])return {path:a.path,namespace:'mock'};if(a.path.startsWith('@dvnt/app/'))return {path:path.join(root,'packages/app',a.path.slice('@dvnt/app/'.length))+'.ts'};});b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:mocks[a.path],loader:'js',resolveDir:root}));}}]});
  const output=await bundle('synthetic-expo-key');const missing=await bundle('  ');
  const browser=await (process.env.MAP_BROWSER==='webkit'?webkit:chromium).launch({headless:true,...(process.env.PLAYWRIGHT_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}:{})});
  try{
@@ -93,6 +93,54 @@ const mocks = {
   assert.equal(await page.evaluate(()=>window.fixture.samples.length),0);
   assert.equal(await page.evaluate(()=>window.fixture.nativePermissionRequests.length),0);
  }
+ // iPhone browser reload: consent survives, but the Permissions API may be
+ // absent/unsupported/prompt. Do not call that denial or silently prompt.
+ // The actual user action can recover without toggling sharing off/on.
+ for(const variant of [{permissionsMissing:true},{permissionQueryFails:true},{permissionState:'prompt'}]) {
+  await reset({...restored,...variant});
+  await page.waitForFunction(()=>window.fixture.presence.error?.includes('needs confirmation'));
+  assert.equal(await page.evaluate(()=>window.fixture.settings.eventsMapEnabled),true);
+  assert.equal(await page.evaluate(()=>window.fixture.samples.length),0);
+  assert.equal(await page.evaluate(()=>window.fixture.calls.some(c=>c.action==='revoke')),false);
+  assert.doesNotMatch(await page.evaluate(()=>window.fixture.presence.error),/access is off/);
+  await page.getByRole('button',{name:'Update my location',exact:true}).click();
+  await page.waitForFunction(()=>window.fixture.samples.length===1);
+  await resolveSample(0);
+  await page.waitForFunction(()=>window.fixture.calls.some(c=>c.action==='publish'));
+  assert.equal(await page.evaluate(()=>window.fixture.presence.error),null);
+  await page.waitForFunction(()=>window.fixture.presence.area!==null);
+  assert.notEqual(await page.evaluate(()=>window.fixture.presence.area),null);
+  assert.equal(await page.evaluate(()=>window.fixture.calls.some(c=>c.action==='update')),false,'refresh does not renew/change consent');
+ }
+ // If a permission sheet interrupts the page, discard that coordinate but
+ // retain permission proof for the foreground retry in unsupported browsers.
+ await reset({...restored,permissionsMissing:true});
+ await page.waitForFunction(()=>!!window.fixture.presence.error);
+ await page.getByRole('button',{name:'Update my location',exact:true}).click();
+ await page.waitForFunction(()=>window.fixture.samples.length===1);
+ await page.evaluate(()=>{window.fixture.visibility='hidden';document.dispatchEvent(new Event('visibilitychange'));});
+ await resolveSample(0);
+ await page.waitForFunction(()=>!window.fixture.presence.isUpdating);
+ assert.equal(await page.evaluate(()=>window.fixture.calls.some(c=>c.action==='publish')),false);
+ await page.evaluate(()=>{window.fixture.visibility='visible';document.dispatchEvent(new Event('visibilitychange'));});
+ await page.waitForFunction(()=>window.fixture.samples.length===2);await resolveSample(1);
+ await page.waitForFunction(()=>window.fixture.calls.some(c=>c.action==='publish'));
+ // Explicit local-only recovery is not consent to publish an avatar.
+ await reset({...localOnly,permissionsMissing:true});
+ await page.waitForFunction(()=>!!window.fixture.presence.error);
+ await page.getByRole('button',{name:'Update my location',exact:true}).click();
+ await page.waitForFunction(()=>window.fixture.samples.length===1);await resolveSample(0);
+ await page.waitForFunction(()=>window.fixture.presence.area!==null);
+ assert.equal(await page.evaluate(()=>window.fixture.calls.some(c=>c.action==='publish')),false);
+ // Denial during explicit recovery revokes saved sharing, never reports success.
+ await reset({...restored,permissionsMissing:true});
+ await page.waitForFunction(()=>!!window.fixture.presence.error);
+ await page.getByRole('button',{name:'Update my location',exact:true}).click();
+ await page.waitForFunction(()=>window.fixture.samples.length===1);
+ await page.evaluate(()=>window.fixture.samples[0].fail({code:1}));
+ await page.waitForFunction(()=>window.fixture.calls.some(c=>c.action==='revoke'));
+ assert.equal(await page.evaluate(()=>window.fixture.presence.area),null);
+ assert.equal(await page.evaluate(()=>window.fixture.calls.some(c=>c.action==='publish')),false);
  // A publication outage cannot discard a freshly permitted local-only center.
  await reset({...restored,failPublish:true});await page.waitForFunction(()=>window.fixture.samples.length===1);await resolveSample(0);
  await page.waitForFunction(()=>window.fixture.presence.error?.includes('avatar sharing'));

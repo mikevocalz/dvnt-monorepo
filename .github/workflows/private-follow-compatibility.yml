@@ -1,0 +1,31 @@
+name: Private follow compatibility evidence
+on:
+  pull_request:
+    paths:
+      - 'scripts/*private-follow-compatibility.cjs'
+      - 'docs/release/private-follow-compatibility*'
+      - '.github/workflows/private-follow-compatibility.yml'
+  push:
+    branches: [master, main]
+    paths:
+      - 'scripts/*private-follow-compatibility.cjs'
+      - 'docs/release/private-follow-compatibility*'
+      - '.github/workflows/private-follow-compatibility.yml'
+permissions:
+  contents: read
+jobs:
+  evidence-validator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test scripts/test-private-follow-compatibility.cjs
+      - run: node scripts/check-private-follow-compatibility.cjs --declaration-only
+      - name: Default evidence must remain held
+        run: |
+          if node scripts/check-private-follow-compatibility.cjs; then
+            echo "Example incorrectly passed release review"
+            exit 1
+          fi

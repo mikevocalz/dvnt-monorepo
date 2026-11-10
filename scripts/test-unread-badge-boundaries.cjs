@@ -7,7 +7,7 @@ const mocks={
  auth:`import {create} from 'zustand';export const useAuthStore=create(()=>({user:{id:'101'},isAuthenticated:true,authStatus:'authenticated'}));`,
  client:`export const getBridgeRequestEpoch=()=>String(globalThis.F.epoch||0);export const supabase={from(table){globalThis.F.table=table;const q={select(...args){globalThis.F.select=args;return q},eq(...args){globalThis.F.eq=args;return q},is(...args){globalThis.F.is=args;return q},setHeader(...args){globalThis.F.header=args;return q},then(resolve){return Promise.resolve(globalThis.F.response).then(resolve)}};return q}};`,
  helper:`export const getCurrentUserIdSync=()=>globalThis.F.viewer;`,
- identity:`export const requireBetterAuthToken=async()=>'';export const getCurrentUserIdSync=()=>globalThis.F.viewer;export const getCurrentUserRow=async()=>({id:globalThis.F.viewer,authId:'fixture-viewer'});`,
+ identity:`export const getAuthIdFromStore=()=>globalThis.F.viewer?'fixture-viewer':null;export const requireBetterAuthToken=async()=>'';export const getCurrentUserIdSync=()=>globalThis.F.viewer;export const getCurrentUserRow=async()=>({id:globalThis.F.viewer,authId:'fixture-viewer'});`,
  jwt:`export const ensureSupabaseJwt=async subject=>subject==='fixture-viewer' && globalThis.F.bridge!==false;`,
  lifecycle:`export const getSessionLifecycle=()=>({epoch:globalThis.F.epoch||0});`,
  registry:`export const getQueryClient=()=>({invalidateQueries:(options)=>{globalThis.F.invalidations.push(options);return Promise.resolve()}});`,

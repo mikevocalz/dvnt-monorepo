@@ -346,7 +346,7 @@ export function useMemberMapPresence(active: boolean) {
       if (Platform.OS === "web" && typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [active, owner, generation, client]);
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (requestPermission = false) => {
     if (!active || !owner || !access.enabled || !locationAllowedFor(owner) || !isForeground()) return;
     const currentGeneration = useLocationAccessStore.getState().generation;
     if (inFlight.current) {
@@ -368,8 +368,7 @@ export function useMemberMapPresence(active: boolean) {
       useLocationAccessStore.getState().accept(owner, fresh);
       if (!allowed()) { setLocalArea(null); clearLocalLocation(); return; }
       // Passive map refresh never opens a permission sheet. The explicit sharing
-      // disclosure (or a separate local-only location action) owns that request.
-      const requestPermission = false;
+      // disclosure or explicit Update my location action owns that request.
       permissionAttempted.current = true;
       const withdrawDeniedPermission = () => {
         if (!allowed()) return;
@@ -380,7 +379,10 @@ export function useMemberMapPresence(active: boolean) {
       const point = await sampleLocation(allowed, requestPermission, locationSucceeded.current, () => {
         // Permission sheets may background the app. Remember only the OS grant,
         // never their obsolete coordinate, so foreground retry works on WebViews.
-        if (activeRef.current && currentOwner() === owner && useLocationAccessStore.getState().generation === request.generation && inFlight.current === request) locationSucceeded.current = true;
+        if (activeRef.current && currentOwner() === owner && useLocationAccessStore.getState().generation === request.generation && inFlight.current === request) {
+          locationSucceeded.current = true;
+          permissionProof = { owner, generation: request.generation };
+        }
       }, () => {
         if (inFlight.current === request) withdrawDeniedPermission();
       });
@@ -388,7 +390,7 @@ export function useMemberMapPresence(active: boolean) {
       if (!point) {
         locationSucceeded.current = false;
         setLocalArea(null);
-        setError("Location access is off or unavailable. Allow location in your browser or device settings to center the map automatically.");
+        setError("Your device location needs confirmation in this browser or app. Tap Update my location to continue. Your sharing preference has not been changed.");
         return;
       }
       if (!Number.isFinite(point.timestamp) || Date.now() - point.timestamp > 60_000 || point.timestamp > Date.now() + 5_000) throw new Error("Your location is stale. The map will try again automatically.");
@@ -429,7 +431,7 @@ export function useMemberMapPresence(active: boolean) {
   }, [active, owner, generation, access.enabled, access.sharing, refresh]);
   const area = active && access.enabled && localArea?.owner === owner && localArea.generation === generation && Date.parse(localArea.expiresAt) > now
     ? { latitude: localArea.latitude, longitude: localArea.longitude, expiresAt: localArea.expiresAt } : null;
-  return { error, isUpdating, area, refresh };
+  return { error, isUpdating, area, refresh, requestLocation: () => refresh(true) };
 }
 
 export function useNearbyMembers(active: boolean) {

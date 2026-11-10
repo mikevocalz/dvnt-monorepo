@@ -53,5 +53,6 @@ test("all device-collection entry points honor overall permission and stale call
   assert.match(controller, /permission === "denied"\) \{ onDenied\(\); return null;/);
   assert.match(controller, /permission === "prompt" && !requestPermission\) return null/);
   assert.match(controller, /permission\.status !== "granted" && permission\.canAskAgain !== false && requestPermission && allowed\(\)/);
-  assert.match(controller, /const requestPermission = false/);
+  assert.match(controller, /const refresh = useCallback\(async \(requestPermission = false\)/);
+  assert.match(controller, /requestLocation: \(\) => refresh\(true\)/);
 });

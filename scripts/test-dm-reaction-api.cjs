@@ -24,7 +24,10 @@ function loader(stubs, globals = {}) {
 const plain = value => JSON.parse(JSON.stringify(value));
 function apiFixture() {
   const state = {viewer:'101',epoch:0,ready:true,calls:[],token:async()=> 'fixture-token',response:{data:{ok:true,data:{reactions:[{emoji:'❤️',userId:101,username:'fixture'}],toggled:'added',present:true}},error:null}};
+  const unused = () => { throw new Error('Unexpected relationship read in reaction fixture'); };
   const load=loader({
+    './follow-relationships':{getOwnFollowingIds:unused},
+    '../auth/follow-identity':{getFollowIdentity:unused,assertFollowIdentity:unused},
     '../stores/auth-store':{useAuthStore:{getState:()=>({user:{id:state.viewer}})}},
     '../auth/identity':{requireBetterAuthToken:()=>state.token(),getCurrentUserId:async()=>101},
     './auth-helper':{getCurrentUserIdSync:()=>101,getCurrentUserAuthId:async()=> 'fixture-auth',resolveUserIdInt:async()=>101},

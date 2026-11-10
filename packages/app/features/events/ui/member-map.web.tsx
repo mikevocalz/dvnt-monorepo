@@ -31,7 +31,7 @@ export default function MemberMap(props: UnifiedMapProps = {}) {
 function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOpenEvent }: UnifiedMapProps) {
   const status = useApiLoadingStatus();
   const ready = status === APILoadingStatus.LOADED;
-  const { sharing } = useLocationSettings();
+  const { sharing, enabled } = useLocationSettings();
   const savedCity = useEventsLocationStore((state) => state.activeCity);
   const savedArea = savedMapArea(savedCity);
   const presence = useMemberMapPresence(ready);
@@ -66,8 +66,9 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
       {nearby.isError ? (
         <div role="alert"><p>Nearby people could not be refreshed. Locations have been hidden.</p><button className="min-h-11 px-4 rounded-xl bg-white/10" onClick={() => void nearby.refetch()}>Retry nearby people</button></div>
       ) : null}
-      {ready && sharing && !center && !nearby.isError ? <p role="status">{presence.isUpdating || nearby.isPending ? 'Updating your approximate location…' : 'A fresh location is needed to show nearby people.'}</p> : null}
-      {ready && !ownArea ? <p role="status">{savedArea ? `Showing your saved area: ${savedArea.label}. This is not a current device location.` : 'Showing public event locations, not events near you. Your location has not been established on this map.'}</p> : null}
+      {ready && sharing && !center && !nearby.isError && !presence.error ? <p role="status">{presence.isUpdating || nearby.isPending ? 'Updating your approximate location…' : 'A fresh location is needed to show nearby people.'}</p> : null}
+      {ready && !ownArea && !presence.error ? <p role="status">{savedArea ? `Showing your saved area: ${savedArea.label}. This is not a current device location.` : 'Showing public event locations, not events near you. Your location has not been established on this map.'}</p> : null}
+      {ready && enabled ? <button type="button" disabled={presence.isUpdating} onClick={() => void presence.requestLocation()} className="min-h-11 rounded-xl border border-white/30 px-4 disabled:opacity-50">{presence.isUpdating ? "Updating location…" : "Update my location"}</button> : null}
       {!ready ? <LocationControls allowSharing={false} /> : null}
       {ready ? (
         <>
