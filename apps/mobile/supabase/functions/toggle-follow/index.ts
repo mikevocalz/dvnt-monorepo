@@ -161,6 +161,12 @@ Deno.serve(async (req) => {
       p_actor: userId, p_target: targetUserId, p_action: action,
     });
     if (mutationError || !relationship) return errorResponse("internal_error", "Could not update follow relationship");
+    // Activity rows are committed by SQL. Push is best-effort only and must
+    // never turn an already successful relationship mutation into an error.
+    if (relationship.notifyRequest === true || relationship.notifyApproval === true) {
+      await sendFollowRequestPush(supabaseAdmin, userId, targetUserId, relationship)
+        .catch((error) => console.error("[Edge:toggle-follow] Follow request push failed", error));
+    }
     if (action === "approve" || action === "decline" || action === "status") {
       return jsonResponse({ ok: true, data: relationship });
     }
@@ -232,7 +238,7 @@ async function sendFollowNotification(
   // Insert notification row
   await supabaseAdmin.from("notifications").insert({
     recipient_id: targetId,
-    sender_id: followerId,
+    actor_id: followerId,
     type: "follow",
     entity_type: "user",
     entity_id: String(followerId),
@@ -279,4 +285,59 @@ async function sendFollowNotification(
       "device(s)",
     );
   }
+}
+
+
+// Durable in-app notifications live in the same SQL transaction as the request.
+// These pushes are deliberately best-effort; an unavailable push provider does
+// not lose the owner's inbox item or cause a retry to duplicate an approval.
+async function sendFollowRequestPush(
+  db: any,
+  actorId: number,
+  targetId: number,
+  transition: { notifyRequest?: boolean; notifyApproval?: boolean; notificationVersion?: string },
+) {
+  if (!transition.notificationVersion) return;
+  const approved = transition.notifyApproval === true;
+  const followerId = approved ? targetId : actorId;
+  const ownerId = approved ? actorId : targetId;
+  // Recheck the exact incarnation/transition, not merely a newer request from
+  // the same pair. Cancellation, decline or unfollow makes this push ineligible.
+  const { data: request, error: requestError } = await db.from("follow_requests")
+    .select("status")
+    .eq("follower_id", followerId).eq("following_id", ownerId)
+    .eq("updated_at", transition.notificationVersion)
+    .eq("status", approved ? "approved" : "pending").maybeSingle();
+  if (requestError || !request) return;
+  const { data: blocks, error: blockError } = await db.from("blocks")
+    .select("blocker_id")
+    .or(`and(blocker_id.eq.${actorId},blocked_id.eq.${targetId}),and(blocker_id.eq.${targetId},blocked_id.eq.${actorId})`)
+    .limit(1);
+  if (blockError || !Array.isArray(blocks) || blocks.length) return;
+  const { data: actor, error: actorError } = await db.from("users")
+    .select("username").eq("id", actorId).single();
+  if (actorError) return;
+  const { data: tokens, error: tokenError } = await db.from("push_tokens")
+    .select("token").eq("user_id", targetId);
+  if (tokenError || !tokens?.length) return;
+  const type = approved ? "follow_request_approved" : "follow_request";
+  const username = typeof actor?.username === "string" && actor.username.trim()
+    ? actor.username.trim() : null;
+  const url = approved
+    ? username ? `https://dvntapp.live/profile/${encodeURIComponent(username)}` : "https://dvntapp.live/activity"
+    : "https://dvntapp.live/settings/privacy#follow-requests";
+  const messages = tokens.map((entry: { token: string }) => ({
+    to: entry.token,
+    title: approved ? "Follow request accepted" : "Follow request",
+    body: approved ? `${actor?.username || "A member"} accepted your follow request`
+      : `${actor?.username || "Someone"} requested to follow you`,
+    data: { type, senderId: String(actorId), senderUsername: username || undefined, entityType: "user", entityId: String(actorId), url },
+    sound: "default",
+    channelId: "default",
+  }));
+  const response = await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(messages), signal: AbortSignal.timeout(2500),
+  });
+  if (!response.ok) throw new Error(`Expo follow request push failed (${response.status})`);
 }

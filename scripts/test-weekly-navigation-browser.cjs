@@ -11,6 +11,8 @@ const {compile} = require('tailwindcss');
 const root = path.resolve(__dirname,'..');
 const app = path.join(root,'packages/app');
 const fixtures = {
+ '@dvnt/app/features/settings/follow-requests-setting.web': `export const FollowRequestsSetting=()=>null;`,
+ '@dvnt/app/features/settings/follow-requests-setting': `export const FollowRequestsSetting=()=>null;`,
  // Decorative gradient only: real RN-web View preserves the flex layout.
  'expo-linear-gradient': `import {View} from 'react-native';export const LinearGradient=({children,style})=><View style={style}>{children}</View>;`,
  'expo-router': `export const useRouter=()=>({push:path=>window.nav.navigate(path)});`,

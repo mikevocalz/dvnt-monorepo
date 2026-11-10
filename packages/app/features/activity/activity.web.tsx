@@ -1,4 +1,5 @@
 "use client";
+import { FollowRequestsSetting } from "@dvnt/app/features/settings/follow-requests-setting.web";
 import { cohostActivityRoute } from "@dvnt/app/features/sneaky-lynk/cohost-invite-policy";
 import { markActivityRead, markAllActivityRead } from "@dvnt/app/lib/activity/mark-activity-read";
 import { webEventDetailRoute } from "@dvnt/app/lib/events/event-detail-route";
@@ -183,6 +184,7 @@ function PostThumb({ src, className }: { src: string; className: string }) {
 // ── Web route helpers (clean web routes, NOT native (protected) groups) ──────
 export function webRouteForActivity(activity: Activity): string {
   const { type, entityType, entityId, post, postId, event, user } = activity;
+  if (type === "follow_request") return "/settings/privacy#follow-requests";
   const cohostRoute = cohostActivityRoute(type, "web");
   if (cohostRoute) return cohostRoute;
   const detailPostId = (entityType === "post" ? entityId : undefined) || post?.id || postId;
@@ -214,6 +216,7 @@ export function webRouteForActivity(activity: Activity): string {
         return `/feed/post/${encodeURIComponent(detailPostId)}`;
       return `/profile/${encodeURIComponent(user.username)}`;
     case "follow":
+    case "follow_request_approved":
       return `/profile/${encodeURIComponent(user.username)}`;
     case "event_invite":
     case "event_update":
@@ -262,6 +265,8 @@ function ActivityIcon({ type }: { type: Activity["type"] }) {
     case "comment":
       return <MessageCircle size={14} color="#3EA4E5" />;
     case "follow":
+    case "follow_request":
+    case "follow_request_approved":
       return <UserPlus size={14} color="#8A40CF" />;
     case "mention":
       return <AtSign size={14} color="#34A2DF" />;
@@ -318,6 +323,10 @@ function getActivityText(activity: Activity): string {
         : " commented on a post.";
     case "follow":
       return " started following you.";
+    case "follow_request":
+      return " requested to follow you.";
+    case "follow_request_approved":
+      return " accepted your follow request.";
     case "mention":
       return activity.comment
         ? ` mentioned you: "${activity.comment}"`
@@ -770,7 +779,9 @@ export function ActivityScreen() {
   const tabCounts = useMemo(
     () => ({
       All: activities.length,
-      Follows: activities.filter((a) => a.type === "follow").length,
+      Follows: activities.filter((a) =>
+        ["follow", "follow_request", "follow_request_approved"].includes(a.type),
+      ).length,
       Likes: activities.filter((a) => a.type === "like").length,
       Comments: activities.filter((a) => a.type === "comment").length,
       Mentions: activities.filter((a) => a.type === "mention").length,
@@ -801,7 +812,8 @@ export function ActivityScreen() {
         })
         .filter((activity) => {
           if (activeTab === "All") return true;
-          if (activeTab === "Follows") return activity.type === "follow";
+          if (activeTab === "Follows")
+            return ["follow", "follow_request", "follow_request_approved"].includes(activity.type);
           if (activeTab === "Likes") return activity.type === "like";
           if (activeTab === "Comments") return activity.type === "comment";
           if (activeTab === "Mentions") return activity.type === "mention";
@@ -928,6 +940,7 @@ export function ActivityScreen() {
       </div>
 
       <main className="mx-auto w-full max-w-2xl px-4 py-4">
+        {!showLiked && <FollowRequestsSetting />}
         {!showLiked && <PendingCohostInvites />}
         {queryError && activeTab !== "Liked" && (
           <div role="alert" className="mb-4 rounded-xl bg-white/10 p-3 text-sm">

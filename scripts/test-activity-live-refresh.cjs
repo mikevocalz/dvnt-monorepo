@@ -62,7 +62,7 @@ async function fixture() {
 }
 const transfer = {id:'synthetic-transfer-notice',type:'ticket_transfer_initiated',sender:{id:'7',username:'sender'},entityType:'event',entityId:'90',createdAt:'2026-01-01'};
 test('INSERT refreshes the actual visible query and badge keys, not only Zustand',async()=>{
- const f=await fixture();try{assert.equal(f.rows.length,0);f.setRows([transfer]);await f.channels[0].insert({new:{recipient_id:23}});await tick();assert.equal(f.rows[0].id,transfer.id);for(const prefix of ['activities','notifications','badges'])assert.ok(f.invalidations.some(x=>x.queryKey[0]===prefix&&x.queryKey[1]==='23'&&x.exact===true));}finally{f.dispose();}
+ const f=await fixture();try{assert.equal(f.rows.length,0);f.setRows([transfer]);await f.channels[0].insert({new:{recipient_id:23}});await tick();assert.equal(f.rows[0].id,transfer.id);for(const prefix of ['activities','notifications','badges'])assert.ok(f.invalidations.some(x=>x.queryKey[0]===prefix&&x.queryKey[1]==='23'&&x.exact===true));for(const prefix of ['follow-requests','follow-request-status'])assert.ok(f.invalidations.some(x=>x.queryKey[0]===prefix&&x.queryKey[1]==='23'&&!x.exact),'refresh current viewer follow state');}finally{f.dispose();}
 });
 test('SUBSCRIBED catches up rows missed before connection and after reconnect',async()=>{
  const f=await fixture();try{f.setRows([transfer]);f.channels[0].status('SUBSCRIBED');await tick();assert.equal(f.rows.length,1);f.setRows([transfer,{...transfer,id:'second'}]);f.channels[0].status('SUBSCRIBED');await tick();assert.equal(f.rows.length,2);}finally{f.dispose();}
@@ -77,4 +77,27 @@ test('foreground interval catches transfers even without published Realtime; bac
   f.observer.setOptions({...f.options,refetchInterval:10});focusManager.setFocused(false);await tick();const before=f.reads;f.setRows([transfer]);await new Promise(r=>setTimeout(r,35));assert.equal(f.reads,before);assert.equal(f.rows.length,0);
   focusManager.setFocused(true);await new Promise(r=>setTimeout(r,35));assert.equal(f.rows[0].id,transfer.id);assert.ok(f.reads>before);
  }finally{f.dispose();}
+});
+
+
+test('owner request inbox polls only in foreground; per-profile statuses do not poll', () => {
+  const queries = [];
+  const identity = {viewerId:'23',authId:'actor',epoch:1,revision:1};
+  const exported = {};
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT,'packages/app/lib/hooks/use-follow-requests.ts'),'utf8'),{
+    compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},
+  }).outputText, {exports:exported,require:n=>{
+    if(n==='react')return {useSyncExternalStore:(_subscribe,get)=>get()};
+    if(n==='@tanstack/react-query')return {useQuery:opts=>{queries.push(opts);return {};},useQueryClient:()=>({}),useMutation:()=>({})};
+    if(n.endsWith('/stores/auth-store'))return {useAuthStore:selector=>selector({user:{id:'23'}})};
+    if(n.endsWith('/auth/session-lifecycle'))return {getSessionLifecycle:()=>({epoch:1}),subscribeSessionLifecycle:()=>()=>{}};
+    if(n.endsWith('/auth/follow-identity'))return {getFollowIdentity:()=>identity,getFollowIdentityRevision:()=>1,subscribeFollowIdentityRevision:()=>()=>{}};
+    return {};
+  }});
+  exported.useFollowRequests(); exported.useFollowRequestStatus('42');
+  assert.equal(queries[0].queryKey[0],'follow-requests');
+  assert.equal(queries[0].refetchInterval,30000);
+  assert.equal(queries[0].refetchIntervalInBackground,false);
+  assert.equal(queries[1].queryKey[0],'follow-request-status');
+  assert.equal(queries[1].refetchInterval,undefined);
 });

@@ -36,6 +36,8 @@ export type ActivityType =
   | "like"
   | "comment"
   | "follow"
+  | "follow_request"
+  | "follow_request_approved"
   | "mention"
   | "tag"
   | "event_invite"
@@ -307,6 +309,14 @@ export function useActivitiesQuery() {
         queryClient.invalidateQueries({
           queryKey: notificationKeys.badges(viewerId), exact: true,
         }),
+        // Request notifications update both the owner's inbox and the
+        // requester's status without touching another signed-in account.
+        queryClient.invalidateQueries({
+          queryKey: ["follow-requests", viewerId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["follow-request-status", viewerId],
+        }),
       ]).catch(() => {
         // Keep cached rows; the query retains its error/retry state.
         console.warn("[ActivitiesQuery] Notification refresh unavailable");
@@ -355,6 +365,7 @@ export function useLikedActivitiesQuery() {
 export function getRouteForActivity(activity: Activity): string {
   const { type, entityType, entityId, post, postId, event, user, commentId } =
     activity;
+  if (type === "follow_request") return "/settings/privacy";
   const cohostRoute = cohostActivityRoute(type, "native");
   if (cohostRoute) return cohostRoute;
   const commentsPostId =
@@ -420,6 +431,7 @@ export function getRouteForActivity(activity: Activity): string {
     case "system":
       return "";
     case "follow":
+    case "follow_request_approved":
       return `/(protected)/profile/${user.username}`;
     case "event_invite":
     case "event_update":

@@ -40,6 +40,10 @@ export function useFollowRequests() {
       return followsApi.getFollowRequests(identity);
     },
     staleTime: 0,
+    // A bounded foreground fallback covers missing/delayed realtime events.
+    // Do not poll the per-profile/per-card request-status queries.
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
   const mutation = useMutation({
     mutationFn: async (variables: OwnedRequestVariables) => {

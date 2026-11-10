@@ -49,6 +49,7 @@ function hydrateFromProfileBootstrap(
     followingCount: p.followingCount,
     postsCount: p.postsCount,
     verified: p.verified,
+    isPrivate: p.isPrivate,
     isOwnProfile: true,
   });
 

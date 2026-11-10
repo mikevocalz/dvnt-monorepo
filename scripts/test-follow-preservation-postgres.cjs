@@ -31,6 +31,12 @@ const fixtureSql = `
     created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());
   CREATE UNIQUE INDEX follower_following_idx ON follows(follower_id,following_id);
   CREATE TABLE blocks(blocker_id integer,blocked_id integer);
+  CREATE TYPE enum_notifications_type AS ENUM ('follow');
+  CREATE TYPE enum_notifications_entity_type AS ENUM ('user');
+  CREATE TABLE notifications(id serial PRIMARY KEY,recipient_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,actor_id integer REFERENCES users(id) ON DELETE CASCADE,
+    type enum_notifications_type NOT NULL,entity_type enum_notifications_entity_type,entity_id varchar,
+    created_at timestamptz NOT NULL DEFAULT now(),read_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now(),entity_payload jsonb);
   CREATE TABLE posts(id bigint PRIMARY KEY,author_id integer,is_nsfw boolean,content text);
   CREATE TABLE posts_media(id bigint PRIMARY KEY,_parent_id bigint,url text,type text DEFAULT 'image',_order integer DEFAULT 0);
   CREATE TABLE post_text_slides(id bigint PRIMARY KEY,post_id bigint,content text);
@@ -84,6 +90,8 @@ async function fixture() {
   await db.query(fixtureSql);
   await db.query(migration);
   await installGate(db);
+  await db.query(readFileSync(join(migrationDir, '20261110010000_follow_request_notification_types.sql'), 'utf8'));
+  await db.query(readFileSync(join(migrationDir, '20261110010100_follow_request_notifications.sql'), 'utf8'));
   return { db, connect, async close() {
     await Promise.all(connections.map(c => c.end()));
     await admin.query(`DROP DATABASE ${name} WITH (FORCE)`); await admin.end();
@@ -592,3 +600,33 @@ for (const privilege of ['table','column']) {
     }
   });
 }
+
+
+test('concurrent duplicate private requests create only one transactional activity row',async()=>{
+  const f=await fixture(); const {db}=f; const second=await f.connect('duplicate-request');
+  try {
+    await db.query(cutoverSql); await db.query('BEGIN');
+    assert.equal((await call(db,5,2,'follow')).notifyRequest,true);
+    const pending=call(second,5,2,'follow');
+    await waiting(db,second); await db.query('COMMIT');
+    assert.equal((await pending).notifyRequest,false);
+    assert.equal(await count(db,'follow_requests'),1);
+    assert.equal(await count(db,'notifications'),1);
+    assert.equal(await count(db,'follow_legacy_access'),3);
+  }finally {await db.query('ROLLBACK');await f.close();}
+});
+
+test('cancellation waiting ahead of approval cannot leave notification or grant behind',async()=>{
+  const f=await fixture(); const {db}=f; const approver=await f.connect('queued-approval');
+  try {
+    await db.query(cutoverSql); await call(db,5,2,'follow');
+    await db.query('BEGIN');await call(db,5,2,'unfollow');
+    const pending=call(approver,2,5,'approve');
+    await waiting(db,approver);await db.query('COMMIT');
+    assert.equal((await pending).notifyApproval,false);
+    assert.equal(await count(db,'notifications'),0);
+    assert.equal(await count(db,'follow_requests'),0);
+    assert.equal((await call(db,5,2)).following,false);
+    assert.equal(await count(db,'follow_legacy_access'),3);
+  }finally {await db.query('ROLLBACK');await f.close();}
+});

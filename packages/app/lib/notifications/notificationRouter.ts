@@ -23,6 +23,7 @@ import { parseIncomingUrl } from "@dvnt/app/lib/deep-linking/link-engine";
 export type NotificationPayloadType =
   | "follow"
   | "follow_request"
+  | "follow_request_approved"
   | "like"
   | "comment"
   | "mention"
@@ -77,6 +78,9 @@ export function routeFromNotification(
 ): string | null {
   if (!data) return null;
 
+  // Requests open the owner review inbox, never the requester profile.
+  if (data.type === "follow_request") return "/settings/privacy";
+
   // Co-host pushes open explicit choices, even if a legacy payload also has a URL.
   const cohostRoute = cohostActivityRoute(data.type ?? "", "native");
   if (cohostRoute) return cohostRoute;
@@ -101,7 +105,7 @@ export function routeFromNotification(
 
   switch (type) {
     case "follow":
-    case "follow_request": {
+    case "follow_request_approved": {
       // Prefer username; fall back to actor/sender ID (profile page must handle both)
       const username =
         data.senderUsername || data.actorUsername;

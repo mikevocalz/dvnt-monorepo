@@ -1,3 +1,4 @@
+import { FollowRequestsSetting } from "@dvnt/app/features/settings/follow-requests-setting";
 import { PendingCohostInvites } from "@dvnt/app/features/sneaky-lynk/ui/PendingCohostInvites";
 import { markActivityRead, markAllActivityRead } from "@dvnt/app/lib/activity/mark-activity-read";
 import { activitySenderLabel } from "@dvnt/app/lib/activity/event-activity";
@@ -74,6 +75,8 @@ const ActivityIcon = memo(({ type }: { type: Activity["type"] }) => {
     case "comment":
       return <MessageCircle size={16} color="#3EA4E5" />;
     case "follow":
+    case "follow_request":
+    case "follow_request_approved":
       return <UserPlus size={16} color="#8A40CF" />;
     case "mention":
       return <AtSign size={16} color="#34A2DF" />;
@@ -133,6 +136,10 @@ function getActivityText(activity: Activity): string {
         : " commented on a post.";
     case "follow":
       return " started following you.";
+    case "follow_request":
+      return " requested to follow you.";
+    case "follow_request_approved":
+      return " accepted your follow request.";
     case "mention":
       return activity.comment
         ? ` mentioned you: "${activity.comment}"`
@@ -733,8 +740,9 @@ function ActivityScreenContent() {
   const tabCounts = useMemo(
     () => ({
       All: activities.length,
-      Follows: activities.filter((activity) => activity.type === "follow")
-        .length,
+      Follows: activities.filter((activity) =>
+        ["follow", "follow_request", "follow_request_approved"].includes(activity.type),
+      ).length,
       Likes: activities.filter((activity) => activity.type === "like").length,
       Comments: activities.filter((activity) => activity.type === "comment")
         .length,
@@ -792,7 +800,8 @@ function ActivityScreenContent() {
         })
         .filter((activity) => {
           if (activeTab === "All") return true;
-          if (activeTab === "Follows") return activity.type === "follow";
+          if (activeTab === "Follows")
+            return ["follow", "follow_request", "follow_request_approved"].includes(activity.type);
           if (activeTab === "Likes") return activity.type === "like";
           if (activeTab === "Comments") return activity.type === "comment";
           if (activeTab === "Mentions") return activity.type === "mention";
@@ -1018,6 +1027,7 @@ function ActivityScreenContent() {
           )}
         </View>
 
+        {activeTab !== "Liked" && <FollowRequestsSetting />}
         {activeTab !== "Liked" && <PendingCohostInvites />}
 
         {/* Tabs */}

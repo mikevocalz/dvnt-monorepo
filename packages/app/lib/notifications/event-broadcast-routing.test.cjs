@@ -21,3 +21,11 @@ test('co-host pushes open explicit invitation decisions, including legacy URLs',
     assert.equal(out.routeFromNotification({ type, roomId:'42', inviteId:'9', url:'https://dvntapp.live/sl/42' }), '/(protected)/(tabs)/activity');
   }
 });
+
+
+test('follow request push opens review even with an old profile URL; approval opens owner profile', () => {
+  assert.equal(out.routeFromNotification({type:'follow_request',senderUsername:'requester',url:'https://dvntapp.live/u/requester'}), '/settings/privacy');
+  assert.equal(out.routeFromNotification({type:'follow_request_approved',senderUsername:'owner',senderId:'42'}), '/(protected)/profile/owner');
+  assert.equal(out.routeFromNotification({type:'follow_request_approved',senderId:'42'}), '/(protected)/profile/42');
+  assert.equal(out.routeFromNotification({type:'follow_request_approved'}), null);
+});

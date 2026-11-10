@@ -124,7 +124,7 @@ Deno.serve(async (req: Request) => {
         .select(
           `
           id, auth_id, username, first_name, bio, website, location,
-          verified, followers_count, following_count, posts_count,
+          verified, is_private, followers_count, following_count, posts_count,
           avatar:avatar_id(url)
         `,
         )
@@ -221,6 +221,7 @@ Deno.serve(async (req: Request) => {
         followingCount: p.following_count || 0,
         postsCount: p.posts_count || 0,
         verified: p.verified || false,
+        isPrivate: p.is_private === true,
         viewerIsFollowing: viewerFollowsResult?.data ? true : false,
         viewerIsFollowedBy: followsViewerResult?.data ? true : false,
       },

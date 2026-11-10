@@ -10,14 +10,16 @@ export async function resetFollowAccessCaches(
   if (!isCurrent()) return;
   // Detached lightboxes and share sheets must disappear in the same frame.
   resetPostAccessOverlays();
-  const prefixes = [
-    "posts", "profilePosts", "profileTaggedPosts", "postTags", "search",
-    "comments", "bookmarks", "activities", "likedPosts", "notifications",
+  const prefixes: readonly (readonly string[])[] = [
+    ...["posts", "profilePosts", "profileTaggedPosts", "postTags", "search",
+      "comments", "bookmarks", "activities", "likedPosts", "notifications"].map(key => [key]),
+    // Follow lists can contain identities visible only to accepted followers.
+    ["users", "followers"], ["users", "following"],
   ];
-  const cancellations = prefixes.map(prefix => client.cancelQueries({ queryKey: [prefix] }, { revert: false }));
+  const cancellations = prefixes.map(prefix => client.cancelQueries({ queryKey: prefix }, { revert: false }));
   const clear = () => {
     for (const prefix of prefixes) {
-      for (const query of client.getQueryCache().findAll({ queryKey: [prefix] })) {
+      for (const query of client.getQueryCache().findAll({ queryKey: prefix })) {
         // invalidate alone preserves the old authorized media while refetching.
         query.setState({ data: undefined, dataUpdatedAt: 0, error: null, status: "pending" });
       }
@@ -28,5 +30,5 @@ export async function resetFollowAccessCaches(
   await Promise.all(cancellations);
   if (!isCurrent()) return;
   clear();
-  if (refetch) await Promise.all(prefixes.map(prefix => client.invalidateQueries({ queryKey: [prefix] })));
+  if (refetch) await Promise.all(prefixes.map(prefix => client.invalidateQueries({ queryKey: prefix })));
 }

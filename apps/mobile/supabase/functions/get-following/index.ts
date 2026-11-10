@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, no-store" },
     });
   }
   try {
@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
     if (!userId) {
       return new Response(JSON.stringify({ error: "userId is required" }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, no-store" },
       });
     }
 
@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     if (isNaN(userIdInt)) {
       return new Response(JSON.stringify({ error: "Invalid userId" }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, no-store" },
       });
     }
 
@@ -61,7 +61,7 @@ Deno.serve(async (req) => {
     if (!supabaseUrl || !supabaseServiceKey) {
       return new Response(JSON.stringify({ error: "Server configuration error" }), {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, no-store" },
       });
     }
 
@@ -70,81 +70,27 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: `Bearer ${supabaseServiceKey}` } },
     });
 
-    let viewerFollowingIds: number[] = [];
     let viewerUserId: number | null = null;
-    // Optional viewer auth via shared helper (failure = anonymous, not an error)
     const viewerAuthId = await verifySession(supabaseAdmin, req);
     if (viewerAuthId) {
-      const userData = await resolveOrProvisionUser(
-        supabaseAdmin,
-        viewerAuthId,
-        "id",
-      );
-      if (userData) {
-        viewerUserId = Number(userData.id);
-        const { data: followingData } = await supabaseAdmin
-          .from("follows")
-          .select("following_id")
-          .eq("follower_id", userData.id);
-        viewerFollowingIds = (followingData || []).map(
-          (f: any) => f.following_id,
-        );
-      }
+      const userData = await resolveOrProvisionUser(supabaseAdmin, viewerAuthId, "id");
+      if (userData) viewerUserId = Number(userData.id);
     }
-
-    const { data, error, count } = await supabaseAdmin
-      .from("follows")
-      .select(
-        `
-        following:following_id(id, username, first_name, verified, avatar:avatar_id(url))
-      `,
-        { count: "exact" },
-      )
-      .eq("follower_id", userIdInt)
-      .range(offset, offset + limit - 1);
-
-    if (error) {
-      console.error("[Edge:get-following] Supabase error:", error);
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // The service-only RPC authorizes and projects the list in one snapshot.
+    // Never use a caller-supplied viewer ID or a separate preflight read.
+    const { data, error } = await supabaseAdmin.rpc("get_profile_social_graph", {
+      p_viewer: viewerUserId, p_target: userIdInt, p_direction: "following",
+      p_limit: limit, p_offset: offset,
+    });
+    if (error || !data) throw new Error("Could not load follow list");
+    if (data.allowed !== true) {
+      return new Response(JSON.stringify({ error: "This account's follow list is private" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, no-store" },
       });
     }
-
-    const visibleIds = (data || [])
-      .map((row: any) => Number(row?.following?.id))
-      .filter((id: number) => Number.isFinite(id));
-    let followsViewerIds = new Set<number>();
-    if (viewerUserId && visibleIds.length > 0) {
-      const { data: inboundRows, error: inboundError } = await supabaseAdmin
-        .from("follows")
-        .select("follower_id")
-        .eq("following_id", viewerUserId)
-        .in("follower_id", visibleIds);
-      if (inboundError) {
-        console.error("[Edge:get-following] inbound relationship lookup failed:", inboundError);
-      } else {
-        followsViewerIds = new Set(
-          (inboundRows || []).map((row: any) => Number(row.follower_id)),
-        );
-      }
-    }
-
-    const docs: FollowingDoc[] = (data || []).map((f: any) => {
-      const following = f.following;
-      const followingId = following?.id;
-      return {
-        id: String(followingId),
-        username: following?.username || "unknown",
-        name: following?.first_name || following?.username || "Unknown",
-        avatar: following?.avatar?.url || "",
-        verified: following?.verified || false,
-        isFollowing: followingId ? viewerFollowingIds.includes(followingId) : false,
-        followsYou: followingId ? followsViewerIds.has(Number(followingId)) : false,
-      };
-    });
-
-    const totalDocs = count ?? 0;
+    const docs: FollowingDoc[] = data.docs || [];
+    const totalDocs = data.totalDocs ?? 0;
     return new Response(
       JSON.stringify({
         docs,
@@ -154,7 +100,7 @@ Deno.serve(async (req) => {
       }),
       {
         status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "private, no-store" },
       },
     );
   } catch (err) {

@@ -77,6 +77,7 @@ export interface BootstrapProfileResponse {
     followingCount: number;
     postsCount: number;
     verified: boolean;
+    isPrivate?: boolean;
     viewerIsFollowing: boolean;
     viewerIsFollowedBy: boolean;
   };

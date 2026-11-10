@@ -10,6 +10,8 @@ export type NotificationType =
   | "like"
   | "comment"
   | "follow"
+  | "follow_request"
+  | "follow_request_approved"
   | "mention"
   | "tag"
   | "event_invite"
