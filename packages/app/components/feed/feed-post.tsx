@@ -1397,5 +1397,5 @@ function FeedPostComponent({
 }
 
 export const FeedPost = memo(function FeedPost(props: FeedPostProps) {
-  return useSpicyPostLocked(props) ? <SpicyFollowGate presentation="feed" author={props.author} /> : <FeedPostComponent {...props} />;
+  return useSpicyPostLocked(props) ? <SpicyFollowGate postId={props.id} presentation="feed" author={props.author} /> : <FeedPostComponent {...props} />;
 });

@@ -7,6 +7,7 @@ export function SpicyFollowGate({
   height = 240,
 }: {
   author?: { id?: string; username?: string; avatar?: string };
+  postId?: string;
   presentation?: "card" | "feed";
   height?: number;
 }) {

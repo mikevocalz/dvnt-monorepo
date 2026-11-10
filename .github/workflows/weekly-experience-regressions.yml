@@ -73,7 +73,7 @@ jobs:
       - name: Install isolated fixture tools
         run: >-
           npm install --prefix "$RUNNER_TEMP/weekly" --ignore-scripts --no-audit --no-fund --no-save
-          typescript@5.9.3 esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
+          imagescript@3.20.2 typescript@5.9.3 esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
           zustand@5.0.14 @tanstack/react-query@5.90.16 happy-dom@20.0.11
           @electric-sql/pglite@0.3.14
       - name: Settings, event, location and navigation regressions
@@ -97,6 +97,7 @@ jobs:
           node scripts/test-weekly-post-share-metadata.cjs
           node scripts/test-private-follow-requests-sql.cjs
           node scripts/test-spicy-follow-server.cjs
+          node scripts/test-protected-photo-preview.cjs
           node scripts/test-follow-hook.cjs
           node scripts/test-follow-requests-dom.cjs
           node scripts/test-private-profile-presentation.cjs

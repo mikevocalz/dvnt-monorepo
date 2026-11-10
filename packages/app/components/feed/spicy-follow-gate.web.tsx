@@ -1,13 +1,16 @@
 "use client";
+import { ProtectedPhotoPreview } from "./protected-photo-preview.web";
 import { Link } from "solito/link";
 import { FollowStatusRefresh } from "./follow-status-refresh";
 import { useSpicyFollowGate } from "./use-spicy-follow-gate";
 export function SpicyFollowGate({
   author,
+  postId,
   height = 240,
   presentation = "card",
 }: {
   author?: { id?: string; username?: string; avatar?: string };
+  postId?: string;
   presentation?: "card" | "feed";
   height?: number;
 }) {
@@ -27,6 +30,7 @@ export function SpicyFollowGate({
           className="pointer-events-none absolute -inset-8 blur-2xl"
           style={{ background: "radial-gradient(ellipse at 25% 30%, #72537f, transparent 65%), radial-gradient(ellipse at 75% 80%, #367083, transparent 60%), #251b32" }}
         />
+        <ProtectedPhotoPreview postId={postId} />
         <div className="relative flex items-center gap-2 bg-black/30 p-3">
           <Link href={author?.username ? `/feed/${encodeURIComponent(author.username)}` : "/"} aria-label={author?.username ? `View @${author.username}` : "View member"}>
             {author?.avatar ? (

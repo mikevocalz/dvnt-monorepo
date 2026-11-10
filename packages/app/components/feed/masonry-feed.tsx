@@ -344,7 +344,7 @@ interface MasonryCellProps {
 }
 
 const MasonryCell = memo(function MasonryCell(props: MasonryCellProps) {
-  return useSpicyPostLocked(props.post) ? <View style={{ width: props.width, marginBottom: COLUMN_GAP }}><SpicyFollowGate presentation="feed" author={props.post.author} height={props.height} /></View> : <UnlockedMasonryCell {...props} />;
+  return useSpicyPostLocked(props.post) ? <View style={{ width: props.width, marginBottom: COLUMN_GAP }}><SpicyFollowGate postId={props.post.id} presentation="feed" author={props.post.author} height={props.height} /></View> : <UnlockedMasonryCell {...props} />;
 });
 const UnlockedMasonryCell = memo(function UnlockedMasonryCell({
   post,
