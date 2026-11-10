@@ -129,6 +129,7 @@ class Player {
   closed = false;
   broadcast = new WatchBroadcast();
   video = { source: { out: { config: new Signal(undefined) } }, out: { frame: new Signal(undefined) } };
+    audio = { out: { context: new Signal(undefined) } };
   constructor(props: any) {
     assert.ok(props.origin instanceof Signal);
     assert.ok(props.canvas instanceof Signal);
