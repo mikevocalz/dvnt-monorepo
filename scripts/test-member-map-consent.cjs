@@ -4,6 +4,8 @@ const { build } = require('esbuild');
 const { chromium, webkit } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const mocks = {
+  'solito/navigation': `export const useRouter=()=>({push:()=>{}});`,
+  '@dvnt/app/lib/stores/events-screen-store': `export const useEventsScreenStore={getState:()=>({setSelectedMapEventId:()=>{},setShowMapView:()=>{}})};`,
   '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage=window.fixture.noStorage?undefined:{getItem:k=>JSON.parse(window.fixture.storage?.[k]||'null'),setItem:(k,v)=>{if(window.fixture.failStorage)throw Error('Disk full');(window.fixture.storage ||= {})[k]=JSON.stringify(v)},removeItem:k=>delete window.fixture.storage[k]};`,
   'expo-location': `export const Accuracy={Balanced:1};export const getForegroundPermissionsAsync=async()=>({status:window.fixture.permissionState,canAskAgain:window.fixture.canAskAgain!==false});export const requestForegroundPermissionsAsync=()=>new Promise(resolve=>{window.fixture.nativePermissionRequests.push(resolve)});export const getCurrentPositionAsync=()=>new Promise((ok,fail)=>window.fixture.samples.push({ok,fail}));`,
   'react-native': `export const Platform={get OS(){return window.fixture.platform||'web'}};export const AppState={get currentState(){return window.fixture.appState||'active'},addEventListener:(_event,cb)=>{window.fixture.appStateListeners.push(cb);return{remove:()=>{window.fixture.appStateListeners=window.fixture.appStateListeners.filter(f=>f!==cb)}}}};`,

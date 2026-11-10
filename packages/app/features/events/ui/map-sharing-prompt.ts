@@ -44,7 +44,8 @@ export function useMapSharingPrompt(owner: string, active: boolean, autoPrompt =
   const share = async () => {
     suppress();
     const result = await consent.share();
-    if (mounted.current && result) { setOpen(false); setSuccess(true); }
+    if (mounted.current && result) { setOpen(false); setSuccess(true); return true; }
+    return false;
   };
   const stop = () => { consent.cancel(); suppress(); setSuccess(false); void location.setSharing(false); };
   return { location, consent, available, open, success, dismiss, share, stop,

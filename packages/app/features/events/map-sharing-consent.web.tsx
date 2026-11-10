@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useRef } from "react";
+import { useMapSharingNavigation } from "./ui/use-map-sharing-navigation.web";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { MAP_SHARING_DISCLOSURE, useMapSharingPrompt } from "./ui/map-sharing-prompt";
 
@@ -10,6 +11,7 @@ export function MapSharingConsent({ active, promptOnly = false }: { active: bool
 function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: boolean; promptOnly: boolean }) {
   // Only Home/Events entry instances auto-prompt once per sign-in. The map keeps manual controls.
   const flow = useMapSharingPrompt(owner, active, promptOnly);
+  const shareAndOpenMap = useMapSharingNavigation(owner, flow.share);
   const dialogId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
@@ -39,7 +41,7 @@ function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: bo
       <p className="mt-3 text-sm text-white/70">Choose Share my location, then Allow if your device asks. Not now keeps you hidden.</p>
       {flow.consent.error ? <p role="alert" className="mt-3 text-sm text-amber-300">{flow.consent.error}</p> : null}
       <div className="mt-5 flex flex-wrap gap-3">
-        <button type="button" disabled={busy} onClick={() => void flow.share()} className="min-h-11 rounded-xl bg-[#379ED8] px-4 font-semibold text-black disabled:opacity-40">{busy ? "Waiting for location…" : "Share my location"}</button>
+        <button type="button" disabled={busy} onClick={() => void shareAndOpenMap()} className="min-h-11 rounded-xl bg-[#379ED8] px-4 font-semibold text-black disabled:opacity-40">{busy ? "Waiting for location…" : "Share my location"}</button>
         <button ref={cancelButton} type="button" onClick={flow.dismiss} className="min-h-11 rounded-xl border border-white/30 px-4">Not now</button>
       </div>
     </dialog>
