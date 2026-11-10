@@ -55,7 +55,7 @@ export interface UseLynkBroadcastResult extends LynkBroadcastBase {
 export function useLynkBroadcast(
   roomId: string | undefined,
   canPublish = true,
-  devicePreferences: { cameraDeviceId?: string; microphoneDeviceId?: string; audioOutput?: AudioOutputRouter } = {},
+  devicePreferences: { cameraDeviceId?: string; microphoneDeviceId?: string; audioOutput?: AudioOutputRouter; expectedPeerIds?: readonly string[] } = {},
 ): UseLynkBroadcastResult {
   const { token, error: tokenError, authorizationScope } = useMoqToken(
     roomId,
@@ -63,7 +63,7 @@ export function useLynkBroadcast(
     !!roomId && canPublish,
   );
   // Compose the viewer for co-publisher discovery + canvas mounting.
-  const viewer = useLynkViewer(roomId, devicePreferences.audioOutput);
+  const viewer = useLynkViewer(roomId, devicePreferences.audioOutput, devicePreferences.expectedPeerIds);
 
   const urlSignal = useRef(new Signal<URL | undefined>(undefined));
   const reloadRef = useRef<Moq.Connection | null>(null);

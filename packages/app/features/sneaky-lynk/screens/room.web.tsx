@@ -410,7 +410,10 @@ function RoomInner({
   const setDeviceSettingsOpen = useRoomUIStore(s => s.setDeviceSettingsOpen);
   const audioOutput = useRoomAudioOutput();
   const audioOutputState = useRoomUIStore(state => state.audioOutputState);
-  const lynk = useLynkBroadcast(admitted ? id : undefined, canPublish, { cameraDeviceId, microphoneDeviceId, audioOutput });
+  const expectedPeerIds = members
+    .filter(member => member.status === "active" && member.userId !== admission?.user.id && isPublisherRole(member.role))
+    .map(member => peerIdForMember(member.userId, member.anonLabel));
+  const lynk = useLynkBroadcast(admitted ? id : undefined, canPublish, { cameraDeviceId, microphoneDeviceId, audioOutput, expectedPeerIds });
 
   // Same session machine as native, now fed from the MoQ lifecycle. It owns
   // "is this room live" and the observability seam follows it.
@@ -1232,7 +1235,7 @@ function RoomInner({
         // not path discovery (an audio-only publisher still has a path).
         // Mic availability remains discovery-based; speaking is signaled.
         isCameraOn: publisher?.videoAvailable === true,
-        isMicOn: !!publisher,
+        isMicOn: !!publisher && (publisher.announced !== false || publisher.audioAvailable === true),
         isSpeaking: !!speakingByUserId[member.userId],
         isPublisher: isPublisherRole(member.role),
       } satisfies Tile;

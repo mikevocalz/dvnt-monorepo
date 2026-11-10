@@ -1,6 +1,6 @@
 /**
  * useLynkViewer (WEB) — subscribe to a Lynk room namespace over MoQ and render
- * one canvas per live publisher, discovery-driven (no reload when a cohost joins
+ * one canvas per admitted/discovered publisher (no reload when a cohost joins
  * or drops).
  *
  * Transport: `@moq` directly (browser WebTransport + WebCodecs → `<canvas>`).
@@ -35,7 +35,7 @@ export interface UseLynkViewerResult extends LynkViewerBase {
 /** A single connection + its empty-Set fallback live outside React state. */
 const EMPTY_PATHS = new Set<Moq.Path.Valid>();
 
-export function useLynkViewer(roomId: string | undefined, audioOutput?: AudioOutputRouter): UseLynkViewerResult {
+export function useLynkViewer(roomId: string | undefined, audioOutput?: AudioOutputRouter, expectedPeerIds: readonly string[] = []): UseLynkViewerResult {
   const { token, error: tokenError, authorizationScope } = useMoqToken(roomId, "subscribe", !!roomId);
 
   // One URL signal feeds Connection; healthy same-scope renewal does not redial.
@@ -55,6 +55,7 @@ export function useLynkViewer(roomId: string | undefined, audioOutput?: AudioOut
   }, [audioOutput]);
 
   const [videoAvailability, setVideoAvailability] = useState<Record<string, boolean>>({});
+  const [audioAvailability, setAudioAvailability] = useState<Record<string, boolean>>({});
   const [muted, setMutedState] = useState(false);
   const [volume, setVolumeState] = useState(1);
   const [ended, setEnded] = useState(false);
@@ -115,19 +116,28 @@ export function useLynkViewer(roomId: string | undefined, audioOutput?: AudioOut
     paths ?? new Signal<Set<Moq.Path.Valid>>(EMPTY_PATHS),
   );
 
-  // Map announced paths under our namespace → publishers (1..N).
+  // Resolve discovered paths and admitted roster candidates within our namespace.
   const namespace = token?.namespace ?? (roomId ? `lynk/${roomId}` : "");
+  // A relay may announce only a namespace prefix, or advertise no discovery.
+  // The SDK can still subscribe to a known authorized path. Never make the
+  // admitted roster wait for an exact announcement before mounting its player.
+  const expectedKey = [...new Set(expectedPeerIds.filter(peer => /^[a-zA-Z0-9_-]+$/.test(peer)))].sort().join("\n");
   const publishers = useMemo<LynkPublisher[]>(() => {
     const out: LynkPublisher[] = [];
-    for (const path of announcedKey ? announcedKey.split("\n") : []) {
+    const announced = new Set(announcedKey ? announcedKey.split("\n") : []);
+    const candidates = new Set(announced);
+    if (token && namespace) for (const peer of expectedKey ? expectedKey.split("\n") : []) candidates.add(`${namespace}/${peer}`);
+    for (const path of candidates) {
       if (!path) continue;
       if (namespace && !path.startsWith(namespace + "/")) continue;
-      out.push({ path, peerId: path.slice(path.lastIndexOf("/") + 1), videoAvailable: videoAvailability[path] === true });
+      const peerId = path.slice(namespace.length + 1);
+      if (!/^[a-zA-Z0-9_-]+$/.test(peerId)) continue;
+      out.push({ path, peerId, videoAvailable: videoAvailability[path] === true, ...(audioAvailability[path] ? { audioAvailable: true } : {}), ...(announced.has(path) ? {} : { announced: false }) });
     }
     return out;
-  }, [announcedKey, namespace, videoAvailability]);
+  }, [announcedKey, namespace, videoAvailability, audioAvailability, expectedKey, !!token]);
 
-  // Detach backends for publishers that dropped.
+  // Detach backends once neither the admitted roster nor discovery retains them.
   useEffect(() => {
     const live = new Set(publishers.map((p) => p.path));
     for (const [path, entry] of backends.current) {
@@ -181,11 +191,13 @@ export function useLynkViewer(roomId: string | undefined, audioOutput?: AudioOut
       const bindAudioOutput = (output?: AudioOutputRouter) => {
         disposeAudio();
         let unregister = () => {};
-        if (!output) { audioReady.set(true); disposeAudio = () => {}; return; }
         const update = () => {
           unregister();
-          audioReady.set(false);
           const context = player.audio.out.context.peek();
+          const hasAudio = !!context && context.state !== "closed";
+          setAudioAvailability(current => current[path] === hasAudio ? current : { ...current, [path]: hasAudio });
+          if (!output) { audioReady.set(true); return; }
+          audioReady.set(false);
           unregister = context ? output.register(context, ready => audioReady.set(ready)) : () => {};
         };
         const unsubscribeAudio = player.audio.out.context.subscribe(update);
@@ -218,6 +230,10 @@ export function useLynkViewer(roomId: string | undefined, audioOutput?: AudioOut
         disposeAudio();
         unsubscribe();
         available.close();
+        setAudioAvailability(current => {
+          if (!(path in current)) return current;
+          const next = { ...current }; delete next[path]; return next;
+        });
         setVideoAvailability(current => {
           if (!(path in current)) return current;
           const next = { ...current }; delete next[path]; return next;
@@ -252,7 +268,7 @@ export function useLynkViewer(roomId: string | undefined, audioOutput?: AudioOut
   const state = deriveLynkState({
     hasToken: !!token,
     connection: reload ? status : undefined,
-    hasMedia: publishers.length > 0,
+    hasMedia: publishers.some(p => p.announced !== false || p.videoAvailable || p.audioAvailable),
     ended,
     error: !!error,
   });
