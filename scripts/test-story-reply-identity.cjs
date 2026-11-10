@@ -51,13 +51,17 @@ function deferred() {
         name: "offline-story-reply-boundaries",
         setup(builder) {
           builder.onResolve({
-            filter: /(?:stores\/auth-store|auth\/identity|\.\/auth-helper|supabase\/client|hooks\/use-conversation-resolution)$/,
+            filter: /(?:stores\/auth-store|auth\/follow-identity|api\/follow-relationships|\.\/follow-relationships|auth\/identity|\.\/auth-helper|supabase\/client|hooks\/use-conversation-resolution)$/,
           }, (args) => ({ path: args.path, namespace: "story-reply-fixture" }));
           builder.onLoad({ filter: /.*/, namespace: "story-reply-fixture" }, (args) => {
             const fixture = "globalThis.__storyReplyFixture";
             return {
               loader: "js",
-              contents: args.path.endsWith("auth-store")
+              contents: args.path.endsWith("follow-identity")
+                ? "export function getFollowIdentity(){throw new Error('Unexpected follow read in story fixture')} export const assertFollowIdentity=getFollowIdentity;"
+                : args.path.endsWith("follow-relationships")
+                  ? "export function getOwnFollowingIds(){throw new Error('Unexpected relationship read in story fixture')}"
+                : args.path.endsWith("auth-store")
                 ? `export const useAuthStore={getState:()=>({user:${fixture}.viewerId===null?null:{id:${fixture}.viewerId}})};`
                 : args.path.endsWith("identity")
                   ? `export const requireBetterAuthToken=()=>${fixture}.token();export const getCurrentUserId=async()=>${fixture}.viewerId;`

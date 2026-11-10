@@ -50,3 +50,11 @@ cannot be repaired by changing bootstrap projection alone.
 All existing follow grants and ID-verification policy remain unchanged. Never
 bulk-push pending migrations: held producers and access policy require separate
 release decisions. Previously distributed media URLs cannot be revoked here.
+
+## Read consistency limits
+
+These relationship reads are UI snapshots, not access grants. Pair mode combines
+separate outgoing/block and incoming reads; pagination can observe concurrent
+follow changes. A target deleted between Activity and relationship retrieval may
+make the page fail closed for retry. Do not describe these reads as an atomic
+multi-page graph snapshot. Server post/private access checks remain authoritative.

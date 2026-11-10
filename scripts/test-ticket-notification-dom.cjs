@@ -38,7 +38,7 @@ if (fs.existsSync(accessPath)) vm.runInNewContext(ts.transpileModule(fs.readFile
 const exportsApi = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/app/lib/api/notifications.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
   exports: exportsApi, console, Date, Map, Set,
-  require: name => name.includes('follow-identity') ? {getFollowIdentity:()=>({userId:23}),assertFollowIdentity:()=>{}} : name.includes('follow-relationships') ? {getOwnFollowRelationships:async()=>[]} : name.includes('notification-semantic-type') ? semanticExports : name.includes('supabase/client') ? { supabase: db }
+  require: name => name.includes('follow-identity') ? require('./fixtures/follow-identity.cjs')(()=>23,()=>4,()=>'fixture-viewer') : name.includes('follow-relationships') ? {getOwnFollowRelationships:async()=>[]} : name.includes('notification-semantic-type') ? semanticExports : name.includes('supabase/client') ? { supabase: db }
     : name.includes('notification-access') ? exportsAccess
     : name.includes('auth-helper') ? { getCurrentUserIdSync: () => 23 }
     : {},
