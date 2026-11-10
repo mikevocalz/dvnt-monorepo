@@ -60,6 +60,9 @@ import {
   MAX_BROWSER_POST_MEDIA,
 } from "./browser-live-photo-import";
 
+import { reviewFingerprint, type NudityReview } from "./nudity-review-policy";
+import { NudityReviewDialog } from "./nudity-review-dialog.web";
+
 const MAX_PHOTOS = MAX_BROWSER_POST_MEDIA;
 const MAX_ANIMATED_VIDEO_DURATION = 15; // seconds
 
@@ -139,6 +142,10 @@ export function CreatePostScreen() {
   const publishPost = usePublishPost();
   const guardVerified = useVerifiedGate();
   const submittingRef = useRef(false);
+  const scanAbort = useRef<AbortController | null>(null);
+  const [checkingMedia, setCheckingMedia] = useState(false);
+  const [nudityReview, setNudityReview] = useState<(NudityReview & { fingerprint: string }) | null>(null);
+  useEffect(() => () => scanAbort.current?.abort(), []);
 
   // Same hand-off as native `(tabs)/create.tsx`: the /feed/camera screen writes
   // `useCameraResultStore` before routing back here; consume it into the
@@ -216,7 +223,7 @@ export function CreatePostScreen() {
     });
   };
 
-  const submitPost = async () => {
+  const submitPost = async (reviewedFingerprint?: string) => {
     if (!mounted.current || submittingRef.current) return;
     // A ref closes the same-event/verification-delay race before React rerenders.
     if (pendingMediaRef.current || handoffPendingRef.current) {
@@ -235,6 +242,28 @@ export function CreatePostScreen() {
     submittingRef.current = true;
     ui.setIsSubmitLocked(true);
     try {
+      const draft = useCreatePostStore.getState();
+      const fingerprint = reviewFingerprint(draft);
+      if (draft.postKind === "media" && !draft.isNSFW && fingerprint !== reviewedFingerprint) {
+        const controller = new AbortController();
+        scanAbort.current = controller;
+        setCheckingMedia(true);
+        let result: NudityReview;
+        try {
+          const { scanPostMedia } = await import("./nudity-scan.web");
+          result = await scanPostMedia(draft.selectedMedia, controller.signal);
+        } catch { result = { flagged: false, incomplete: true }; }
+        finally { if (mounted.current) setCheckingMedia(false); }
+        if (!stillCurrent() || controller.signal.aborted) return;
+        if (reviewFingerprint(useCreatePostStore.getState()) !== fingerprint) {
+          showToast("warning", "Draft changed", "Review your changes and tap Share again.");
+          return;
+        }
+        if (result.flagged || result.incomplete) {
+          setNudityReview({ ...result, fingerprint });
+          return;
+        }
+      }
       // Same publication-time visibility recheck as native.
       await assertFirstPostPublishable();
       if (!stillCurrent()) return;
@@ -244,6 +273,10 @@ export function CreatePostScreen() {
       const progress = await fetchNewMemberProgress();
       if (!stillCurrent()) return;
       const mandatoryFirstPost = progress.step === "first_post";
+      if (reviewFingerprint(useCreatePostStore.getState()) !== fingerprint) {
+        showToast("warning", "Draft changed", "Review your changes and tap Share again.");
+        return;
+      }
       const publishId = publishPost(useCreatePostStore.getState());
       if (mandatoryFirstPost) {
         await postPublishQueue.whenFinished(publishId);
@@ -271,6 +304,22 @@ export function CreatePostScreen() {
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
+      {nudityReview && <NudityReviewDialog result={nudityReview} onCancel={() => setNudityReview(null)} onContinue={(spicy) => {
+        const current = useCreatePostStore.getState();
+        if (reviewFingerprint(current) !== nudityReview.fingerprint) {
+          setNudityReview(null);
+          showToast("warning", "Draft changed", "Review your changes and tap Share again.");
+          return;
+        }
+        if (spicy) setIsNSFW(true);
+        const reviewed = reviewFingerprint(useCreatePostStore.getState());
+        setNudityReview(null);
+        guardVerified("post", () => void submitPost(reviewed));
+      }} />}
+      {checkingMedia && <div role="status" className="px-4 py-3 text-sm text-white/70">
+        Checking media privately in your browser…
+        <button className="ml-3 underline" onClick={() => scanAbort.current?.abort()}>Cancel check</button>
+      </div>}
       {/* Header */}
       <div
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
@@ -520,7 +569,7 @@ export function CreatePostScreen() {
             disabled={!isValid || busy || pendingMedia || handoffPending}
             className="min-h-12 w-full rounded-xl px-4 py-3 text-[16px] font-bold bg-cyan-500 text-white disabled:bg-white/8 disabled:text-white/30"
           >
-            {busy ? "Posting…" : "Share"}
+            {checkingMedia ? "Checking media…" : busy ? "Posting…" : "Share"}
           </button>
         </div>
       </div>
