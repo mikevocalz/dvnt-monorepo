@@ -37,10 +37,16 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/
     : name.includes('session-lifecycle') ? { getSessionLifecycle: () => ({ epoch: 4, ready: true }) }
     : name.includes('supabase/client') ? { getBridgeRequestEpoch: () => '4' } : {},
 });
+const semanticExports = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/app/lib/activity/notification-semantic-type.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: semanticExports });
+const followIdentity = require('./fixtures/follow-identity.cjs')(()=>23,()=>4,()=>'fixture-notification-viewer');
 const exportsApi = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/app/lib/api/notifications.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
   exports: exportsApi, console, Date, Map, Set,
-  require: name => name.includes('supabase/client') ? { supabase: db }
+  require: name => name.includes('follow-identity') ? followIdentity
+    : name.includes('follow-relationships') ? { getOwnFollowRelationships: async (ids, identity) => { followIdentity.assertFollowIdentity(identity); assert.deepEqual(Array.from(ids), [613]); return []; } }
+    : name.includes('notification-semantic-type') ? semanticExports
+    : name.includes('supabase/client') ? { supabase: db }
     : name.includes('notification-access') ? exportsAccess
     : name.includes('auth-helper') ? { getCurrentUserIdSync: () => 23 }
     : {},
@@ -119,6 +125,7 @@ const boundaries = {
       build.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: boundaries[args.path], loader: 'tsx', resolveDir: ROOT }));
     } }],
   });
+  if (process.argv.includes('--prebrowser')) { console.log('PASS: actual notification DTO/auth/relationship boundary and web/native browser bundle (browser assertions not run)'); return; }
   const server = http.createServer((req, res) => {
     if (req.url === '/bundle.js') { res.writeHead(200, { 'Content-Type': 'text/javascript' }); return res.end(build.outputFiles[0].contents); }
     res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{background:#080910;color:white;font:16px system-ui}section{padding:20px;margin:20px;border:1px solid grey}p{padding:10px}</style><div id="root"></div><script src="/bundle.js"></script>');
