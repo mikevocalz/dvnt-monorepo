@@ -4,6 +4,7 @@ import { bindDiscoveryRoom, discoveryRoomState } from "./discovery-room-state.ts
 const now = Date.parse("2026-11-07T00:00:00Z"), mono = 1000;
 const base = { status: "open" as const, isLive: true, availability: "live" as const,
   presenceKnown: true, observedAt: new Date(now).toISOString(), presenceExpiresAt: new Date(now + 90_000).toISOString(),
+  resumeExpiresAt: new Date(now + 600_000).toISOString(),
   requestStartedAt: now, requestStartedMonotonic: mono, listeners: 10, maxParticipants: 10 };
 const state = (room: typeof base, elapsed = 0) => discoveryRoomState(room, now + elapsed, mono + elapsed);
 test("only fresh known live proof permits joining, including full rooms", () => {
@@ -54,4 +55,20 @@ test("only fresh current server ownership permits Resume; invites wait without J
   assert.equal(discoveryRoomState(invite,now,mono).actionable,false);
   const unknown=bindDiscoveryRoom({...base,availability:"unknown",isOwner:true},()=>true);
   assert.equal(discoveryRoomState(unknown,now,mono).canResume,false);
+});
+
+test("Resume expires at the server deadline even with a fresh discovery lease", () => {
+  for (const remaining of [1, 0, -1]) {
+    const room = bindDiscoveryRoom({...base, isOwner: true, isLive: false, availability: "inactive",
+      resumeExpiresAt: new Date(now + remaining).toISOString()}, () => true);
+    assert.equal(discoveryRoomState(room, now, mono).canResume, remaining > 0);
+    assert.equal(discoveryRoomState(room, now + 1, mono + 1).canResume, false);
+    assert.equal(discoveryRoomState(room, now, mono).canResume, false);
+  }
+});
+test("missing deadline fails closed for Resume, not live joining or scheduled event Start", () => {
+  const room = {...base, isOwner: true, resumeExpiresAt: undefined};
+  assert.equal(discoveryRoomState(bindDiscoveryRoom(room,()=>true),now,mono).actionLabel,"Check room");
+  assert.equal(discoveryRoomState(bindDiscoveryRoom({...room,isLive:false,availability:"inactive"},()=>true),now,mono).actionable,false);
+  assert.equal(discoveryRoomState(bindDiscoveryRoom({...room,isLive:false,availability:"scheduled"},()=>true),now,mono).actionLabel,"Start");
 });

@@ -107,7 +107,7 @@ export function useLynkDiscovery(enabled = true) {
     for (const room of query.data ?? []) {
       const elapsed = Math.max(0, now - (room.requestStartedAt ?? NaN), monotonic - (room.requestStartedMonotonic ?? NaN));
       const observed = Date.parse(room.observedAt ?? "");
-      for (const lease of [90_000, Date.parse(room.presenceExpiresAt ?? "") - observed, Date.parse(room.endsAt ?? "") - observed]) {
+      for (const lease of [90_000, Date.parse(room.presenceExpiresAt ?? "") - observed, Date.parse(room.endsAt ?? "") - observed, Date.parse(room.resumeExpiresAt ?? "") - observed]) {
         const remaining = lease - elapsed;
         if (Number.isFinite(remaining) && remaining > 0) delay = Math.min(delay, remaining);
       }

@@ -5,6 +5,8 @@ export interface DiscoveryProof {
   presenceKnown?: boolean;
   observedAt?: string | null;
   presenceExpiresAt?: string | null;
+  /** Server-derived inactivity deadline; never extended by a discovery refresh. */
+  resumeExpiresAt?: string | null;
   endsAt?: string | null;
   isOwner?: boolean;
   isInvited?: boolean;
@@ -54,7 +56,9 @@ export function discoveryRoomState(room: DiscoveryRoom, now = Date.now(), monoto
   if (observation && ended) observation.ended = true;
   const lease = Math.min(LEASE_MS, expiresAt - observedAt);
   const liveExpired = !Number.isFinite(lease) || lease <= 0 || elapsed >= lease;
-  const ownerExpired = elapsed >= LEASE_MS;
+  const resumeDeadline = Date.parse(room.resumeExpiresAt ?? "");
+  const resumeExpired = !Number.isFinite(resumeDeadline) || serverNow >= resumeDeadline;
+  const ownerExpired = elapsed >= LEASE_MS || (room.availability !== "scheduled" && resumeExpired);
   if (observation) {
     observation.liveExpired ||= liveExpired;
     observation.ownerExpired ||= ownerExpired;
@@ -72,5 +76,5 @@ export function discoveryRoomState(room: DiscoveryRoom, now = Date.now(), monoto
     room.availability === "inactive" && room.isInvited ? "Waiting for host" : room.availability === "inactive" ? "Inactive" : "Status unavailable";
   return { ended, live, countKnown, full, label, canJoin: live, canResume,
     actionable: live || canResume,
-    actionLabel: live ? full ? "Check room" : "Join" : canResume ? "Resume" : undefined };
+    actionLabel: live ? full ? "Check room" : "Join" : canResume ? room.availability === "scheduled" ? "Start" : "Resume" : undefined };
 }

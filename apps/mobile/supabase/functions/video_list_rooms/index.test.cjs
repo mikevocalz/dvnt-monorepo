@@ -328,3 +328,29 @@ test('presence expires during final profile hydration, including legacy response
   assert.equal(row.isLive, false);
   assert.equal(row.observedAt, iso(80001));
 });
+
+test('Resume has a durable ten-minute deadline after explicit host leave, not after each fetch', async () => {
+  for (const age of [599999, 600000, 600001]) {
+    const f = fixture({ actor: 'host', tables: { video_room_members: [member(1, {status:'left', left_at:iso(-age), last_seen_at:iso(-age-1000)})] } });
+    const first = (await list(f, {discoveryVersion:2}))[0];
+    const second = (await list(f, {discoveryVersion:2}))[0];
+    assert.equal(first.availability, 'inactive');
+    assert.equal(first.resumeExpiresAt, iso(600000-age));
+    assert.equal(second.resumeExpiresAt, first.resumeExpiresAt);
+  }
+});
+test('silent host disconnect starts Resume at heartbeat expiry; cohost extends live session', async () => {
+  const f = fixture({ actor:'host', tables: { video_room_members: [member(1,{last_seen_at:iso(-90000)})] } });
+  assert.equal((await list(f,{discoveryVersion:2}))[0].resumeExpiresAt,iso(600000));
+  const cohost = fixture({actor:'host',tables:{ video_room_members:[
+    member(1,{status:'left',left_at:iso(-HOUR)}), member(2,{user_id:'cohost',role:'co-host',last_seen_at:iso(-1000)})] }});
+  const row=(await list(cohost,{discoveryVersion:2}))[0];
+  assert.equal(row.availability,'live');assert.equal(row.resumeExpiresAt,iso(689000));
+});
+test('unstarted rooms use creation time and latest leave cannot be overruled by an older membership', async () => {
+  const empty=fixture({actor:'host',tables:{video_rooms:[room(1,{created_at:iso(-300000)})],video_room_members:[]}});
+  assert.equal((await list(empty,{discoveryVersion:2}))[0].resumeExpiresAt,iso(300000));
+  const left=fixture({actor:'host',tables:{video_room_members:[member(1),member(2,{status:'left',left_at:iso(-600001)})]}});
+  const row=(await list(left,{discoveryVersion:2}))[0];
+  assert.equal(row.availability,'inactive');assert.equal(row.resumeExpiresAt,iso(-1));
+});
