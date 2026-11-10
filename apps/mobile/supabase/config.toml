@@ -604,3 +604,7 @@ verify_jwt = false
 # Authenticated internally with verified Better Auth session, never caller IDs.
 [functions.get-follow-relationships]
 verify_jwt = false
+
+# Verified Better Auth session and current post-access projection checked internally.
+[functions.protected-photo-preview]
+verify_jwt = false
