@@ -8,7 +8,7 @@
 
 import type { LynkState } from "./lynkState";
 
-/** A discovered live publisher in the room namespace. */
+/** A discovered publisher or admitted web subscription candidate in the room namespace. */
 export interface LynkPublisher {
   /** Full MoQ path, e.g. `lynk/<roomId>/<peerId>`. */
   path: string;
@@ -16,13 +16,17 @@ export interface LynkPublisher {
   peerId: string;
   /** Web decoder has current usable video; discovery alone can be audio-only. */
   videoAvailable?: boolean;
+  /** False for an admitted roster candidate awaiting an exact relay announcement. */
+  announced?: boolean;
+  /** An audio decoder context exists, including on relays without discovery. */
+  audioAvailable?: boolean;
 }
 
 /** Common surface both platforms expose for the viewer. */
 export interface LynkViewerBase {
   state: LynkState;
   error: string | null;
-  /** Live publishers (1 when only host, 2 when cohost joins) — discovery-driven. */
+  /** Discovered publishers plus authorized roster subscription candidates on web. */
   publishers: LynkPublisher[];
   /** Number of viewers in the room (from Supabase presence, not MoQ). */
   viewerCount: number;
@@ -49,7 +53,7 @@ export interface LynkBroadcastBase {
   retryCapture: () => void;
   setCameraEnabled: (on: boolean) => void;
   setMicEnabled: (on: boolean) => void;
-  /** Other live publishers in the room (e.g. the cohost) — discovery-driven. */
+  /** Other discovered publishers/authorized roster candidates (e.g. the cohost). */
   coPublishers: LynkPublisher[];
   viewerCount: number;
   /** Begin publishing camera + mic. */

@@ -26,7 +26,7 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     ` }));
   } }] });
   const mod = { exports: {} }; new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(require, mod, mod.exports);
-  function Harness({ room = 'room' }) { f.latest = mod.exports.useLynkViewer(room, f.audioOutput); return null; }
+  function Harness({ room = 'room' }) { f.latest = mod.exports.useLynkViewer(room, f.audioOutput, f.expectedPeerIds); return null; }
   const root = createRoot(document.getElementById('root'));
   const tick = () => new Promise(r => setTimeout(r, 5));
   const act = fn => React.act(async () => { await fn(); await tick(); });
@@ -108,6 +108,33 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     await act(() => f.latest.attachCanvas(peer, null));
     assert.equal(f.players[1].closed, true, 'truly removed roster tile stops audio before discovery drops');
     await act(() => f.latest.attachCanvas(peer, canvas));
+    // A namespace-only route/no-discovery relay cannot enumerate peer paths.
+    // The admitted roster must still create the host's receiver, while the SDK
+    // owns waiting/reconnect for that exact path under the scoped credential.
+    await act(() => connection.paths.set(new Map([['lynk/room', {}]])));
+    f.expectedPeerIds = ['host', 'host', '../outside', ''];
+    await act(() => root.render(React.createElement(Harness)));
+    assert.deepEqual(f.latest.publishers.map(p => p.peerId), ['host']);
+    assert.equal(f.latest.publishers[0].videoAvailable, false);
+    assert.equal(f.latest.publishers[0].announced, false);
+    assert.notEqual(f.latest.state, 'live', 'membership alone is not usable media');
+    await act(() => f.latest.attachCanvas('lynk/room/host', canvas));
+    const hostPlayer = f.players.at(-1);
+    await act(() => hostPlayer.audio.out.context.set({ state: 'running', sinkId: 'speakers', async setSinkId(id) { this.sinkId = id; } }));
+    assert.equal(f.latest.publishers[0].audioAvailable, true, 'no-discovery audio is not mislabeled muted');
+    assert.equal(f.latest.state, 'live', 'audio-only no-discovery reception counts as live');
+    await act(() => {
+      hostPlayer.video.source.out.config.set({ codec: 'avc1' });
+      hostPlayer.video.out.frame.set({ timestamp: 99 });
+    });
+    assert.equal(f.latest.publishers[0].videoAvailable, true);
+    await act(() => connection.paths.set(new Map([['lynk/room/host', {}]])));
+    assert.equal(f.players.at(-1), hostPlayer, 'late exact announcement keeps the existing decoder');
+    await act(() => connection.paths.set(new Map()));
+    assert.equal(hostPlayer.closed, false, 'roster remains valid across discovery churn');
+    f.expectedPeerIds = [];
+    await act(() => root.render(React.createElement(Harness)));
+    assert.equal(hostPlayer.closed, true, 'departed roster member stops its receiver');
     f.denied = true;
     await act(() => root.render(React.createElement(Harness)));
     assert.equal(connection.props.url.peek(), undefined, 'business refusal revokes even healthy reception');
@@ -115,6 +142,41 @@ const resolve = name => require.resolve(name, { paths: name.startsWith('@moq/') 
     assert.ok(f.players.every(p => p.closed)); assert.equal(connection.closed, true);
     assert.equal(f.outputState.phase, 'waiting', 'leave unregisters all actual audio contexts');
     f.audioOutput.dispose();
+    // The exact pinned networking SDK, with no mocked origin/route and no
+    // socket: a relay-style namespace advertisement is not a peer list, but
+    // the admitted host's exact path must resolve through that prefix.
+    const netBundle = await esbuild.build({ stdin: { contents: `export * from ${JSON.stringify(resolve('@moq/net'))}`, resolveDir: process.cwd() }, bundle: true, write: false, platform: 'node', format: 'cjs' });
+    const netModule = { exports: {} };
+    new Function('require', 'module', 'exports', netBundle.outputFiles[0].text)(require, netModule, netModule.exports);
+    const Net = netModule.exports;
+    const origin = new Net.Origin.Producer();
+    const prefix = Net.Path.from('lynk/room');
+    const hostPath = Net.Path.from('lynk/room/host');
+    const route = origin.dynamic(prefix);
+    const source = new Net.Broadcast.Producer();
+    const requests = route.requested();
+    const request = origin.request(hostPath, { announced: true });
+    try {
+      assert.deepEqual([...origin.broadcasts().peek().keys()], [prefix]);
+      assert.equal(origin.broadcasts().peek().has(hostPath), false, 'namespace discovery does not enumerate its host');
+      let timeout;
+      const pending = await Promise.race([
+        requests.next(),
+        new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('SDK prefix route did not receive known host request')), 1000); }),
+      ]).finally(() => clearTimeout(timeout));
+      assert.equal(pending.done, false);
+      assert.equal(pending.value.path, hostPath);
+      pending.value.accept(source);
+      await tick();
+      assert.ok(request.active.peek(), 'SDK resolves an announcement-gated exact host request through a namespace route');
+      assert.equal(request.unroutable.peek(), false);
+      route.close();
+      await tick();
+      assert.equal(request.active.peek(), undefined, 'withdrawn namespace releases the receiver');
+      console.log('PASS pinned @moq/net Origin: namespace-only discovery resolves known host path and releases it on route withdrawal. No socket, relay, browser or decoder used.');
+    } finally {
+      request.close(); route.close(); await requests.return(); source.close(); origin.close();
+    }
     console.log('PASS production web viewer + real SDK signals: real decoder AudioContext routing, rendition replacement, stale routing failure, volume continuity, repeated renewal/player continuity, newest-grant reconnect and denial, audio-only discovery, first frame, remote background avatar/recovery, stable player/audio across ref churn, jitter no-flicker, publisher stalls, peer drop/rejoin and leave cleanup. Relay/decoder mocked.');
   } finally { await act(() => root.unmount()); dom.window.close(); delete global.__viewerSdk; }
 })().then(() => process.exit(0)).catch(error => { console.error(error); process.exit(1); });
