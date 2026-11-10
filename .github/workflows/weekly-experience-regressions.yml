@@ -104,6 +104,7 @@ jobs:
           node scripts/test-weekly-spicy-ui.cjs
           node scripts/test-member-map-session-sql.cjs
           node scripts/test-member-map-session-dom.cjs
+          node scripts/test-member-map-recovery-dom.cjs
           node scripts/test-exact-distance-sql.cjs
           node scripts/test-exact-distance-hooks.cjs
           node --test scripts/test-member-proximity-settings-dom.cjs

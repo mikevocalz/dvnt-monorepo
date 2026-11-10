@@ -23,7 +23,7 @@ function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: bo
   return <section aria-label="Map sharing" className={promptOnly ? "" : "rounded-xl border border-white/15 p-4 space-y-3"}>
     {!promptOnly ? <>
       {flow.location.sharing ? <>
-      <p className="text-sm">Avatar sharing is on until {new Date(flow.location.settings!.shareUntil!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. Your avatar appears when a fresh location is available.</p>
+      <p className="text-sm">Avatar sharing is enabled for this sign-in, until {new Date(flow.location.settings!.shareUntil!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. This is your sharing preference, not confirmation of a current location. Your avatar appears only while a fresh permitted location is available.</p>
       <button type="button" disabled={flow.location.busy} onClick={flow.stop} className="min-h-11 rounded-xl border border-white/30 px-4">Stop sharing</button>
     </> : <>
       <p className="text-sm text-white/70">Show your avatar for this sign-in. Sharing stops when you sign out or your sign-in expires. Sharing is optional.</p>
