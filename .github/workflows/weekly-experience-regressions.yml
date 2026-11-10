@@ -86,6 +86,7 @@ jobs:
           node --test apps/mobile/supabase/functions/toggle-follow/notifications.test.cjs
           node --test packages/supabase/src/bridge-transport.test.ts packages/app/lib/messages/unread-counts.test.ts packages/app/lib/profile/follow-read-failure.test.ts
           node --test packages/app/lib/api/follows-account.test.ts
+          node --test apps/mobile/supabase/functions/get-follow-relationships/index.test.cjs packages/app/lib/api/follow-relationships.test.cjs
           node --test apps/mobile/supabase/functions/create-event/index.test.cjs
           node --test packages/app/lib/events/*.test.ts packages/app/features/events/create/event-form.test.ts
           node --test packages/app/lib/api/ticket-types-read.test.ts
@@ -115,6 +116,7 @@ jobs:
           node scripts/test-weekly-home-reset.cjs
           node scripts/test-weekly-logo-actions.cjs
           node scripts/test-ticket-notification-dom.cjs
+          node scripts/test-legacy-follow-notification.cjs
 
   web-browser-regressions:
     runs-on: ubuntu-24.04

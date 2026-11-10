@@ -8,7 +8,8 @@ import {
   ownEmailFor,
 } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
-import { resolveFollowRelationship } from "../profile/follow-relationship";
+import { getOwnFollowRelationships } from "./follow-relationships";
+import { getFollowIdentity } from "../auth/follow-identity";
 import {
   buildUserSearchFilters,
   userDisplayName,
@@ -66,13 +67,15 @@ async function getFollowRelationship(viewerId: number | null, targetId: number) 
   if (!viewerId || !targetId || String(viewerId) === String(targetId)) {
     return { isFollowing: false, followsYou: false };
   }
-  const { data, error } = await supabase
-    .from(DB.follows.table)
-    .select("follower_id, following_id")
-    .in(DB.follows.followerId, [viewerId, targetId])
-    .in(DB.follows.followingId, [viewerId, targetId]);
-  if (error) throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
-  return resolveFollowRelationship(data ?? [], viewerId, targetId);
+  try {
+    const identity = getFollowIdentity();
+    if (!identity || String(viewerId) !== identity.viewerId) throw new Error("Account changed");
+    const [relationship] = await getOwnFollowRelationships([targetId], identity);
+    if (!relationship || relationship.targetId !== targetId) throw new Error("Missing relationship");
+    return { isFollowing: relationship.isFollowing, followsYou: relationship.followsYou };
+  } catch {
+    throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
+  }
 }
 
 type BetterAuthUserRow = {

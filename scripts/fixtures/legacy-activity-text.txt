@@ -1,0 +1,77 @@
+// Verbatim getActivityText from released source d1f03d8, native Activity.
+// Test-only snapshot avoids depending on historical git objects in shallow CI.
+function getActivityText(activity: Activity): string {
+  switch (activity.type) {
+    // No leading username: the row renders no actor for a system notice, so
+    // the title is the sentence rather than a suffix to somebody's name.
+    case "system":
+      return activity.payload?.title || "Announcement";
+    case "like":
+      return " liked your post.";
+    case "comment":
+      return activity.comment
+        ? ` commented: "${activity.comment}"`
+        : " commented on a post.";
+    case "follow":
+      return " started following you.";
+    case "mention":
+      return activity.comment
+        ? ` mentioned you: "${activity.comment}"`
+        : " mentioned you in a comment.";
+    case "tag":
+      return " tagged you in a post.";
+    case "event_invite":
+      return ` invited you to ${activity.event?.title || "an event"}.`;
+    case "event_update":
+      return ` updated ${activity.event?.title || "an event"}.`;
+    case "event_co_organizer_invited":
+      return ` invited you to staff ${activity.event?.title || "an event"}.`;
+    case "event_co_organizer_accepted":
+      return ` accepted your staff invite.`;
+    case "event_co_organizer_declined":
+      return ` declined your staff invite.`;
+    case "event_co_organizer_revoked":
+      return ` removed your staff access.`;
+    case "event_cancelled":
+      return ` cancelled ${activity.event?.title || "an event"} you have a ticket to.`;
+    case "event_changed":
+      return ` updated details for ${activity.event?.title || "your event"}.`;
+    case "event_broadcast":
+      return ` sent a message to attendees of ${activity.event?.title || "an event"}.`;
+    case "event_promoter_added":
+      return ` added you as a promoter for ${activity.event?.title || "an event"}.`;
+    case "ticket_transfer_initiated":
+      return ` sent you a ticket transfer. View your tickets.`;
+    case "ticket_transfer_accepted":
+      return ` accepted your ticket transfer.`;
+    case "ticket_transfer_declined":
+      return ` declined your ticket transfer. It's back in your wallet.`;
+    case "ticket_transfer_cancelled":
+      return ` cancelled the ticket transfer.`;
+    case "ticket_comped":
+      return ` comped you a ticket to ${activity.event?.title || "an event"}.`;
+    case "ticket_refunded":
+      return ` issued a refund for your ${activity.event?.title || "event"} ticket.`;
+    case "ticket_claim_required":
+    case "ticket_delivery_failed":
+    case "ticket_voided":
+    case "event_postponed":
+    case "event_time_changed":
+    case "event_venue_changed":
+      return ticketActivityCopy(activity.type) || " updated your ticket.";
+    case "room_invite":
+      return roomInviteActivityText(
+        activity.event?.title || activity.payload?.event_title,
+      );
+    case "lynk_cohost_invited":
+      return " invited you to co-host a Lynk.";
+    case "lynk_cohost_accepted":
+      return " accepted your invitation to co-host a Lynk.";
+    case "lynk_cohost_declined":
+      return " declined your invitation to co-host a Lynk.";
+    case "sneaky_lynk":
+      return " invited you to a Sneaky Lynk.";
+    default:
+      return "";
+  }
+}

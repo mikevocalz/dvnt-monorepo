@@ -1,3 +1,5 @@
+import { getFollowIdentity, assertFollowIdentity } from "@dvnt/app/lib/auth/follow-identity";
+import { getOwnFollowRelationships } from "@dvnt/app/lib/api/follow-relationships";
 import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import { getCurrentUserIdSync } from "./auth-helper";
@@ -425,6 +427,8 @@ export const notificationsApi = {
    */
   async getNotifications(limit: number = 50) {
     try {
+      const followIdentity = getFollowIdentity();
+      assertFollowIdentity(followIdentity);
       const userId = getCurrentUserIdSync();
       if (!userId) return { docs: [], totalDocs: 0 };
 
@@ -650,7 +654,7 @@ export const notificationsApi = {
         }
       }
 
-      // Batch-query follows table: which actors does the viewer follow?
+      // Verified-session relationship read, independent of installed-client RLS transport.
       const actorIds = [
         ...new Set(
           (data || [])
@@ -658,21 +662,17 @@ export const notificationsApi = {
             .filter((id: any) => id != null),
         ),
       ];
+      assertFollowIdentity(followIdentity);
+      if (Number(followIdentity.viewerId) !== Number(userId)) throw new Error("Account changed");
       let viewerFollowsSet = new Set<number>();
       if (actorIds.length > 0) {
-        const { data: followRows, error: followError } = await supabase
-          .from("follows")
-          .select("following_id")
-          .eq("follower_id", userId)
-          .in("following_id", actorIds);
-        if (followError) throw followError;
-        if (followRows) {
-          viewerFollowsSet = new Set(
-            followRows.map((r: any) => r.following_id),
-          );
+        for (let offset = 0; offset < actorIds.length; offset += 100) {
+          const relationships = await getOwnFollowRelationships(actorIds.slice(offset, offset + 100).map(Number), followIdentity);
+          relationships.filter(row => row.isFollowing).forEach(row => viewerFollowsSet.add(row.targetId));
         }
       }
 
+      assertFollowIdentity(followIdentity);
       const docs = (data || []).map((n: any) => {
         const actorInfo = n.actor
           ? {

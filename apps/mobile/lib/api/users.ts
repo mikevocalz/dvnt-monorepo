@@ -8,6 +8,8 @@ import {
   ownEmailFor,
 } from "../auth/identity";
 import { invokeEdge } from "./invoke-edge";
+import { getOwnFollowRelationships } from "@dvnt/app/lib/api/follow-relationships";
+import { getFollowIdentity } from "@dvnt/app/lib/auth/follow-identity";
 
 function normalizeUserLinks(value: unknown): string[] {
   const sanitize = (items: unknown[]) =>
@@ -43,6 +45,21 @@ async function getViewerIdForRelationshipChecks(): Promise<number | null> {
 
   const viewerRow = await getCurrentUserRow();
   return viewerRow?.id ?? null;
+}
+
+async function getFollowRelationship(viewerId: number | null, targetId: number) {
+  if (!viewerId || !targetId || String(viewerId) === String(targetId)) {
+    return { isFollowing: false, followsYou: false };
+  }
+  try {
+    const identity = getFollowIdentity();
+    if (!identity || String(viewerId) !== identity.viewerId) throw new Error("Account changed");
+    const [relationship] = await getOwnFollowRelationships([targetId], identity);
+    if (!relationship || relationship.targetId !== targetId) throw new Error("Missing relationship");
+    return { isFollowing: relationship.isFollowing, followsYou: relationship.followsYou };
+  } catch {
+    throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
+  }
 }
 
 type BetterAuthUserRow = {
@@ -156,14 +173,7 @@ export const usersApi = {
         // Follow check fires only when we have both IDs and they differ
         let isFollowing = false;
         if (currentUserId && targetUserId && currentUserId !== targetUserId) {
-          const { data: followData, error: followError } = await supabase
-            .from(DB.follows.table)
-            .select("id")
-            .eq(DB.follows.followerId, currentUserId)
-            .eq(DB.follows.followingId, targetUserId)
-            .maybeSingle();
-          if (followError) throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
-          isFollowing = !!followData;
+          isFollowing = (await getFollowRelationship(Number(currentUserId), Number(targetUserId))).isFollowing;
         }
 
         return {
@@ -292,14 +302,7 @@ export const usersApi = {
         data[DB.users.id] &&
         currentUserId !== data[DB.users.id]
       ) {
-        const { data: followData, error: followError } = await supabase
-          .from(DB.follows.table)
-          .select("id")
-          .eq(DB.follows.followerId, currentUserId)
-          .eq(DB.follows.followingId, data[DB.users.id])
-          .maybeSingle();
-        if (followError) throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
-        isFollowing = !!followData;
+        isFollowing = (await getFollowRelationship(Number(currentUserId), Number(data[DB.users.id]))).isFollowing;
       }
 
       return {
@@ -395,14 +398,7 @@ export const usersApi = {
           profile[DB.users.username] || betterAuthUser?.username || authId;
         let isFollowing = false;
         if (currentUserId && targetUserId && currentUserId !== targetUserId) {
-          const { data: followData, error: followError } = await supabase
-            .from(DB.follows.table)
-            .select("id")
-            .eq(DB.follows.followerId, currentUserId)
-            .eq(DB.follows.followingId, targetUserId)
-            .maybeSingle();
-          if (followError) throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
-          isFollowing = !!followData;
+          isFollowing = (await getFollowRelationship(Number(currentUserId), Number(targetUserId))).isFollowing;
         }
 
         return {

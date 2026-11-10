@@ -1,3 +1,5 @@
+import { getOwnFollowingIds } from "./follow-relationships";
+import { getFollowIdentity, assertFollowIdentity } from "../auth/follow-identity";
 import type { Conversation } from "./messages";
 import { fetchUnreadConversationCounts, type UnreadConversationCounts } from "@dvnt/app/lib/messages/unread-counts";
 import type { ThreadCursor, ThreadPage } from "./messages";
@@ -798,7 +800,13 @@ export const messagesApi = {
       getCurrentUserAuthId(), resolveVisitorIdInt(),
     ]);
     if (!authId || !viewerId) throw new Error("Sign in to load unread messages");
-    return fetchUnreadConversationCounts(supabase, authId, viewerId);
+    const identity = getFollowIdentity();
+    assertFollowIdentity(identity);
+    if (identity.authId !== authId || Number(identity.viewerId) !== viewerId)
+      throw new Error("Account changed");
+    const result = await fetchUnreadConversationCounts(supabase, authId, viewerId, () => getOwnFollowingIds(identity));
+    assertFollowIdentity(identity);
+    return result;
   },
 
   /**

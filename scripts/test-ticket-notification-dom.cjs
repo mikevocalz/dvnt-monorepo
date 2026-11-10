@@ -8,6 +8,7 @@ const vm = require('node:vm');
 const ts = require('typescript');
 const esbuild = require('esbuild');
 const ROOT = path.resolve(__dirname, '..');
+const semanticExports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname,'../packages/app/lib/activity/notification-semantic-type.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports:semanticExports});
 const selections = [];
 const row = {
   id: 1, type: 'event_broadcast', entity_type: 'event', entity_id: '90', actor_id: 613,
@@ -37,7 +38,7 @@ if (fs.existsSync(accessPath)) vm.runInNewContext(ts.transpileModule(fs.readFile
 const exportsApi = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/app/lib/api/notifications.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
   exports: exportsApi, console, Date, Map, Set,
-  require: name => name.includes('supabase/client') ? { supabase: db }
+  require: name => name.includes('follow-identity') ? require('./fixtures/follow-identity.cjs')(()=>23,()=>4,()=>'fixture-viewer') : name.includes('follow-relationships') ? {getOwnFollowRelationships:async()=>[]} : name.includes('notification-semantic-type') ? semanticExports : name.includes('supabase/client') ? { supabase: db }
     : name.includes('notification-access') ? exportsAccess
     : name.includes('auth-helper') ? { getCurrentUserIdSync: () => 23 }
     : {},
@@ -95,7 +96,7 @@ const boundaries = {
  }
  const followDtos=[];
  for(const type of ['follow_request','follow_request_approved']) {
-  row.type=type;row.entity_type='user';row.entity_id='613';row.entity_payload={};
+  row.type='system';row.entity_type='user';row.entity_id='613';row.entity_payload={semantic_type:type,title:'Follow request',body:'Review in your browser.'};
   const dto=(await exportsApi.notificationsApiClient.getNotifications()).docs[0];
   assert.equal(dto.type,type);assert.equal(dto.sender.username,'deviantevents');
   followDtos.push(dto);
@@ -131,6 +132,14 @@ const boundaries = {
     section.firstElementChild.click();
     assert.equal(window.routes.at(-1),i===0?(platform==='web'?'/settings/privacy#follow-requests':'/settings/privacy'):(platform==='web'?'/profile/deviantevents':'/(protected)/profile/deviantevents'));
    }
+  }
+  // Legacy clients leave system rows unnormalized: exercise the unchanged system rendering.
+  window.renderActivity({id:'legacy',type:'system',entityType:'user',entityId:'42',user:{username:'actor',avatar:''},timeAgo:'now',isRead:true,payload:{title:'New follow request',body:'Open dvntapp.live in your browser: Settings > Privacy > Follow requests.'}});
+  for(const platform of ['web','native']){
+    const section=window.document.querySelector('#'+platform);
+    assert.ok(section.textContent.includes('New follow request'));
+    assert.ok(section.textContent.includes('in your browser'));
+    assert.equal([...section.querySelectorAll('button')].some(button=>['Follow','Following','Follow Back'].includes(button.textContent.trim())),false);
   }
   const fixtures = [
    {type:'follow_request',entityType:'user',entityId:'42',web:'/settings/privacy#follow-requests',native:'/settings/privacy',text:' requested to follow you.'},

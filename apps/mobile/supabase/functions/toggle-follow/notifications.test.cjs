@@ -10,7 +10,7 @@ const migration = name => fs.readFileSync(path.join(__dirname, '../../migrations
 async function fixture() {
   const db = new PGlite();
   await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
-    CREATE TYPE enum_notifications_type AS ENUM ('follow');
+    CREATE TYPE enum_notifications_type AS ENUM ('follow','system');
     CREATE TYPE enum_notifications_entity_type AS ENUM ('user');
     CREATE TABLE users(id bigint PRIMARY KEY,auth_id text UNIQUE,is_private boolean,username text);
     CREATE TABLE user_settings(auth_id text PRIMARY KEY,settings jsonb);
@@ -42,13 +42,15 @@ test('requests and approvals have distinct transactional activity; repeats do no
     assert.equal(first.following,false); assert.equal(first.notifyRequest,true); assert.equal(first.notifyFollow,false);
     assert.ok(first.notificationVersion);
     assert.equal((await act(1,2,'follow')).notifyRequest,false);
-    assert.deepEqual((await notices()).map(n => [n.type,n.recipient_id,n.actor_id,n.entity_payload.url]), [
+    assert.deepEqual((await notices()).map(n => [n.entity_payload.semantic_type,n.recipient_id,n.actor_id,n.entity_payload.url]), [
       ['follow_request',2,1,'/settings/privacy#follow-requests'],
     ]);
+    assert.equal((await notices())[0].type, 'system');
+    assert.match((await notices())[0].entity_payload.body, /browser.*Settings > Privacy > Follow requests/);
     const approved = await act(2,1,'approve');
     assert.equal(approved.notifyApproval,true); assert.ok(approved.notificationVersion);
     assert.equal((await act(2,1,'approve')).notifyApproval,false);
-    assert.deepEqual((await notices()).map(n => [n.type,n.recipient_id,n.actor_id,n.entity_payload.url]), [
+    assert.deepEqual((await notices()).map(n => [n.entity_payload.semantic_type,n.recipient_id,n.actor_id,n.entity_payload.url]), [
       ['follow_request_approved',1,2,undefined],
     ]);
     assert.equal((await act(1,2,'status')).following,true);
@@ -72,7 +74,7 @@ test('cancel/decline retire actionable activity; cancel-before-approve grants no
     assert.deepEqual(await notices(),[]);
     await act(1,2,'follow'); await act(2,1,'approve'); await act(1,2,'unfollow');
     assert.equal((await act(1,2,'status')).following,false,'approve-before-cancel is retired by the later cancellation');
-    assert.equal((await notices()).filter(n=>n.type==='follow_request').length,0);
+    assert.equal((await notices()).filter(n=>n.entity_payload.semantic_type==='follow_request').length,0);
   } finally { await db.close(); }
 });
 
@@ -86,7 +88,7 @@ test('blocks reject new requests and approvals; rollback emits no activity or gr
     await db.exec('INSERT INTO blocks VALUES(1,2)');
     await assert.rejects(act(2,1,'approve'),/unavailable/);
     assert.equal((await act(1,2,'status')).following,false);
-    assert.equal((await notices()).filter(n=>n.type==='follow_request_approved').length,0);
+    assert.equal((await notices()).filter(n=>n.entity_payload.semantic_type==='follow_request_approved').length,0);
     await act(2,1,'decline');
     assert.deepEqual(await notices(),[]);
     await db.exec('DELETE FROM blocks; BEGIN'); await act(1,2,'follow'); await db.exec('ROLLBACK');
@@ -205,4 +207,20 @@ test('approval push uses an encoded canonical username and safe Activity fallbac
     assert.equal(h.sent[0][0].data.url,username?'https://dvntapp.live/profile/owner%20name':'https://dvntapp.live/activity');
     assert.equal(h.sent[0][0].data.senderUsername,username || undefined);
   }
+});
+
+test('semantic fallback retains ID/read state on repeat and cancellation leaves unrelated system notices', async () => {
+  const {db,act} = await fixture();
+  try {
+    await act(1,2,'follow');
+    await db.exec("UPDATE notifications SET read_at='2026-11-01T00:00:00Z'");
+    const before=(await db.query('SELECT id,read_at FROM notifications')).rows;
+    await act(1,2,'follow');
+    assert.deepEqual((await db.query('SELECT id,read_at FROM notifications')).rows,before);
+    await db.exec("INSERT INTO notifications(recipient_id,actor_id,type,entity_payload) VALUES(2,1,'system','{\"title\":\"Unrelated announcement\"}')");
+    await act(1,2,'unfollow');
+    const remaining=(await db.query('SELECT entity_payload FROM notifications')).rows;
+    assert.equal(remaining.length,1);
+    assert.equal(remaining[0].entity_payload.title,'Unrelated announcement');
+  } finally { await db.close(); }
 });

@@ -1,13 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fetchUnreadConversationCounts } from "./unread-counts.ts";
+import { fetchUnreadConversationCounts as fetchCounts } from "./unread-counts.ts";
+const fetchUnreadConversationCounts = (client: any, authId: string, viewerId: number) => fetchCounts(client, authId, viewerId, client.loadFollowingIds);
 
 type Row = Record<string, any>;
 function fixture(tables: Record<string, Row[]>, errorTable?: string, missingTable?: string) {
   const calls: { table: string; range?: number[]; limit?: number }[] = [];
   let inFlight = 0;
   let maximumInFlight = 0;
-  const client = { from(table: string) {
+  const client = { loadFollowingIds: async () => {
+    if (errorTable === "follows" || missingTable === "follows") throw new Error("Synthetic unavailable");
+    return (tables.follows || []).map(row => row.following_id);
+  }, from(table: string) {
     const filters: ((row: Row) => boolean)[] = [];
     let start = 0, end = 999, limit: number | undefined;
     const call: typeof calls[number] = { table }; calls.push(call);
@@ -71,7 +75,7 @@ test("membership, cursors, follows and users traverse page boundaries; conversat
   assert.deepEqual(await fetchUnreadConversationCounts(h.client,'viewer',1),{inbox:205,spam:0,inboxConversationIds:ids.map(String).sort(),spamConversationIds:[]});
   assert.ok(h.calls.some(c=>c.table==='conversations_rels'&&c.range?.[0]===200));
   assert.ok(h.calls.some(c=>c.table==='conversation_reads'&&c.range?.[0]===200));
-  assert.ok(h.calls.some(c=>c.table==='follows'&&c.range?.[0]===200));
+  assert.ok(!h.calls.some(c=>c.table==='follows'), 'relationships use the authenticated server loader, not raw follows');
 });
 
 test("partial errors reject rather than fabricate zero or misclassify requests", async () => {

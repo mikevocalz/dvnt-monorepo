@@ -24,6 +24,8 @@ function fixture(options={}) {
  };
  function load(file){const exports={};const source=ts.transpileModule(fs.readFileSync(path.join(__dirname,file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;vm.runInNewContext(source,{exports,require:name=>deps[name]??{},console:{log(){},error(){},warn(){}},Date});return exports;}
  deps['./notification-access']=load('notification-access.ts');
+ deps['@dvnt/app/lib/auth/follow-identity']=require('../../../../scripts/fixtures/follow-identity.cjs')(()=>userId,()=>epoch,()=>userId===1?'auth-A':'auth-B');
+ deps['../activity/notification-semantic-type']=load('../activity/notification-semantic-type.ts');
  return {api:load('notifications.ts').notificationsApi,calls,mintSubjects,rows,switchAccount};
 }
 const methods=[['getNotifications',[]],['getBadges',[]],['markAsRead',['10']],['markAllAsRead',[]]];
