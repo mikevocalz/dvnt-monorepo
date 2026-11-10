@@ -62,7 +62,8 @@ const boundaries={
   assert.deepEqual(f.profileCalls,[],'free RSVP does not create an account');
   await page.getByRole('button',{name:'Done',exact:true}).click();
   await page.evaluate(()=>window.begin());
-  assert.equal(await page.getByRole('textbox',{name:/username|mobile number/i}).count(),0);
+  assert.equal(await page.getByRole('textbox',{name:/username/i}).count(),0);
+  assert.equal(await page.getByRole('textbox',{name:'Mobile number',exact:true}).inputValue(),'+12125550123');
   await page.getByRole('textbox',{name:'Full name',exact:true}).fill('Guest Buyer');
   const code=page.getByRole('textbox',{name:'Promo or promoter code'});
   await page.getByRole('button',{name:'Pay $31.75',exact:true}).waitFor();
