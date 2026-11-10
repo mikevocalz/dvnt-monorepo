@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bindDiscoveryRoom, discoveryRoomState } from "./discovery-room-state.ts";
+import { bindDiscoveryRoom, discoveryRoomState, hasDiscoveryResumeOwnership } from "./discovery-room-state.ts";
 const now = Date.parse("2026-11-07T00:00:00Z"), mono = 1000;
 const base = { status: "open" as const, isLive: true, availability: "live" as const,
   presenceKnown: true, observedAt: new Date(now).toISOString(), presenceExpiresAt: new Date(now + 90_000).toISOString(),
+  resumeAllowed: true,
   resumeExpiresAt: new Date(now + 600_000).toISOString(),
   requestStartedAt: now, requestStartedMonotonic: mono, listeners: 10, maxParticipants: 10 };
 const state = (room: typeof base, elapsed = 0) => discoveryRoomState(room, now + elapsed, mono + elapsed);
@@ -71,4 +72,22 @@ test("missing deadline fails closed for Resume, not live joining or scheduled ev
   assert.equal(discoveryRoomState(bindDiscoveryRoom(room,()=>true),now,mono).actionLabel,"Check room");
   assert.equal(discoveryRoomState(bindDiscoveryRoom({...room,isLive:false,availability:"inactive"},()=>true),now,mono).actionable,false);
   assert.equal(discoveryRoomState(bindDiscoveryRoom({...room,isLive:false,availability:"scheduled"},()=>true),now,mono).actionLabel,"Start");
+});
+
+test("guests cannot Resume even with an unexpired deadline or mismatched owner flag", () => {
+  for (const isOwner of [false, true]) for (const resumeAllowed of [false, undefined]) {
+    const room = bindDiscoveryRoom({...base,isLive:false,availability:"inactive",isOwner,resumeAllowed},()=>true);
+    assert.equal(discoveryRoomState(room,now,mono).canResume,false);
+    assert.equal(discoveryRoomState(room,now,mono).actionLabel,undefined);
+  }
+});
+
+test("host proof is tied to the current authenticated identity, not numeric profile IDs or cached ownership", () => {
+  const room = {isOwner:true,resumeAllowed:true,createdBy:"host-auth-id"};
+  assert.equal(hasDiscoveryResumeOwnership(room,["123","guest-auth-id"]),false);
+  assert.equal(hasDiscoveryResumeOwnership(room,["123","host-auth-id"]),true);
+  assert.equal(hasDiscoveryResumeOwnership(room,[]),false);
+  assert.equal(hasDiscoveryResumeOwnership({...room,createdBy:"123"},["123"]),false);
+  assert.equal(hasDiscoveryResumeOwnership({...room,createdBy:""},[""]),false);
+  assert.equal(hasDiscoveryResumeOwnership({...room,resumeAllowed:undefined},["host-auth-id"]),false);
 });

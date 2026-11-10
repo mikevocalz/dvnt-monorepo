@@ -354,3 +354,17 @@ test('unstarted rooms use creation time and latest leave cannot be overruled by 
   const row=(await list(left,{discoveryVersion:2}))[0];
   assert.equal(row.availability,'inactive');assert.equal(row.resumeExpiresAt,iso(-1));
 });
+
+test('only creator with a current host role can Resume; guests, demoted and removed creators cannot', async () => {
+  for (const [actor, role, status, allowed] of [
+    ['viewer','listener','active',false], ['host','listener','active',false],
+    ['host','speaker','active',false], ['host','host','banned',false],
+    ['host','host','kicked',false], ['host','host','left',true],
+    ['host','co-host','left',true],
+  ]) {
+    const f=fixture({actor,tables:{video_room_members:[member(),member(2,{user_id:actor,role,status})]}});
+    const rows=await list(f,{discoveryVersion:2});
+    if(rows.length) assert.equal(rows[0].resumeAllowed,allowed,`${actor}/${role}/${status}`);
+    else assert.equal(allowed,false);
+  }
+});

@@ -9,6 +9,8 @@ export interface DiscoveryProof {
   resumeExpiresAt?: string | null;
   endsAt?: string | null;
   isOwner?: boolean;
+  resumeAllowed?: boolean;
+  createdBy?: string;
   isInvited?: boolean;
   /** Local request-start clocks. Network/authentication time consumes the lease. */
   requestStartedAt?: number;
@@ -19,6 +21,12 @@ export interface DiscoveryRoom extends DiscoveryProof {
   isLive: boolean;
   listeners: number;
   maxParticipants?: number;
+}
+/** Server role permission must also belong to this authenticated viewer. */
+export function hasDiscoveryResumeOwnership(room: DiscoveryProof, selfIds: string[]): boolean {
+  return room.resumeAllowed === true && room.isOwner === true &&
+    typeof room.createdBy === "string" && room.createdBy.length > 0 &&
+    !/^\d+$/.test(room.createdBy) && selfIds.includes(room.createdBy);
 }
 const LEASE_MS = 90_000;
 type Observation = { elapsed: number; liveExpired: boolean; ownerExpired: boolean; ended: boolean };
@@ -67,7 +75,7 @@ export function discoveryRoomState(room: DiscoveryRoom, now = Date.now(), monoto
   const fresh = current && hasClocks && Number.isFinite(observedAt) && !ended;
   const live = fresh && room.availability === "live" && room.presenceKnown === true && room.isLive === true &&
     !liveExpired && !observation?.liveExpired;
-  const canResume = fresh && room.isOwner === true && room.status === "open" &&
+  const canResume = fresh && room.resumeAllowed === true && room.isOwner === true && room.status === "open" &&
     (room.availability === "live" || room.availability === "inactive" || room.availability === "scheduled") &&
     !ownerExpired && !observation?.ownerExpired;
   const countKnown = live || (ended && room.presenceKnown === true);
