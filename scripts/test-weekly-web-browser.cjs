@@ -14,6 +14,7 @@ const fixtures = { ...shared };
 delete fixtures['@dvnt/app/lib/hooks/use-user-settings'];
 delete fixtures['@dvnt/app/lib/stores/city-discovery-visibility'];
 Object.assign(fixtures, {
+  "@dvnt/app/lib/stores/events-screen-store": `export const useEventsScreenStore={getState:()=>({setSelectedMapEventId:()=>{},setShowMapView:()=>{}})};`,
   '@dvnt/app/lib/auth/identity': `import {useAuth} from 'fixture';export const getAuthIdFromStore=()=>useAuth.getState().user?.authId;export const requireBetterAuthToken=async()=> 'fixture-token';`,
   '@dvnt/app/lib/stores/ui-store': `export const useUIStore=s=>s({showToast:()=>{}});`,
   '@dvnt/app/lib/supabase/client': `import {state} from 'fixture';export const supabase={functions:{invoke:async(name,{body})=>{state.settingsCalls.push(body);if(body.action==='update'){if(state.saveFail)return {error:{message:'Save failed'}};state.savedPrivacy={...state.savedPrivacy,...body.settings.privacy};}return {data:{ok:true,data:{settings:{privacy:{...state.savedPrivacy}}}},error:null};}}};`,

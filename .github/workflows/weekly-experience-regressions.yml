@@ -34,6 +34,18 @@ permissions:
   contents: read
 
 jobs:
+  protected-preview-deno:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Check actual Edge Function types
+        run: deno check --no-config apps/mobile/supabase/functions/protected-photo-preview/index.ts
+      - name: Real Deno image codecs and allocation bounds
+        run: deno test --no-config apps/mobile/supabase/functions/_shared/protected-photo-preview.test.ts
+
   follow-preservation-postgres:
     runs-on: ubuntu-24.04
     services:
@@ -73,7 +85,7 @@ jobs:
       - name: Install isolated fixture tools
         run: >-
           npm install --prefix "$RUNNER_TEMP/weekly" --ignore-scripts --no-audit --no-fund --no-save
-          typescript@5.9.3 esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
+          imagescript@3.20.2 typescript@5.9.3 esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
           zustand@5.0.14 @tanstack/react-query@5.90.16 happy-dom@20.0.11
           @electric-sql/pglite@0.3.14
       - name: Settings, event, location and navigation regressions
@@ -97,6 +109,7 @@ jobs:
           node scripts/test-weekly-post-share-metadata.cjs
           node scripts/test-private-follow-requests-sql.cjs
           node scripts/test-spicy-follow-server.cjs
+          node scripts/test-protected-photo-preview.cjs
           node scripts/test-follow-hook.cjs
           node scripts/test-follow-requests-dom.cjs
           node scripts/test-private-profile-presentation.cjs
@@ -128,7 +141,7 @@ jobs:
       - name: Install isolated browser tools
         run: >-
           npm install --prefix "$RUNNER_TEMP/weekly-web" --ignore-scripts --no-audit --no-fund --no-save
-          esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
+          imagescript@3.20.2 esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
           zustand@5.0.14 @tanstack/react-query@5.90.16 playwright@1.58.2 react-native-web@0.21.2 lucide-react@1.30.0 tailwindcss@4.3.0
       - name: Install Chromium
         run: $RUNNER_TEMP/weekly-web/node_modules/.bin/playwright install --with-deps chromium
@@ -136,6 +149,11 @@ jobs:
         env:
           NODE_PATH: ${{ runner.temp }}/weekly-web/node_modules
         run: node scripts/test-weekly-web-browser.cjs
+      - name: Actual protected photo preview in Chromium
+        if: ${{ !cancelled() }}
+        env:
+          NODE_PATH: ${{ runner.temp }}/weekly-web/node_modules
+        run: node scripts/test-protected-photo-preview-browser.cjs
       - name: Production web location and distance in Chromium
         if: ${{ !cancelled() }}
         env:

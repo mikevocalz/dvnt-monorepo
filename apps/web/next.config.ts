@@ -321,6 +321,13 @@ const nextConfig: NextConfig = {
     ];
   },
   webpack: (config, { webpack }) => {
+    // NSFWJS ships self-contained Browserify UMD model data. Do not parse its
+    // private require(id, fallback) runtime as webpack imports. Only MobileNet
+    // is imported by the browser-local scanner; inference stays lazy.
+    config.module.noParse = [
+      ...(Array.isArray(config.module.noParse) ? config.module.noParse : config.module.noParse ? [config.module.noParse] : []),
+      /nsfwjs[\\/]dist[\\/]models[\\/]mobilenet_v2[\\/].*\.min\.js$/,
+    ];
     // Never reuse an unpatched SDK from a restored webpack node_modules cache.
     withOrientationCache(config, checkInstalledPublisher());
     config.resolve.alias = {

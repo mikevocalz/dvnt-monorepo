@@ -477,7 +477,7 @@ export function HomeScreen() {
 export default HomeScreen;
 
 function MasonryCell(props: { post: Post; fallbackHeight: number }) {
-  return useSpicyPostLocked(props.post) ? <SpicyFollowGate author={props.post.author} height={props.fallbackHeight} /> : <UnlockedMasonryCell {...props} />;
+  return useSpicyPostLocked(props.post) ? <SpicyFollowGate postId={props.post.id} presentation="feed" author={props.post.author} height={props.fallbackHeight} /> : <UnlockedMasonryCell {...props} />;
 }
 function UnlockedMasonryCell({
   post,

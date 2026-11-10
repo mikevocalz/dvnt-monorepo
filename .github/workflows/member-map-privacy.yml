@@ -7,6 +7,7 @@ on:
       - 'apps/web/next.config.ts'
       - 'apps/mobile/supabase/**'
       - 'scripts/test-member-map*'
+      - 'scripts/test-map-after-allow.cjs'
       - 'scripts/test-unified-native-map.cjs'
       - 'scripts/test-native-map-icon.cjs'
       - 'scripts/fixtures/native-map-icon-boundary.cjs'
@@ -35,7 +36,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/member-map" --ignore-scripts --no-audit --no-fund --no-save
           typescript@5.9.2 @electric-sql/pglite@0.3.10 esbuild@0.28.1 next@16.3.5
           react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @tanstack/react-query@5.101.0
-          playwright@1.56.1 tailwindcss@4.3.3 @vis.gl/react-google-maps@1.8.3
+          happy-dom@21.0.4 playwright@1.56.1 tailwindcss@4.3.3 @vis.gl/react-google-maps@1.8.3
       - name: SQL privacy and edge request boundaries
         env:
           NODE_PATH: ${{ runner.temp }}/member-map/node_modules
@@ -57,6 +58,7 @@ jobs:
           node scripts/test-member-map-renderer.cjs || status=1
           node scripts/test-native-map-icon.cjs || status=1
           node scripts/test-unified-native-map.cjs || status=1
+          node scripts/test-map-after-allow.cjs || status=1
           node scripts/test-member-map-controls.cjs || status=1
           MAP_BROWSER=webkit node scripts/test-member-map-controls.cjs || status=1
           node scripts/test-member-map-consent.cjs || status=1

@@ -12,6 +12,7 @@ const load = (name) => require(resolve(name));
 async function buildFixture({ outfile, browser = false }) {
   const reactionArray = fs.readFileSync(path.join(ROOT, "packages/app/lib/stories/story-message.ts"), "utf8").match(/export const STORY_REACTION_EMOJIS = (\[[^;]+\]);/)[1];
   const boundaries = {
+  "solito/link": `export const Link=({href,children,...props})=><a href={typeof href === "string" ? href : href?.pathname} {...props}>{children}</a>;`,
     "solito/navigation": `export const useRouter=()=>({push:path=>globalThis.__routes.push(path)});`,
     "@dvnt/app/lib/stores/auth-store": `import {create} from 'zustand';export const useAuthStore=create(()=>({user:{id:'1',authId:'auth1',username:'publisher',avatar:'publisher.jpg'}}));`,
     "@dvnt/app/lib/stores/ui-store": `const state={showToast:(...args)=>globalThis.__toasts.push(args)};export const useUIStore=selector=>selector(state);`,
