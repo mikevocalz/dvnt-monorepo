@@ -1,3 +1,4 @@
+import { notificationSemanticType } from "../activity/notification-semantic-type";
 /**
  * Bootstrap Notifications Hook
  *
@@ -40,7 +41,7 @@ function hydrateFromNotificationsBootstrap(
 
     return {
       id: a.id,
-      type: a.type || "like",
+      type: notificationSemanticType(a.type || "like", a.payload),
       user: {
         id: a.actor.id,
         username,

@@ -24,14 +24,14 @@ const fixtureSql = `
   $$;
   GRANT USAGE ON SCHEMA auth TO anon,authenticated,service_role;
   GRANT EXECUTE ON FUNCTION auth.jwt() TO anon,authenticated,service_role;
-  CREATE TABLE users(id integer PRIMARY KEY,auth_id text UNIQUE,is_private boolean);
+  CREATE TABLE users(id integer PRIMARY KEY,auth_id text UNIQUE,is_private boolean,username text);
   CREATE TABLE user_settings(id serial PRIMARY KEY,auth_id text UNIQUE,settings jsonb);
   CREATE TABLE follows(id serial PRIMARY KEY,follower_id integer NOT NULL REFERENCES users ON DELETE CASCADE,
     following_id integer NOT NULL REFERENCES users ON DELETE CASCADE,
     created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());
   CREATE UNIQUE INDEX follower_following_idx ON follows(follower_id,following_id);
   CREATE TABLE blocks(blocker_id integer,blocked_id integer);
-  CREATE TYPE enum_notifications_type AS ENUM ('follow');
+  CREATE TYPE enum_notifications_type AS ENUM ('follow','system');
   CREATE TYPE enum_notifications_entity_type AS ENUM ('user');
   CREATE TABLE notifications(id serial PRIMARY KEY,recipient_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,actor_id integer REFERENCES users(id) ON DELETE CASCADE,
     type enum_notifications_type NOT NULL,entity_type enum_notifications_entity_type,entity_id varchar,
@@ -60,7 +60,7 @@ const fixtureSql = `
   -- Match the former permissive direct-write boundary, including column grants.
   GRANT INSERT,UPDATE,DELETE ON follows TO anon,authenticated;
   GRANT UPDATE(follower_id,following_id) ON follows TO PUBLIC;
-  INSERT INTO users VALUES(1,'viewer',false),(2,'private-owner',true),(3,'public-owner',false),
+  INSERT INTO users(id,auth_id,is_private) VALUES(1,'viewer',false),(2,'private-owner',true),(3,'public-owner',false),
     (4,'minor',false),(5,'new-follower',false),(6,'another-viewer',false);
   INSERT INTO follows(follower_id,following_id) VALUES(1,2),(1,3),(4,2);
   INSERT INTO posts VALUES(21,2,false,'private safe'),(22,2,true,'private spicy'),
@@ -416,7 +416,7 @@ for (const writerName of ['ensure_brand_follow_relationships','backfill_brand_fo
   test(`actual ${writerName} preserves Public acceptance, queues Private requests and remains repeatable`, async () => {
     const f = await fixture(); const { db } = f;
     try {
-      await db.query(`ALTER TABLE users ADD COLUMN banned_at timestamptz, ADD COLUMN created_at timestamptz DEFAULT now(), ADD COLUMN username text;
+      await db.query(`ALTER TABLE users ADD COLUMN banned_at timestamptz, ADD COLUMN created_at timestamptz DEFAULT now(), ADD COLUMN IF NOT EXISTS username text;
         CREATE TABLE public."user"(id text PRIMARY KEY,banned boolean);
         CREATE SCHEMA payload; CREATE TABLE payload.members(app_user_id text,status text);
         INSERT INTO public."user"(id,banned) SELECT auth_id,false FROM users;`);
