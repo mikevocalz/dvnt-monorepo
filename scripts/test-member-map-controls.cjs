@@ -108,6 +108,7 @@ const mocks = {
   await resolveSample(0);
   await page.waitForFunction(()=>window.fixture.calls.some(c=>c.action==='publish'));
   assert.equal(await page.evaluate(()=>window.fixture.presence.error),null);
+  await page.waitForFunction(()=>window.fixture.presence.area!==null);
   assert.notEqual(await page.evaluate(()=>window.fixture.presence.area),null);
   assert.equal(await page.evaluate(()=>window.fixture.calls.some(c=>c.action==='update')),false,'refresh does not renew/change consent');
  }

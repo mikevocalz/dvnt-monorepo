@@ -17,7 +17,7 @@ const mocks = {
   '@dvnt/app/lib/api/event-map': `export const eventMapApi={getLocations:async()=>[]};`,
   'solito/navigation': `export const useRouter=()=>({push:p=>window.fixture.route=p});`,
   '@dvnt/app/features/settings/ui/LocationControls': `import React from 'react';export const LocationControls=({allowSharing})=>React.createElement('button',{'aria-label':'Synthetic sharing toggle',onClick:()=>{window.fixture.sharing=false;window.renderFixture()},disabled:!allowSharing},'Stop sharing');`,
-  '@dvnt/app/lib/hooks/use-member-map': `export const useLocationSettings=()=>({sharing:window.fixture.sharing});export const useMemberMapPresence=active=>{window.fixture.presenceActive=active;return{area:window.fixture.area,error:null,isUpdating:false,refresh:async()=>{window.fixture.refreshes++}}};export const useNearbyMembers=active=>{window.fixture.nearbyActive=active;return {data:window.fixture.data,isPending:false,isError:window.fixture.error,refetch:()=>{window.fixture.retries++}}};`,
+  '@dvnt/app/lib/hooks/use-member-map': `export const useLocationSettings=()=>({sharing:window.fixture.sharing,enabled:window.fixture.enabled!==false});export const useMemberMapPresence=active=>{window.fixture.presenceActive=active;return{area:window.fixture.area,error:null,isUpdating:false,refresh:async()=>{window.fixture.refreshes++},requestLocation:async()=>{window.fixture.refreshes++}}};export const useNearbyMembers=active=>{window.fixture.nearbyActive=active;return {data:window.fixture.data,isPending:false,isError:window.fixture.error,refetch:()=>{window.fixture.retries++}}};`,
 };
 async function bundle(key, native = false, expoKey = '') {
   const platformMocks = native ? {
@@ -66,7 +66,7 @@ async function bundle(key, native = false, expoKey = '') {
   await page.evaluate(()=>{window.fixture.selectedEventId='event-1';window.renderFixture()});
   await page.waitForFunction(()=>window.fixture.camera.lat===40.72);
   assert.equal(await page.getByRole('button',{name:'Show my area',exact:true}).count(),0);
-  assert.equal(await page.getByRole('button',{name:'Update my location',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Update my location',exact:true}).count(),1);
   await page.evaluate(()=>{window.fixture.selectedEventId=null;window.renderFixture()});
   await page.waitForFunction(()=>window.fixture.camera.lat===40.7);
   await page.evaluate(()=>{window.fixture.savedCity={id:17,name:'Saved City',state:'NY',lat:42,lng:-75};window.fixture.data={members:[],self:null,center:null,expiresAt:null};window.renderFixture()});
@@ -221,6 +221,6 @@ async function bundle(key, native = false, expoKey = '') {
   await page.waitForFunction(()=>window.fixture.camera.coordinates.latitude===42&&window.fixture.camera.zoom===8);
   await page.getByText(/Showing your saved area/).waitFor();
   assert.equal(await page.locator('[data-monogram],[data-photo]').count(),0,'native saved city never invents consented avatars');
-  assert.deepEqual(errors,[]); console.log('PASS: avatar clusters, keyboard chooser, zoom split, exact-cell max zoom access, privacy removal; avatar marker, profile route, automatic area/no location buttons, opt-out, refresh failure, expiry, provider auth failure, no-key/no-collection; native custom avatar annotation, initials, profile and opt-out');
+  assert.deepEqual(errors,[]); console.log('PASS: avatar clusters, keyboard chooser, zoom split, exact-cell max zoom access, privacy removal; avatar marker, profile route, automatic area/explicit permission recovery, opt-out, refresh failure, expiry, provider auth failure, no-key/no-collection; native custom avatar annotation, initials, profile and opt-out');
  }finally{await browser?.close();server.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});
