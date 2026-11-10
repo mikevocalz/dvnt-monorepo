@@ -764,13 +764,6 @@ export function CreateEventScreen() {
             >
               {s.isSavingDraft ? "Saving…" : s.serverDraftId ? "Update draft" : "Save draft"}
             </button>
-            <button
-              onClick={() => guardVerified("host_event", () => void publish())}
-              disabled={publishing || flyerPreparation.isPreparing}
-              className="h-10 px-5 rounded-full bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white font-bold disabled:opacity-40"
-            >
-              {publishing ? "Publishing…" : "Publish"}
-            </button>
           </div>
         </div>
         {s.scheduleNeedsReview ? (
@@ -1491,6 +1484,17 @@ export function CreateEventScreen() {
               <div className="mt-2 text-sm text-white/60">Free RSVP</div>
             )}
           </div>
+        </div>
+        <div data-event-publish-footer="" className="mt-6 border-t border-white/10 pt-5">
+          <button
+            type="button"
+            onClick={() => guardVerified("host_event", () => void publish())}
+            disabled={publishing || flyerPreparation.isPreparing}
+            aria-busy={publishing}
+            className="min-h-12 w-full rounded-xl px-4 py-3 text-[16px] font-bold bg-linear-to-r from-[#3FDCFF] to-[#8A40CF] text-white disabled:opacity-40"
+          >
+            {publishing ? "Publishing…" : "Publish"}
+          </button>
         </div>
       </div>
     </div>
