@@ -6,7 +6,8 @@ export function SpicyFollowGate({
   author,
   height = 240,
 }: {
-  author?: { id?: string; username?: string };
+  author?: { id?: string; username?: string; avatar?: string };
+  presentation?: "card" | "feed";
   height?: number;
 }) {
   const gate = useSpicyFollowGate(author);

@@ -231,6 +231,34 @@ for (const file of ["spicy-follow-gate.tsx", "spicy-follow-gate.web.tsx"]) {
   assert.doesNotMatch(JSON.stringify(tree), /SECRET_/);
   assert.match(JSON.stringify(tree), /Could not update follow/);
 }
+// Feed presentation fills the media tile while retaining only public identity.
+failed = false;
+const feedGate = load(base + "spicy-follow-gate.web.tsx").SpicyFollowGate({
+  author: { ...secret.author, avatar: "PUBLIC_AVATAR" },
+  presentation: "feed",
+  height: 320,
+  media: secret.media,
+});
+assert.equal(feedGate.props.style.minHeight, 320);
+assert.equal(feedGate.props["data-protected-feed-blur"], true);
+assert.match(JSON.stringify(feedGate), /PUBLIC_AVATAR/);
+assert.doesNotMatch(JSON.stringify(feedGate), /SECRET_/);
+function nodes(tree) {
+  if (!tree || typeof tree !== "object") return [];
+  const children = tree.props?.children;
+  return [tree, ...[children].flat(Infinity).flatMap(nodes)];
+}
+assert.equal(nodes(feedGate).filter(n => n.type === "strong").length, 0);
+const followButton = nodes(feedGate).find(n => n.type === "button");
+assert.equal(followButton.props.children, "Follow");
+assert.equal(followButton.props.disabled, false);
+followButton.props.onClick();
+assert.equal(calls.pop().action, "follow");
+status = "pending";
+const pendingFeed = load(base + "spicy-follow-gate.web.tsx").SpicyFollowGate({author: secret.author, presentation: "feed"});
+assert.match(JSON.stringify(pendingFeed), /Cancel follow request/);
+assert.doesNotMatch(JSON.stringify(pendingFeed), /SECRET_/);
+status = "none";
 const checks = [
   [
     "packages/app/features/location/location-detail.web.tsx",
