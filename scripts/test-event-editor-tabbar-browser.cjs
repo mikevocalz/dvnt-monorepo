@@ -130,7 +130,9 @@ const mocks = {
     assert.equal(await publish.evaluate(el=>el.closest('[data-event-publish-footer]')!==null),true);
     await page.getByRole('button',{name:'More details (optional)'}).click();
     const bottomPublish=async()=>{
-      await publish.scrollIntoViewIfNeeded();await nextFrame();
+      // Force the same end-of-form scroll a user can make; Playwright's
+      // scrollIntoViewIfNeeded ignores overlays when a button is already in view.
+      await publish.evaluate(el=>el.scrollIntoView({block:'center',behavior:'instant'}));await nextFrame();
       const geometry=await publish.evaluate(el=>{
         const r=el.getBoundingClientRect();
         const editor=el.closest('[data-dvnt-event-editor]');
@@ -140,7 +142,7 @@ const mocks = {
       });
       assert.ok(geometry.top>=geometry.lastField,'publish follows every form field');
       assert.ok(geometry.height>=44,'touch target');
-      assert.ok(geometry.bottom<=geometry.limit,'publish clears navigation');
+      assert.ok(geometry.bottom<=geometry.limit,'publish clears navigation '+JSON.stringify(geometry));
       assert.equal(geometry.hit,true,'publish is unobstructed');
     };
     await bottomPublish();
