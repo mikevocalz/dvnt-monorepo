@@ -75,6 +75,16 @@ window.runCaptionScenarios=async()=>{
   check(store.getState().tags[0]==='music','legacy text-card tags are preserved');
   await flush(()=>root.render(<CreatePostScreen/>));
   check(!!document.querySelector('input[placeholder="Add tag"]'),'text-card tag input stays available');
+  const assertBottomShare=()=>{
+    const share=button('Share');
+    const footer=document.querySelector('[data-testid="composer-publish-footer"]');
+    check(!!footer&&footer.contains(share),'Share lives in the bottom publish footer');
+    check(document.querySelectorAll('[data-testid="composer-publish-footer"] button').length===1,'only one publish action');
+    check(document.querySelectorAll('button').length>0&&Array.from(document.querySelectorAll('button')).filter(b=>b.textContent.trim()==='Share').length===1,'no duplicate header Share action');
+    check(Array.from(document.querySelectorAll('textarea')).every(input=>!!(input.compareDocumentPosition(footer)&Node.DOCUMENT_POSITION_FOLLOWING)),'Share follows all draft inputs');
+    check(footer.parentElement.lastElementChild===footer,'publish footer is the last composer section');
+  };
+  assertBottomShare();
   check(!!(document.querySelector('textarea').compareDocumentPosition(document.querySelector('input[placeholder="Add tag"]'))&Node.DOCUMENT_POSITION_FOLLOWING),'Add tags is below the text-only caption');
   check(Object.values(TEXT_POST_THEMES).every(theme=>!button(theme.label)),'no theme/color choices remain in text creation');
   await flush(()=>store.getState().setPostKind('media'));
@@ -83,6 +93,7 @@ window.runCaptionScenarios=async()=>{
   check(store.getState().tags[0]==='music','text tags survive mode round trip and reload');
   check(store.getState().textTheme==='deviant','mode round trip and reload retain DVNT branding');
   await flush(()=>{store.getState().setPostKind('media');store.getState().setSelectedMedia(media)});
+  assertBottomShare();
   check(!document.querySelector('input[placeholder="Add tag"]'),'media only has inline caption tags');
   check(document.querySelector('textarea').maxLength===8000,'hashtags can exceed the prose input ceiling');
   const caption='x'.repeat(2200)+'\\n#Café #東京';
