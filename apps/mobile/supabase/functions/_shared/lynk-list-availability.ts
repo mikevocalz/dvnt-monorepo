@@ -1,5 +1,6 @@
 import { eventRoomDeadline, type EventAccessRow } from "./event-access.ts";
 
+export const RESUME_WINDOW_MS = 10 * 60 * 1000;
 export const HEARTBEAT_FRESHNESS_MS = 90 * 1000;
 export type LynkAvailability = "live" | "inactive" | "scheduled" | "ended" | "unknown";
 export interface ListMember {
@@ -15,6 +16,7 @@ export interface RoomPresence {
   activeCount: number;
   historicalCount: number;
   hostExpiresAt: number | null;
+  hostInactiveAt: number | null;
 }
 
 /** Membership IDs are the table's monotonic serial PK. An older active row must
@@ -31,9 +33,17 @@ export function buildRoomPresence(members: ListMember[], now: number): Map<numbe
   }
   const result = new Map<number, RoomPresence>();
   for (const [roomId, users] of newest) {
-    const presence: RoomPresence = { activeCount: 0, historicalCount: users.size, hostExpiresAt: null };
+    const presence: RoomPresence = { activeCount: 0, historicalCount: users.size, hostExpiresAt: null, hostInactiveAt: null };
     for (const member of users.values()) {
       const seen = Date.parse(member.last_seen_at ?? "");
+      // A persisted leave wins over a heartbeat. Refreshing discovery never resets
+      // this clock; a silent disconnect becomes inactive when its heartbeat expires.
+      if (member.role === "host" || member.role === "co-host") {
+        const left = Date.parse(member.left_at ?? "");
+        const inactive = Number.isFinite(left) && left <= now ? left
+          : Number.isFinite(seen) && seen <= now ? seen + HEARTBEAT_FRESHNESS_MS : NaN;
+        if (Number.isFinite(inactive)) presence.hostInactiveAt = Math.max(presence.hostInactiveAt ?? 0, inactive);
+      }
       // Neither joined_at nor stored participant_count establishes presence.
       if (member.status !== "active" || member.left_at != null || !Number.isFinite(seen) ||
           seen > now || now - seen >= HEARTBEAT_FRESHNESS_MS) continue;
@@ -74,13 +84,17 @@ export function resolveListAvailability(
   presence: RoomPresence | undefined,
   link: EventLink,
   now: number,
-): { availability: LynkAvailability; presenceKnown: boolean; observedAt: string; presenceExpiresAt: string | null; endsAt: string | null } {
-  const base = { presenceKnown: true, observedAt: new Date(now).toISOString(), presenceExpiresAt: null as string | null };
+): { availability: LynkAvailability; presenceKnown: boolean; observedAt: string; presenceExpiresAt: string | null; endsAt: string | null; resumeExpiresAt: string | null } {
+  const base = { presenceKnown: true, observedAt: new Date(now).toISOString(), presenceExpiresAt: null as string | null, resumeExpiresAt: null as string | null };
   if (link.kind === "invalid") return { ...base, availability: "unknown", endsAt: null };
   const end = link.kind === "linked" ? eventRoomDeadline(link.event, room)
     : room.ends_at == null ? null : Date.parse(room.ends_at);
   const endsAt = end !== null && Number.isFinite(end) ? new Date(end).toISOString() : null;
-  const result = (availability: LynkAvailability) => ({ ...base, availability, endsAt });
+  const inactiveAt = presence?.hostInactiveAt ?? Date.parse(room.created_at ?? "");
+  const resumeDeadline = Number.isFinite(inactiveAt) ? Math.min(inactiveAt + RESUME_WINDOW_MS, end ?? Infinity) : NaN;
+  const result = (availability: LynkAvailability) => ({ ...base, availability, endsAt,
+    resumeExpiresAt: ["inactive", "live"].includes(availability) && Number.isFinite(resumeDeadline)
+      ? new Date(resumeDeadline).toISOString() : null });
   if (room.status === "ended" || room.status === "closed") return result("ended");
   if (room.status !== "open") return result("unknown");
   if ((end !== null && !Number.isFinite(end)) || (link.kind === "linked" && end === null)) return result("unknown");

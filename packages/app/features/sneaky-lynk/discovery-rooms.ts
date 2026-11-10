@@ -1,4 +1,4 @@
-import { bindDiscoveryRoom, discoveryRoomState } from "./discovery-room-state";
+import { bindDiscoveryRoom, discoveryRoomState, hasDiscoveryResumeOwnership } from "./discovery-room-state";
 import type { LynkRecord } from "./stores/lynk-history-store";
 import type { SneakyRoom } from "./types";
 
@@ -8,7 +8,11 @@ export function selectDiscoveryRooms(
 ): LynkRecord[] {
   if (!isCurrent()) return [];
   const seen = new Set(remote.map((room) => room.id));
-  const rooms: LynkRecord[] = remote.map((room) => bindDiscoveryRoom(room, isCurrent)).filter((room) => {
+  const rooms: LynkRecord[] = remote.map((room) => bindDiscoveryRoom({ ...room,
+    // Never let a response or an old account's cached owner flag grant host UI
+    // to a different signed-in identity. Only canonical auth IDs match creators.
+    resumeAllowed: hasDiscoveryResumeOwnership(room, selfIds),
+  }, isCurrent)).filter((room) => {
     const state = discoveryRoomState(room);
     return state.live || room.status === "ended" || room.availability === "ended" || room.isOwner === true || room.isInvited === true;
   });
