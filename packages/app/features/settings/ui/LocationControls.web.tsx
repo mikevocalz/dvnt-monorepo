@@ -1,4 +1,5 @@
 "use client";
+import { useMapSharingNavigation } from "@dvnt/app/features/events/ui/use-map-sharing-navigation.web";
 import { getGoogleMapsPublicKey } from "@dvnt/ui/google-maps-public-config";
 import { useEffect, useState } from "react";
 import { useLocationSettings, useMapSharingConsent } from "@dvnt/app/lib/hooks/use-member-map";
@@ -11,7 +12,8 @@ export function LocationControls({ allowSharing = Boolean(getGoogleMapsPublicKey
   const owner = useAuthStore(state => state.user?.authId);
   const [confirm, setConfirm] = useState(false);
   useEffect(() => { setConfirm(false); }, [owner]);
-  const share = async () => { if (allowSharing && await consent.share() && useAuthStore.getState().user?.authId === owner) setConfirm(false); };
+  const shareAndOpenMap = useMapSharingNavigation(owner, consent.share);
+  const share = async () => { if (allowSharing && await shareAndOpenMap() && useAuthStore.getState().user?.authId === owner) setConfirm(false); };
   const dismiss = () => { consent.cancel(); setConfirm(false); };
   const unavailable = location.loading || location.busy || consent.busy || !location.settings;
   return <section aria-label="Location settings" className="mt-4 rounded-2xl border border-white/10 bg-white/4 p-4">
