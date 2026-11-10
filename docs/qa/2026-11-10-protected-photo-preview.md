@@ -37,5 +37,11 @@ This PR does not deploy or change production configuration.
 
 Local checks: protected preview contract tests, existing gate/UI suite, 49 server
 access tests and diff whitespace checks. Node runtime tests exercise the pinned ImageScript PNG/JPEG/WebP codec and decoder pixel limits.
-Actual Deno edge limits and signed-in browser/network verification remain
-required before release, including source variants and revoked/blocked viewers.
+Real Deno 2.9.6 tests also pass for PNG/JPEG/WebP decoding and 4MP input
+allocation/reduction (142ms encode/decode/reduction on the test machine).
+Independent review prompted a post-processing access/source recheck, now covered
+by a revocation-during-encode test. Chromium component coverage is included in CI
+for account/session races, post changes, rejected original URLs and failures.
+Actual deployed Supabase limits and signed-in live-backend browser verification
+remain release checks. Local Chromium launch is blocked by the execution sandbox
+socket restriction, so hosted browser results must be checked.

@@ -21,13 +21,15 @@ const fixtures = {
     export const router={push:path=>state.navigations.push(path),replace:()=>{},back:()=>{},canDismiss:()=>false};
     export const navigation={setOptions:()=>{}};`,
   "@dvnt/app/lib/stores/auth-store": `export {useAuth as useAuthStore} from 'fixture';`,
-  "@dvnt/app/lib/auth/identity": `import {useAuth} from 'fixture';export const getAuthIdFromStore=()=>useAuth.getState().user?.authId;`,
+  "@dvnt/app/lib/supabase/client": `export const supabase={functions:{invoke:async(name)=>{if(name!=="protected-photo-preview")throw Error("Unexpected function: "+name);return {data:{preview:null},error:null};}}};`,
+  "@dvnt/app/lib/auth/identity": `import {useAuth} from 'fixture';export const requireBetterAuthToken=async()=>"fixture-session-token";export const getAuthIdFromStore=()=>useAuth.getState().user?.authId;`,
   "@dvnt/app/lib/posts/revoke-post-overlays": `import {state} from 'fixture';export const resetPostAccessOverlays=()=>{state.overlayResets++;};`,
   "@dvnt/app/lib/api/follows": `import {state} from 'fixture';export const followsApi={
     getFollowRequests:async(identity)=>{state.reads.push(identity);const data=state.requests[identity.viewerId]||[];if(state.loadHold)await new Promise(r=>state.readReleases.push(r));if(state.loadFail)throw Error('Offline');return data;},
     getFollowRequestStatus:async(target,identity)=>{state.statusReads++;if(state.statusHold)await new Promise(r=>state.statusReleases.push(r));if(state.statusFail)throw Error('Offline');return {following:false,followRequestStatus:'none',...state.statuses[identity.viewerId]};},
     respondToFollowRequest:async(requesterId,action,identity)=>{state.calls.push({requesterId,action,identity});if(state.pending)await new Promise(r=>state.releases.push(r));if(state.fail)throw Error('Connection interrupted');state.requests[identity.viewerId]=(state.requests[identity.viewerId]||[]).filter(r=>String(r.follower_id)!==requesterId);}
   };`,
+  "solito/link": `export const Link=({href,children,...props})=><a href={typeof href === "string" ? href : href?.pathname} {...props}>{children}</a>;`,
   "solito/navigation": `export {router} from 'fixture';import {router} from 'fixture';export const useRouter=()=>router;`,
   "expo-router": `import {router,navigation} from 'fixture';export const useRouter=()=>router;export const useNavigation=()=>navigation;`,
   "react-native": `import React from 'react';
