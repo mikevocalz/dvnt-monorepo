@@ -156,12 +156,13 @@ export const usersApi = {
         // Follow check fires only when we have both IDs and they differ
         let isFollowing = false;
         if (currentUserId && targetUserId && currentUserId !== targetUserId) {
-          const { data: followData } = await supabase
+          const { data: followData, error: followError } = await supabase
             .from(DB.follows.table)
             .select("id")
             .eq(DB.follows.followerId, currentUserId)
             .eq(DB.follows.followingId, targetUserId)
             .maybeSingle();
+          if (followError) throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
           isFollowing = !!followData;
         }
 
@@ -221,6 +222,7 @@ export const usersApi = {
 
       return null;
     } catch (error) {
+      if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
       console.error("[Users] getProfileByUsername error:", error);
       return null;
     }
@@ -290,12 +292,13 @@ export const usersApi = {
         data[DB.users.id] &&
         currentUserId !== data[DB.users.id]
       ) {
-        const { data: followData } = await supabase
+        const { data: followData, error: followError } = await supabase
           .from(DB.follows.table)
           .select("id")
           .eq(DB.follows.followerId, currentUserId)
           .eq(DB.follows.followingId, data[DB.users.id])
           .maybeSingle();
+        if (followError) throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
         isFollowing = !!followData;
       }
 
@@ -332,6 +335,7 @@ export const usersApi = {
         createdAt: data[DB.users.createdAt],
       };
     } catch (error) {
+      if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
       console.error("[Users] getProfileById error:", error);
       return null;
     }
@@ -391,12 +395,13 @@ export const usersApi = {
           profile[DB.users.username] || betterAuthUser?.username || authId;
         let isFollowing = false;
         if (currentUserId && targetUserId && currentUserId !== targetUserId) {
-          const { data: followData } = await supabase
+          const { data: followData, error: followError } = await supabase
             .from(DB.follows.table)
             .select("id")
             .eq(DB.follows.followerId, currentUserId)
             .eq(DB.follows.followingId, targetUserId)
             .maybeSingle();
+          if (followError) throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
           isFollowing = !!followData;
         }
 
@@ -472,6 +477,7 @@ export const usersApi = {
         createdAt: authUser.createdAt,
       };
     } catch (error) {
+      if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
       console.error("[Users] getProfileByAuthUserId error:", error);
       return null;
     }

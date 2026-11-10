@@ -660,11 +660,12 @@ export const notificationsApi = {
       ];
       let viewerFollowsSet = new Set<number>();
       if (actorIds.length > 0) {
-        const { data: followRows } = await supabase
+        const { data: followRows, error: followError } = await supabase
           .from("follows")
           .select("following_id")
           .eq("follower_id", userId)
           .in("following_id", actorIds);
+        if (followError) throw followError;
         if (followRows) {
           viewerFollowsSet = new Set(
             followRows.map((r: any) => r.following_id),
@@ -733,7 +734,7 @@ export const notificationsApi = {
       return { docs, totalDocs: count || 0 };
     } catch (error) {
       console.error("[Notifications] getNotifications error:", error);
-      return { docs: [], totalDocs: 0 };
+      throw error;
     }
   },
 

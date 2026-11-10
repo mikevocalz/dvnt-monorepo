@@ -42,6 +42,12 @@ export function createBridgeTransport(anonKey: string) {
           (!bearer || bearer === anonKey || bearer !== token || !usable(bearer))) {
           return Promise.reject(new Error('Your private activity could not be verified. Please sign in again or retry.'));
         }
+        // Relationship reads drive follow buttons and inbox/spam classification.
+        // An anonymous RLS-filtered [] is not evidence of "not following".
+        if (/\/rest\/v1\/follows(?:[/?#]|$)/.test(url) &&
+          (!bearer || bearer === anonKey || bearer !== token || !usable(bearer))) {
+          return Promise.reject(new Error('Your follow relationships could not be verified. Please retry.'));
+        }
         // Final synchronous gate after supabase-js's async token selection and
         // immediately before dispatch. Never replace an old request's A with B.
         if (bearer && bearer !== anonKey && (bearer !== token || !usable(bearer))) {

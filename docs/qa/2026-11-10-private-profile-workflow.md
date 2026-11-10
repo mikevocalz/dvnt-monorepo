@@ -84,3 +84,25 @@ header/avatar/bio/counts remain visible. Public hosted events retain their own
 existing publication rules; changing profile privacy does not reclassify events.
 Follow-list caches are erased on follow/privacy resets, and private-locked profile
 headers cannot prefetch or navigate to those lists.
+
+## Bounded web-first release
+
+The current client now rejects direct relationship reads when bridge minting is
+unavailable instead of interpreting anonymous filtered rows as “not following”.
+Profile/Activity errors propagate for retry; unread classification rejects failed
+reads instead of silently moving followed members into spam. Public profile
+headers do not require a relationship lookup without a signed-in viewer; public
+list browsing uses the separately authenticated Edge route.
+
+This does not repair older installed binaries. For a web-first partial release,
+ship client presentation/request review and matching private-post readers. The
+additive 10200 RPC can precede guarded list endpoints. Hold 10100 entirely: its
+triggers immediately produce new notification types even without a new handler.
+Old native consumers render those rows with blank action text and incorrect
+review routing. Hold 10300 until supported installed-client compatibility is
+verified. No new request/approval Activity or push is promised in this partial
+release, and the remaining raw social-graph bypass is not closed.
+
+Hosted CI on cd529233 passed the full weekly isolated, PostgreSQL and Chromium
+jobs. The subsequent relationship-failure fix adds 26 focused passing tests;
+inspect its exact new published head before release.

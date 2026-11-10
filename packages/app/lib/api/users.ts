@@ -71,7 +71,7 @@ async function getFollowRelationship(viewerId: number | null, targetId: number) 
     .select("follower_id, following_id")
     .in(DB.follows.followerId, [viewerId, targetId])
     .in(DB.follows.followingId, [viewerId, targetId]);
-  if (error) console.error("[Users] relationship lookup failed:", error);
+  if (error) throw Object.assign(new Error("Could not verify follow relationships. Please retry."), { name: "FollowRelationshipUnavailable" });
   return resolveFollowRelationship(data ?? [], viewerId, targetId);
 }
 
@@ -242,6 +242,7 @@ export const usersApi = {
 
       return null;
     } catch (error) {
+      if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
       console.error("[Users] getProfileByUsername error:", error);
       return null;
     }
@@ -341,6 +342,7 @@ export const usersApi = {
         createdAt: data[DB.users.createdAt],
       };
     } catch (error) {
+      if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
       console.error("[Users] getProfileById error:", error);
       return null;
     }
@@ -474,6 +476,7 @@ export const usersApi = {
         createdAt: authUser.createdAt,
       };
     } catch (error) {
+      if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
       console.error("[Users] getProfileByAuthUserId error:", error);
       return null;
     }
