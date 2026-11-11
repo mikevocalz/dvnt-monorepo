@@ -1,3 +1,4 @@
+import { beforeSettlementRefund } from "../_shared/settlement-recovery.ts";
 /**
  * bulk-refund-tickets Edge Function
  *
@@ -55,9 +56,11 @@ function errResp(message: string, status: number, req: Request) {
 }
 
 async function stripeRefund(
+  db: any,
   body: Record<string, string>,
   idempotencyKey: string,
 ): Promise<{ id?: string; status?: string; error?: any }> {
+  body = await beforeSettlementRefund(db, body);
   const res = await fetch("https://api.stripe.com/v1/refunds", {
     method: "POST",
     headers: {
@@ -194,7 +197,7 @@ Deno.serve(withSentry("bulk-refund-tickets", async (req: Request) => {
       }
 
       if (amount > 0 && pi) {
-        const result = await stripeRefund(
+        const result = await stripeRefund(supabase,
           {
             payment_intent: pi,
             amount: String(amount),

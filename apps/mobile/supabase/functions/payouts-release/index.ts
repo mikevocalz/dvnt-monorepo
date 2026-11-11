@@ -1,3 +1,4 @@
+import { isConfiguredPlatformOwner } from "../_shared/owner-dispute-policy.ts";
 /**
  * Payouts Release Cron Edge Function
  *
@@ -13,6 +14,7 @@ import {
 } from "../_shared/send-resend-email.ts";
 import { withHeartbeat, tryClaimJob, releaseJob } from "../_shared/heartbeat.ts";
 import { withSentry } from "../_shared/sentry.ts";
+import { assertSafeRelease, checkedWrite } from "./safety.ts";
 
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
@@ -36,15 +38,19 @@ async function stripeRequest(
     Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
     "Content-Type": "application/x-www-form-urlencoded",
   };
-  // Deterministic key per (event, promoter, window) / (event, window) so a
-  // cron re-run — or a mid-run crash — never issues a second transfer.
+  // Deterministic key per event/promoter/window provides
+  // short-lived retry deduplication. Durable event holds prevent crash replay.
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   const res = await fetch(`https://api.stripe.com/v1${endpoint}`, {
     method: "POST",
     headers,
     body: new URLSearchParams(body).toString(),
   });
-  return res.json();
+  const result = await res.json();
+  if (!res.ok || result.error || typeof result.id !== "string") {
+    throw new Error(`Stripe transfer failed or unconfirmed: ${result.error?.message || res.status}`);
+  }
+  return result;
 }
 
 type PromoterSettlement = {
@@ -62,27 +68,16 @@ type PromoterSettlement = {
 };
 
 /**
- * Net each promoter's unreversed earnings out of the organizer's payout
- * for one event's payout window, and disburse them to the promoter's own
- * connected account.
- *
- * - Sums unsettled promoter_ledger_entries (earning − reversal) per promoter.
- * - Resolves each promoter's Stripe account (event_promoters.stripe_account_id,
- *   else the promoter's organizer_accounts row when they are also an organizer).
- * - No account (or a failed transfer) ⇒ the share is HELD, never dropped:
- *   the earning rows keep paid_out_at IS NULL + payout_status='held' + a note,
- *   so a later run settles them once the promoter connects.
- * - Idempotent: stamped rows (paid_out_at IS NOT NULL) are skipped, and the
- *   Stripe transfer uses a deterministic Idempotency-Key.
- *
- * The organizer never earned the promoter's cut (see the LEDGER BASE note in
- * stripe-webhook), so `totalCutCents` (paid + held) reduces the organizer
- * transfer regardless of whether each promoter transfer landed.
+ * Settle a first-attempt event's promoter ledger before the organizer share.
+ * Preflight rejects prior settlement activity; partial/uncertain outcomes stay
+ * held for reconciliation rather than replaying this aggregate calculation.
+ * An unconnected promoter's share remains held and is still deducted.
  */
 async function settlePromoters(
   supabase: any,
   eventId: number,
   windowKey: string,
+  availableCents: number,
 ): Promise<PromoterSettlement> {
   const result: PromoterSettlement = {
     paidCents: 0,
@@ -91,20 +86,21 @@ async function settlePromoters(
     transfers: [],
   };
 
-  // Unsettled ledger rows for this event, with the promoter's account.
+  // Preflight below rejects previously settled rows: retries require reconciliation.
   const { data: rows, error } = await supabase
     .from("promoter_ledger_entries")
     .select(
       "id, promoter_id, entry_type, amount_cents, event_promoters(id, display_name, user_id, stripe_account_id, payouts_enabled)",
     )
     .eq("event_id", eventId)
-    .is("paid_out_at", null);
+    .is("paid_out_at", null).limit(1001);
 
   if (error) {
     console.error("[payouts] promoter ledger read error:", error);
-    return result;
+    throw error;
   }
-  if (!rows?.length) return result;
+  if (!rows || rows.length >= 1000) throw new Error("Promoter ledger requires reconciliation");
+  if (!rows.length) return result;
 
   // Group signed amounts by promoter.
   const byPromoter = new Map<
@@ -117,21 +113,29 @@ async function settlePromoters(
       net: 0,
       promoter: r.event_promoters,
     };
-    cur.net += r.amount_cents || 0;
+    if (!Number.isSafeInteger(r.amount_cents)) throw new Error("Invalid promoter amount");
+    cur.net += r.amount_cents;
     byPromoter.set(pid, cur);
   }
 
+  const totalCut = [...byPromoter.values()].reduce((sum, row) => sum + Math.max(0, row.net), 0);
+  if (!Number.isSafeInteger(availableCents) || availableCents < 0 ||
+      !Number.isSafeInteger(totalCut) || totalCut > availableCents) {
+    throw new Error("Invalid settlement budget; reconciliation required");
+  }
   const nowIso = new Date().toISOString();
 
   for (const [promoterId, { net, promoter }] of byPromoter) {
+    const rowIds = rows.filter((r: any) => r.promoter_id === promoterId).map((r: any) => r.id);
     // Fully-reversed (net ≤ 0) → settle the paired rows to nil, no transfer.
     if (net <= 0) {
-      await supabase
+      await checkedWrite(supabase
         .from("promoter_ledger_entries")
         .update({ paid_out_at: nowIso, payout_status: "paid" })
         .eq("event_id", eventId)
         .eq("promoter_id", promoterId)
-        .is("paid_out_at", null);
+        .in("id", rowIds)
+        .is("paid_out_at", null), rowIds.length);
       continue;
     }
 
@@ -144,23 +148,25 @@ async function settlePromoters(
         ? promoter.stripe_account_id
         : null;
     if (!stripeAccountId && promoter?.user_id) {
-      const { data: org } = await supabase
+      const { data: org, error: orgError } = await supabase
         .from("organizer_accounts")
         .select("stripe_account_id, payouts_enabled")
         .eq("host_id", promoter.user_id)
         .maybeSingle();
+      if (orgError) throw orgError;
       if (org?.stripe_account_id && org?.payouts_enabled) {
         stripeAccountId = org.stripe_account_id;
       }
     }
 
     const holdShare = async (note: string) => {
-      await supabase
+      await checkedWrite(supabase
         .from("promoter_ledger_entries")
         .update({ payout_status: "held", payout_note: note })
         .eq("event_id", eventId)
         .eq("promoter_id", promoterId)
-        .is("paid_out_at", null);
+        .in("id", rowIds)
+        .is("paid_out_at", null), rowIds.length);
       result.heldCents += net;
       result.transfers.push({
         promoterId,
@@ -191,17 +197,9 @@ async function settlePromoters(
       `promoter_payout:${eventId}:${promoterId}:${windowKey}`,
     );
 
-    if (transfer.error) {
-      console.error("[payouts] promoter transfer error:", transfer.error);
-      await holdShare(
-        `Transfer failed: ${transfer.error.message || "unknown error"}`,
-      );
-      continue;
-    }
-
     // Stamp the settled rows. Earnings carry the payout transfer id;
     // reversal rows keep their own (reversal) transfer id.
-    await supabase
+    await checkedWrite(supabase
       .from("promoter_ledger_entries")
       .update({
         paid_out_at: nowIso,
@@ -210,15 +208,17 @@ async function settlePromoters(
       })
       .eq("event_id", eventId)
       .eq("promoter_id", promoterId)
+        .in("id", rowIds)
       .eq("entry_type", "earning")
-      .is("paid_out_at", null);
-    await supabase
+      .is("paid_out_at", null), rows.filter((r: any) => r.promoter_id === promoterId && r.entry_type === "earning").length);
+    await checkedWrite(supabase
       .from("promoter_ledger_entries")
       .update({ paid_out_at: nowIso, payout_status: "paid" })
       .eq("event_id", eventId)
       .eq("promoter_id", promoterId)
+        .in("id", rowIds)
       .eq("entry_type", "reversal")
-      .is("paid_out_at", null);
+      .is("paid_out_at", null), rows.filter((r: any) => r.promoter_id === promoterId && r.entry_type === "reversal").length);
 
     result.paidCents += net;
     result.transfers.push({
@@ -304,16 +304,19 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
 
     for (const event of events) {
       try {
-        // ── Atomic CAS: claim this event for payout ──────────
+        // Durable atomic claim using a schema-supported state. Never reset this
+        // claim on timeout/error: Stripe keys expire and are NOT a durable ledger.
+        // A held event needs reconciliation before any operator requeues it.
         const { data: claimed, error: claimError } = await supabase
           .from("events")
-          .update({ payout_status: "processing" })
+          .update({ payout_status: "on_hold" })
           .eq("id", event.id)
           .eq("payout_status", "pending")
           .select("id")
-          .single();
+          .maybeSingle();
 
-        if (claimError || !claimed) {
+        if (claimError) throw claimError;
+        if (!claimed) {
           results.push({
             event_id: event.id,
             status: "skipped",
@@ -322,23 +325,30 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
           continue;
         }
 
+        const verifiedGrossCents = await assertSafeRelease(supabase, event.id);
+
         // Check for active disputes on orders for this event
-        const { data: disputedOrders } = await supabase
+        const { data: disputedOrders, error: disputeError } = await supabase
           .from("orders")
           .select("id")
           .eq("event_id", event.id)
           .eq("status", "disputed")
           .limit(1);
 
+        if (disputeError) throw disputeError;
         if (disputedOrders?.length) {
-          await supabase
+          await checkedWrite(supabase
             .from("events")
             .update({ payout_status: "on_hold" })
-            .eq("id", event.id);
+            .eq("id", event.id));
           results.push({
             event_id: event.id,
             status: "on_hold",
-            reason: "dispute",
+            // Aggregate financials include disputed tickets. Never fund them
+            // by merely skipping the owner event-wide dispute policy.
+            reason: isConfiguredPlatformOwner(event.host_id, Deno.env.get("DVNT_PLATFORM_OWNER_AUTH_ID"))
+              ? "owner_dispute_requires_order_settlement"
+              : "dispute",
           });
           continue;
         }
@@ -365,6 +375,10 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
         const refundsCents = Number(financials.refunds_cents || 0);
         const organizerFeeCents = Number(financials.dvnt_fee_cents || 0);
         const netCents = Number(financials.net_cents || 0);
+        if (![grossCents, refundsCents, organizerFeeCents, netCents].every(Number.isSafeInteger) ||
+            netCents < 0 || netCents > verifiedGrossCents) {
+          throw new Error("Invalid settlement budget; reconciliation required");
+        }
 
         // Ticket counts for the statement email only. Add-on units are not
         // tickets and must not inflate "tickets sold".
@@ -383,13 +397,25 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
         // ── Split ledger: net promoter cuts out of the organizer's take ──
         // Runs before the organizer transfer so their share is disbursed to
         // their own connected accounts (or held) and never lands in the
-        // organizer's payout. Idempotent + deterministic per payout window.
+        // organizer's payout. Any uncertain result requires reconciliation.
         const windowKey =
           event.payout_release_at || event.end_date || String(event.id);
+        // Persist intent BEFORE the first transfer. Even an erroneous/admin
+        // requeue must encounter this evidence and stop for reconciliation.
+        const payoutIntentId = crypto.randomUUID();
+        await checkedWrite(supabase.from("payouts").insert({
+          id: payoutIntentId,
+          event_id: event.id,
+          host_id: event.host_id,
+          status: "pending",
+          gross_cents: grossCents,
+          release_at: event.payout_release_at,
+        }));
         const settlement = await settlePromoters(
           supabase,
           event.id,
           windowKey,
+          netCents,
         );
         const organizerNetCents = Math.max(
           0,
@@ -398,13 +424,17 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
 
         if (organizerNetCents <= 0) {
           // Promoters may have been paid above; organizer has nothing left.
-          await supabase
+          await checkedWrite(supabase.from("payouts").update({
+            status: settlement.heldCents > 0 ? "on_hold" : "paid",
+            net_cents: 0,
+          }).eq("id", payoutIntentId));
+          await checkedWrite(supabase
             .from("events")
-            .update({ payout_status: "released" })
-            .eq("id", event.id);
+            .update({ payout_status: settlement.heldCents > 0 ? "on_hold" : "released" })
+            .eq("id", event.id));
           results.push({
             event_id: event.id,
-            status: "released",
+            status: settlement.heldCents > 0 ? "on_hold" : "released",
             net_cents: 0,
             promoter_paid_cents: settlement.paidCents,
             promoter_held_cents: settlement.heldCents,
@@ -414,17 +444,18 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
         }
 
         // Get organizer's Stripe account
-        const { data: organizer } = await supabase
+        const { data: organizer, error: organizerError } = await supabase
           .from("organizer_accounts")
           .select("stripe_account_id, payouts_enabled")
           .eq("host_id", event.host_id)
           .single();
 
+        if (organizerError) throw organizerError;
         if (!organizer?.stripe_account_id || !organizer?.payouts_enabled) {
-          await supabase
+          await checkedWrite(supabase
             .from("events")
             .update({ payout_status: "on_hold" })
-            .eq("id", event.id);
+            .eq("id", event.id));
           results.push({
             event_id: event.id,
             status: "on_hold",
@@ -447,22 +478,8 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
           `event_payout:${event.id}:${windowKey}`,
         );
 
-        if (transfer.error) {
-          console.error("[payouts] Stripe transfer error:", transfer.error);
-          await supabase
-            .from("events")
-            .update({ payout_status: "on_hold" })
-            .eq("id", event.id);
-          results.push({
-            event_id: event.id,
-            status: "on_hold",
-            reason: transfer.error.message,
-          });
-          continue;
-        }
-
         // Record payout (organizer's net, after promoter split)
-        await supabase.from("payouts").insert({
+        await checkedWrite(supabase.from("payouts").update({
           event_id: event.id,
           host_id: event.host_id,
           stripe_payout_id: transfer.id,
@@ -470,13 +487,13 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
           gross_cents: grossCents,
           net_cents: organizerNetCents,
           release_at: event.payout_release_at,
-        });
+        }).eq("id", payoutIntentId));
 
         // Mark event payout as released
-        await supabase
+        await checkedWrite(supabase
           .from("events")
-          .update({ payout_status: "released" })
-          .eq("id", event.id);
+          .update({ payout_status: settlement.heldCents > 0 ? "on_hold" : "released" })
+          .eq("id", event.id));
 
         // Send payout statement email
         if (RESEND_API_KEY) {
@@ -513,7 +530,7 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
 
         results.push({
           event_id: event.id,
-          status: "released",
+          status: settlement.heldCents > 0 ? "on_hold" : "released",
           net_cents: organizerNetCents,
           promoter_paid_cents: settlement.paidCents,
           promoter_held_cents: settlement.heldCents,
@@ -534,7 +551,7 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
 
     return new Response(
       JSON.stringify({ processed: results.length, results }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
+      { status: results.some((r) => r.status === "error" || r.status === "on_hold") ? 503 : 200, headers: { "Content-Type": "application/json" } },
     );
   } catch (err: any) {
     console.error("[payouts-release] Error:", err);

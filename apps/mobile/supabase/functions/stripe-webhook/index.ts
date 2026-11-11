@@ -1,3 +1,5 @@
+import { linkSettlementWebhookPayment } from "../_shared/settlement-webhook-link.ts";
+import { holdSettlementPayment, recordSettlementPayoutEvent } from "../_shared/settlement-recovery.ts";
 /**
  * Stripe Webhook Handler (Edge Function)
  *
@@ -23,6 +25,7 @@
  * IDEMPOTENT: Uses stripe_events table to deduplicate.
  */
 
+import { applyEventDisputeHold } from "../_shared/owner-dispute-policy.ts";
 import { withSentry, captureEdge } from "../_shared/sentry.ts";
 import {
   checkoutFailureLabel,
@@ -261,6 +264,7 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
   let stripeFeeSyncRefs: StripeFeeSyncRefs | null = null;
 
   try {
+    await linkSettlementWebhookPayment(supabase, event.data.object, event.type);
     switch (event.type) {
       // async_payment_succeeded is the settlement completion for delayed
       // methods (ACH / bank transfer): the session object carries the
@@ -918,6 +922,8 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
       case "charge.refunded": {
         const charge = event.data.object;
         const paymentIntent = charge.payment_intent;
+        const settlementRefundOrders = new Set(await holdSettlementPayment(supabase,
+          typeof paymentIntent === "string" ? paymentIntent : paymentIntent?.id || null, event.id, "refund"));
         const refundObjects = Array.isArray(charge.refunds?.data)
           ? charge.refunds.data
           : [];
@@ -1165,7 +1171,7 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
 
             // Promoter rev-share reversal (WS-4) — full clawback of the
             // order's earning, idempotent via (order_id, 'reversal').
-            await recordPromoterReversal(supabase, refundedOrder.id);
+            if (!settlementRefundOrders.has(refundedOrder.id)) await recordPromoterReversal(supabase, refundedOrder.id);
           }
 
           console.log(
@@ -1179,6 +1185,7 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
       case "charge.dispute.created": {
         const dispute = event.data.object;
         const paymentIntent = dispute.payment_intent;
+        await holdSettlementPayment(supabase, typeof paymentIntent === "string" ? paymentIntent : paymentIntent?.id || null, event.id, "dispute");
 
         if (paymentIntent) {
           // Find the event via ticket
@@ -1190,26 +1197,28 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             .single();
 
           if (ticket?.event_id) {
-            await supabase
-              .from("events")
-              .update({ payout_status: "on_hold" })
-              .eq("id", ticket.event_id);
-
             // Update order status + add timeline
-            const { data: disputedOrder } = await supabase
+            const { data: disputedOrder, error: disputedOrderError } = await supabase
               .from("orders")
               .select("id")
               .eq("stripe_payment_intent_id", paymentIntent)
               .single();
 
+            if (disputedOrderError || !disputedOrder) {
+              throw disputedOrderError || new Error("Disputed order requires reconciliation");
+            }
             if (disputedOrder) {
-              await supabase
+              const { data: disputeWrite, error: disputeWriteError } = await supabase
                 .from("orders")
                 .update({
                   status: "disputed",
                   updated_at: new Date().toISOString(),
                 })
-                .eq("id", disputedOrder.id);
+                .eq("id", disputedOrder.id).select("id");
+              if (disputeWriteError) throw disputeWriteError;
+              if (!disputeWrite || disputeWrite.length !== 1) {
+                throw new Error("Disputed order marker was not persisted");
+              }
 
               await supabase.from("order_timeline").insert({
                 order_id: disputedOrder.id,
@@ -1219,11 +1228,18 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
               });
             }
 
+            const eventWideHold = await applyEventDisputeHold(
+              supabase, ticket.event_id,
+              Deno.env.get("DVNT_PLATFORM_OWNER_AUTH_ID") || "",
+            );
+
             // Notify host + co-hosts
             await notifyEventOrganizers(supabase, ticket.event_id, {
               type: "event_update",
               title: "Dispute opened",
-              body: "A buyer has disputed a charge for your event. Payouts are on hold until resolved.",
+              body: eventWideHold
+                ? "A buyer has disputed a charge for your event. Payouts are on hold until resolved."
+                : "A buyer has disputed a charge for your event. The disputed order is withheld; other allocations still require settlement safety checks.",
               data: {
                 entityType: "event",
                 entityId: ticket.event_id,
@@ -1233,7 +1249,7 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             });
 
             console.log(
-              "[stripe-webhook] Event payout on_hold due to dispute:",
+              "[stripe-webhook] Dispute recorded; event-wide hold:", eventWideHold,
               ticket.event_id,
             );
           }
@@ -1655,9 +1671,15 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
 
       // ── Phase 2: New webhook events ─────────────────────────
 
+      case "charge.dispute.updated": {
+        const pi = event.data.object.payment_intent;
+        await holdSettlementPayment(supabase, typeof pi === "string" ? pi : pi?.id || null, event.id, "dispute");
+        break;
+      }
       case "charge.dispute.closed": {
         const closedDispute = event.data.object;
         const closedPi = closedDispute.payment_intent;
+        await holdSettlementPayment(supabase, typeof closedPi === "string" ? closedPi : closedPi?.id || null, event.id, "dispute");
         const disputeStatus = closedDispute.status; // won, lost, warning_closed
 
         if (closedPi) {
@@ -1760,23 +1782,12 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             }
 
             if (activeDisputeCount === 0) {
-              // No more active disputes — release hold
-              const { data: heldEvent } = await supabase
-                .from("events")
-                .select("payout_status")
-                .eq("id", disputeTicket.event_id)
-                .single();
-
-              if (heldEvent?.payout_status === "on_hold") {
-                await supabase
-                  .from("events")
-                  .update({ payout_status: "pending" })
-                  .eq("id", disputeTicket.event_id);
-
-                console.log(
-                  `[stripe-webhook] Payout hold released for event ${disputeTicket.event_id}`,
-                );
-              }
+              // on_hold also represents an active payout claim or an uncertain
+              // transfer. A late/duplicate dispute webhook must never requeue it.
+              // Reconcile payout intents/Stripe first; generic hold release is unsafe.
+              console.log(
+                `[stripe-webhook] Disputes resolved for event ${disputeTicket.event_id}; payout reconciliation required`,
+              );
             }
 
             // Notify host + co-hosts
@@ -1906,10 +1917,10 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             if (sourcePiId) {
               const { data: reversedOrder } = await supabase
                 .from("orders")
-                .select("id")
+                .select("id, charge_model")
                 .eq("stripe_payment_intent_id", sourcePiId)
                 .maybeSingle();
-              if (reversedOrder?.id) {
+              if (reversedOrder?.id && reversedOrder.charge_model !== "separate_charges_and_transfers") {
                 await recordPromoterReversal(
                   supabase,
                   reversedOrder.id,
@@ -1967,7 +1978,14 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
         break;
       }
 
+      case "payout.paid":
+      case "payout.reconciliation_completed":
+      case "payout.canceled": {
+        await recordSettlementPayoutEvent(supabase, event);
+        break;
+      }
       case "payout.failed": {
+        await recordSettlementPayoutEvent(supabase, event);
         const failedPayout = event.data.object;
         const failedPayoutAccount = failedPayout.destination || event.account;
 

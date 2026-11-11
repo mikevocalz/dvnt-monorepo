@@ -57,6 +57,9 @@ const MONEY_JOB_SLA: Record<string, JobSla> = {
   "reconcile-orders": { intervalMs: 15 * MINUTE, marginMs: 15 * MINUTE, note: "~15m, not in cron.job (unverified)" },
   // documented "hourly" (payouts-release header); NOT in live cron.job.
   "payouts-release": { intervalMs: 60 * MINUTE, marginMs: 30 * MINUTE, note: "~hourly, not in cron.job (unverified)" },
+  // New worker remains unscheduled until approved. Once observed, missed runs
+  // use the existing free heartbeat watchdog; readiness reports never-run jobs.
+  "settlements-process": { intervalMs: 60 * MINUTE, marginMs: 30 * MINUTE, note: "schedule must be separately verified before enabling" },
   // client-fired on feed load (lib/api/promotions.ts sweep), not cron — lenient.
   "spotlight-expiry": { intervalMs: 60 * MINUTE, marginMs: 60 * MINUTE, note: "client-fired on feed load, not cron" },
 };

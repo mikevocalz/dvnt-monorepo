@@ -1,3 +1,4 @@
+import { beforeSettlementRefund } from "../_shared/settlement-recovery.ts";
 /**
  * event-cancel Edge Function — WS-9 cancel-with-auto-refund orchestrator.
  *
@@ -74,9 +75,11 @@ function json(data: unknown, status = 200, req?: Request) {
 }
 
 async function stripeRefund(
+  db: any,
   body: Record<string, string>,
   idempotencyKey: string,
 ): Promise<{ id?: string; status?: string; error?: any }> {
+  body = await beforeSettlementRefund(db, body);
   const res = await fetch("https://api.stripe.com/v1/refunds", {
     method: "POST",
     headers: {
@@ -319,7 +322,7 @@ Deno.serve(async (req: Request) => {
 
       let refundId: string | null = null;
       if (pi && amount > 0) {
-        const result = await stripeRefund(
+        const result = await stripeRefund(supabase,
           {
             payment_intent: pi,
             refund_application_fee: "true",
@@ -419,7 +422,7 @@ Deno.serve(async (req: Request) => {
     }
     for (const pi of legacyPis) {
       if (legacyPiRefunds + batch.length >= ORDER_BATCH) break; // shared budget
-      const result = await stripeRefund(
+      const result = await stripeRefund(supabase,
         {
           payment_intent: pi,
           refund_application_fee: "true",

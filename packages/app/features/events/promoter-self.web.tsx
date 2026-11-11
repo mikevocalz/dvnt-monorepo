@@ -1,3 +1,4 @@
+import { settlementSummaryLines } from "@dvnt/app/lib/payments/settlement-status";
 /**
  * Promoter self-service screen (web)
  *
@@ -7,9 +8,11 @@
  */
 
 import { useParams } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { usePromoterPayout } from "@dvnt/app/lib/hooks/use-promoter-payout";
+import { promoterEventId, promoterSettlementPresentation } from "@dvnt/app/lib/payments/promoter-payout-status";
 import { Megaphone, ArrowLeft, Wallet, AlertCircle } from "lucide-react";
 import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
@@ -25,36 +28,39 @@ export function PromoterSelfScreen() {
   const params = useParams();
   const router = useRouter();
   const rawId = String((params as any)?.id ?? "");
-  const eventId = parseInt(rawId || "0", 10);
-  const queryClient = useQueryClient();
+  const eventId = promoterEventId(rawId);
+  const { meQuery, connectQuery, setup, refreshing, refresh, viewerId, authenticated } = usePromoterPayout(eventId);
+  const current = useRef({ eventId, viewerId });
+  current.current = { eventId, viewerId };
+  const starting = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const showToast = useUIStore((s) => s.showToast);
 
-  const meQuery = useQuery({
-    queryKey: ["promoter-self", eventId],
-    queryFn: () => promotersApi.me(eventId),
-    enabled: Number.isFinite(eventId) && eventId > 0,
-    staleTime: 15_000,
-  });
-
   const connectStart = useMutation({
-    mutationFn: () => promotersApi.connectStart(eventId, "web"),
-    onSuccess: ({ url }) => {
-      window.location.href = url;
+    mutationFn: async () => {
+      const owner = current.current;
+      try {
+        const { url } = await promotersApi.connectStart(eventId, "web");
+        if (!mounted.current || current.current.eventId !== owner.eventId || current.current.viewerId !== owner.viewerId) return;
+        window.location.assign(url);
+      } finally {
+        starting.current = false;
+      }
     },
-    onError: (err: any) => {
-      showToast("error", "Connect failed", err?.message || "Try again.");
+    onError: (err: Error) => {
+      if (mounted.current) showToast("error", "Connect failed", err?.message || "Try again.");
     },
   });
 
-  const connectStatus = useMutation({
-    mutationFn: () => promotersApi.connectStatus(eventId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["promoter-self", eventId] });
-    },
-    onError: (err: any) => {
-      showToast("error", "Status refresh failed", err?.message || "Try again.");
-    },
-  });
+  const startOnboarding = () => {
+    if (starting.current || refreshing) return;
+    starting.current = true;
+    connectStart.mutate();
+  };
 
   // Stripe's return_url is a navigation signal, NOT proof of verified payouts.
   // Refresh the Stripe status when the browser returns and remove the one-time
@@ -72,12 +78,12 @@ export function PromoterSelfScreen() {
     );
     if (Number.isFinite(eventId) && eventId > 0) {
       if (outcome === "return") {
-        connectStatus.mutate();
+        void refresh();
       } else {
-        showToast("info", "Stripe setup not finished", "Tap Connect bank account to resume.");
+        showToast("info", "Stripe setup not finished", "Continue Stripe setup to resume.");
       }
     }
-  }, [eventId, connectStatus.mutate, showToast]);
+  }, [eventId, refresh, showToast]);
 
   if (!Number.isFinite(eventId) || eventId <= 0) {
     return (
@@ -87,7 +93,7 @@ export function PromoterSelfScreen() {
     );
   }
 
-  if (meQuery.isLoading) {
+  if (!authenticated || meQuery.isPending) {
     return (
       <div className="min-h-[100dvh] bg-[#06070d] px-4 py-24 text-center">
         <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-[#8A40CF]" />
@@ -100,6 +106,8 @@ export function PromoterSelfScreen() {
     return (
       <div className="min-h-[100dvh] bg-[#06070d] px-4 py-24 text-center text-white">
         <p className="text-white/50">Couldn&apos;t load your promoter info.</p>
+        <button type="button" disabled={meQuery.isFetching} onClick={() => void meQuery.refetch()} className="mt-4 rounded-xl border border-white/20 px-4 py-3">Retry</button>
+        <button type="button" onClick={() => router.back()} className="ml-3 px-4 py-3">Back</button>
       </div>
     );
   }
@@ -131,7 +139,7 @@ export function PromoterSelfScreen() {
   }
 
   const p = meQuery.data.promoter!;
-  const connected = p.connect.detailsSubmitted && p.connect.payoutsEnabled;
+  const settlement = promoterSettlementPresentation(p.payout);
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -187,7 +195,7 @@ export function PromoterSelfScreen() {
             </div>
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-white/40">
-                Earnings
+                Net earnings
               </p>
               <p className="mt-0.5 font-mono text-[17px] text-[#22c55e]">
                 {formatCents(p.earnedCents)}
@@ -195,6 +203,23 @@ export function PromoterSelfScreen() {
             </div>
           </div>
         </div>
+
+        {p.settlement?.verified ? (
+        <section className="mb-6 rounded-2xl border border-white/10 p-4"><h2 className="font-semibold">Settlement status</h2>
+          {settlementSummaryLines(p.settlement,"promoter").map((line,i)=><p key={i} className="mt-1 text-sm text-white/60">{line}</p>)}
+          <p className="mt-2 text-xs text-white/45">Amounts are gross transfers; bank totals may be reduced by fees or adjustments.</p></section>
+        ) : (
+        <section className="mb-6 rounded-2xl border border-white/8 bg-white/4 p-4" aria-label="Commission settlement">
+          <h2 className="font-semibold">{settlement.title}</h2>
+          <p className="mt-2 text-sm text-white/60">{settlement.detail}</p>
+          {p.payout && <dl className="mt-4 grid grid-cols-2 gap-4">
+            <div><dt className="text-sm text-white/50">Awaiting settlement</dt><dd className="font-mono">{formatCents(p.payout.unsettledCents)}</dd></div>
+            <div><dt className="text-sm text-white/50">Settled in ledger</dt><dd className="font-mono">{formatCents(p.payout.settledCents)}</dd></div>
+          </dl>}
+          {p.payout?.hasRecordedTransfer && <p className="mt-3 text-sm text-white/60">A Stripe transfer is recorded. Bank delivery is not confirmed.</p>}
+          <p className="mt-3 text-xs text-white/45">Bank deposit status is not available here. Stripe transfers and bank payouts are separate steps.</p>
+        </section>
+        )}
 
         <div className="rounded-2xl border border-white/8 bg-white/4 p-4">
           <div className="flex items-center gap-3">
@@ -204,44 +229,35 @@ export function PromoterSelfScreen() {
             <div>
               <p className="font-semibold text-white">Payout setup</p>
               <p className="text-sm text-white/50">
-                {connected
-                  ? "Connected — payouts enabled"
-                  : p.connect.detailsSubmitted
-                    ? "Details submitted — waiting on Stripe"
-                    : "Connect your bank account to get paid"}
+                {setup.title}
               </p>
             </div>
           </div>
 
-          {!connected && (
-            <div className="mt-4 flex items-start gap-3 rounded-xl bg-white/5 p-3 text-sm text-white/60">
-              <AlertCircle size={16} className="mt-0.5 shrink-0" />
-              <p>
-                Commissions are held until you complete Stripe Connect. Tap
-                below to set up your account.
-              </p>
-            </div>
-          )}
+          <div className="mt-4 flex items-start gap-3 rounded-xl bg-white/5 p-3 text-sm text-white/60" role={connectQuery.isError ? "alert" : "status"}>
+            <AlertCircle size={16} className="mt-0.5 shrink-0" />
+            <p>{setup.detail}</p>
+          </div>
 
           <div className="mt-4 flex gap-3">
-            {!connected ? (
+            {setup.action ? (
               <button
                 type="button"
-                disabled={connectStart.isPending}
-                onClick={() => connectStart.mutate()}
+                disabled={connectStart.isPending || refreshing}
+                onClick={startOnboarding}
                 className="flex-1 rounded-xl py-3 text-sm font-semibold text-white disabled:opacity-60"
                 style={{ backgroundColor: ACCENT }}
               >
-                {connectStart.isPending ? "Starting…" : "Connect bank account"}
+                {connectStart.isPending ? "Starting…" : setup.action}
               </button>
             ) : null}
             <button
               type="button"
-              disabled={connectStatus.isPending}
-              onClick={() => connectStatus.mutate()}
+              disabled={refreshing || connectStart.isPending}
+              onClick={() => void refresh()}
               className="rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-white active:bg-white/5 disabled:opacity-50"
             >
-              {connectStatus.isPending ? "Refreshing…" : "Refresh status"}
+              {refreshing ? "Refreshing…" : "Refresh status"}
             </button>
           </div>
         </div>

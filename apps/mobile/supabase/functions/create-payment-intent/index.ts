@@ -1,3 +1,4 @@
+import { prepareSettlementCheckout, settlementStripeParams, settlementProviderObject, finalizeSettlementCheckout, SettlementCheckoutError } from "../_shared/settlement-checkout.ts";
 import { canAccessEvent } from "../_shared/event-access.ts";
 /**
  * Create Payment Intent Edge Function
@@ -64,12 +65,14 @@ async function stripeRequest(
   endpoint: string,
   body: Record<string, string>,
   method = "POST",
+  idempotencyKey?: string,
 ): Promise<any> {
   const res = await fetch(`https://api.stripe.com/v1${endpoint}`, {
     method,
     headers: {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       "Content-Type": "application/x-www-form-urlencoded",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: method !== "GET" ? new URLSearchParams(body).toString() : undefined,
   });
@@ -515,6 +518,45 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
     // application_fee (DVNT's 5% + $2) is unchanged. Shared entry point.
     const fees = computeFeesWithMode(subtotalCents, quantity, event.fee_mode);
 
+    const orderSnapshot = {
+      currency: ticketType.currency || "usd",
+      user_id,
+      type: "event_ticket",
+      status: "payment_pending",
+      quantity,
+      subtotal_cents: fees.subtotal,
+      platform_fee_cents: fees.dvnt_total_fee,
+      total_cents: fees.customer_charge_amount,
+      buyer_pct_fee_cents: fees.buyer_pct_fee,
+      buyer_per_ticket_fee_cents: fees.buyer_per_ticket_fee,
+      buyer_fee_cents: fees.buyer_fee,
+      org_pct_fee_cents: fees.org_pct_fee,
+      org_per_ticket_fee_cents: fees.org_per_ticket_fee,
+      organizer_fee_cents: fees.organizer_fee,
+      dvnt_total_fee_cents: fees.dvnt_total_fee,
+      fee_policy_version: fees.fee_policy_version,
+      event_id: parseInt(event_id),
+      ...(promoResult
+        ? {
+            promo_code_id: promoResult.promo_code_id,
+            discount_cents: discountCents,
+          }
+        : {}),
+      ...(promoterResult
+        ? {
+            promoter_policy_version: "v2_eligible_subtotal_after_discount",
+            promoter_original_amount_cents: rawSubtotal,
+            promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+            promoter_discount_amount_cents: promoterResult.discount_cents,
+            promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+            promoter_code: promoterResult.code,
+            promoter_commission_bps: promoterResult.promoter_commission_bps,
+            promoter_commission_amount_cents: promoterResult.commission_cents,
+          }
+        : {}),
+    };
+    const settlement = await prepareSettlementCheckout(supabase, { rail: "create-payment-intent", order: orderSnapshot, selection: { ticket_type_id: ticket_type_id } }, idemKey);
+
     // ── Get or create Stripe Customer ────────────────────
     const customerId = await getOrCreateCustomer(supabase, user_id);
 
@@ -522,7 +564,7 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
     const idempotencyKey = `pi_${user_id}_${event_id}_${ticket_type_id}_${quantity}_${Date.now()}`;
 
     // ── Create PaymentIntent ───────────────────────────
-    const pi = await stripeRequest("/payment_intents", {
+    let piBody: Record<string, string> = {
       amount: fees.customer_charge_amount.toString(),
       currency: ticketType.currency || "usd",
       customer: customerId,
@@ -568,7 +610,11 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
       ...(validPromoterCode
         ? { "metadata[dvnt_promoter_code]": validPromoterCode }
         : {}),
-    });
+    };
+    piBody = settlementStripeParams(settlement, piBody, false);
+    const pi = await settlementProviderObject(supabase, settlement, piBody, false,
+      (key) => stripeRequest("/payment_intents", piBody, "POST", key));
+    await finalizeSettlementCheckout(supabase, settlement, { paymentIntentId: pi.id });
 
     // ── Create ephemeral key for PaymentSheet ────────────────
     const ephemeralRes = await fetch(
@@ -639,43 +685,8 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
     }
 
     // ── Create order row in payment_pending state (fee components stored) ──
-    const { error: orderError } = await supabase.from("orders").insert({
-      user_id,
-      type: "event_ticket",
-      status: "payment_pending",
-      charge_model: "destination_charge",
-      quantity,
-      subtotal_cents: fees.subtotal,
-      platform_fee_cents: fees.dvnt_total_fee,
-      total_cents: fees.customer_charge_amount,
-      buyer_pct_fee_cents: fees.buyer_pct_fee,
-      buyer_per_ticket_fee_cents: fees.buyer_per_ticket_fee,
-      buyer_fee_cents: fees.buyer_fee,
-      org_pct_fee_cents: fees.org_pct_fee,
-      org_per_ticket_fee_cents: fees.org_per_ticket_fee,
-      organizer_fee_cents: fees.organizer_fee,
-      dvnt_total_fee_cents: fees.dvnt_total_fee,
-      fee_policy_version: fees.fee_policy_version,
-      event_id: parseInt(event_id),
-      stripe_payment_intent_id: pi.id,
-      ...(promoResult
-        ? {
-            promo_code_id: promoResult.promo_code_id,
-            discount_cents: discountCents,
-          }
-        : {}),
-      ...(promoterResult
-        ? {
-            promoter_policy_version: "v2_eligible_subtotal_after_discount",
-            promoter_original_amount_cents: rawSubtotal,
-            promoter_customer_discount_bps: promoterResult.customer_discount_bps,
-            promoter_discount_amount_cents: promoterResult.discount_cents,
-            promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
-            promoter_code: promoterResult.code,
-            promoter_commission_bps: promoterResult.promoter_commission_bps,
-            promoter_commission_amount_cents: promoterResult.commission_cents,
-          }
-        : {}),
+    const { error: orderError } = settlement ? { error: null } : await supabase.from("orders").insert({
+      ...orderSnapshot, charge_model: "destination_charge", stripe_payment_intent_id: pi.id,
     });
     if (orderError) {
       console.error("[create-payment-intent] order insert failed", orderError);
@@ -691,6 +702,7 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
       paymentIntentId: pi.id,
     });
   } catch (err: any) {
+    if (err instanceof SettlementCheckoutError) return json({ error: err.message }, err.status);
     console.error("[create-payment-intent] Error:", err);
     return json({ error: err.message || "Internal error" }, 500);
   }

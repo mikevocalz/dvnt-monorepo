@@ -1,0 +1,28 @@
+name: Settlement concurrency
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/_shared/settlement-*'
+      - 'apps/mobile/supabase/functions/settlements-process/**'
+      - 'apps/mobile/supabase/migrations/*settlement*.sql'
+      - 'docs/payments/drafts/settlement-*.sql'
+      - 'scripts/fixtures/settlement/**'
+      - 'scripts/test-settlement-concurrency.py'
+      - '.github/workflows/settlement-concurrency.yml'
+permissions:
+  contents: read
+jobs:
+  postgres-locks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile test runner
+        run: python3 -m py_compile scripts/test-settlement-concurrency.py
+      - name: Overlapping transactions in disposable local databases
+        run: |
+          set -euo pipefail
+          sudo systemctl start postgresql
+          python3 scripts/test-settlement-concurrency.py --disposable-ci-postgres

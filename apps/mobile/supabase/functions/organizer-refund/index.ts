@@ -1,3 +1,4 @@
+import { beforeSettlementRefund } from "../_shared/settlement-recovery.ts";
 /**
  * Organizer-initiated refund
  *
@@ -42,8 +43,10 @@ if (!STRIPE_SECRET_KEY) {
 }
 
 async function stripeRefund(
+  db: any,
   body: Record<string, string>,
 ): Promise<{ id?: string; status?: string; error?: any }> {
+  body = await beforeSettlementRefund(db, body);
   const res = await fetch("https://api.stripe.com/v1/refunds", {
     method: "POST",
     headers: {
@@ -166,7 +169,7 @@ Deno.serve(withSentry("organizer-refund", async (req: Request) => {
       "metadata[ticket_id]": ticketId,
     };
 
-    const stripeResp = await stripeRefund(refundParams);
+    const stripeResp = await stripeRefund(supabase, refundParams);
     if (stripeResp.error) {
       console.error(
         "[organizer-refund] stripe error:",

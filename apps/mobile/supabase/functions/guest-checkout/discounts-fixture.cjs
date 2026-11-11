@@ -34,6 +34,8 @@ function fixture(options={}){
  const writes=[],stripe=[],emails=[],usage=[],logs=[],profileCalls=[],qr=[];let serial=0;
  const db={rpc:async(fn,args)=>{
   writes.push({table:'rpc',fn,args});
+  if(options.settlementRpc && fn.endsWith('_settlement_checkout'))return options.settlementRpc(fn,args);
+  if(fn==='lookup_settlement_checkout')return{data:{exists:false}};
   if(fn==='ticket_purchase_hold_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
   if(fn==='guest_free_checkout_atomic'){
    if(options.atomicError)return{data:null,error:options.atomicError};
@@ -94,10 +96,11 @@ function fixture(options={}){
   const code=ts.transpileModule(fs.readFileSync(full,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
   vm.runInNewContext(code,{exports,Request,Response,URL,URLSearchParams,TextEncoder,
    Date:options.now==null?Date:class extends Date{constructor(...args){super(...(args.length?args:[options.now]))}static now(){return options.now}},crypto,console:{...console,error:(...args)=>logs.push(args)},
-   Deno:{env:{get:k=>k==='STRIPE_SECRET_KEY'?(options.noStripe?'':'fixture-not-a-provider-key'):''},serve:fn=>{handler=fn}},
+   Deno:{env:{get:k=>options.env && Object.hasOwn(options.env,k)?options.env[k]:k==='STRIPE_SECRET_KEY'?(options.noStripe?'':'fixture-not-a-provider-key'):''},serve:fn=>{handler=fn}},
    fetch:async(url,opts)=>{
     assert.equal(new URL(url).hostname,'api.stripe.com');
     stripe.push({url,params:Object.fromEntries(new URLSearchParams(opts.body))});
+    if(options.stripeResponse)return options.stripeResponse(url,opts);
     return Response.json({id:'cs_fixture_'+stripe.length,url:'https://checkout.stripe.com/c/pay/fixture'});
    },require:name=>{
     if(options.entrypoint && name.endsWith('/verify-session.ts'))return{verifySession:async()=>options.unauthorized?null:'member-fixture'};

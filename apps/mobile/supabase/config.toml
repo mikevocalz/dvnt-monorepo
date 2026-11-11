@@ -608,3 +608,7 @@ verify_jwt = false
 # Verified Better Auth session and current post-access projection checked internally.
 [functions.protected-photo-preview]
 verify_jwt = false
+
+# Internal worker authenticates SETTLEMENT_WORKER_SECRET itself. No schedule installed.
+[functions.settlements-process]
+verify_jwt = false

@@ -1,3 +1,4 @@
+import { beforeSettlementRefund } from "../_shared/settlement-recovery.ts";
 /**
  * cart-line-refund Edge Function
  *
@@ -73,9 +74,11 @@ function parseBody(input: unknown): ParsedBody | null {
 }
 
 async function stripeRefund(
+  db: any,
   params: Record<string, string>,
   idempotencyKey: string,
 ): Promise<any> {
+  params = await beforeSettlementRefund(db, params);
   const res = await fetch("https://api.stripe.com/v1/refunds", {
     method: "POST",
     headers: {
@@ -312,7 +315,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const refund = await stripeRefund(
+    const refund = await stripeRefund(supabase,
       {
         payment_intent: cartRow.stripe_pi_id,
         amount: String(refundAmountCents),

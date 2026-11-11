@@ -10,7 +10,7 @@
  * STATE: isLoading lives in usePaymentsStore.checkoutLoading (no useState).
  */
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { initStripe } from "@stripe/stripe-react-native";
 import { useStripeSafe as useStripe } from "@dvnt/app/lib/safe-native-modules";
 import { supabase } from "@dvnt/app/lib/supabase/client";
@@ -37,6 +37,7 @@ interface CheckoutResult {
 }
 
 export function useTicketCheckout() {
+  const attempt = useRef<{selection:string;key:string}|null>(null);
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const setCheckoutLoading = usePaymentsStore((s) => s.setCheckoutLoading);
   const checkoutLoading = usePaymentsStore((s) => s.checkoutLoading);
@@ -64,12 +65,21 @@ export function useTicketCheckout() {
         // share link — MMKV-persisted, attribution-only (no pricing).
         const promoterCode = getPendingPromoterRef(eventId);
 
+        const selection=JSON.stringify([eventId,ticketTypeId,quantity,promoCode||"",promoterCode||""]);
+        if(attempt.current?.selection!==selection) {
+          const key=typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():`checkout_${Date.now()}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
+          attempt.current={selection,key};
+        }
+        // Reuse across cancellation/network errors; never mint a new payment
+        // request merely because the previous response was ambiguous.
+        const requestKey=attempt.current!.key;
         // Step 1: Create PaymentIntent via edge function
         const { data, error } = await supabase.functions.invoke(
           "create-payment-intent",
           {
             body: {
               event_id: eventId,
+              idempotency_key: requestKey,
               ticket_type_id: ticketTypeId,
               quantity,
               ...(promoCode ? { promo_code: promoCode } : {}),
@@ -102,6 +112,7 @@ export function useTicketCheckout() {
 
         // Free ticket — already issued server-side
         if (result.free && result.tickets) {
+          attempt.current=null;
           return { success: true, free: true, tickets: result.tickets };
         }
 
@@ -208,6 +219,7 @@ export function useTicketCheckout() {
         }
 
         // Step 4: Payment succeeded (webhook will finalize tickets)
+        attempt.current=null;
         return {
           success: true,
           paymentIntentId: result.paymentIntentId,

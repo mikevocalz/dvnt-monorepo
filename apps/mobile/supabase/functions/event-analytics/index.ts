@@ -1,3 +1,4 @@
+import { readSettlementSummary } from "../_shared/settlement-status.ts";
 /**
  * Event Analytics Edge Function
  *
@@ -356,6 +357,7 @@ Deno.serve(async (req: Request) => {
       title: event.title || "",
       revenue,
       monthlyPlatformFees,
+      settlement: await readSettlementSummary(supabase, authId, eventIdNum),
       ticketStats,
       attendanceBreakdown,
       tiers,

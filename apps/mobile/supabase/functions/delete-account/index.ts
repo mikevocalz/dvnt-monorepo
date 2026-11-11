@@ -1,3 +1,4 @@
+import { beforeSettlementRefund } from "../_shared/settlement-recovery.ts";
 /**
  * Delete Account Edge Function
  *
@@ -62,8 +63,10 @@ async function stripePost(
 }
 
 async function stripeRefund(
+  db: any,
   body: Record<string, string>,
 ): Promise<{ id?: string; status?: string; error?: any }> {
+  body = await beforeSettlementRefund(db, body);
   const res = await fetch("https://api.stripe.com/v1/refunds", {
     method: "POST",
     headers: {
@@ -240,7 +243,7 @@ Deno.serve(async (req: Request) => {
           .filter((t) => t.stripe_payment_intent_id === paymentIntentId)
           .map((t) => String(t.id));
         try {
-          const refund = await stripeRefund({
+          const refund = await stripeRefund(supabase, {
             payment_intent: paymentIntentId,
             refund_application_fee: "true",
             reverse_transfer: "true",
