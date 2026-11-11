@@ -174,7 +174,7 @@ def reservation_wins_then_refund_quarantines():
         db.rpc("settlement_hold", p_order_id=order, p_event_id="re_fixture", p_reason="refund")
         db.finish(first)
         assert db.sql("SELECT state FROM dvnt_settlement.deliveries WHERE allocation_id=" + literal(allocation)) == "uncertain"
-        assert "settlement held" in db.sql(db.reserve(allocation), ok=False)
+        assert "settlement held" in db.sql(db.reserve(allocation, amount=30000), ok=False)
 
 
 def bank_setup(db, suffix):

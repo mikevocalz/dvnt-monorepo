@@ -307,16 +307,12 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
         // Durable atomic claim using a schema-supported state. Never reset this
         // claim on timeout/error: Stripe keys expire and are NOT a durable ledger.
         // A held event needs reconciliation before any operator requeues it.
-        const { data: claimed, error: claimError } = await supabase
-          .from("events")
-          .update({ payout_status: "on_hold" })
-          .eq("id", event.id)
-          .eq("payout_status", "pending")
-          .select("id")
-          .maybeSingle();
+        const { data: claim, error: claimError } = await supabase.rpc(
+          "settlement_claim_legacy_event", { p_event_id: event.id },
+        );
 
         if (claimError) throw claimError;
-        if (!claimed) {
+        if (claim?.claimed !== true) {
           results.push({
             event_id: event.id,
             status: "skipped",

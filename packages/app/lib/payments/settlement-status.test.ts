@@ -15,3 +15,9 @@ test('bank membership describes included transfer amount, not net paid; unknown 
 test('verified bank net contribution is separate from gross transfer allocation',()=>{
  assert.equal(settlementSummaryLines({verified:true,rows:[{currency:'usd',recipient_role:'promoter',stage:'bank_paid',amount_cents:1000,allocation_count:1,bank_net_contribution_cents:975}]},'promoter')[0],'Included in verified bank payout: 10.00 USD gross; verified bank contribution 9.75 USD');
 });
+
+test('manual external receipt is distinct from Stripe bank payout and pending receipts cannot claim paid',()=>{
+ assert.equal(settlementSummaryLines({verified:true,rows:[{currency:'usd',recipient_role:'promoter',stage:'paid_externally',amount_cents:1000,allocation_count:1}]},'promoter')[0],'Paid externally (receipt manually verified): 10.00 USD');
+ assert.match(settlementSummaryLines({verified:true,rows:[{currency:'usd',recipient_role:'promoter',stage:'external_needs_review',amount_cents:1000,allocation_count:1}]},'promoter')[0],/recovery needs review/);
+ assert.equal(settlementSummaryLines({verified:true,rows:[{currency:'usd',recipient_role:'promoter',stage:'external_pending',amount_cents:1000,allocation_count:1}]},'promoter')[0],'Payment status needs review.');
+});
