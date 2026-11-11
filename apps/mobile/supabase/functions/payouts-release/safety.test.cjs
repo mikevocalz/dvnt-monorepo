@@ -41,7 +41,14 @@ function harness(options = {}) {
         return { data, error: null };
       }).then(resolve,reject); }
     }; return q;
-  }, rpc: async (name) => name === 'settlement_legacy_event_eligible' ? {data:{eligible:!options.managed},error:options.ownershipError?new Error('ownership unavailable'):null} : ({error:null}) };
+  }, rpc: async (name) => {
+    if(name === 'settlement_claim_legacy_event') {
+      if(options.claimError || options.externallySettled) return {data:null,error:new Error('legacy execution excluded')};
+      if(state !== 'pending') return {data:{claimed:false},error:null};
+      state='on_hold';return {data:{claimed:true},error:null};
+    }
+    return name === 'settlement_legacy_event_eligible' ? {data:{eligible:!options.managed},error:options.ownershipError?new Error('ownership unavailable'):null} : ({error:null});
+  } };
   const source = fs.readFileSync(__dirname + '/index.ts','utf8').replace(/^import[\s\S]*?from [^;]+;\n/gm,'');
   vm.runInNewContext(stripTypeScriptTypes(source), { console: {log(){},error(){},warn(){}}, Request, Response, URLSearchParams, crypto,
     Deno: {env:{get: k => k === 'DVNT_PLATFORM_OWNER_AUTH_ID' ? (options.owner || '') : k === 'RESEND_API_KEY' ? '' : 'test'}, serve: fn => {handler=fn;}},
@@ -124,3 +131,5 @@ test('new-ledger ownership and unavailable ownership proof block aggregate sweep
   const h=harness(options);await h.invoke();assert.equal(h.transfers.length,0);
  }
 });
+
+test('external exclusion or missing atomic claim RPC prevents all legacy provider writes',async()=>{for(const options of [{externallySettled:true},{claimError:true}]){const h=harness(options);assert.equal((await h.invoke()).status,503);assert.equal(h.transfers.length,0);assert.equal(h.writes.length,0);}});

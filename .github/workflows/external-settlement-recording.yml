@@ -1,0 +1,36 @@
+name: External settlement recording
+on:
+  pull_request:
+    paths:
+      - 'docs/payments/drafts/settlement-*.sql'
+      - 'apps/mobile/supabase/functions/record-external-promoter-payment/**'
+      - 'apps/mobile/supabase/functions/payouts-release/**'
+      - 'packages/app/lib/payments/settlement-status*'
+      - 'scripts/test*settlement*.cjs'
+      - 'scripts/test*settlement*.py'
+      - 'scripts/fixtures/settlement/**'
+      - '.github/workflows/external-settlement-recording.yml'
+permissions:
+  contents: read
+jobs:
+  offline-and-sql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test dependencies
+        run: npm install --prefix /tmp/external-settlement-test --no-package-lock --ignore-scripts @electric-sql/pglite@0.3.14 typescript@5.9.3
+      - name: Receipt, authorization, legacy exclusion and UI contracts
+        env:
+          NODE_PATH: /tmp/external-settlement-test/node_modules
+        run: node --test scripts/test-settlement-external.cjs scripts/test-settlement-external-endpoint.cjs apps/mobile/supabase/functions/payouts-release/safety.test.cjs packages/app/lib/payments/settlement-status.test.ts
+      - name: Cross-process PostgreSQL races in disposable local databases
+        run: |
+          set -euo pipefail
+          sudo systemctl start postgresql
+          python3 scripts/test-external-settlement-concurrency.py --disposable-ci-postgres
