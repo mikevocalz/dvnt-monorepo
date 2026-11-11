@@ -1533,6 +1533,7 @@ export const eventsApi = {
    */
   async canEditEvent(eventId: string, authId: string): Promise<boolean> {
     try {
+      if (!authId || !Number.isSafeInteger(Number(eventId)) || Number(eventId) <= 0) return false;
       // Check if user is host (host_id is text/auth_id)
       const { data: event } = await supabase
         .from(DB.events.table)
@@ -1548,6 +1549,7 @@ export const eventsApi = {
         .select("role")
         .eq("event_id", parseInt(eventId))
         .eq("user_id", authId)
+        .eq("accepted", true)
         .in("role", ["editor", "admin"])
         .maybeSingle();
 

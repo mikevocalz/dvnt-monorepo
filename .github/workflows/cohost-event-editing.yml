@@ -1,0 +1,29 @@
+name: Co-host event editing
+on:
+  pull_request:
+    paths:
+      - 'packages/app/features/events/**'
+      - 'packages/app/features/routes/screens/(protected)/events/**'
+      - 'packages/app/lib/api/events.ts'
+      - 'packages/app/lib/api/ticket-types.ts'
+      - 'packages/app/lib/api/event-edit-access.test.ts'
+      - 'packages/app/lib/events/event-role*'
+      - 'packages/app/lib/hooks/use-event-role*'
+      - 'apps/mobile/supabase/functions/notify-event-change/**'
+      - 'apps/mobile/supabase/migrations/20261111120000_accepted_cohost_event_editing.sql'
+      - 'scripts/test-cohost-editor-dom.cjs'
+      - '.github/workflows/cohost-event-editing.yml'
+permissions:
+  contents: read
+jobs:
+  offline-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated pinned test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/cohost-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 @electric-sql/pglite@0.3.14 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.10.3
+      - name: SQL, Edge, API and mounted web/native permission regressions
+        run: NODE_PATH="$RUNNER_TEMP/cohost-tests/node_modules" npm run test:cohost-editing

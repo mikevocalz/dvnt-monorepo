@@ -55,6 +55,8 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useColorScheme, useMediaPicker } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canEditEvent } from "@dvnt/app/lib/events/event-role";
 import {
   EVENT_VISIBILITY_OPTIONS,
   eventVisibilityCopy,
@@ -86,7 +88,6 @@ import {
   saleWindowLocalToInstant,
 } from "@dvnt/app/lib/events/sale-window";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
-import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
 import { useQueryClient } from "@tanstack/react-query";
 import { eventKeys, useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
 import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
@@ -130,6 +131,9 @@ function EditEventScreenContent() {
   const updateEventMutation = useUpdateEvent();
   const showToast = useUIStore((s) => s.showToast);
   const currentUser = useAuthStore((state) => state.user);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const editRole = useEventRole(id ?? "");
+  const mayEdit = isAuthenticated && editRole.hasResolved && canEditEvent(editRole.role);
   const { pickFromLibrary, requestPermissions } = useMediaPicker();
   const { uploadMultiple, isUploading, progress: uploadProgress } = useMediaUpload({ folder: "events" });
 
@@ -203,7 +207,6 @@ function EditEventScreenContent() {
     return () => { screenMounted.current = false; };
   }, []);
   const [hasChanges, setHasChanges] = useState(false);
-  const [isOwner, setIsOwner] = useState(false);
   const [originalData, setOriginalData] = useState<any>(null);
 
   useEffect(() => {
@@ -232,26 +235,15 @@ function EditEventScreenContent() {
 
   // Fetch event data
   useEffect(() => {
+    let cancelled = false;
     async function fetchEvent() {
-      if (!id) return;
-
+      if (!id || !mayEdit) return;
+      setIsLoading(true);
       try {
         const event = await eventsApi.getEventById(id);
+        if (cancelled) return;
         if (!event) {
           showToast("error", "Error", "Event not found");
-          router.back();
-          return;
-        }
-
-        // Check ownership via server-side auth (host_id === auth_id)
-        const canEdit = await eventsApi.canEditEvent(
-          id,
-          (await getCurrentUserAuthId()) || "",
-        );
-        setIsOwner(canEdit);
-
-        if (!canEdit) {
-          showToast("error", "Error", "You can only edit your own events");
           router.back();
           return;
         }
@@ -340,6 +332,7 @@ function EditEventScreenContent() {
 
         // Load ticket tiers
         const dbTiers = await ticketTypesApi.getByEvent(id);
+        if (cancelled) return;
         const activeTiers = dbTiers.filter(
           (t: any) => t.active !== false && t.is_active !== false,
         );
@@ -364,6 +357,7 @@ function EditEventScreenContent() {
 
         setIsLoading(false);
       } catch (error: any) {
+        if (cancelled) return;
         console.error("[EditEvent] Fetch error:", error);
         showToast("error", "Error", error?.message || "Failed to load event");
         router.back();
@@ -371,7 +365,8 @@ function EditEventScreenContent() {
     }
 
     fetchEvent();
-  }, [id, currentUser?.id, showToast, router]);
+    return () => { cancelled = true; };
+  }, [id, mayEdit, currentUser?.id, currentUser?.authId, showToast, router]);
 
   // Track changes
   useEffect(() => {
@@ -519,7 +514,7 @@ function EditEventScreenContent() {
   };
 
   const handleSave = useCallback(async () => {
-    if (!id || saveLock.current || isSaving) return;
+    if (!mayEdit || !id || saveLock.current || isSaving) return;
 
     if (!title.trim()) {
       showToast("error", "Error", "Title is required");
@@ -550,7 +545,10 @@ function EditEventScreenContent() {
         ticketingEnabled &&
         ticketTiers.some((t) => parseFloat(t.priceDollars || "0") > 0);
 
-      if (hasPaidTier) {
+      // Payment setup belongs to the event owner. A co-host must never be
+      // sent to connect their own bank just to change this event's prices.
+      // Checkout validates the actual event owner's readiness on the server.
+      if (hasPaidTier && editRole.role === "owner") {
         try {
           const status = await organizerApi.getStatus();
           const ready =
@@ -797,6 +795,8 @@ function EditEventScreenContent() {
     }
   }, [
     id,
+    mayEdit,
+    editRole.role,
     title,
     description,
     location,
@@ -830,11 +830,27 @@ function EditEventScreenContent() {
   ]);
 
   // Loading state
-  if (isLoading) {
+  if ((isAuthenticated && editRole.isPending && !editRole.isPaused) || (mayEdit && isLoading)) {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!mayEdit) {
+    return (
+      <SafeAreaView edges={["top"]} className="flex-1 bg-background">
+        <View className="flex-1 items-center justify-center p-6">
+          <Text className="text-foreground text-center">
+            {editRole.isPaused || (editRole.isError && editRole.errorStatus !== 401 && editRole.errorStatus !== 403)
+              ? "We couldn't verify editing access. Check your connection and retry."
+              : "Only the host and accepted co-hosts or editors can edit this event."}
+          </Text>
+          <Pressable onPress={() => void editRole.refetch()} className="p-4"><Text className="text-primary">Retry</Text></Pressable>
+          <Pressable onPress={() => router.back()} className="p-4"><Text className="text-primary">Go back</Text></Pressable>
         </View>
       </SafeAreaView>
     );

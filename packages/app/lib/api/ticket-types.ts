@@ -237,7 +237,9 @@ export const ticketTypesApi = {
         .from("ticket_types")
         .update(updates)
         .eq("id", id)
-        .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS));
+        .select("id")
+        .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS))
+        .single();
 
       if (error) throw error;
       return true;

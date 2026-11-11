@@ -128,7 +128,7 @@ import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
 import { canHostEventLynk } from "@dvnt/app/lib/events/event-lynk";
 import { EventLynkCard } from "@dvnt/app/features/events/ui/EventLynkCard";
-import { canScanTickets } from "@dvnt/app/lib/events/event-role";
+import { canEditEvent, canScanTickets } from "@dvnt/app/lib/events/event-role";
 import { eventEnded, eventSalesClosed } from "@dvnt/app/lib/events/event-time";
 import type {
   TicketTier,
@@ -1235,6 +1235,7 @@ function EventDetailScreenContent() {
    */
   const { role: doorRole } = useEventRole(eventId);
   const mayScanTickets = canScanTickets(doorRole);
+  const mayEditEvent = canEditEvent(doorRole);
 
   const isHost = useMemo(() => {
     if (!user?.id || !eventData?.host?.id) return false;
@@ -2504,6 +2505,15 @@ function EventDetailScreenContent() {
             </View>
           ) : null}
 
+          {!isHost && mayEditEvent ? (
+            <View style={s.section}>
+              <Pressable onPress={() => router.push(`/(protected)/events/${eventId}/edit` as any)} style={s.organizerButton}>
+                <Pencil size={16} color="#3FDCFF" />
+                <Text style={s.organizerButtonText}>Edit Event</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           {/* ── 3.25 HOST ORGANIZER TOOLS ──────────────────────────── */}
           {isHost ? (
             <View style={s.section}>
@@ -3101,6 +3111,7 @@ function EventDetailScreenContent() {
         visible={showActionSheet}
         onClose={() => setShowActionSheet(false)}
         isHost={isHost}
+        canEdit={mayEditEvent}
         isLiked={isLiked}
         eventStatus={(eventData as any)?.status}
         shareLabel={

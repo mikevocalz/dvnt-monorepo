@@ -39,6 +39,8 @@ import { FormField, useDirtyGuard } from "@dvnt/ui";
 import { StickySaveBar } from "@dvnt/ui/sticky-save-bar-web";
 import { useVisualViewportBottom } from "@dvnt/app/components/use-visual-viewport-bottom.web";
 import { useEvent, useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canEditEvent } from "@dvnt/app/lib/events/event-role";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
   EVENT_VISIBILITY_OPTIONS,
@@ -145,8 +147,12 @@ export function EventEditScreen() {
   const showToast = useUIStore((st) => st.showToast);
   const updateEventMutation = useUpdateEvent();
   const { data: event, isLoading } = useEvent(id);
-  // Host ownership: only the event's host may edit (mirrors native's auth guard).
   const currentUser = useAuthStore((state) => state.user);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  // The public host projection uses a different ID space. Ask the server for
+  // this account's accepted role instead of comparing it with a display ID.
+  const editRole = useEventRole(id);
+  const mayEdit = isAuthenticated && editRole.hasResolved && canEditEvent(editRole.role);
   const s = useEventEditStore();
   const saveSession = useRef(createEventSaveSession());
   useEffect(() => {
@@ -310,7 +316,7 @@ export function EventEditScreen() {
   // ── Save (mirrors native handleSave: event row + tier CRUD diff) ──
   const saveLock = useRef(false);
   const handleSave = async () => {
-    if (!id || saveLock.current || updateEventMutation.isPending || uploadPct != null || flyerPreparation.isBusy()) return;
+    if (!mayEdit || !id || saveLock.current || updateEventMutation.isPending || uploadPct != null || flyerPreparation.isBusy()) return;
     if (!s.title.trim()) {
       showToast("error", "Error", "Title is required");
       return;
@@ -670,7 +676,8 @@ export function EventEditScreen() {
     }
   };
 
-  if (isLoading || s.hydratedId !== id) {
+  if (isLoading || (isAuthenticated && editRole.isPending && !editRole.isPaused) ||
+    (mayEdit && event && s.hydratedId !== id)) {
     return (
       <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#06070d] text-white flex items-center justify-center">
         <span className="text-sm text-white/50">Loading event…</span>
@@ -678,16 +685,19 @@ export function EventEditScreen() {
     );
   }
 
-  // Host-only guard (mirrors native's canEditEvent ownership check).
-  const ev = event as any;
-  const hostId = ev?.hostId ?? ev?.host_id ?? ev?.organizerId ?? ev?.host?.id;
-  const isOwner = !currentUser || !hostId || String(hostId) === String(currentUser.id);
-  if (!isOwner) {
+  if (!mayEdit || !event) {
     return (
       <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#06070d] text-white flex flex-col items-center justify-center gap-3 px-6">
         <span className="text-sm text-white/60 text-center">
-          You don&apos;t have permission to edit this event.
+          {editRole.isPaused || (editRole.isError && editRole.errorStatus !== 403 && editRole.errorStatus !== 401)
+            ? "We couldn't verify editing access. Check your connection and retry."
+            : "You don't have permission to edit this event. Only its host and accepted co-hosts or editors can make changes."}
         </span>
+        {(editRole.isPaused || editRole.isError) && (
+          <button onClick={() => void editRole.refetch()} className="px-4 h-10 rounded-xl bg-white/8 text-sm font-semibold">
+            Retry
+          </button>
+        )}
         <button
           onClick={() => router.back()}
           className="px-4 h-10 rounded-xl bg-white/8 text-sm font-semibold"
