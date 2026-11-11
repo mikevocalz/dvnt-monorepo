@@ -2,7 +2,7 @@ const {test}=require('node:test');const assert=require('node:assert/strict');con
 const vm=require('node:vm');const ts=require('typescript');const {PGlite}=require('@electric-sql/pglite');
 const root=resolve(__dirname,'..');const exportsObject={};const fundingExports={};
 vm.runInNewContext(ts.transpileModule(readFileSync(resolve(root,'apps/mobile/supabase/functions/_shared/settlement-funding.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:fundingExports,Date,Set,Number,Error,encodeURIComponent});
-vm.runInNewContext(ts.transpileModule(readFileSync(resolve(root,'apps/mobile/supabase/functions/_shared/settlement-engine.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:exportsObject,Date,Set,Number,Error,encodeURIComponent,require:p=>{assert.equal(p,'./settlement-funding.ts');return fundingExports}});
+vm.runInNewContext(ts.transpileModule(readFileSync(resolve(root,'apps/mobile/supabase/functions/_shared/settlement-engine.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:exportsObject,Date,Set,Number,Error,encodeURIComponent,require:p=>{if(p==='./settlement-recipient.ts')return require('./fixtures/settlement/recipient.cjs');assert.equal(p,'./settlement-funding.ts');return fundingExports}});
 const {processSettlementOrder}=exportsObject;
 const {sourceSchemaSql}=require('./fixtures/settlement/replacement-source-schema.cjs');
 const {issuePaidOrder,fixtureTier}=require('./fixtures/settlement/issuance.cjs');
@@ -82,7 +82,7 @@ test('platform reserve remains after promoter transfer and blocks only insuffici
 test('platform automatic payout sweep or unreadable schedule blocks every new send',async()=>{for(const settings of [{payouts:{schedule:{interval:'weekly'}}},{}]){const f=await setup();try{const get=f.provider.get;f.provider.get=async(path,...args)=>path==='/v1/account'?{object:'account',id:'acct_platform_fixture',settings}:get(path,...args);const result=await f.run(true);assert.equal(f.transfers.length,0);assert.ok(result.held.some(x=>x.includes('platform_payout_policy_unverified')));}finally{await f.pg.close();}}});
 
 
-test('legacy v1 recipient rejected by v2 stays held with no fallback, reservation or transfer',async()=>{const f=await setup();try{
+test('untyped v1-looking error stays held with no fallback, reservation or transfer',async()=>{const f=await setup();try{
  const reads=[],calls=[];const get=f.provider.get,rpc=f.db.rpc.bind(f.db);
  f.provider.get=async(path,...args)=>{reads.push(path);if(path.startsWith('/v2/core/accounts/'))throw Object.assign(new Error('v1_account_instead_of_v2_account'),{code:'v1_account_instead_of_v2_account'});return get(path,...args)};
  f.db.rpc=async(name,args)=>{calls.push(name);return rpc(name,args)};

@@ -1,3 +1,4 @@
+import { SettlementProviderError } from "../_shared/settlement-recipient.ts";
 import { reconcileReplacementInventoryOrder } from "../_shared/settlement-replacement-cleanup.ts";
 import { withSentry } from "../_shared/sentry.ts";
 import { withHeartbeat } from "../_shared/heartbeat.ts";
@@ -44,8 +45,8 @@ Deno.serve(withSentry("settlements-process",async(req:Request)=>{
     ...(connectedAccount?{'Stripe-Account':connectedAccount}:{}),
     ...(body?{'Content-Type':'application/x-www-form-urlencoded','Idempotency-Key':idempotencyKey!}:{})},
    ...(body?{body:new URLSearchParams(body)}:{}),signal:AbortSignal.timeout(30000)});
-  const value=await response.json();
-  if(!response.ok||value.error)throw new Error(`Stripe request failed (${response.status})`);
+  const value=await response.json().catch(()=>{throw new SettlementProviderError(response.status,null)});
+  if(!response.ok||value?.error)throw new SettlementProviderError(response.status,value?.error?.code);
   return value;
  };
  const provider:SettlementProvider={assertCanStart,get:(path,account)=>request(path,undefined,undefined,account),post:(path,body,idempotencyKey)=>request(path,body,idempotencyKey)};

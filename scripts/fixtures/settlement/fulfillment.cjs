@@ -3,9 +3,9 @@ const {PGlite}=require('@electric-sql/pglite');const ts=require('typescript');co
 const root=resolve(__dirname,'../../..');const read=p=>readFileSync(resolve(root,p),'utf8');
 const {sourceSchemaSql:sourceSql}=require('./replacement-source-schema.cjs');
 const funding={};vm.runInNewContext(ts.transpileModule(read('apps/mobile/supabase/functions/_shared/settlement-funding.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:funding,Date,Set,Number,Error,encodeURIComponent});
-const engine={};vm.runInNewContext(ts.transpileModule(read('apps/mobile/supabase/functions/_shared/settlement-engine.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:engine,Date,Set,Number,Error,encodeURIComponent,require:()=>funding});
+const engine={};vm.runInNewContext(ts.transpileModule(read('apps/mobile/supabase/functions/_shared/settlement-engine.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:engine,Date,Set,Number,Error,encodeURIComponent,require:p=>p==='./settlement-recipient.ts'?require('./recipient.cjs'):funding});
 const TIER='00000000-0000-4000-8000-0000000000aa';const ADDON='00000000-0000-4000-8000-0000000000ab';const VARIANT='00000000-0000-4000-8000-0000000000ac';
-async function setup({rail='create-payment-intent',quantity=1,capacity=100,cartAddon=false,addonOnly=false,defaultGrants=false,installGate=true,uuidSpelling=x=>x,secondAdmission=false,hostedPiUnknown=false}={}){
+async function setup({rail='create-payment-intent',quantity=1,capacity=100,cartAddon=false,addonOnly=false,defaultGrants=false,installGate=true,uuidSpelling=x=>x,secondAdmission=false,hostedPiUnknown=false,fundingMode=false}={}){
  const pg=new PGlite();
  for(const p of ['scripts/fixtures/settlement/schema.sql','scripts/fixtures/settlement/external-schema.sql'])await pg.exec(read(p));
  if(defaultGrants)await pg.exec('ALTER DEFAULT PRIVILEGES GRANT EXECUTE ON FUNCTIONS TO anon,authenticated,service_role; ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO anon,authenticated,service_role;');
@@ -18,7 +18,8 @@ async function setup({rail='create-payment-intent',quantity=1,capacity=100,cartA
  await pg.exec(artifact);
  if(installGate&&!(await pg.query("SELECT to_regclass('dvnt_settlement.fulfillments') v")).rows[0].v)throw Error('Generated artifact is missing the fulfillment gate');
  await pg.exec(read('scripts/fixtures/settlement/approved-policy.sql'));
- await pg.exec("INSERT INTO dvnt_settlement.funding_policy VALUES(true,'acct_platform_fixture',false,0,'synthetic only'); UPDATE dvnt_settlement.controls SET checkout_enabled=true,transfers_enabled=true; INSERT INTO dvnt_settlement.currency_reserves VALUES('usd',0,'synthetic only'); UPDATE event_promoters SET stripe_account_id='acct_promoter';");
+ await pg.query("INSERT INTO dvnt_settlement.funding_policy VALUES(true,'acct_platform_fixture',$1,0,'synthetic only')",[fundingMode]);
+ await pg.exec("UPDATE dvnt_settlement.controls SET checkout_enabled=true,transfers_enabled=true; INSERT INTO dvnt_settlement.currency_reserves VALUES('usd',0,'synthetic only'); UPDATE event_promoters SET stripe_account_id='acct_promoter';");
  await pg.query("INSERT INTO ticket_types(id,event_id,currency,quantity_total,quantity_sold) VALUES($1,1,'usd',$2,0)",[TIER,capacity]);
  const cart=rail==='cart-checkout'?randomUUID():null;const line=cart&&!addonOnly?randomUUID():null;const addonLine=cart&&(cartAddon||addonOnly)?randomUUID():null;
  const secondTier='00000000-0000-4000-8000-0000000000ad';const secondLine=secondAdmission?randomUUID():null;
@@ -54,10 +55,10 @@ function worker(db,provider,env={}) {
  let handler;
  const code=read('apps/mobile/supabase/functions/settlements-process/index.ts').replace(/^import[\s\S]*?from [^;]+;\n/gm,'');
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{
-  exports:{},withSentry:(_n,fn)=>fn,withHeartbeat:(_n,fn)=>fn(),...engine,...recovery,performance,Response,Request,URLSearchParams,AbortSignal,
+  exports:{},withSentry:(_n,fn)=>fn,withHeartbeat:(_n,fn)=>fn(),...engine,...recovery,...require('./recipient.cjs'),performance,Response,Request,URLSearchParams,AbortSignal,
   Deno:{env:{get:k=>({SETTLEMENT_RUN_BUDGET_MS:'120000',SETTLEMENT_WORKER_SECRET:'fixture_worker',STRIPE_SECRET_KEY:'fixture_provider',SUPABASE_URL:'https://fixture.invalid',SUPABASE_SERVICE_ROLE_KEY:'fixture_service',...env})[k]},serve:fn=>handler=fn},
   createClient:()=>db,
-  fetch:async(url,options)=>{const path=url.replace('https://api.stripe.com','');try{return Response.json(options.method==='POST'?await provider.post(path,Object.fromEntries(new URLSearchParams(options.body)),options.headers['Idempotency-Key']):await provider.get(path));}catch{return Response.json({error:{message:'synthetic provider unavailable'}},{status:400});}},
+  fetch:async(url,options)=>{const path=url.replace('https://api.stripe.com','');try{return Response.json(options.method==='POST'?await provider.post(path,Object.fromEntries(new URLSearchParams(options.body)),options.headers['Idempotency-Key']):await provider.get(path,options.headers['Stripe-Account']));}catch(error){return Response.json({error:{message:'synthetic private provider details',code:error.code}},{status:error.status||400});}},
  });
  return ()=>handler(new Request('https://fixture.invalid/settlements-process',{method:'POST',headers:{Authorization:'Bearer fixture_worker'}}));
 }
