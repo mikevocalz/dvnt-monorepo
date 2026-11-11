@@ -15,6 +15,12 @@
 /** Mirrors the server's role ladder. `null` = not staff on this event. */
 export type EventRole = "owner" | "admin" | "editor" | "scanner" | null;
 
+/** Validate untrusted API/cache values before exposing any staff capability. */
+export function normalizeEventRole(value: unknown): EventRole {
+  return value === "owner" || value === "admin" || value === "editor" || value === "scanner"
+    ? value : null;
+}
+
 const RANK: Record<Exclude<EventRole, null>, number> = {
   owner: 3,
   admin: 2,
@@ -23,8 +29,8 @@ const RANK: Record<Exclude<EventRole, null>, number> = {
 };
 
 function atLeast(role: EventRole, floor: Exclude<EventRole, null>): boolean {
-  if (!role) return false;
-  return RANK[role] >= RANK[floor];
+  const validated = normalizeEventRole(role);
+  return validated !== null && RANK[validated] >= RANK[floor];
 }
 
 /**
@@ -32,7 +38,7 @@ function atLeast(role: EventRole, floor: Exclude<EventRole, null>): boolean {
  * every staff role has.
  */
 export function canScanTickets(role: EventRole): boolean {
-  return role !== null;
+  return normalizeEventRole(role) !== null;
 }
 
 /** Editing the event itself: content, schedule, tiers. */
@@ -45,7 +51,7 @@ export function canViewFullRoster(role: EventRole): boolean {
   return atLeast(role, "editor");
 }
 
-/** Staff management and anything that spends money. */
+/** Staff management. Refunds, payouts and cancellation remain owner-only. */
 export function canManageStaff(role: EventRole): boolean {
   return atLeast(role, "admin");
 }
@@ -62,7 +68,7 @@ export function canDeleteEvent(role: EventRole): boolean {
 
 /** Does this account have ANY host-side business with this event? */
 export function isEventStaff(role: EventRole): boolean {
-  return role !== null;
+  return normalizeEventRole(role) !== null;
 }
 
 /**

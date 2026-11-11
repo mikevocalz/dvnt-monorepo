@@ -1,3 +1,4 @@
+import { usePostPreviewLease } from "@dvnt/app/lib/media/use-post-preview-lease";
 import { FollowRequestsSetting } from "@dvnt/app/features/settings/follow-requests-setting";
 import { PendingCohostInvites } from "@dvnt/app/features/sneaky-lynk/ui/PendingCohostInvites";
 import { markActivityRead, markAllActivityRead } from "@dvnt/app/lib/activity/mark-activity-read";
@@ -362,7 +363,9 @@ export const ActivityItem = memo(
     onUserPress,
     onPostPress,
     onFollowBack,
-  }: ActivityItemProps) => (
+  }: ActivityItemProps) => {
+    const postPreview = usePostPreviewLease(activity.post?.id, activity.post?.thumbnail);
+    return (
     <Pressable
       onPress={() => onActivityPress(activity)}
       className={`flex-row items-center py-4 border-b border-border ${
@@ -444,10 +447,10 @@ export const ActivityItem = memo(
         </Text>
       </View>
 
-      {activity.post && (
+      {postPreview && (
         <View>
           <Image
-            source={{ uri: activity.post.thumbnail }}
+            source={{ uri: postPreview }}
             className="w-12 h-12 rounded-lg ml-3"
           />
         </View>
@@ -480,7 +483,7 @@ export const ActivityItem = memo(
         <CoOrgInviteActions inviteId={activity.entityId} />
       )}
     </Pressable>
-  ),
+  ); },
 );
 
 interface LikedItemProps {
@@ -490,6 +493,8 @@ interface LikedItemProps {
 }
 
 const LikedItem = memo(({ item, onPress, onUserPress }: LikedItemProps) => {
+  const leasedPreview = usePostPreviewLease(item.entityType === "post" ? item.entityId : undefined, item.previewImage);
+  const preview = item.entityType === "post" ? leasedPreview : item.previewImage;
   const palette = getLikedAccent(item.entityType);
 
   return (
@@ -622,9 +627,9 @@ const LikedItem = memo(({ item, onPress, onUserPress }: LikedItemProps) => {
             backgroundColor: "rgba(255,255,255,0.08)",
           }}
         >
-          {item.previewImage ? (
+          {preview ? (
             <Image
-              source={{ uri: item.previewImage }}
+              source={{ uri: preview }}
               style={{ width: 82, height: 104 }}
               contentFit="cover"
             />

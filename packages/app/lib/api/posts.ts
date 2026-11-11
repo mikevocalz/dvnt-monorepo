@@ -230,6 +230,7 @@ export function transformPost(
         livePhotoVideoUrl,
         thumbnail: m[DB.postsMedia.thumbnail] || undefined,
         sortOrder,
+        order: sortOrder,
       };
     })
     .sort((a: any, b: any) => a.sortOrder - b.sortOrder);
@@ -563,8 +564,9 @@ export const postsApi = {
           verified: false,
           name: "You",
         },
-        media: (data.media || []).map((m) => ({
+        media: (data.media || []).map((m, order) => ({
           ...m,
+          order,
           // Convert the flat DB-shaped input (type: "image"|"video" + mimeType)
           // back into the rich in-memory MediaKind so the feed grid / detail
           // screen renders GIFs, Live Photos, and animated videos correctly
@@ -612,7 +614,7 @@ export const postsApi = {
   async likePost(
     postId: string,
     isLiked: boolean,
-  ): Promise<{ liked: boolean; likes: number }> {
+  ): Promise<{ liked: boolean; likes: number; countHidden?: boolean }> {
     // Import dynamically to avoid circular dependency
     const { likesApi } = await import("./likes");
     return likesApi.toggleLike(postId);

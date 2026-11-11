@@ -45,6 +45,8 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(ROOT, 'packages/
 });
 const icons = ['Heart','MessageCircle','UserPlus','AtSign','Bell','BellOff','CheckCheck','Calendar','Radio','ImageOff','Megaphone'].map(name => `export const ${name}=()=>null;`).join('\n');
 const boundaries = {
+  // Ticket/follow notification rows do not exercise protected post media.
+  '@dvnt/app/lib/media/use-post-preview-lease': 'export const usePostPreviewLease=(_id,fallback)=>fallback;',
   '@dvnt/app/features/settings/follow-requests-setting.web': 'export const FollowRequestsSetting=()=>null;',
   '@dvnt/app/features/settings/follow-requests-setting': 'export const FollowRequestsSetting=()=>null;',
 

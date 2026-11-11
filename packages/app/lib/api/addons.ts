@@ -189,6 +189,22 @@ function timeoutSignal(ms: number): AbortSignal {
   return controller.signal;
 }
 
+/** The parent exists even when saving its variants fails. Reuse this ID on retry. */
+export class AddonCreatePartialError extends Error {
+  readonly addonId: string;
+  constructor(addonId: string, cause: unknown) {
+    super("The add-on was created, but its variants could not be saved. Reload this add-on before retrying.", { cause });
+    this.name = "AddonCreatePartialError";
+    this.addonId = addonId;
+  }
+}
+
+function requireWrittenRows(data: unknown, expected = 1): void {
+  if (!Array.isArray(data) || data.length !== expected) {
+    throw new Error("The add-on change was not confirmed. Your access may have changed. Reload before retrying.");
+  }
+}
+
 export const addonsApi = {
   /** All add-ons for an event, variants embedded (public read). */
   async getByEvent(eventId: string): Promise<AddonRecord[]> {
@@ -202,7 +218,7 @@ export const addonsApi = {
       return (data || []) as AddonRecord[];
     } catch (err) {
       console.error("[Addons] getByEvent error:", err);
-      return [];
+      throw err;
     }
   },
 
@@ -236,21 +252,30 @@ export const addonsApi = {
         .single();
       if (error) throw error;
 
-      if (hasVariants && data?.id) {
-        const rows = (params.variants ?? []).map((v, i) => ({
-          addon_id: data.id,
-          name: v.name,
-          option_values: v.optionValues,
-          price_cents: v.priceCents ?? null,
-          quantity_total: v.quantityTotal ?? null,
-          sku: v.sku ?? null,
-          sort_order: v.sortOrder ?? i,
-        }));
-        const { error: variantError } = await supabase
-          .from("ticket_addon_variants")
-          .insert(rows)
-          .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS));
-        if (variantError) throw variantError;
+      if (!data?.id) throw new Error("The add-on creation was not confirmed.");
+
+      if (hasVariants) {
+        try {
+          const rows = (params.variants ?? []).map((v, i) => ({
+            addon_id: data.id,
+            name: v.name,
+            option_values: v.optionValues,
+            price_cents: v.priceCents ?? null,
+            quantity_total: v.quantityTotal ?? null,
+            sku: v.sku ?? null,
+            sort_order: v.sortOrder ?? i,
+          }));
+          const { data: writtenVariants, error: variantError } = await supabase
+            .from("ticket_addon_variants")
+            .insert(rows)
+            .select("*")
+            .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS));
+          if (variantError) throw variantError;
+          requireWrittenRows(writtenVariants, rows.length);
+          data.ticket_addon_variants = writtenVariants;
+        } catch (cause) {
+          throw new AddonCreatePartialError(String(data.id), cause);
+        }
       }
       return data as AddonRecord;
     } catch (err) {
@@ -283,12 +308,14 @@ export const addonsApi = {
   ): Promise<boolean> {
     try {
       await ensureBridgeAuth();
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("ticket_addons")
         .update(updates)
         .eq("id", id)
+        .select("id")
         .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS));
       if (error) throw error;
+      requireWrittenRows(data);
       return true;
     } catch (err) {
       console.error("[Addons] update error:", err);
@@ -299,17 +326,19 @@ export const addonsApi = {
   /**
    * Retire an add-on. Hard-deletes when nothing sold (order_addons FKs are
    * ON DELETE RESTRICT); falls back to status='ended' when the delete is
-   * blocked so sold history is never orphaned.
+   * blocked by a foreign-key constraint so sold history is never orphaned.
    */
   async remove(id: string): Promise<boolean> {
     try {
       await ensureBridgeAuth();
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("ticket_addons")
         .delete()
         .eq("id", id)
+        .select("id")
         .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS));
-      if (!error) return true;
+      if (!error) { requireWrittenRows(data); return true; }
+      if (error.code !== "23503") throw error;
       // 23503 = foreign_key_violation (already-sold add-on) → soft-retire.
       return addonsApi.update(id, { status: "ended" });
     } catch (err) {
@@ -332,6 +361,9 @@ export const addonsApi = {
       sku?: string | null;
       sortOrder?: number;
     }>,
+    // Called immediately for each confirmed insert, before any later write can
+    // fail. Persist the ID in the draft so retry updates instead of duplicates.
+    onPersisted?: (index: number, row: AddonVariantRecord) => void,
   ): Promise<boolean> {
     try {
       await ensureBridgeAuth();
@@ -341,6 +373,10 @@ export const addonsApi = {
         .eq("addon_id", addonId);
       if (readError) throw readError;
 
+      const existingIds = new Set((existing || []).map((row: { id: string }) => String(row.id)));
+      if (variants.some(v => v.id && !existingIds.has(String(v.id)))) {
+        throw new Error("A variant does not belong to this add-on. Reload before retrying.");
+      }
       const keptIds = new Set(
         variants.filter((v) => v.id).map((v) => String(v.id)),
       );
@@ -350,12 +386,15 @@ export const addonsApi = {
 
       if (removedIds.length > 0) {
         // RESTRICT FKs will block deleting a sold variant — surface that error.
-        const { error: deleteError } = await supabase
+        const { data: deleted, error: deleteError } = await supabase
           .from("ticket_addon_variants")
           .delete()
           .in("id", removedIds)
+          .eq("addon_id", addonId)
+          .select("id")
           .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS));
         if (deleteError) throw deleteError;
+        requireWrittenRows(deleted, removedIds.length);
       }
 
       for (const [i, v] of variants.entries()) {
@@ -368,30 +407,38 @@ export const addonsApi = {
           sort_order: v.sortOrder ?? i,
         };
         if (v.id) {
-          const { error } = await supabase
+          const { data: written, error } = await supabase
             .from("ticket_addon_variants")
             .update(row)
             .eq("id", v.id)
+            .eq("addon_id", addonId)
+            .select("id")
             .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS));
           if (error) throw error;
+          requireWrittenRows(written);
         } else {
-          const { error } = await supabase
+          const { data: written, error } = await supabase
             .from("ticket_addon_variants")
             .insert({ ...row, addon_id: addonId })
+            .select("*")
             .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS));
           if (error) throw error;
+          requireWrittenRows(written);
+          onPersisted?.(i, written[0] as AddonVariantRecord);
         }
       }
 
-      const { error: flagError } = await supabase
+      const { data: flagged, error: flagError } = await supabase
         .from("ticket_addons")
         .update({
           has_variants: variants.length > 0,
           ...(variants.length > 0 ? { quantity_total: null } : {}),
         })
         .eq("id", addonId)
+        .select("id")
         .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS));
       if (flagError) throw flagError;
+      requireWrittenRows(flagged);
       return true;
     } catch (err) {
       console.error("[Addons] syncVariants error:", err);

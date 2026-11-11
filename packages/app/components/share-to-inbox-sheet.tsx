@@ -1,3 +1,4 @@
+import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delivery";
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   View,
@@ -106,7 +107,7 @@ export function ShareToInboxSheet({
         authorUsername: post.authorUsername,
         authorAvatar: post.authorAvatar,
         caption: post.caption,
-        mediaUrl: post.mediaUrl,
+        mediaUrl: protectedPostMediaEnabled() ? undefined : post.mediaUrl,
         mediaType: post.mediaType,
       };
 

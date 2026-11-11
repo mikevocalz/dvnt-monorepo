@@ -1,3 +1,4 @@
+import { usePostPreviewLease } from "@dvnt/app/lib/media/use-post-preview-lease";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
@@ -17,6 +18,7 @@ export function SharedPostBubble({
   isOwnMessage,
   onLongPress,
 }: SharedPostBubbleProps) {
+  const preview = usePostPreviewLease(sharedPost.postId, sharedPost.mediaUrl);
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -34,14 +36,14 @@ export function SharedPostBubble({
       style={styles.container}
     >
       {/* Post media preview */}
-      {sharedPost.mediaUrl ? (
+      {preview ? (
         <Image
-          source={{ uri: sharedPost.mediaUrl }}
+          source={{ uri: preview }}
           style={styles.mediaPreview}
           contentFit="cover"
           transition={0}
-          cachePolicy="memory-disk"
-          recyclingKey={sharedPost.mediaUrl}
+          cachePolicy="none"
+          recyclingKey={preview}
         />
       ) : (
         <View style={[styles.mediaPreview, styles.noMedia]}>

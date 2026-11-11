@@ -4,8 +4,8 @@
  * POST /event-cancel
  * Body: { eventId: number, reason?: string }
  *
- * Owner or accepted ADMIN co-organizer (same callerRole bar as
- * event-broadcast-message / get-event-staff). Supersedes the legacy
+ * Owner only: cancellation moves money and cannot be undone.
+ * Content editing and staff management do not grant refunds. Supersedes the legacy
  * `cancel-event` fn (owner-only, no batching/resume, no waitlist
  * close-out, no guest email) — that directory is frozen by the identity
  * consolidation sweep, so the WS-9 orchestration lands here.
@@ -156,35 +156,16 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Permission: owner OR accepted admin co-organizer — exactly the
-    // broadcast/staff callerRole bar. Editors/scanners are denied:
-    // cancelling moves money.
-    const isOwner = String(event.host_id) === String(authId);
-    if (!isOwner) {
-      const { data: coOrg } = await supabase
-        .from("event_co_organizers")
-        .select("role, accepted")
-        .eq("event_id", eventId)
-        .eq("user_id", authId)
-        .eq("accepted", true)
-        .eq("role", "admin")
-        .maybeSingle();
-      if (!coOrg) {
-        return json(
-          {
-            ok: false,
-            error: {
-              message:
-                "Only the event owner or an admin co-organizer can cancel this event",
-            },
-          },
-          403,
-          req,
-        );
-      }
+    // Destructive cancellation and refund authority belongs to the owner only.
+    // Recheck every invocation, including resumable refund sweeps.
+    if (String(event.host_id) !== String(authId)) {
+      return json(
+        { ok: false, error: { message: "Only the event owner can cancel this event" } },
+        403,
+        req,
+      );
     }
 
-    // 10/min: a resume loop legitimately re-invokes several times.
     const rl = checkRateLimit(authId, `event-cancel:${eventId}`, {
       maxRequests: 10,
       windowMs: 60_000,

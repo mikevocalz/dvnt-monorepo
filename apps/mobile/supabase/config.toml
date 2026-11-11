@@ -608,3 +608,7 @@ verify_jwt = false
 # Verified Better Auth session and current post-access projection checked internally.
 [functions.protected-photo-preview]
 verify_jwt = false
+
+# Better Auth verified internally; every lease rechecks the current post gate.
+[functions.post-media-lease]
+verify_jwt = false

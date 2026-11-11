@@ -1,4 +1,5 @@
 "use client";
+import { usePostPreviewLease } from "@dvnt/app/lib/media/use-post-preview-lease";
 import { FollowRequestsSetting } from "@dvnt/app/features/settings/follow-requests-setting.web";
 import { cohostActivityRoute } from "@dvnt/app/features/sneaky-lynk/cohost-invite-policy";
 import { markActivityRead, markAllActivityRead } from "@dvnt/app/lib/activity/mark-activity-read";
@@ -530,6 +531,7 @@ export function ActivityRow({
   onPostPress: (postId: string) => void;
   onFollowBack: (a: Activity) => void;
 }) {
+  const postPreview = usePostPreviewLease(activity.post?.id, activity.post?.thumbnail);
   return (
     <div
       onClick={() => onActivityPress(activity)}
@@ -607,7 +609,7 @@ export function ActivityRow({
         <p className="mt-0.5 text-xs text-white/50">{activity.timeAgo}</p>
       </div>
 
-      {activity.post?.thumbnail ? (
+      {postPreview ? (
         <button
           type="button"
           onClick={(e) => {
@@ -617,7 +619,7 @@ export function ActivityRow({
           className="shrink-0"
         >
           <PostThumb
-            src={activity.post.thumbnail}
+            src={postPreview}
             className="ml-3 h-12 w-12 rounded-lg object-cover bg-white/10"
           />
         </button>
@@ -662,6 +664,8 @@ function LikedRow({
   onUserPress: (username: string, avatar?: string) => void;
 }) {
   const isEvent = item.entityType === "event";
+  const leasedPreview = usePostPreviewLease(isEvent ? undefined : item.entityId, item.previewImage);
+  const preview = isEvent ? item.previewImage : leasedPreview;
   const accent = isEvent ? "#10B981" : "#FF5BFC";
   const border = isEvent
     ? "border-emerald-500/20 bg-emerald-950/40"
@@ -728,9 +732,9 @@ function LikedRow({
         <div
           className="flex h-[104px] w-[82px] shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/8"
         >
-          {item.previewImage ? (
+          {preview ? (
             <PostThumb
-              src={item.previewImage}
+              src={preview}
               className="h-full w-full object-cover"
             />
           ) : isEvent ? (

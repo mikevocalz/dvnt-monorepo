@@ -1,5 +1,8 @@
 /** Resolve the motion half of a post without replacing its still-image poster. */
 export interface WebPostMedium {
+  postId?: string;
+  order?: number;
+  expiresAt?: number;
   type?: string;
   url: string;
   thumbnail?: string;

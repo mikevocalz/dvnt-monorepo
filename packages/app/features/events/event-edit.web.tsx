@@ -39,6 +39,8 @@ import { FormField, useDirtyGuard } from "@dvnt/ui";
 import { StickySaveBar } from "@dvnt/ui/sticky-save-bar-web";
 import { useVisualViewportBottom } from "@dvnt/app/components/use-visual-viewport-bottom.web";
 import { useEvent, useUpdateEvent } from "@dvnt/app/lib/hooks/use-events";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canEditEvent, canManageStaff } from "@dvnt/app/lib/events/event-role";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import {
   EVENT_VISIBILITY_OPTIONS,
@@ -68,9 +70,10 @@ import {
   type LocalTicketTier,
 } from "@dvnt/app/lib/stores/event-edit-store";
 import { addonsApi } from "@dvnt/app/lib/api/addons";
+import { saveAddonCatalog } from "@dvnt/app/lib/events/save-addon-catalog";
+import { catalogSaveNeedsReload } from "@dvnt/app/lib/events/catalog-save-error";
 import {
   addonRecordToDraft,
-  draftAddonToCreateParams,
 } from "@dvnt/app/features/events/create/addon-form";
 import { AddonsEditor } from "@dvnt/app/features/events/create/addons-editor.web";
 import { resolveEventSchedule } from "@dvnt/app/features/events/create/event-form";
@@ -145,8 +148,14 @@ export function EventEditScreen() {
   const showToast = useUIStore((st) => st.showToast);
   const updateEventMutation = useUpdateEvent();
   const { data: event, isLoading } = useEvent(id);
-  // Host ownership: only the event's host may edit (mirrors native's auth guard).
   const currentUser = useAuthStore((state) => state.user);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  // The public host projection uses a different ID space. Ask the server for
+  // this account's accepted role instead of comparing it with a display ID.
+  const editRole = useEventRole(id);
+  const mayEdit = isAuthenticated && editRole.hasResolved && canEditEvent(editRole.role);
+  const editAccess = useRef({ id, mayEdit });
+  editAccess.current = { id, mayEdit };
   const s = useEventEditStore();
   const saveSession = useRef(createEventSaveSession());
   useEffect(() => {
@@ -166,6 +175,8 @@ export function EventEditScreen() {
   const flyerRef = useRef<HTMLInputElement>(null);
   const flyerPreparation = useEventFlyerPreparation(id);
   const [tierLoadFailed, setTierLoadFailed] = useState(false);
+  const [addonLoadFailed, setAddonLoadFailed] = useState(false);
+  const [catalogPending, setCatalogPending] = useState(true);
   // A flyer video upload can run for minutes; a bare "Saving…" for that long
   // reads as a hung app, which is what "it won't let me upload" looks like.
   const [uploadPct, setUploadPct] = useState<number | null>(null);
@@ -173,7 +184,10 @@ export function EventEditScreen() {
 
   // ── Prefill from the fetched event (mirrors native fetchEvent) ──
   useEffect(() => {
-    if (!event || s.hydratedId === id) return;
+    if (!event || !mayEdit || s.hydratedId === id) return;
+    setCatalogPending(true);
+    setTierLoadFailed(false);
+    setAddonLoadFailed(false);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ev = event as any;
 
@@ -241,8 +255,13 @@ export function EventEditScreen() {
     const hydrationCurrent = () => screenMounted.current &&
       useEventEditStore.getState().hydratedId === id &&
       getAuthIdFromStore() === hydrationAuthId && getSessionLifecycle().epoch === hydrationEpoch;
+    let remainingLoads = 2;
+    const catalogLoaded = () => {
+      remainingLoads -= 1;
+      if (hydrationCurrent() && remainingLoads === 0) setCatalogPending(false);
+    };
     // Load ticket tiers
-    ticketTypesApi.getByEvent(id).then((dbTiers) => {
+    ticketTypesApi.getByEvent(id, false).then((dbTiers) => {
       if (!hydrationCurrent()) return;
       const activeTiers = dbTiers.filter(
         (t: any) => t.active !== false && t.is_active !== false,
@@ -287,7 +306,7 @@ export function EventEditScreen() {
       // Say it failed and keep the section empty-but-explained.
       console.error("[EditEvent] Ticket tier load failed:", err);
       if (hydrationCurrent()) setTierLoadFailed(true);
-    });
+    }).finally(catalogLoaded);
 
     // Load the add-on catalog (WS-3) — working copy + diff baseline.
     addonsApi.getByEvent(id).then((dbAddons) => {
@@ -298,9 +317,10 @@ export function EventEditScreen() {
       });
     }).catch((err) => {
       console.error("[EditEvent] Add-on load failed:", err);
-    });
+      if (hydrationCurrent()) setAddonLoadFailed(true);
+    }).finally(catalogLoaded);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [event, id, currentUser?.id, currentUser?.authId]);
+  }, [event, id, mayEdit, currentUser?.id, currentUser?.authId]);
 
   const isDirty = s.hydratedId === id && s.title.trim().length > 0;
   const saveBarRef = useRef<HTMLDivElement>(null);
@@ -310,7 +330,11 @@ export function EventEditScreen() {
   // ── Save (mirrors native handleSave: event row + tier CRUD diff) ──
   const saveLock = useRef(false);
   const handleSave = async () => {
-    if (!id || saveLock.current || updateEventMutation.isPending || uploadPct != null || flyerPreparation.isBusy()) return;
+    if (!mayEdit || !id || saveLock.current || updateEventMutation.isPending || uploadPct != null || flyerPreparation.isBusy()) return;
+    if (catalogPending || tierLoadFailed || addonLoadFailed) {
+      showToast("error", "Catalog not ready", "Reload the existing tickets and add-ons before saving to avoid duplicate or missing items.");
+      return;
+    }
     if (!s.title.trim()) {
       showToast("error", "Error", "Title is required");
       return;
@@ -338,7 +362,7 @@ export function EventEditScreen() {
     }
     const saving = saveSession.current.begin(
       JSON.stringify([id, expectedAuthId, expectedSessionEpoch]),
-      () => screenMounted.current && getAuthIdFromStore() === expectedAuthId &&
+      () => screenMounted.current && editAccess.current.id === id && editAccess.current.mayEdit && getAuthIdFromStore() === expectedAuthId &&
         getSessionLifecycle().epoch === expectedSessionEpoch && getSessionLifecycle().ready,
     );
     saveLock.current = true;
@@ -445,7 +469,7 @@ export function EventEditScreen() {
 
       saving.assertCurrent();
       // 2. Ticket tier creates / updates / deactivates
-      const tierPromises = s.ticketTiers.map(async (tier) => {
+      const tierPromises = s.ticketTiers.map(async (tier, tierIndex) => {
         saving.assertCurrent();
         const priceCents = Math.round(parseFloat(tier.priceDollars || "0") * 100);
         const qty = parseInt(tier.quantity || "100");
@@ -456,7 +480,7 @@ export function EventEditScreen() {
         const subAllocations = bandRowsToSubAllocations(tier.subAllocations);
 
         if (!tier.id) {
-          await withTimeout(
+          const created = await withTimeout(
             ticketTypesApi.create({
               eventId: id,
               name: tier.name || defaultTicketTypeName(tier.category),
@@ -476,6 +500,12 @@ export function EventEditScreen() {
             15000,
             "ticket-type-create",
           );
+          if (!created?.id) throw new Error("Ticket creation was not confirmed. Reload before retrying.");
+          saving.assertCurrent();
+          useEventEditStore.setState((current) => ({
+            ticketTiers: current.ticketTiers.map((row, index) => index === tierIndex ? { ...row, id: created.id } : row),
+            originalTierIds: Array.from(new Set([...current.originalTierIds, created.id])),
+          }));
         } else {
           await withTimeout(
             ticketTypesApi.update(tier.id, {
@@ -505,96 +535,55 @@ export function EventEditScreen() {
         s.ticketTiers.filter((t) => t.id).map((t) => t.id!),
       );
       const removedIds = s.originalTierIds.filter((tid) => !currentIds.has(tid));
-      const deactivatePromises = removedIds.map((tid) =>
-        withTimeout(ticketTypesApi.deactivate(tid), 15000, "ticket-type-deactivate"),
-      );
-
-      // 3. Add-on catalog creates / updates / removes (WS-3). requiresTierId
-      // already holds ticket_types uuids in the edit flow (identity resolve).
-      const addonPromises = s.addons.map(async (draft, i) => {
-        saving.assertCurrent();
-        const params = draftAddonToCreateParams(draft, id, (tid) => tid, i);
-        if (!params) return; // unnamed row — nothing to persist
-        if (!draft.dbId) {
-          await withTimeout(addonsApi.create(params), 15000, "addon-create");
-          return;
-        }
-        await withTimeout(
-          addonsApi.update(draft.dbId, {
-            name: params.name,
-            description: params.description ?? null,
-            addon_type: params.addonType,
-            binding_mode: params.bindingMode,
-            price_cents: params.priceCents,
-            min_price_cents: params.minPriceCents ?? null,
-            // Inventory lives on variants once the matrix exists.
-            quantity_total:
-              (params.variants?.length ?? 0) > 0
-                ? null
-                : (params.quantityTotal ?? null),
-            requires_tier_id: params.requiresTierId ?? null,
-            is_redeemable: params.isRedeemable ?? false,
-            sort_order: i,
-            status: params.status ?? "on_sale",
-          }),
-          15000,
-          "addon-update",
-        );
-        saving.assertCurrent();
-        await withTimeout(
-          addonsApi.syncVariants(
-            draft.dbId,
-            draft.variants
-              .filter((row) => row.size.trim() || row.color.trim())
-              .map((row, vi) => ({
-                id: row.dbId,
-                name: [row.size.trim(), row.color.trim()]
-                  .filter(Boolean)
-                  .join(" / "),
-                optionValues: {
-                  ...(row.size.trim() ? { size: row.size.trim() } : {}),
-                  ...(row.color.trim() ? { color: row.color.trim() } : {}),
-                },
-                priceCents:
-                  row.priceDollars.trim() === ""
-                    ? null
-                    : Math.round(parseFloat(row.priceDollars) * 100) || null,
-                quantityTotal:
-                  parseInt(row.quantity, 10) > 0
-                    ? parseInt(row.quantity, 10)
-                    : null,
-                sortOrder: vi,
-              })),
-          ),
-          15000,
-          "addon-variants",
-        );
+      const deactivatePromises = removedIds.map(async (tid) => {
+        await withTimeout(ticketTypesApi.deactivate(tid), 15000, "ticket-type-deactivate");
+        if (saving.current()) useEventEditStore.setState((current) => ({ originalTierIds: current.originalTierIds.filter((value) => value !== tid) }));
       });
-      const currentAddonIds = new Set(
-        s.addons.filter((a) => a.dbId).map((a) => a.dbId!),
-      );
-      const removedAddonIds = s.originalAddonIds.filter(
-        (aid) => !currentAddonIds.has(aid),
-      );
-      const addonRemovePromises = removedAddonIds.map((aid) =>
-        withTimeout(addonsApi.remove(aid), 15000, "addon-remove"),
-      );
+
+      // Shared web/native catalog saving retains confirmed IDs across partial retries.
+      const addonPromise = saveAddonCatalog({
+        eventId: id, addons: s.addons, originalIds: s.originalAddonIds,
+        assertCurrent: saving.assertCurrent, current: saving.current,
+        onCreated: (index, addonId, variants) => useEventEditStore.setState((current) => ({
+          addons: current.addons.map((row, i) => {
+            if (i !== index) return row;
+            let variantIndex = 0;
+            return { ...row, dbId: addonId, variants: row.variants.map((variant) => {
+              if (!variant.size.trim() && !variant.color.trim()) return variant;
+              const persisted = variants?.find((item) => item.sort_order === variantIndex++);
+              return persisted ? { ...variant, dbId: persisted.id } : variant;
+            }) };
+          }),
+          originalAddonIds: Array.from(new Set([...current.originalAddonIds, addonId])),
+        })),
+        onVariantPersisted: (index, variantIndex, persisted) => useEventEditStore.setState((current) => ({
+          addons: current.addons.map((row, i) => i === index ? { ...row,
+            variants: row.variants.map((variant, vi) => vi === variantIndex ? { ...variant, dbId: persisted.id } : variant),
+          } : row),
+        })),
+        onRemoved: (addonId) => useEventEditStore.setState((current) => ({ originalAddonIds: current.originalAddonIds.filter((value) => value !== addonId) })),
+      });
 
       try {
-        await Promise.all([
-          ...tierPromises,
-          ...deactivatePromises,
-          ...addonPromises,
-          ...addonRemovePromises,
+        const outcomes = await Promise.allSettled([
+          ...tierPromises, ...deactivatePromises, addonPromise,
         ]);
+        const failed = outcomes.find((outcome) => outcome.status === "rejected");
+        if (failed?.status === "rejected") throw failed.reason;
       } catch (err: any) {
         if (!saving.current()) return;
         console.error("[EditEvent] Tier/add-on sync error:", err);
+        const uncertain = catalogSaveNeedsReload(err);
+        if (uncertain) { setTierLoadFailed(true); setAddonLoadFailed(true); }
         showToast(
           "warning",
           "Partial save",
-          "Event saved, but some ticket or add-on changes did not apply. Open Edit and re-save.",
+          uncertain ? "Event details saved, but we couldn't confirm all catalog changes. Reopen this editor to check the saved items before trying again." :
+          "Event details saved, but some ticket or add-on changes did not apply. Your edits are still here. Check the error and try saving again.",
         );
+        await queryClient.invalidateQueries({ queryKey: ["tickets", "types", id] });
+        await queryClient.invalidateQueries({ queryKey: ["events"] });
+        return;
       }
 
       saving.assertCurrent();
@@ -670,7 +659,8 @@ export function EventEditScreen() {
     }
   };
 
-  if (isLoading || s.hydratedId !== id) {
+  if (isLoading || (isAuthenticated && editRole.isPending && !editRole.isPaused) ||
+    (mayEdit && event && s.hydratedId !== id)) {
     return (
       <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#06070d] text-white flex items-center justify-center">
         <span className="text-sm text-white/50">Loading event…</span>
@@ -678,16 +668,19 @@ export function EventEditScreen() {
     );
   }
 
-  // Host-only guard (mirrors native's canEditEvent ownership check).
-  const ev = event as any;
-  const hostId = ev?.hostId ?? ev?.host_id ?? ev?.organizerId ?? ev?.host?.id;
-  const isOwner = !currentUser || !hostId || String(hostId) === String(currentUser.id);
-  if (!isOwner) {
+  if (!mayEdit || !event) {
     return (
       <div data-dvnt-event-editor="" className="min-h-[100dvh] bg-[#06070d] text-white flex flex-col items-center justify-center gap-3 px-6">
         <span className="text-sm text-white/60 text-center">
-          You don&apos;t have permission to edit this event.
+          {editRole.isPaused || (editRole.isError && editRole.errorStatus !== 403 && editRole.errorStatus !== 401)
+            ? "We couldn't verify editing access. Check your connection and retry."
+            : "You don't have permission to edit this event. Only its host and accepted co-hosts or editors can make changes."}
         </span>
+        {(editRole.isPaused || editRole.isError) && (
+          <button onClick={() => void editRole.refetch()} className="px-4 h-10 rounded-xl bg-white/8 text-sm font-semibold">
+            Retry
+          </button>
+        )}
         <button
           onClick={() => router.back()}
           className="px-4 h-10 rounded-xl bg-white/8 text-sm font-semibold"
@@ -716,14 +709,15 @@ export function EventEditScreen() {
           onClick={handleSave}
           // Uploads run BEFORE the mutation starts, so isPending alone left
           // Done tappable for the whole upload — a second tap re-uploads.
-          disabled={updateEventMutation.isPending || uploadPct != null || flyerPreparation.isPreparing}
+          disabled={catalogPending || tierLoadFailed || addonLoadFailed || updateEventMutation.isPending || uploadPct != null || flyerPreparation.isPreparing}
           className="text-[16px] font-semibold text-[#3FDCFF] disabled:text-white/40"
         >
           {uploadPct != null || updateEventMutation.isPending ? "Saving…" : "Done"}
         </button>
       </div>
 
-      <div className="mx-auto w-full max-w-2xl px-4 pb-32 pt-4 flex flex-col gap-4">
+      <div inert={uploadPct != null || updateEventMutation.isPending} className="mx-auto w-full max-w-2xl px-4 pb-32 pt-4 flex flex-col gap-4">
+        {(catalogPending || tierLoadFailed || addonLoadFailed) && <p role="status" className="text-amber-300">{catalogPending ? "Loading existing tickets and add-ons…" : "Tickets or add-ons could not load. Reload this editor before saving."}</p>}
         {uploadPct != null && (
           <div role="status" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
             Uploading event media…
@@ -1048,6 +1042,7 @@ export function EventEditScreen() {
                   Ticket Tiers
                 </span>
                 <button
+                  disabled={catalogPending || tierLoadFailed}
                   onClick={() => s.addTier()}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#8A40CF]/15 border border-[#8A40CF]/30 text-[#8A40CF] text-[13px] font-semibold"
                 >
@@ -1084,16 +1079,16 @@ export function EventEditScreen() {
             Upsells sold alongside tickets. Already-sold add-ons can&apos;t be
             deleted — retire them by setting status to Ended.
           </p>
-          <AddonsEditor
+          {!catalogPending && !addonLoadFailed && <AddonsEditor
             addons={s.addons}
             onChange={s.setAddons}
             tierOptions={s.ticketTiers
               .filter((tier) => tier.id)
               .map((tier) => ({ id: tier.id!, name: tier.name }))}
-          />
+          />}
         </Section>
 
-        <EventFollowupSettings eventId={Number(id)} />
+        {canManageStaff(editRole.role) && <EventFollowupSettings eventId={Number(id)} />}
 
         {/* More details */}
         <Section title="More Details">
@@ -1159,7 +1154,7 @@ export function EventEditScreen() {
         visible={isDirty}
         onSave={handleSave}
         onCancel={() => router.back()}
-        saving={updateEventMutation.isPending}
+        saving={catalogPending || tierLoadFailed || addonLoadFailed || uploadPct != null || updateEventMutation.isPending}
       />
     </div>
   );

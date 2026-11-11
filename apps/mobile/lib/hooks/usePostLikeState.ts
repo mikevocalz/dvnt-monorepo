@@ -1,3 +1,4 @@
+import { resetFollowAccessCaches } from "@dvnt/app/lib/hooks/reset-follow-access-caches";
 /**
  * Centralized Post Like State Hook
  *
@@ -123,15 +124,15 @@ export function usePostLikeState(
 
   // Query for like state - use cached data or seed with initial values
   // NOTE: We use cache-first approach to prevent crashes from missing backend endpoints
-  const { data: likeState } = useQuery<LikeState>({
+  const { data: likeState } = useQuery<LikeState | null>({
     queryKey: likeStateQueryKey,
     queryFn: async () => {
       // Return cached value or initial values - no server fetch to prevent crashes
       const cached = queryClient.getQueryData<LikeState>(likeStateQueryKey);
-      return cached || { hasLiked: initialHasLiked, likes: initialLikesCount };
+      return cached === null ? null : cached || { hasLiked: initialHasLiked, likes: initialLikesCount };
     },
     // CRITICAL: Use existing cache if available, otherwise use initial props
-    initialData: existingCache || {
+    initialData: existingCache === null ? null : existingCache || {
       hasLiked: initialHasLiked,
       likes: initialLikesCount,
     },
@@ -144,11 +145,11 @@ export function usePostLikeState(
   const likeMutation = useMutation({
     mutationKey: ["likePost", normalizedPostId],
     mutationFn: async ({ action }: { action: "like" | "unlike" }) => {
-      if (action === "like") {
-        return likesApi.likePost(normalizedPostId);
-      } else {
-        return likesApi.unlikePost(normalizedPostId);
-      }
+      const owner = useAuthStore.getState().user;
+      const result = action === "like"
+        ? await likesApi.likePost(normalizedPostId)
+        : await likesApi.unlikePost(normalizedPostId);
+      return { ...result, isCurrent: () => useAuthStore.getState().user === owner };
     },
     onMutate: async ({ action }) => {
       // Cancel outgoing refetches
@@ -260,6 +261,10 @@ export function usePostLikeState(
       }
     },
     onSuccess: (data) => {
+      if (data.countHidden) {
+        void resetFollowAccessCaches(queryClient, true, data.isCurrent);
+        return;
+      }
       // Sync ALL caches with server-authoritative data
       const serverLiked = data.liked;
       const serverLikes = data.likes;
@@ -307,14 +312,14 @@ export function usePostLikeState(
 
   // Like action - only if not already liked
   const like = useCallback(() => {
-    if (!normalizedPostId || likeState?.hasLiked || likeMutation.isPending)
+    if (!normalizedPostId || queryClient.getQueryData(likeStateQueryKey) === null || likeState?.hasLiked || likeMutation.isPending)
       return;
     likeMutation.mutate({ action: "like" });
   }, [likeState?.hasLiked, likeMutation, normalizedPostId]);
 
   // Unlike action - only if currently liked
   const unlike = useCallback(() => {
-    if (!normalizedPostId || !likeState?.hasLiked || likeMutation.isPending)
+    if (!normalizedPostId || queryClient.getQueryData(likeStateQueryKey) === null || !likeState?.hasLiked || likeMutation.isPending)
       return;
     likeMutation.mutate({ action: "unlike" });
   }, [likeState?.hasLiked, likeMutation, normalizedPostId]);
@@ -332,9 +337,11 @@ export function usePostLikeState(
   // CRITICAL: Prioritize cached data over initial props
   // This ensures likes sync correctly on back navigation
   const finalHasLiked =
-    likeState?.hasLiked ?? existingCache?.hasLiked ?? initialHasLiked;
+    likeState === null || existingCache === null ? false :
+      likeState?.hasLiked ?? existingCache?.hasLiked ?? initialHasLiked;
   const finalLikesCount =
-    likeState?.likes ?? existingCache?.likes ?? initialLikesCount;
+    likeState === null || existingCache === null ? 0 :
+      likeState?.likes ?? existingCache?.likes ?? initialLikesCount;
 
   return {
     hasLiked: finalHasLiked,

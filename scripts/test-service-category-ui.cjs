@@ -19,6 +19,7 @@ const mocks = {
   '@dvnt/app/lib/stores/auth-store': `const state={user:{id:'fixture-owner',username:'member'},isAuthenticated:true,_hasHydrated:true};export const useAuthStore=selector=>selector(state);useAuthStore.getState=()=>state;useAuthStore.subscribe=()=>()=>{};`,
   '@dvnt/app/lib/stores/ui-store': `import {state} from 'fixture';export const useUIStore=selector=>selector({showToast:(...x)=>state.toasts.push(x)});`,
   '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage={getItem:()=>null,setItem:()=>{},removeItem:()=>{}};`,
+  '@dvnt/app/lib/hooks/use-event-role': `export const useEventRole=()=>({role:'owner',hasResolved:true,isPending:false,isPaused:false,isError:false,refetch:async()=>{}});`,
   '@dvnt/app/lib/hooks/use-events': `import {state,event} from 'fixture';export const useEvent=()=>({data:event,isLoading:false});export const useCreateEvent=()=>({isPending:false,mutateAsync:async x=>{state.events.push(x);return {id:'fixture-created-event'}}});export const useUpdateEvent=useCreateEvent;`,
   '@dvnt/app/lib/hooks/use-verified-gate': `export const useVerifiedGate=()=> (_action,run)=>run();`,
   '@dvnt/app/lib/hooks/use-places-autocomplete': `export const usePlacesAutocomplete=()=>({predictions:[],isLoading:false,input:'Test venue',setInput:()=>{},setShowDropdown:()=>{},clear:()=>{},selectPrediction:()=>{}});`,

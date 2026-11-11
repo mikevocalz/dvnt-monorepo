@@ -1,4 +1,6 @@
 "use client";
+import { usePostMediaLease } from "@dvnt/app/lib/media/use-post-media-lease";
+import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delivery";
 
 /**
  * Edit Post — WEB (@dvnt/app/features/post/edit-post). Real web port of the
@@ -61,6 +63,7 @@ export function EditPostScreen() {
 
   // ── Fetch post (same hook native uses for prefill) ──
   const { data: post, isLoading, isError } = usePost(id);
+  const leasedMedia = usePostMediaLease(post?.id, post?.media || []);
 
   // ── Post tags (Instagram-style) — same query native runs ──
   const { data: postTags = [] } = useQuery<PostTag[]>({
@@ -298,7 +301,7 @@ export function EditPostScreen() {
     );
   }
 
-  const mediaItems = post.media || [];
+  const mediaItems = leasedMedia;
   const hasMedia = mediaItems.length > 0;
   const activeSlide = s.textSlides[s.activeSlideIndex] ?? s.textSlides[0] ?? "";
 

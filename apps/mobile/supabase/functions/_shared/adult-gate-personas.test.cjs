@@ -142,6 +142,11 @@ function fakeDb(tables) {
   // Keep admission/ID policy in the real production modules loaded below.
   async function rpc(name, args) {
     rpcCalls.push({ name, args });
+    if (name === 'profile_is_private') {
+      const user = tables.users.find(u => u.id === args.p_user_id);
+      const preference = tables.user_settings?.find(s => s.auth_id === user?.auth_id)?.settings?.privacy?.privateAccount;
+      return { data: user ? user.is_private === true || (preference != null && String(preference) !== 'false') : null, error: null };
+    }
     if (name !== 'post_relationship_access') return { data: null, error: null };
     assert.ok(args && Array.isArray(args.p_authors), 'projection must name its authors');
     assert.ok(args.p_viewer === null || Number.isSafeInteger(args.p_viewer), 'projection viewer must be a resolved member');
