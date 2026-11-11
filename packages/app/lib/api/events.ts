@@ -1461,8 +1461,8 @@ export const eventsApi = {
       import("./addons"),
     ]);
     const [sourceTiers, sourceAddons] = await Promise.all([
-      ticketTypesApi.getByEvent(eventId).catch(() => []),
-      addonsApi.getByEvent(eventId).catch(() => []),
+      ticketTypesApi.getByEvent(eventId, false),
+      addonsApi.getByEvent(eventId),
     ]);
 
     const seed = Date.now();

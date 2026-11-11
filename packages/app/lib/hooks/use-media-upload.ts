@@ -214,10 +214,10 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
       setStatusMessage(null);
 
       try {
-      // Keep every half/file of this web batch on the session that started it.
+      // Keep every half/file of web and identity-guarded native batches on the starting session.
       // This value stays in the active closure, never in the persisted job.
       assertOwner?.();
-      const expectedAuthToken = Platform.OS === "web" ? await getAuthToken() : undefined;
+      const expectedAuthToken = Platform.OS === "web" || assertOwner ? await getAuthToken() : undefined;
       assertOwner?.();
       const results: MediaUploadResult[] = [];
       const videoCount = files.filter((f) => f.type === "video" && f.kind !== "animated_video").length;

@@ -40,6 +40,9 @@ import {
 } from "lucide-react-native";
 import { organizerRosterMetrics } from "@dvnt/app/lib/tickets/organizer-roster-metrics";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canEditEvent, canScanTickets, canManageStaff } from "@dvnt/app/lib/events/event-role";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { eventDraftsApi } from "@dvnt/app/lib/api/event-drafts";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { tickets } from "@dvnt/app/lib/api/tickets";
@@ -78,13 +81,30 @@ function EventOrganizerScreenContent() {
   // so we don't ship two different scanner UIs for the same job.
 
   const eventId = id || "";
-  const countsKnown = !isLoading && !loadError && loadedEventId === eventId;
+  const viewerId = useAuthStore((state) => state.user?.id);
+  const authenticated = useAuthStore((state) => state.isAuthenticated);
+  const access = useEventRole(eventId);
+  const mayManage = authenticated && access.hasResolved && canEditEvent(access.role);
+  const mayAdminister = mayManage && canManageStaff(access.role);
+  const isOwner = mayManage && access.role === "owner";
+  const assertPermission = useCallback(async (ownerOnly = false) => {
+    const fresh = await access.refetch();
+    const current = useAuthStore.getState();
+    if (!current.isAuthenticated || current.user?.id !== viewerId || !fresh.isSuccess || fresh.fetchStatus === "paused" ||
+        (ownerOnly ? fresh.data !== "owner" : !canEditEvent(fresh.data ?? null))) {
+      throw new Error("Your event access changed. Reopen event management before trying again.");
+    }
+  }, [access.refetch, viewerId]);
+
+  const countsKnown = !isLoading && !loadError && loadedEventId === `${viewerId}:${eventId}`;
 
   const handleDuplicateEvent = useCallback(async () => {
     const numericId = Number(eventId);
     if (!Number.isSafeInteger(numericId) || numericId <= 0 || duplicateLock.current) return;
+    if (!isOwner) return;
     duplicateLock.current = true;
     try {
+      await assertPermission(true);
       await eventDraftsApi.duplicateEvent(numericId);
       showToast(
         "success",
@@ -101,7 +121,7 @@ function EventOrganizerScreenContent() {
     } finally {
       duplicateLock.current = false;
     }
-  }, [eventId, router, showToast]);
+  }, [eventId, router, showToast, isOwner, assertPermission]);
 
   // Offline check-in state
   const offlineStore = useOfflineCheckinStore();
@@ -116,6 +136,7 @@ function EventOrganizerScreenContent() {
   const handleDownloadForOffline = useCallback(async () => {
     setIsDownloading(true);
     try {
+      await assertPermission();
       const tokens = await ticketsApi.downloadOfflineTokens(eventId);
       if (tokens.length > 0) {
         showToast(
@@ -132,12 +153,13 @@ function EventOrganizerScreenContent() {
     } finally {
       setIsDownloading(false);
     }
-  }, [eventId, offlineStore, showToast]);
+  }, [eventId, offlineStore, showToast, assertPermission]);
 
   const handleSyncPendingScans = useCallback(async () => {
     if (pendingScans.length === 0) return;
     setIsSyncing(true);
     try {
+      await assertPermission();
       const result = await ticketsApi.syncOfflineScans(pendingScans);
       if (result.synced.length > 0) {
         offlineStore.removePendingScans(eventId, result.synced);
@@ -161,9 +183,10 @@ function EventOrganizerScreenContent() {
     } finally {
       setIsSyncing(false);
     }
-  }, [pendingScans, eventId, offlineStore, showToast]);
+  }, [pendingScans, eventId, offlineStore, showToast, assertPermission]);
 
   const loadTickets = async () => {
+    if (!mayManage) return;
     const request = ++requestSequence.current;
     setIsLoading(true);
     setLoadError(false);
@@ -171,7 +194,7 @@ function EventOrganizerScreenContent() {
       const result = await tickets.getEventTickets(eventId);
       if (request !== requestSequence.current) return;
       setEventTickets((result as any) || []);
-      setLoadedEventId(eventId);
+      setLoadedEventId(`${viewerId}:${eventId}`);
     } catch (error: any) {
       if (request !== requestSequence.current) return;
       setLoadError(true);
@@ -187,9 +210,11 @@ function EventOrganizerScreenContent() {
   };
 
   useEffect(() => {
-    loadTickets();
+    setEventTickets([]);
+    setLoadedEventId("");
+    void loadTickets();
     return () => { requestSequence.current++; };
-  }, [eventId]);
+  }, [eventId, viewerId, mayManage]);
 
   // Refresh tickets every time the dashboard regains focus — covers the
   // "scanner just checked someone in" case now that the scanner is a
@@ -197,7 +222,7 @@ function EventOrganizerScreenContent() {
   useFocusEffect(
     useCallback(() => {
       loadTickets();
-    }, [eventId]),
+    }, [eventId, viewerId, mayManage]),
   );
 
   const handleRefresh = async () => {
@@ -211,6 +236,7 @@ function EventOrganizerScreenContent() {
   );
   const handleRefundTicket = useCallback(
     (ticketId: string, buyerName: string) => {
+      if (!isOwner) return;
       Alert.alert(
         "Refund this ticket?",
         `This cancels the ticket for ${buyerName} and refunds the full purchase back to their card. Cannot be undone.`,
@@ -222,6 +248,7 @@ function EventOrganizerScreenContent() {
             onPress: async () => {
               setRefundingTicketId(ticketId);
               try {
+                await assertPermission(true);
                 const res = await organizerApi.refundTicket(ticketId);
                 if (res.error) {
                   showToast("error", "Refund failed", res.error);
@@ -249,7 +276,7 @@ function EventOrganizerScreenContent() {
         ],
       );
     },
-    [showToast],
+    [showToast, isOwner, assertPermission],
   );
 
   const formatDate = (dateString: string) => {
@@ -263,6 +290,17 @@ function EventOrganizerScreenContent() {
   };
 
   const { issued: totalCount, checkedIn: checkedInCount, awaitingCheckIn: remainingCount } = organizerRosterMetrics(eventTickets);
+
+  if (!mayManage) return (
+    <SafeAreaView style={{ flex: 1, padding: 24, backgroundColor: colors.background }}>
+      <DetailBackButton />
+      <Text style={{ color: colors.foreground }}>{access.isPending && !access.isPaused && authenticated ? "Checking event access…"
+        : access.isError || access.isPaused ? "Could not verify event access. Try again."
+        : "You don't have permission to manage this event."}</Text>
+      {(access.isError || access.isPaused) && <Pressable onPress={() => void access.refetch()}><Text style={{ color: colors.foreground }}>Retry</Text></Pressable>}
+      {authenticated && access.hasResolved && canScanTickets(access.role) && <Pressable onPress={() => router.push(`/(protected)/events/${eventId}/scanner` as any)}><Text style={{ color: colors.foreground }}>Open scanner</Text></Pressable>}
+    </SafeAreaView>
+  );
 
   return (
     <SafeAreaView
@@ -294,7 +332,7 @@ function EventOrganizerScreenContent() {
         </Text>
         <Pressable
           onPress={() =>
-            router.push("/(protected)/events/organizer-setup" as any)
+            router.push(`/(protected)/events/${eventId}/edit` as any)
           }
           hitSlop={12}
         >
@@ -508,7 +546,7 @@ function EventOrganizerScreenContent() {
 
         {/* Analytics + Promo Codes — two-column row */}
         <View style={{ flexDirection: "row", gap: 8 }}>
-          <Pressable
+          {mayAdminister && <Pressable
             onPress={() =>
               router.push(`/(protected)/events/${eventId}/analytics` as any)
             }
@@ -535,7 +573,7 @@ function EventOrganizerScreenContent() {
             >
               Analytics
             </Text>
-          </Pressable>
+          </Pressable>}
           <Pressable
             onPress={() =>
               router.push(`/(protected)/events/${eventId}/promo-codes` as any)
@@ -568,7 +606,7 @@ function EventOrganizerScreenContent() {
 
         {/* Promoters + intentional duplicate-to-draft */}
         <View style={{ flexDirection: "row", gap: 8 }}>
-          <Pressable
+          {mayAdminister && <Pressable
             onPress={() =>
               router.push(`/(protected)/events/${eventId}/promoters` as any)
             }
@@ -589,8 +627,8 @@ function EventOrganizerScreenContent() {
             <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>
               Promoters
             </Text>
-          </Pressable>
-          <Pressable
+          </Pressable>}
+          {isOwner && <Pressable
             onPress={() => void handleDuplicateEvent()}
             style={{
               flex: 1,
@@ -609,7 +647,7 @@ function EventOrganizerScreenContent() {
             <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>
               Duplicate Event
             </Text>
-          </Pressable>
+          </Pressable>}
         </View>
       </View>
 
@@ -622,7 +660,7 @@ function EventOrganizerScreenContent() {
             <Text style={{ color: colors.primary, fontWeight: "600" }}>Retry</Text>
           </Pressable>
         </View>
-      ) : isLoading || loadedEventId !== eventId ? (
+      ) : !countsKnown ? (
         <View
           style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
         >
@@ -795,7 +833,7 @@ function EventOrganizerScreenContent() {
                   )}
 
                   {/* Refund button — only on tickets that CAN be refunded */}
-                  {ticket.status !== "revoked" &&
+                  {isOwner && ticket.status !== "revoked" &&
                   ticket.status !== "checked_in" && ticket.status !== "scanned" && !ticket.checked_in_at ? (
                     <Pressable
                       onPress={() =>

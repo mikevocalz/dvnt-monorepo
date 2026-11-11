@@ -134,6 +134,24 @@
       "owner": "tickets",
       "kind": "test",
       "automation": "apps/mobile/supabase/functions/_shared/repeat-purchase-sql.cjs"
+    },
+    {
+      "id": "cohost-event-permissions",
+      "owner": "events",
+      "kind": "command",
+      "automation": "test:cohost-editing"
+    },
+    {
+      "id": "cohost-editor-save-interactions",
+      "owner": "events",
+      "kind": "test",
+      "automation": "scripts/test-cohost-editor-dom.cjs"
+    },
+    {
+      "id": "cohost-sql-permission-boundaries",
+      "owner": "events",
+      "kind": "test",
+      "automation": "apps/mobile/supabase/functions/notify-event-change/cohost-sql.test.cjs"
     }
   ],
   "releaseCandidateManual": [

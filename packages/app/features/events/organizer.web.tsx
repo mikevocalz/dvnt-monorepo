@@ -50,6 +50,9 @@ import {
 import { tickets, ticketsApi, type TicketRecord } from "@dvnt/app/lib/api/tickets";
 import { organizerRosterMetrics } from "@dvnt/app/lib/tickets/organizer-roster-metrics";
 import { organizerApi } from "@dvnt/app/lib/api/organizer";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canEditEvent, canScanTickets, canManageStaff } from "@dvnt/app/lib/events/event-role";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useOfflineCheckinStore } from "@dvnt/app/lib/stores/offline-checkin-store";
 
@@ -188,7 +191,7 @@ function TicketRow({
 }: {
   ticket: TicketRecord;
   isRefunding: boolean;
-  onRefund: () => void;
+  onRefund?: () => void;
 }) {
   const refundable = !isRevoked(ticket) && !isCheckedIn(ticket);
   return (
@@ -219,7 +222,7 @@ function TicketRow({
         </p>
       ) : null}
 
-      {refundable ? (
+      {refundable && onRefund ? (
         <button
           type="button"
           onClick={onRefund}
@@ -245,6 +248,21 @@ export function EventOrganizerScreen() {
   const params = useParams();
   const rawId = (params as Record<string, string | string[]>)?.id;
   const eventId = Array.isArray(rawId) ? rawId[0] ?? "" : rawId ?? "";
+  const viewerId = useAuthStore((state) => state.user?.id);
+  const authenticated = useAuthStore((state) => state.isAuthenticated);
+  const access = useEventRole(eventId);
+  const mayManage = authenticated && access.hasResolved && canEditEvent(access.role);
+  const mayAdminister = mayManage && canManageStaff(access.role);
+  const isOwner = mayManage && access.role === "owner";
+  const assertPermission = useCallback(async (ownerOnly = false) => {
+    const fresh = await access.refetch();
+    const current = useAuthStore.getState();
+    if (!current.isAuthenticated || current.user?.id !== viewerId || !fresh.isSuccess || fresh.fetchStatus === "paused" ||
+        (ownerOnly ? fresh.data !== "owner" : !canEditEvent(fresh.data ?? null))) {
+      throw new Error("Your event access changed. Reopen event management before trying again.");
+    }
+  }, [access.refetch, viewerId]);
+
 
   const showToast = useUIStore((s) => s.showToast);
   const duplicateLock = useRef(false);
@@ -252,8 +270,10 @@ export function EventOrganizerScreen() {
   const handleDuplicateEvent = useCallback(async () => {
     const numericId = Number(eventId);
     if (!Number.isSafeInteger(numericId) || numericId <= 0 || duplicateLock.current) return;
+    if (!isOwner) return;
     duplicateLock.current = true;
     try {
+      await assertPermission(true);
       const { eventDraftsApi } = await import("@dvnt/app/lib/api/event-drafts");
       await eventDraftsApi.duplicateEvent(numericId);
       showToast(
@@ -271,7 +291,7 @@ export function EventOrganizerScreen() {
     } finally {
       duplicateLock.current = false;
     }
-  }, [eventId, router, showToast]);
+  }, [eventId, router, showToast, isOwner, assertPermission]);
 
   // Offline check-in state (Zustand — exact native store)
   const offlineStore = useOfflineCheckinStore();
@@ -290,7 +310,7 @@ export function EventOrganizerScreen() {
   const setLoadError = useOrganizerUIStore((s) => s.setLoadError);
   const setLoadedEventId = useOrganizerUIStore((s) => s.setLoadedEventId);
   const requestSequence = useRef(0);
-  const countsKnown = requestSequence.current > 0 && !isLoading && !loadError && loadedEventId === eventId;
+  const countsKnown = requestSequence.current > 0 && !isLoading && !loadError && loadedEventId === `${viewerId}:${eventId}`;
   const isRefreshing = useOrganizerUIStore((s) => s.isRefreshing);
   const isDownloading = useOrganizerUIStore((s) => s.isDownloading);
   const isSyncing = useOrganizerUIStore((s) => s.isSyncing);
@@ -303,6 +323,7 @@ export function EventOrganizerScreen() {
   const setRefundingTicketId = useOrganizerUIStore((s) => s.setRefundingTicketId);
 
   const loadTickets = useCallback(async () => {
+    if (!mayManage) return;
     const request = ++requestSequence.current;
     setLoading(true);
     setLoadError(false);
@@ -310,7 +331,7 @@ export function EventOrganizerScreen() {
       const result = await tickets.getEventTickets(eventId);
       if (request !== requestSequence.current) return;
       setRoster(result || []);
-      setLoadedEventId(eventId);
+      setLoadedEventId(`${viewerId}:${eventId}`);
     } catch (error: any) {
       if (request !== requestSequence.current) return;
       setLoadError(true);
@@ -322,12 +343,14 @@ export function EventOrganizerScreen() {
         setRefreshing(false);
       }
     }
-  }, [eventId, setRoster, setLoading, setLoadError, setLoadedEventId, setRefreshing, showToast]);
+  }, [eventId, viewerId, mayManage, setRoster, setLoading, setLoadError, setLoadedEventId, setRefreshing, showToast]);
 
   useEffect(() => {
-    if (eventId) loadTickets();
+    setRoster([]);
+    setLoadedEventId("");
+    if (eventId && mayManage) void loadTickets();
     return () => { requestSequence.current++; };
-  }, [eventId, loadTickets]);
+  }, [eventId, viewerId, mayManage, loadTickets, setRoster, setLoadedEventId]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -337,6 +360,7 @@ export function EventOrganizerScreen() {
   const handleDownloadForOffline = useCallback(async () => {
     setDownloading(true);
     try {
+      await assertPermission();
       const tokens = await ticketsApi.downloadOfflineTokens(eventId);
       if (tokens.length > 0) {
         showToast(
@@ -353,12 +377,13 @@ export function EventOrganizerScreen() {
     } finally {
       setDownloading(false);
     }
-  }, [eventId, offlineStore, showToast, setDownloading]);
+  }, [eventId, offlineStore, showToast, setDownloading, assertPermission]);
 
   const handleSyncPendingScans = useCallback(async () => {
     if (pendingScans.length === 0) return;
     setSyncing(true);
     try {
+      await assertPermission();
       const result = await ticketsApi.syncOfflineScans(pendingScans);
       if (result.synced.length > 0) {
         offlineStore.removePendingScans(eventId, result.synced);
@@ -382,10 +407,11 @@ export function EventOrganizerScreen() {
     } finally {
       setSyncing(false);
     }
-  }, [pendingScans, eventId, offlineStore, showToast, loadTickets, setSyncing]);
+  }, [pendingScans, eventId, offlineStore, showToast, loadTickets, setSyncing, assertPermission]);
 
   const handleRefundTicket = useCallback(
     async (ticketId: string, buyerName: string) => {
+      if (!isOwner) return;
       if (
         typeof window !== "undefined" &&
         !window.confirm(
@@ -396,6 +422,7 @@ export function EventOrganizerScreen() {
       }
       setRefundingTicketId(ticketId);
       try {
+        await assertPermission(true);
         const res = await organizerApi.refundTicket(ticketId);
         if (res.error) {
           showToast("error", "Refund failed", res.error);
@@ -419,7 +446,7 @@ export function EventOrganizerScreen() {
         setRefundingTicketId(null);
       }
     },
-    [showToast, loadTickets, setRefundingTicketId],
+    [showToast, loadTickets, setRefundingTicketId, isOwner, assertPermission],
   );
 
   const { issued: totalCount, checkedIn: checkedInCount, awaitingCheckIn: remainingCount } = useMemo(
@@ -435,6 +462,17 @@ export function EventOrganizerScreen() {
     estimateSize: () => ROW_HEIGHT,
     overscan: 8,
   });
+
+  if (!mayManage) return (
+    <div className="min-h-[100dvh] bg-[#06070d] p-6 text-white">
+      <button onClick={() => router.back()}>Back</button>
+      <p role="status">{access.isPending && !access.isPaused && authenticated ? "Checking event access…"
+        : access.isError || access.isPaused ? "Could not verify event access. Try again."
+        : "You don't have permission to manage this event."}</p>
+      {(access.isError || access.isPaused) && <button onClick={() => void access.refetch()}>Retry</button>}
+      {authenticated && access.hasResolved && canScanTickets(access.role) && <button onClick={() => router.push(`/feed/events/${eventId}/scanner`)}>Open scanner</button>}
+    </div>
+  );
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -538,14 +576,14 @@ export function EventOrganizerScreen() {
 
           {/* Sub-tool nav: Analytics + Promo Codes */}
           <div className="flex gap-2">
-            <button
+            {mayAdminister && <button
               type="button"
               onClick={() => router.push(`/feed/events/${eventId}/analytics`)}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/6 py-3 text-[13px] font-semibold text-white active:bg-white/8"
             >
               <BarChart3 size={16} color="#22c55e" />
               Analytics
-            </button>
+            </button>}
             <button
               type="button"
               onClick={() => router.push(`/feed/events/${eventId}/promo-codes`)}
@@ -566,34 +604,34 @@ export function EventOrganizerScreen() {
               <Users size={16} color="#3FDCFF" />
               Attendees
             </button>
-            <button
+            {mayAdminister && <button
               type="button"
               onClick={() => router.push(`/feed/events/${eventId}/staff`)}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/6 py-3 text-[13px] font-semibold text-white active:bg-white/8"
             >
               <User size={16} color="#EAB308" />
               Staff
-            </button>
+            </button>}
           </div>
 
           {/* Sub-tool nav: Promoters + intentional duplicate-to-draft */}
           <div className="flex gap-2">
-            <button
+            {mayAdminister && <button
               type="button"
               onClick={() => router.push(`/feed/events/${eventId}/promoters`)}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/6 py-3 text-[13px] font-semibold text-white active:bg-white/8"
             >
               <Megaphone size={16} color="#C084FC" />
               Promoters
-            </button>
-            <button
+            </button>}
+            {isOwner && <button
               type="button"
               onClick={() => void handleDuplicateEvent()}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/6 py-3 text-[13px] font-semibold text-white active:bg-white/8"
             >
               <span aria-hidden className="text-base leading-none text-[#3FDCFF]">＋</span>
               Duplicate Event
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -661,9 +699,9 @@ export function EventOrganizerScreen() {
                       <TicketRow
                         ticket={ticket}
                         isRefunding={refundingTicketId === ticket.id}
-                        onRefund={() =>
+                        onRefund={isOwner ? () =>
                           handleRefundTicket(ticket.id, displayName(ticket))
-                        }
+                        : undefined}
                       />
                     </div>
                   );

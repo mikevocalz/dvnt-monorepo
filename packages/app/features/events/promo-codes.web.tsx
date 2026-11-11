@@ -22,7 +22,7 @@
  * id via useParams.
  */
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter } from "solito/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -31,6 +31,9 @@ import { X, Plus, Tag, Trash2, Copy, Percent, DollarSign } from "lucide-react";
 import { FormField, Dialog } from "@dvnt/ui";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { createEventPromoCode } from "@dvnt/app/lib/api/promo-codes";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canEditEvent, canManageStaff } from "@dvnt/app/lib/events/event-role";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usePromoCodesUIStore } from "@dvnt/app/lib/stores/promo-codes-ui-store";
@@ -81,7 +84,7 @@ function PromoCodeCard({
 }: {
   promo: PromoCode;
   onCopy: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
 }) {
   const exhausted = promo.max_uses != null && promo.uses_count >= promo.max_uses;
   return (
@@ -97,14 +100,14 @@ function PromoCodeCard({
           </span>
           <Copy size={13} className="text-white/40" />
         </button>
-        <button
+        {onDelete && <button
           type="button"
           onClick={onDelete}
           aria-label={`Delete ${promo.code}`}
           className="shrink-0 active:scale-90"
         >
           <Trash2 size={16} color="#ef4444" />
-        </button>
+        </button>}
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -134,6 +137,21 @@ export function EventPromoCodesScreen() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rawId = String((params as any)?.id ?? "");
   const eventId = parseInt(rawId || "0", 10);
+  const viewerId = useAuthStore((state) => state.user?.id);
+  const authenticated = useAuthStore((state) => state.isAuthenticated);
+  const access = useEventRole(String(eventId));
+  const mayCreate = authenticated && access.hasResolved && canEditEvent(access.role);
+  const mayRevoke = mayCreate && canManageStaff(access.role);
+  const assertPermission = async (revoke = false) => {
+    if (!mayCreate || (revoke && !mayRevoke)) throw new Error("Not authorized to manage promo codes");
+    const fresh = await access.refetch();
+    const current = useAuthStore.getState();
+    if (!current.isAuthenticated || current.user?.id !== viewerId || !fresh.isSuccess || fresh.fetchStatus === "paused" ||
+        !(revoke ? canManageStaff(fresh.data ?? null) : canEditEvent(fresh.data ?? null))) {
+      throw new Error("Your event access changed. Reopen promo codes before trying again.");
+    }
+  };
+
 
   const showToast = useUIStore((s) => s.showToast);
   const queryClient = useQueryClient();
@@ -157,10 +175,16 @@ export function EventPromoCodesScreen() {
   const setPending = useDeleteStore((s) => s.setPending);
   const setIsDeleting = useDeleteStore((s) => s.setIsDeleting);
 
-  // LIST — exact native supabase read.
-  const { data, isLoading } = useQuery({
-    queryKey: ["event-promo-codes", eventId],
-    enabled: !!eventId,
+  useEffect(() => {
+    resetForm();
+    setShowCreate(false);
+    setPending(null);
+  }, [viewerId, eventId, mayCreate, resetForm, setShowCreate, setPending]);
+
+  // Role and account scoped: never display another viewer's cached codes.
+  const { data, isLoading, isError: listError, refetch: reloadCodes } = useQuery({
+    queryKey: ["event-promo-codes", eventId, viewerId],
+    enabled: Number.isSafeInteger(eventId) && eventId > 0 && mayCreate,
     queryFn: async (): Promise<PromoCode[]> => {
       const { data, error } = await supabase
         .from("promo_codes")
@@ -178,6 +202,7 @@ export function EventPromoCodesScreen() {
   // CREATE — server verifies the accepted event role, not a client JWT bridge.
   const createMutation = useMutation({
     mutationFn: async () => {
+      await assertPermission();
       const code = newCode.trim().toUpperCase();
       const numValue =
         discountType === "percent"
@@ -193,7 +218,7 @@ export function EventPromoCodesScreen() {
       showToast("success", "Created", `Promo code ${code} created`);
       resetForm();
       setShowCreate(false);
-      queryClient.invalidateQueries({ queryKey: ["event-promo-codes", eventId] });
+      queryClient.invalidateQueries({ queryKey: ["event-promo-codes", eventId, viewerId] });
     },
     onError: (err: Error & { duplicate?: boolean }) => {
       if (err.duplicate) {
@@ -207,6 +232,7 @@ export function EventPromoCodesScreen() {
   // DELETE — server-side revoke; prior paid orders keep their promo refs.
   const deleteMutation = useMutation({
     mutationFn: async (promoId: string) => {
+      await assertPermission(true);
       const { data, error } = await invokeEdge<{ ok: boolean; error?: string }>(
         "manage-promo-code",
         { action: "delete", promo_id: promoId },
@@ -220,7 +246,7 @@ export function EventPromoCodesScreen() {
       showToast("success", "Deleted", `Promo code "${code}" deleted`);
       setPending(null);
       setIsDeleting(false);
-      queryClient.invalidateQueries({ queryKey: ["event-promo-codes", eventId] });
+      queryClient.invalidateQueries({ queryKey: ["event-promo-codes", eventId, viewerId] });
     },
     onError: (error: Error) => {
       setIsDeleting(false);
@@ -255,7 +281,7 @@ export function EventPromoCodesScreen() {
   };
 
   const confirmDelete = () => {
-    if (!pending) return;
+    if (!pending || !mayRevoke) return;
     setIsDeleting(true);
     deleteMutation.mutate(pending.id);
   };
@@ -268,6 +294,17 @@ export function EventPromoCodesScreen() {
     estimateSize: () => ROW_HEIGHT,
     overscan: 8,
   });
+
+  if (!mayCreate) return (
+    <div className="min-h-[100dvh] bg-[#06070d] p-6 text-white">
+      <button onClick={() => router.back()}>Back</button>
+      <p role="status">{access.isPending && !access.isPaused && authenticated
+        ? "Checking event access…"
+        : access.isError || access.isPaused ? "Could not verify event access. Try again."
+        : "You don't have permission to manage promo codes for this event."}</p>
+      {(access.isError || access.isPaused) && <button onClick={() => void access.refetch()}>Retry</button>}
+    </div>
+  );
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">
@@ -295,7 +332,9 @@ export function EventPromoCodesScreen() {
       </div>
 
       <main className="mx-auto w-full max-w-2xl px-4 py-6">
-        {isLoading ? (
+        {listError ? (
+          <div role="alert">Could not load promo codes. <button onClick={() => void reloadCodes()}>Retry</button></div>
+        ) : isLoading ? (
           <div className="flex flex-col items-center justify-center py-24">
             <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-cyan-500 animate-spin" />
             <p className="mt-4 text-sm text-white/60">Loading promo codes…</p>
@@ -342,7 +381,7 @@ export function EventPromoCodesScreen() {
                     <PromoCodeCard
                       promo={promo}
                       onCopy={() => handleCopy(promo.code)}
-                      onDelete={() => setPending(promo)}
+                      onDelete={mayRevoke ? () => setPending(promo) : undefined}
                     />
                   </div>
                 );

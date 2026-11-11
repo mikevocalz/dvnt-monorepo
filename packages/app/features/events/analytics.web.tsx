@@ -46,6 +46,7 @@ import {
 } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { currentAccountingMonth, useEventAnalyticsStore } from "@dvnt/app/lib/stores/event-analytics-store";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 
 function formatPercent(n: number): string {
@@ -223,14 +224,18 @@ export function EventAnalyticsScreen() {
   const isExporting = useEventAnalyticsStore((s) => s.isExporting);
   const setExporting = useEventAnalyticsStore((s) => s.setExporting);
   const viewerId = useAuthStore((s) => s.user?.authId ?? s.user?.id ?? null);
+  const authenticated = useAuthStore((s) => s.isAuthenticated);
+  const roleQuery = useEventRole(eventId);
+  const canView = authenticated && !!viewerId && roleQuery.hasResolved && !roleQuery.isPaused && !roleQuery.isError &&
+    (roleQuery.role === "owner" || roleQuery.role === "admin");
   const month = useEventAnalyticsStore((s) => s.month);
   const setMonth = useEventAnalyticsStore((s) => s.setMonth);
 
-  const { data, isLoading, isError, refetch, isRefetching } =
+  const { data, isLoading, isError, refetch, isRefetching, fetchStatus } =
     useQuery<EventAnalyticsSummary | null>({
       queryKey: ["event-analytics", eventId, month, viewerId],
       queryFn: () => eventAnalyticsApi.getSummary(eventId, month),
-      enabled: !!eventId && !!viewerId,
+      enabled: !!eventId && canView,
       staleTime: 30 * 1000,
     });
 
@@ -238,18 +243,35 @@ export function EventAnalyticsScreen() {
   // earnings (single ledger query in manage-promoters). No client
   // re-math beyond formatting, so this section always matches the
   // ledger exactly.
-  const { data: promoterLeaderboard } = useQuery<PromoterLeaderboardRow[]>({
+  const leaderboardQuery = useQuery<PromoterLeaderboardRow[]>({
     queryKey: ["event-promoter-leaderboard", eventId, viewerId],
     queryFn: () => promotersApi.leaderboard(parseInt(eventId, 10)),
-    enabled: !!eventId && !!viewerId,
+    enabled: !!eventId && canView,
     staleTime: 30 * 1000,
   });
 
+  const promoterLeaderboard = canView && leaderboardQuery.isSuccess &&
+    leaderboardQuery.fetchStatus !== "paused" ? leaderboardQuery.data : undefined;
+  const canShowData = canView && !isError && fetchStatus !== "paused" && !!data;
+
   const handleExportAttendees = useCallback(async () => {
-    if (!eventId || isExporting) return;
+    if (!eventId || isExporting || !canShowData) return;
     setExporting(true);
     try {
+      const assertSession = () => {
+        const current = useAuthStore.getState();
+        if (!current.isAuthenticated || (current.user?.authId ?? current.user?.id ?? null) !== viewerId) {
+          throw new Error("Your account changed. Reopen analytics before exporting.");
+        }
+      };
+      const fresh = await roleQuery.refetch();
+      assertSession();
+      if (!fresh.isSuccess || fresh.fetchStatus === "paused" ||
+          (fresh.data !== "owner" && fresh.data !== "admin")) {
+        throw new Error("Your event access changed. Reopen analytics before exporting.");
+      }
       const result = await eventAnalyticsApi.getAttendees(eventId);
+      assertSession();
       if (!result || result.attendees.length === 0) {
         if (typeof window !== "undefined") {
           window.alert("No attendees yet. Once tickets are sold, you can export the list here.");
@@ -264,6 +286,7 @@ export function EventAnalyticsScreen() {
         .slice(0, 40);
       const filename = `${safeTitle || "event"}-attendees-${eventId}.csv`;
       if (typeof window !== "undefined") {
+        assertSession();
         const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -282,7 +305,7 @@ export function EventAnalyticsScreen() {
     } finally {
       setExporting(false);
     }
-  }, [eventId, isExporting, setExporting]);
+  }, [eventId, isExporting, setExporting, canShowData, viewerId, roleQuery.refetch]);
 
   const Header = (
     <div
@@ -297,11 +320,11 @@ export function EventAnalyticsScreen() {
         <ArrowLeft size={18} color="#fff" />
       </button>
       <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold">
-        {data?.title || "Analytics"}
+        {canShowData ? data?.title || "Analytics" : "Analytics"}
       </h1>
       <button
         onClick={handleExportAttendees}
-        disabled={isExporting}
+        disabled={isExporting || !canShowData}
         aria-label="Export attendees as CSV"
         className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/8 active:scale-95 disabled:opacity-40"
       >
@@ -310,7 +333,7 @@ export function EventAnalyticsScreen() {
     </div>
   );
 
-  if (isLoading && !data) {
+  if (authenticated && !roleQuery.isPaused && (roleQuery.isPending || (canView && isLoading && !data))) {
     return (
       <div className="min-h-[100dvh] bg-[#06070d] text-white">
         {Header}
@@ -322,7 +345,7 @@ export function EventAnalyticsScreen() {
     );
   }
 
-  if (isError || !data) {
+  if (!canShowData || !data) {
     return (
       <div className="min-h-[100dvh] bg-[#06070d] text-white">
         {Header}
@@ -335,7 +358,7 @@ export function EventAnalyticsScreen() {
             We couldn't load this event's numbers.
           </p>
           <button
-            onClick={() => refetch()}
+            onClick={() => canView ? refetch() : roleQuery.refetch()}
             className="mt-3.5 rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-white active:bg-white/5"
           >
             Retry

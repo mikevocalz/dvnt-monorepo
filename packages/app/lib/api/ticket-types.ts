@@ -189,10 +189,11 @@ export const ticketTypesApi = {
   },
 
   /**
-   * Get all ticket types for an event
+   * Get buyer-safe ticket types by default; editors opt into private fields.
    */
-  async getByEvent(eventId: string, publicOnly = false): Promise<TicketTypeRecord[]> {
+  async getByEvent(eventId: string, publicOnly = true): Promise<TicketTypeRecord[]> {
     try {
+      if (!publicOnly) await ensureBridgeAuth();
       const { data, error } = await supabase
         .from(publicOnly ? "ticket_types_public" : "ticket_types")
         .select("*")

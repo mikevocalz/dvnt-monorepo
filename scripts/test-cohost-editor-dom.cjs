@@ -10,18 +10,24 @@ const React = require('react');
 const {createRoot} = require('react-dom/client');
 const ROOT = path.resolve(__dirname, '..');
 const noop = () => {};
+const showToast=(...args)=>state.toasts?.push(args);
 const state = { role: 'editor', resolved: true, pending: false, paused: false, error: false, authenticated: true, saves: [], navigations: [], bankChecks: 0 };
 const event = {id:'7', title:'Co-host event', description:'Details', fullDate:'2026-12-11T22:00:00Z', eventTz:'UTC', host:{id:'different-owner-id'}, price:20, ticketingEnabled:true, visibility:'public'};
 const auth = {user:{id:'cohost', authId:'cohost'}, isAuthenticated:true};
+const disturbSession = () => {
+ if(!state.switchAccountOnUpload)return;
+ auth.user={id:'other',authId:'other'};state.epoch=(state.epoch??1)+1;
+ if(state.returnToAccount){auth.user={id:'cohost',authId:'cohost'};state.epoch++;}
+};
 const useAuthStore = selector => selector({...auth, isAuthenticated:state.authenticated});
 useAuthStore.subscribe = () => noop;
 useAuthStore.getState = () => auth;
 const router = {push:p=>state.navigations.push(p), replace:p=>state.navigations.push(p), back:()=>state.navigations.push('back')};
-const mutation = {isPending:false, mutateAsync:async value=>state.saves.push(value)};
+const mutation = {isPending:false, mutateAsync:async value=>{state.saves.push(value);if(state.eventFailure)throw Error('No row updated');}};
 const queryClient = {invalidateQueries:async()=>{},setQueryData:noop};
 const tier = {id:'tier-7',name:'General Admission',category:'admission',price_cents:2000,quantity_total:100,max_per_user:4,is_active:true};
-const ticketTypesApi = {getByEvent:async()=>[tier],create:async()=>({id:'new'}),update:async()=>true,deactivate:async()=>true};
-const mediaPicker = {pickFromLibrary:async()=>[],requestPermissions:noop};
+const ticketTypesApi = {getByEvent:async()=>{if(state.tierLoadFailure)throw Error('catalog unavailable');return [tier];},create:async params=>{state.tierCreates?.push(params);if(state.deferTierCreate)await new Promise(resolve=>{state.finishTierCreate=resolve;});return {id:'new'};},update:async(...args)=>{state.tierWrites?.push(args);if(state.tierFailure)throw Error('No row updated');return true;},deactivate:async()=>true};
+const mediaPicker = {pickFromLibrary:async()=>[{uri:'file:///new-flyer.jpg',type:'image'}],requestPermissions:noop};
 const colors = new Proxy({}, {get:()=> '#fff'});
 const dom = tag => function Component({children,onPress,onChangeText,...props}) {
   const safe = {};
@@ -40,20 +46,25 @@ const fixture = {
  '@gorhom/bottom-sheet':{__esModule:true,default:React.forwardRef(({children},ref)=>{React.useImperativeHandle(ref,()=>({snapToIndex:noop,close:noop}));return React.createElement('div',null,children)}),BottomSheetView:dom('div'),BottomSheetBackdrop:()=>null},
  '@dvnt/ui':{FormField:({label,children})=>React.createElement('label',null,label,children),useDirtyGuard:noop},
  '@dvnt/app/lib/stores/auth-store':{useAuthStore},
- '@dvnt/app/lib/stores/ui-store':{useUIStore:selector=>selector({showToast:noop})},
+ '@dvnt/app/lib/stores/ui-store':{useUIStore:selector=>selector({showToast})},
  '@dvnt/app/lib/hooks/use-events':{useEvent:()=>({data:event,isLoading:false}),useUpdateEvent:()=>mutation,eventKeys:{all:['events'],detail:id=>['events',id]}},
  '@dvnt/app/lib/hooks/use-event-role':{useEventRole:()=>({role:state.role,hasResolved:state.resolved,isPending:state.pending,isPaused:state.paused,isError:state.error,errorStatus:state.errorStatus,refetch:async()=>{}})},
  '@dvnt/app/lib/hooks':{useColorScheme:()=>({colors}),useMediaPicker:()=>mediaPicker},
- '@dvnt/app/lib/hooks/use-media-upload':{useMediaUpload:()=>({uploadMultiple:async()=>[],isUploading:false,progress:0})},
+ '@dvnt/app/lib/hooks/use-media-upload':{useMediaUpload:()=>({uploadMultiple:async files=>{state.uploads?.push(...files.map(f=>f.uri));disturbSession();if(state.revokeOnUpload){state.role=null;state.eventFailure=true;}return files.map(()=>({success:true,url:'https://media.test/new-flyer.jpg'}));},isUploading:false,progress:0})},
  '@dvnt/app/lib/media/use-event-flyer-preparation.web':{useEventFlyerPreparation:()=>({isBusy:()=>false,isPreparing:false,cancel:noop})},
- '@dvnt/app/lib/auth/session-lifecycle':{getSessionLifecycle:()=>({ready:true,epoch:1}),subscribeSessionLifecycle:()=>noop},
- '@dvnt/app/lib/auth/identity':{getAuthIdFromStore:()=> 'cohost'},
+ '@dvnt/app/lib/auth/session-lifecycle':{getSessionLifecycle:()=>({ready:true,epoch:state.epoch??1}),subscribeSessionLifecycle:()=>noop},
+ '@dvnt/app/lib/auth/identity':{getAuthIdFromStore:()=>auth.user.authId},
  '@dvnt/app/lib/auth-client':{getAuthToken:async()=> 'fixture-token'},
  '@dvnt/app/lib/api/events':{eventsApi:{getEventById:async()=>event}},
  '@dvnt/app/lib/api/ticket-types':{ticketTypesApi,TICKET_TYPE_CATEGORIES:[],TIER_TYPE_OPTIONS:[],TIER_VISIBILITY_OPTIONS:[]},
- '@dvnt/app/lib/api/addons':{addonsApi:{getByEvent:async()=>[]}},
+ '@dvnt/app/features/events/create/addons-editor.web':{AddonsEditor:()=>React.createElement('div',{'data-addon-editor':'true'})},
+ '@dvnt/app/lib/api/addons':{ADDON_TYPE_OPTIONS:[{value:'merch',label:'Merch'}],ADDON_BINDING_OPTIONS:[{value:'standalone',label:'Standalone'}],ADDON_STATUS_OPTIONS:[{value:'on_sale',label:'On sale'}],VARIANT_ADDON_TYPES:new Set(['merch']),REDEEMABLE_DEFAULTS:{merch:true},addonsApi:{getByEvent:async()=>{if(state.addonLoadFailure)throw Error('catalog unavailable');return state.addonRows||[];},update:async(...args)=>{state.addonWrites?.push(args);if(state.addonFailure)throw Error('No row updated');return true;},syncVariants:async(id,rows,onPersisted)=>{state.variantCalls?.push({id,rows});if(state.variantFailure){onPersisted?.(0,{id:'persisted-variant',option_values:rows[0].optionValues});throw Error('second variant failed');}return true;},create:async params=>{state.addonCreates?.push(params);if(state.addonCreateFailure)throw Object.assign(Error('variant create failed'),{addonId:'created-addon'});return {id:'created-addon'};},remove:async()=>true}},
+ '@dvnt/app/lib/server-upload':{uploadToServer:async url=>{state.uploads?.push(url);disturbSession();if(state.revokeOnUpload){state.role=null;state.eventFailure=true;}return {success:true,url:'https://media.test/new-flyer.jpg'};}},
+ '@dvnt/app/lib/media/persist-local-selection':{isRemoteMediaUri:url=>/^https?:/.test(url),persistLocalMediaSelection:async url=>url},
  '@dvnt/app/lib/api/organizer':{organizerApi:{getStatus:async()=>{state.bankChecks++;return {connected:false}}}},
  '@dvnt/app/components/error-boundary':{ErrorBoundary:dom('div')},
+ './ui/followup-settings.web':{EventFollowupSettings:()=>React.createElement('span',null,'Followup controls')},
+ '@dvnt/app/features/events/ui/followup-settings.native':{EventFollowupSettings:()=>React.createElement('span',null,'Followup controls')},
 };
 const cache = new Map();
 function load(relative) {
@@ -63,6 +74,8 @@ function load(relative) {
  const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
  const localRequire = name => {
   if(fixture[name])return fixture[name];
+  if(name==='../api/addons')return fixture['@dvnt/app/lib/api/addons'];
+  if(name==='@dvnt/app/features/events/create/addons-editor.native')return load('packages/app/features/events/create/addons-editor.native.tsx');
   if(name.startsWith('@dvnt/app/lib/events/') || name==='@dvnt/app/lib/stores/event-edit-store' || name==='@dvnt/app/features/events/create/addon-form' || name==='@dvnt/app/features/events/create/event-form' || name==='@dvnt/app/lib/tickets/pricing')return load('packages/app/'+name.slice(10)+'.ts');
   if(name.startsWith('.')){
    const stem=path.resolve(path.dirname(file),name);
@@ -95,6 +108,7 @@ function load(relative) {
     const text=node.textContent;
     assert.equal(text.includes('Edit Event'),canEditEvent(role),`${platform} ${role}: ${text.slice(0,150)}`);
     if(canEditEvent(role)){
+     assert.equal(text.includes('Followup controls'),role==='owner'||role==='admin','followup settings require admin');
      assert.ok(text.includes('Flyer'),`${platform} ${role} can change flyer`);
      assert.ok(text.includes('Ticket'),`${platform} ${role} can change tickets`);
     }
@@ -130,6 +144,154 @@ function load(relative) {
    count++;
   }finally{await flush(()=>root.unmount());node.remove();}
  }
+ // Exercise real save callbacks and serialized payloads; only transport/platform
+ // adapters are mocked. Revocation simulates the authoritative server refusal
+ // after upload; it is not a full JWT/RLS integration. Native add-ons follow below.
+ for(const [platform,Component] of [['web',web],['native',native]]){
+  for(const mode of ['success','admin-success','event-refused','revoked-during-upload','tier-refused',...(platform==='web'?['addon-refused']:[])]){
+   Object.assign(state,{role:mode==='admin-success'?'admin':'editor',resolved:true,pending:false,paused:false,error:false,authenticated:true,saves:[],bankChecks:0,navigations:[],toasts:[],uploads:[],tierWrites:[],addonWrites:[],eventFailure:mode==='event-refused',revokeOnUpload:mode==='revoked-during-upload',tierFailure:mode==='tier-refused',addonFailure:mode==='addon-refused'});
+   store.getState().reset();
+   const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
+   try{
+    await flush(()=>root.render(React.createElement(Component)));
+    if(platform==='web'){
+     await flush(()=>{store.getState().setFlyerImage('blob:new-flyer');store.getState().updateTier(0,{priceDollars:'37.25'});store.getState().addAddon();store.getState().updateAddon(0,{dbId:'addon-7',name:'T-shirt',priceDollars:'12.50'});});
+    }else{
+     const flyer=[...node.querySelectorAll('button')].find(b=>b.textContent.includes('Add Flyer'));assert.ok(flyer,'native flyer picker');await flush(()=>flyer.click());
+     const price=[...node.querySelectorAll('input')].find(i=>i.value==='20'&&i.placeholder==='0');assert.ok(price,'native tier price input');
+     await flush(()=>{price.value='37.25';price.dispatchEvent(new window.Event('input',{bubbles:true}));});
+    }
+    const save=platform==='web'?[...node.querySelectorAll('button')].find(b=>b.textContent==='Done'):node.querySelector('button');
+    assert.ok(save);await flush(()=>save.click());
+    assert.equal(state.uploads.length,1,platform+'/'+mode+' uploads flyer once');
+    assert.equal(state.saves.length,1);
+    assert.equal(state.saves[0].updates.flyerImageUrl,'https://media.test/new-flyer.jpg');
+    if((mode==='event-refused'||mode==='revoked-during-upload'))assert.equal(state.tierWrites.length,0,'refused event must not continue catalog writes');
+    else {
+     assert.equal(state.tierWrites.length,1);
+     assert.equal(state.tierWrites[0][1].price_cents,3725,'changed tier dollars serialize to cents');
+     if(platform==='web'){assert.equal(state.addonWrites.length,1);assert.equal(state.addonWrites[0][1].price_cents,1250);}
+    }
+    if(mode==='success'||mode==='admin-success'){assert.ok(state.toasts.some(t=>t[0]==='success'));assert.ok(state.navigations.length);}
+    else {assert.ok(state.toasts.some(t=>t[0]==='error'||t[0]==='warning'));assert.equal(state.toasts.some(t=>t[0]==='success'),false,'failed or partial writes never claim complete success');assert.equal(state.navigations.length,0,'failed save keeps editor open');if(mode!=='revoked-during-upload'){if(platform==='web')assert.equal(store.getState().ticketTiers[0].priceDollars,'37.25','retry retains changed tier');else assert.ok([...node.querySelectorAll('input')].some(i=>i.value==='37.25'),'native retry retains changed tier');}}
+    count++;
+   }finally{await flush(()=>root.unmount());node.remove();Object.assign(state,{eventFailure:false,tierFailure:false,addonFailure:false,revokeOnUpload:false});}
+  }
+ }
+ // Partial multi-row writes must preserve successful IDs for an explicit retry.
+ const resetInteractions=()=>{auth.user={id:'cohost',authId:'cohost'};Object.assign(state,{epoch:1,switchAccountOnUpload:false,returnToAccount:false,role:'editor',resolved:true,pending:false,paused:false,error:false,authenticated:true,saves:[],navigations:[],toasts:[],tierWrites:[],addonWrites:[],tierCreates:[],addonCreates:[],variantCalls:[],addonRows:[],tierFailure:false,addonFailure:false,eventFailure:false,revokeOnUpload:false,tierLoadFailure:false,addonLoadFailure:false,addonCreateFailure:false,variantFailure:false,deferTierCreate:false});store.getState().reset();};
+ for(const [platform,Component] of [['web',web],['native',native]])for(const returns of [false,true]){
+  resetInteractions();state.switchAccountOnUpload=true;state.returnToAccount=returns;
+  const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
+  try{
+   await flush(()=>root.render(React.createElement(Component)));
+   if(platform==='web')await flush(()=>store.getState().setFlyerImage('blob:account-switch'));
+   else {const pick=[...node.querySelectorAll('button')].find(b=>b.textContent.includes('Add Flyer'));assert.ok(pick);await flush(()=>pick.click());}
+   const save=platform==='web'?[...node.querySelectorAll('button')].find(b=>b.textContent==='Done'):node.querySelector('button');
+   await flush(()=>save.click());
+   assert.equal(state.saves.length,0,`${platform} account switch${returns?' and return':''} blocks stale event save`);
+   assert.equal(state.tierWrites.length,0);assert.equal(state.addonWrites.length,0);assert.equal(state.navigations.length,0);
+   assert.equal(state.toasts.some(t=>t[0]==='success'),false);count++;
+  }finally{await flush(()=>root.unmount());node.remove();resetInteractions();}
+ }
+ for(const [platform,Component] of [['web',web],['native',native]]){
+  resetInteractions();
+  const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
+  try{
+   await flush(()=>root.render(React.createElement(Component)));
+   if(platform==='web')await flush(()=>store.getState().addTier());
+   else await flush(()=>[...node.querySelectorAll('button')].find(b=>b.textContent.includes('Add Tier')).click());
+   const save=()=>platform==='web'?[...node.querySelectorAll('button')].find(b=>b.textContent==='Done'):node.querySelector('button');
+   state.tierFailure=true;state.deferTierCreate=true;
+   await flush(()=>{save().click();save().click();});
+   assert.equal(state.tierCreates.length,1,'repeated Done must not duplicate in-flight creation');
+   assert.equal(state.toasts.some(t=>t[1]==='Partial save'),false,'wait for successful sibling before enabling retry');
+   assert.equal(state.navigations.length,0);
+   await flush(()=>state.finishTierCreate());
+   assert.equal(state.toasts.some(t=>t[1]==='Partial save'),true);
+   if(platform==='web')assert.equal(store.getState().ticketTiers[1].id,'new');
+   state.tierFailure=false;state.deferTierCreate=false;state.toasts=[];
+   await flush(()=>save().click());
+   assert.equal(state.tierCreates.length,1,'retry updates confirmed new tier instead of creating it twice');
+   assert.ok(state.tierWrites.some(([id])=>id==='new'));
+   assert.ok(state.toasts.some(t=>t[0]==='success'));
+   count++;
+  }finally{await flush(()=>root.unmount());node.remove();}
+ }
+ for(const mode of ['addon-create','variant-update']){
+  resetInteractions();
+  const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
+  try{
+   await flush(()=>root.render(React.createElement(web)));
+   await flush(()=>{store.getState().addAddon();store.getState().updateAddon(0,{name:'Shirt',priceDollars:'12',...(mode==='variant-update'?{dbId:'existing-addon',variants:[{size:'M',color:'',priceDollars:'',quantity:''},{size:'L',color:'',priceDollars:'',quantity:''}]}:{})});});
+   state.addonCreateFailure=mode==='addon-create';state.variantFailure=mode==='variant-update';
+   const save=()=>[...node.querySelectorAll('button')].find(b=>b.textContent==='Done');
+   await flush(()=>save().click());
+   assert.equal(state.navigations.length,0);assert.ok(state.toasts.some(t=>t[1]==='Partial save'));
+   if(mode==='addon-create')assert.equal(store.getState().addons[0].dbId,'created-addon');
+   else assert.equal(store.getState().addons[0].variants[0].dbId,'persisted-variant');
+   state.addonCreateFailure=false;state.variantFailure=false;state.toasts=[];
+   await flush(()=>save().click());
+   if(mode==='addon-create'){assert.equal(state.addonCreates.length,1);assert.ok(state.addonWrites.some(([id])=>id==='created-addon'));}
+   else {assert.equal(state.variantCalls.length,2);assert.equal(state.variantCalls[1].rows[0].id,'persisted-variant');}
+   assert.ok(state.toasts.some(t=>t[0]==='success'));count++;
+  }finally{await flush(()=>root.unmount());node.remove();}
+ }
+ for(const mode of ['tiers','addons']){
+  resetInteractions();state.tierLoadFailure=mode==='tiers';state.addonLoadFailure=mode==='addons';
+  const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
+  try{
+   await flush(()=>root.render(React.createElement(web)));
+   const done=[...node.querySelectorAll('button')].find(b=>b.textContent==='Done');assert.equal(done.disabled,true,'failed catalog load blocks save');
+   if(mode==='tiers'){const add=[...node.querySelectorAll('button')].find(b=>b.textContent.includes('Add Tier'));assert.ok(add);assert.equal(add.disabled,true,'failed tier load blocks duplicate reconstruction');}
+   if(mode==='addons')assert.equal(node.querySelector('[data-addon-editor]'),null,'failed add-on load hides editing controls');
+   await flush(()=>done.click());assert.equal(state.saves.length,0);count++;
+  }finally{await flush(()=>root.unmount());node.remove();}
+ }
+ // Native parity: mount the real AddonsEditorNative, edit its inputs, and
+ // exercise the screen's shared catalog save/retry callbacks.
+ for(const mode of ['success','update-refused','partial-create','partial-variant']){
+  resetInteractions();
+  if(mode!=='partial-create')state.addonRows=[{id:'native-addon',name:'Native shirt',addon_type:'merch',binding_mode:'standalone',price_cents:900,status:'on_sale',is_redeemable:false,ticket_addon_variants:[]}];
+  const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
+  try{
+   await flush(()=>root.render(React.createElement(native)));
+   const input=placeholder=>[...node.querySelectorAll('input')].find(i=>i.placeholder===placeholder);
+   const type=async(field,value)=>{assert.ok(field,'native addon input exists');await flush(()=>{field.value=value;field.dispatchEvent(new window.Event('input',{bubbles:true}));});};
+   if(mode==='partial-create'){
+    const add=[...node.querySelectorAll('button')].find(b=>b.textContent.includes('Add an Add-on'));assert.ok(add);await flush(()=>add.click());
+    await type(input('Add-on name (e.g. Coat check, Event tee)'),'New shirt');
+   }
+   await type(input('0.00'),'16.25');
+   if(mode==='partial-variant'){
+    for(const size of ['M','L']){
+     const add=[...node.querySelectorAll('button')].find(b=>b.textContent.includes('Add size / color'));assert.ok(add);await flush(()=>add.click());
+     const sizes=[...node.querySelectorAll('input')].filter(i=>i.placeholder==='Size');await type(sizes.at(-1),size);
+    }
+   }
+   state.addonFailure=mode==='update-refused';state.addonCreateFailure=mode==='partial-create';state.variantFailure=mode==='partial-variant';
+   await flush(()=>node.querySelector('button').click());
+   if(mode!=='partial-create')assert.equal(state.addonWrites[0][1].price_cents,1625);
+   if(mode==='success')assert.ok(state.toasts.some(t=>t[0]==='success'));
+   else{
+    assert.equal(state.navigations.length,0);assert.ok(state.toasts.some(t=>t[1]==='Partial save'));assert.equal(state.toasts.some(t=>t[0]==='success'),false);
+    assert.equal(input('0.00').value,'16.25','native addon price survives failed save');
+    state.addonFailure=false;state.addonCreateFailure=false;state.variantFailure=false;state.toasts=[];
+    await flush(()=>node.querySelector('button').click());
+    if(mode==='partial-create'){assert.equal(state.addonCreates.length,1);assert.ok(state.addonWrites.some(([id])=>id==='created-addon'));}
+    if(mode==='partial-variant'){assert.equal(state.variantCalls.length,2);assert.equal(state.variantCalls[1].rows[0].id,'persisted-variant');}
+    assert.ok(state.toasts.some(t=>t[0]==='success'));
+   }
+   count++;
+  }finally{await flush(()=>root.unmount());node.remove();}
+ }
+ resetInteractions();state.tierLoadFailure=true;
+ {
+  const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
+  try{await flush(()=>root.render(React.createElement(native)));assert.equal(node.textContent.includes('Edit Event'),false,'native failed tier hydration never exposes an empty writable catalog');assert.equal([...node.querySelectorAll('button')].some(b=>b.textContent.includes('Add Tier')),false);assert.equal(state.saves.length,0);assert.ok(state.toasts.some(t=>t[0]==='error'));count++;}
+  finally{await flush(()=>root.unmount());node.remove();}
+ }
+ resetInteractions();
  for(const role of ['owner','admin','editor','scanner',null]){
   const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
   try{

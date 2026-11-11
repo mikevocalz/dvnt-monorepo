@@ -33,6 +33,7 @@ import { ScreenSkeleton } from "@dvnt/app/components/ui/screen-skeleton";
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { currentAccountingMonth, useEventAnalyticsStore } from "@dvnt/app/lib/stores/event-analytics-store";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
@@ -129,6 +130,10 @@ function EventAnalyticsContent() {
   const showToast = useUIStore((s) => s.showToast);
   const eventId = Array.isArray(id) ? (id[0] ?? "") : (id ?? "");
   const viewerId = useAuthStore((s) => s.user?.authId ?? s.user?.id ?? null);
+  const authenticated = useAuthStore((s) => s.isAuthenticated);
+  const roleQuery = useEventRole(eventId);
+  const canView = authenticated && !!viewerId && roleQuery.hasResolved && !roleQuery.isPaused && !roleQuery.isError &&
+    (roleQuery.role === "owner" || roleQuery.role === "admin");
   const month = useEventAnalyticsStore((s) => s.month);
   const setMonth = useEventAnalyticsStore((s) => s.setMonth);
   const shiftMonth = (delta: number) => {
@@ -137,34 +142,51 @@ function EventAnalyticsContent() {
     setMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
   };
 
-  const { data, isLoading, isError, refetch, isRefetching } =
+  const { data, isLoading, isError, refetch, isRefetching, fetchStatus } =
     useQuery<EventAnalyticsSummary | null>({
       queryKey: ["event-analytics", eventId, month, viewerId],
       queryFn: () => eventAnalyticsApi.getSummary(eventId, month),
-      enabled: !!eventId && !!viewerId,
+      enabled: !!eventId && canView,
       staleTime: 30 * 1000,
     });
 
   // Promoter leaderboard (WS-4) — ranked server-side by NET ledger
   // earnings (single ledger query). No client re-math beyond formatting.
-  const { data: promoterLeaderboard } = useQuery<PromoterLeaderboardRow[]>({
+  const leaderboardQuery = useQuery<PromoterLeaderboardRow[]>({
     queryKey: ["event-promoter-leaderboard", eventId, viewerId],
     queryFn: () => promotersApi.leaderboard(parseInt(eventId, 10)),
-    enabled: !!eventId && !!viewerId,
+    enabled: !!eventId && canView,
     staleTime: 30 * 1000,
   });
+
+  const promoterLeaderboard = canView && leaderboardQuery.isSuccess &&
+    leaderboardQuery.fetchStatus !== "paused" ? leaderboardQuery.data : undefined;
 
   const [isExporting, setIsExporting] = React.useState(false);
 
   const handleRefresh = useCallback(() => {
-    refetch();
-  }, [refetch]);
+    if (canView) refetch();
+    else void roleQuery.refetch();
+  }, [refetch, canView, roleQuery.refetch]);
 
   const handleExportAttendees = useCallback(async () => {
-    if (!eventId || isExporting) return;
+    if (!eventId || isExporting || !canView) return;
     setIsExporting(true);
     try {
+      const assertSession = () => {
+        const current = useAuthStore.getState();
+        if (!current.isAuthenticated || (current.user?.authId ?? current.user?.id ?? null) !== viewerId) {
+          throw new Error("Your account changed. Reopen analytics before exporting.");
+        }
+      };
+      const fresh = await roleQuery.refetch();
+      assertSession();
+      if (!fresh.isSuccess || fresh.fetchStatus === "paused" ||
+          (fresh.data !== "owner" && fresh.data !== "admin")) {
+        throw new Error("Your event access changed. Reopen analytics before exporting.");
+      }
       const result = await eventAnalyticsApi.getAttendees(eventId);
+      assertSession();
       if (!result || result.attendees.length === 0) {
         showToast(
           "info",
@@ -194,6 +216,7 @@ function EventAnalyticsContent() {
         );
         return;
       }
+      assertSession();
       await Sharing.shareAsync(fileUri, {
         mimeType: "text/csv",
         dialogTitle: "Export Attendees",
@@ -211,13 +234,13 @@ function EventAnalyticsContent() {
     } finally {
       setIsExporting(false);
     }
-  }, [eventId, isExporting, showToast]);
+  }, [eventId, isExporting, showToast, canView, viewerId, roleQuery.refetch]);
 
-  if (isLoading && !data) {
+  if (authenticated && !roleQuery.isPaused && (roleQuery.isPending || (canView && isLoading && !data))) {
     return <ScreenSkeleton variant="detail" rows={6} />;
   }
 
-  if (isError || !data) {
+  if (!canView || isError || fetchStatus === "paused" || !data) {
     return (
       <SafeAreaView
         edges={["top"]}

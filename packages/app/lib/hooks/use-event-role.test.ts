@@ -7,7 +7,7 @@ import { URL } from "node:url";
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
 
-function hookFixture(query: any) {
+function hookFixture(query: any, authenticated = true) {
   let options: any;
   const exports: any = {};
   const code = ts.transpileModule(fs.readFileSync(new URL("./use-event-role.ts", import.meta.url), "utf8"), {
@@ -15,7 +15,8 @@ function hookFixture(query: any) {
   }).outputText;
   vm.runInNewContext(code, { exports, require: (name: string) => name === "@tanstack/react-query"
     ? { useQuery: (o: any) => { options = o; return query; } }
-    : name.endsWith("auth-store") ? { useAuthStore: (f: any) => f({ user: { id: "staff-2" }, isAuthenticated: true }) }
+    : name.endsWith("auth-store") ? { useAuthStore: (f: any) => f({ user: { id: "staff-2" }, isAuthenticated: authenticated }) }
+    : name.endsWith("event-role") ? { normalizeEventRole: (value: unknown) => ["owner", "admin", "editor", "scanner"].includes(String(value)) ? value : null }
     : name.endsWith("stale-time-config") ? { GC_TIMES: { standard: 1000 } } : {},
   });
   return { result: exports.useEventRole("7"), get options() { return options; } };
@@ -28,6 +29,17 @@ test("initial offline pause is pending, not a confirmed no-role decision", () =>
 test("explicit authorization errors survive hook boundary even with stale cached role", () => {
   for (const status of [401, 403, 503]) {
     const f = hookFixture({ data: "scanner", isLoading: false, isPending: false, fetchStatus: "idle", isError: true, isSuccess: false, error: { status } });
-    assert.equal(f.result.errorStatus, status); assert.equal(f.result.hasResolved, false);
+    assert.equal(f.result.errorStatus, status); assert.equal(f.result.hasResolved, false); assert.equal(f.result.role, null);
   }
+});
+
+
+test("logout and corrupt cached roles cannot retain staff tools", () => {
+  for (const value of [undefined, "unknown", {}, null]) {
+    assert.equal(hookFixture({data:value,isSuccess:true}).result.role, null);
+  }
+  assert.equal(hookFixture({data:"owner",isSuccess:true}, false).result.role, null);
+  const active = hookFixture({data:"editor",isSuccess:true});
+  assert.equal(active.result.role, "editor");
+  assert.equal(active.options.refetchOnMount, "always");
 });

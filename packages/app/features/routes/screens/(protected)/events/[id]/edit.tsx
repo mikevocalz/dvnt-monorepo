@@ -56,7 +56,7 @@ import { useColorScheme, useMediaPicker } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
-import { canEditEvent } from "@dvnt/app/lib/events/event-role";
+import { canEditEvent, canManageStaff } from "@dvnt/app/lib/events/event-role";
 import {
   EVENT_VISIBILITY_OPTIONS,
   eventVisibilityCopy,
@@ -67,6 +67,13 @@ import { Avatar } from "@dvnt/app/components/ui/avatar";
 import { Progress } from "@dvnt/app/components/ui/progress";
 import { useMediaUpload } from "@dvnt/app/lib/hooks/use-media-upload";
 import { eventsApi } from "@dvnt/app/lib/api/events";
+import { addonsApi } from "@dvnt/app/lib/api/addons";
+import { saveAddonCatalog } from "@dvnt/app/lib/events/save-addon-catalog";
+import { catalogSaveNeedsReload } from "@dvnt/app/lib/events/catalog-save-error";
+import { addonRecordToDraft, type DraftAddon } from "@dvnt/app/features/events/create/addon-form";
+import { AddonsEditorNative } from "@dvnt/app/features/events/create/addons-editor.native";
+import { getSessionLifecycle } from "@dvnt/app/lib/auth/session-lifecycle";
+import { getAuthIdFromStore } from "@dvnt/app/lib/auth/identity";
 import { resolveEventSchedule } from "@dvnt/app/features/events/create/event-form";
 import { EventZonePicker } from "@dvnt/app/features/events/ui/event-zone-field";
 import { EventAttendanceField } from "@dvnt/app/components/event/event-attendance-field.native";
@@ -134,6 +141,8 @@ function EditEventScreenContent() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const editRole = useEventRole(id ?? "");
   const mayEdit = isAuthenticated && editRole.hasResolved && canEditEvent(editRole.role);
+  const editAccess = useRef({ id, mayEdit, userId: currentUser?.id, authId: currentUser?.authId });
+  editAccess.current = { id, mayEdit, userId: currentUser?.id, authId: currentUser?.authId };
   const { pickFromLibrary, requestPermissions } = useMediaPicker();
   const { uploadMultiple, isUploading, progress: uploadProgress } = useMediaUpload({ folder: "events" });
 
@@ -180,6 +189,9 @@ function EditEventScreenContent() {
   const [youtubeVideoUrl, setYoutubeVideoUrl] = useState("");
   const [ticketingEnabled, setTicketingEnabled] = useState(false);
   const [ticketTiers, setTicketTiers] = useState<LocalTicketTier[]>([]);
+  const [addons, setAddons] = useState<DraftAddon[]>([]);
+  const [originalAddonIds, setOriginalAddonIds] = useState<string[]>([]);
+  const [addonsDirty, setAddonsDirty] = useState(false);
   // Which tier currently has its "Sale starts" picker expanded. Indexed by
   // array position because tiers without a server id share `undefined` as
   // their identifier.
@@ -200,6 +212,7 @@ function EditEventScreenContent() {
   // Loading states
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [catalogNeedsReload, setCatalogNeedsReload] = useState(false);
   const saveLock = useRef(false);
   const screenMounted = useRef(true);
   useEffect(() => {
@@ -210,8 +223,8 @@ function EditEventScreenContent() {
   const [originalData, setOriginalData] = useState<any>(null);
 
   useEffect(() => {
-    requestPermissions();
-  }, [requestPermissions]);
+    if (mayEdit) requestPermissions();
+  }, [mayEdit, requestPermissions]);
 
   const persistEventDraftAssets = useCallback(
     async (
@@ -331,7 +344,7 @@ function EditEventScreenContent() {
         }
 
         // Load ticket tiers
-        const dbTiers = await ticketTypesApi.getByEvent(id);
+        const dbTiers = await ticketTypesApi.getByEvent(id, false);
         if (cancelled) return;
         const activeTiers = dbTiers.filter(
           (t: any) => t.active !== false && t.is_active !== false,
@@ -355,6 +368,11 @@ function EditEventScreenContent() {
           })),
         );
 
+        const dbAddons = await addonsApi.getByEvent(id);
+        if (cancelled) return;
+        setAddons(dbAddons.map(addonRecordToDraft));
+        setOriginalAddonIds(dbAddons.map((addon) => addon.id));
+        setAddonsDirty(false);
         setIsLoading(false);
       } catch (error: any) {
         if (cancelled) return;
@@ -375,6 +393,7 @@ function EditEventScreenContent() {
     const isoDate = od.fullDate || od.startDate || od.date;
 
     const changed =
+      addonsDirty ||
       title !== (od.title || "") ||
       description !== (od.description || "") ||
       location !== (od.location || "") ||
@@ -421,6 +440,7 @@ function EditEventScreenContent() {
     ticketingEnabled,
     flyerImage,
     originalData,
+    addonsDirty,
   ]);
 
   const handlePickImages = async () => {
@@ -514,6 +534,7 @@ function EditEventScreenContent() {
   };
 
   const handleSave = useCallback(async () => {
+    if (catalogNeedsReload) return;
     if (!mayEdit || !id || saveLock.current || isSaving) return;
 
     if (!title.trim()) {
@@ -533,6 +554,18 @@ function EditEventScreenContent() {
       return;
     }
 
+    const startedAccess = editAccess.current;
+    const expectedSessionEpoch = getSessionLifecycle().epoch;
+    const expectedAuthId = getAuthIdFromStore();
+    if (!expectedAuthId || !getSessionLifecycle().ready) {
+      showToast("error", "Sign in required", "Wait for sign-in to finish, then try again.");
+      return;
+    }
+    const savingCurrent = () => screenMounted.current && getSessionLifecycle().ready &&
+      getSessionLifecycle().epoch === expectedSessionEpoch && getAuthIdFromStore() === expectedAuthId &&
+      editAccess.current.id === startedAccess.id &&
+      editAccess.current.mayEdit && editAccess.current.userId === startedAccess.userId && editAccess.current.authId === startedAccess.authId;
+    const assertSavingCurrent = () => { if (!savingCurrent()) throw new Error("Your sign-in or event access changed. Reopen this event before saving."); };
     saveLock.current = true;
     setIsSaving(true);
     try {
@@ -577,6 +610,7 @@ function EditEventScreenContent() {
 
       // Upload new images if any are local URIs
       const uploadedImages: string[] = [];
+      assertSavingCurrent();
       const normalizedImages = await Promise.all(
         eventImages.map((uri) =>
           isRemoteMediaUri(uri)
@@ -584,6 +618,7 @@ function EditEventScreenContent() {
             : persistLocalMediaSelection(uri, { scope: "event-drafts/images" }),
         ),
       );
+      assertSavingCurrent();
       setEventImages(normalizedImages);
 
       const localImages = normalizedImages.filter(
@@ -599,7 +634,8 @@ function EditEventScreenContent() {
           uri,
           type: "image" as const,
         }));
-        const uploadResults = await uploadMultiple(mediaFiles);
+        const uploadResults = await uploadMultiple(mediaFiles, undefined, assertSavingCurrent);
+        assertSavingCurrent();
         const successfulUploads = uploadResults
           .filter((r) => r.success && r.url)
           .map((r) => r.url!);
@@ -630,12 +666,14 @@ function EditEventScreenContent() {
           if (isRemoteMediaUri(normalizedFlyerUri)) {
             flyerImageUrl = normalizedFlyerUri;
           } else {
+            assertSavingCurrent();
             const flyerResults = await uploadMultiple([
               {
                 uri: normalizedFlyerUri,
                 type: flyerMediaType as "image" | "video",
               },
-            ]);
+            ], undefined, assertSavingCurrent);
+            assertSavingCurrent();
             if (!flyerResults[0]?.success || !flyerResults[0].url) {
               throw new Error(flyerResults[0]?.error || "Flyer upload failed. Please try again.");
             }
@@ -695,10 +733,13 @@ function EditEventScreenContent() {
       // Await the event and tier writes before navigating to the saved event.
 
       // 1. Event row update — must finish before navigation
+      assertSavingCurrent();
       try {
         await updateEventMutation.mutateAsync({
           eventId: id,
           updates: updateData,
+          expectedAuthId,
+          expectedSessionEpoch,
         });
       } catch (err: any) {
         // The shared mutation handles revision-aware rollback. Only revalidate
@@ -714,7 +755,9 @@ function EditEventScreenContent() {
       }
 
       // 2. Ticket tier creates / updates / deactivates — also awaited
-      const tierPromises = ticketTiers.map(async (tier) => {
+      assertSavingCurrent();
+      const tierPromises = ticketTiers.map(async (tier, tierIndex) => {
+        assertSavingCurrent();
         const priceCents = Math.round(
           parseFloat(tier.priceDollars || "0") * 100,
         );
@@ -722,7 +765,7 @@ function EditEventScreenContent() {
         const maxPerUser = parseInt(tier.maxPerOrder || "4");
 
         if (!tier.id) {
-          await ticketTypesApi.create({
+          const created = await ticketTypesApi.create({
             eventId: id,
             name: tier.name || defaultTicketTypeName(tier.category),
             category: tier.category || "admission",
@@ -732,6 +775,10 @@ function EditEventScreenContent() {
             maxPerUser,
             saleStart: saleWindowLocalToInstant(tier.saleStart, schedule.eventTz) ?? undefined,
           });
+          if (!created?.id) throw new Error("Ticket creation was not confirmed. Reload before retrying.");
+          assertSavingCurrent();
+          setTicketTiers((current) => current.map((row, index) => index === tierIndex ? { ...row, id: created.id } : row));
+          setOriginalTierIds((current) => new Set([...current, created.id]));
         } else {
           await ticketTypesApi.update(tier.id, {
             name: tier.name,
@@ -751,23 +798,55 @@ function EditEventScreenContent() {
       const removedIds = [...originalTierIds].filter(
         (id) => !currentIds.has(id),
       );
-      const deactivatePromises = removedIds.map((tid) =>
-        ticketTypesApi.deactivate(tid),
-      );
+      const deactivatePromises = removedIds.map(async (tid) => {
+        assertSavingCurrent();
+        await ticketTypesApi.deactivate(tid);
+        if (savingCurrent()) setOriginalTierIds((current) => new Set([...current].filter((value) => value !== tid)));
+      });
 
+      const addonPromise = saveAddonCatalog({
+        eventId: id, addons, originalIds: originalAddonIds,
+        assertCurrent: assertSavingCurrent, current: savingCurrent,
+        onCreated: (index, addonId, variants) => {
+          setAddons((current) => current.map((row, i) => {
+            if (i !== index) return row;
+            let variantIndex = 0;
+            return { ...row, dbId: addonId, variants: row.variants.map((variant) => {
+              if (!variant.size.trim() && !variant.color.trim()) return variant;
+              const persisted = variants?.find((item) => item.sort_order === variantIndex++);
+              return persisted ? { ...variant, dbId: persisted.id } : variant;
+            }) };
+          }));
+          setOriginalAddonIds((current) => Array.from(new Set([...current, addonId])));
+        },
+        onVariantPersisted: (index, variantIndex, persisted) => setAddons((current) => current.map((row, i) => i === index ? { ...row,
+          variants: row.variants.map((variant, vi) => vi === variantIndex ? { ...variant, dbId: persisted.id } : variant),
+        } : row)),
+        onRemoved: (addonId) => setOriginalAddonIds((current) => current.filter((value) => value !== addonId)),
+      });
       try {
-        await Promise.all([...tierPromises, ...deactivatePromises]);
+        const outcomes = await Promise.allSettled([...tierPromises, ...deactivatePromises, addonPromise]);
+        const failed = outcomes.find((outcome) => outcome.status === "rejected");
+        if (failed?.status === "rejected") throw failed.reason;
       } catch (err: any) {
         // Tier sync failed but the event row already saved — surface
         // the partial failure honestly so the host can retry instead
         // of thinking the whole save went through.
+        if (!savingCurrent()) return;
         console.error("[EditEvent] Tier sync error:", err);
+        const uncertain = catalogSaveNeedsReload(err);
+        if (uncertain) setCatalogNeedsReload(true);
         showToast(
           "warning",
           "Partial save",
-          "Event saved, but some ticket tier changes did not apply. Open Edit and re-save.",
+          uncertain ? "Event details saved, but we couldn't confirm all catalog changes. Reopen this editor to check the saved items before trying again." :
+          "Event details saved, but some ticket or add-on changes did not apply. Your edits are still here. Check the error and try saving again.",
         );
+        queryClient.invalidateQueries({ queryKey: ["tickets", "types", id] });
+        queryClient.invalidateQueries({ queryKey: ["events"] });
+        return;
       }
+      assertSavingCurrent();
 
       // 3. Invalidate so the detail screen, host dashboard, ticket
       //    detail screens etc. refresh against the now-authoritative
@@ -786,6 +865,7 @@ function EditEventScreenContent() {
       if (screenMounted.current) router.replace(`/events/${id}`);
       return;
     } catch (error: any) {
+      if (!savingCurrent()) return;
       console.error("[EditEvent] Save error:", error);
       showToast("error", "Error", error?.message || "Failed to save changes");
       setIsSaving(false);
@@ -818,6 +898,9 @@ function EditEventScreenContent() {
     ticketingEnabled,
     ticketTiers,
     originalTierIds,
+    addons,
+    originalAddonIds,
+    catalogNeedsReload,
     flyerImage,
     flyerMediaType,
     flyerPosterImage,
@@ -868,7 +951,7 @@ function EditEventScreenContent() {
         </Text>
         <Pressable
           onPress={handleSave}
-          disabled={!hasChanges || isSaving || isUploading}
+          disabled={catalogNeedsReload || !hasChanges || isSaving || isUploading}
           hitSlop={12}
           style={{ opacity: hasChanges && !isSaving && !isUploading ? 1 : 0.5 }}
         >
@@ -884,6 +967,7 @@ function EditEventScreenContent() {
       </View>
       </View>
 
+      {catalogNeedsReload && <Text accessibilityRole="alert" className="px-4 py-3 text-destructive">Reopen this editor to check saved tickets and add-ons before retrying.</Text>}
       {isUploading && (
         <View accessibilityLiveRegion="polite" className="px-4 py-3 bg-card border-b border-border">
           <Text className="text-sm text-muted-foreground mb-2">Uploading event media…</Text>
@@ -892,6 +976,7 @@ function EditEventScreenContent() {
       )}
 
       <KeyboardAwareScrollView
+        pointerEvents={isSaving ? "none" : "auto"}
         contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}
       >
@@ -2103,7 +2188,15 @@ function EditEventScreenContent() {
             }}
           />
         </View>
-        <EventFollowupSettings eventId={Number(id)} />
+        <View className="mb-6">
+          <Text className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Add-ons</Text>
+          <AddonsEditorNative
+            addons={addons}
+            onChange={(next) => { setAddons(next); setAddonsDirty(true); }}
+            tierOptions={ticketTiers.filter((tier) => tier.id).map((tier) => ({ id: tier.id!, name: tier.name }))}
+          />
+        </View>
+        {canManageStaff(editRole.role) && <EventFollowupSettings eventId={Number(id)} />}
       </KeyboardAwareScrollView>
     </SafeAreaView>
   );
