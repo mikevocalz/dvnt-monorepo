@@ -139,6 +139,17 @@ BEGIN
   END LOOP;
 END $$;
 
+-- Completion means exact provider transfer confirmation, not a bank deposit.
+-- The receipt-backed external-settlement extension may replace this predicate
+-- with an equally exact, immutable proof. Pending/unknown receipts never count.
+CREATE FUNCTION dvnt_settlement.promoter_obligation_satisfied(p_allocation uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+ SELECT EXISTS(SELECT 1 FROM dvnt_settlement.allocations a
+  JOIN dvnt_settlement.deliveries d ON d.allocation_id=a.id
+  WHERE a.id=p_allocation AND a.role='promoter'
+   AND d.state='transferred' AND d.stripe_transfer_id IS NOT NULL);
+$$;
+
 -- No release/unblock API in this foundation: release and funds verification
 -- must be built and audited before any integration can enable transfers.
 CREATE FUNCTION dvnt_settlement.reserve(p_allocation uuid, p_destination text)
@@ -156,6 +167,13 @@ BEGIN
     OR NOT EXISTS(SELECT 1 FROM public.orders WHERE id=a.order_id AND status='paid'
       AND charge_model='separate_charges_and_transfers') THEN
     RAISE EXCEPTION 'settlement held';
+  END IF;
+  -- The source-order lock serializes promoter completion, host claims and holds.
+  -- Only this order is dependent; unrelated healthy orders are not event-held.
+  IF a.role='organizer' AND EXISTS(SELECT 1 FROM dvnt_settlement.allocations p
+    WHERE p.order_id=a.order_id AND p.role='promoter'
+      AND NOT dvnt_settlement.promoter_obligation_satisfied(p.id)) THEN
+    RAISE EXCEPTION 'promoter settlement pending';
   END IF;
   IF d.state <> 'held' THEN RAISE EXCEPTION 'already reserved; reconcile, never redispatch'; END IF;
   IF p_destination IS NULL OR p_destination NOT LIKE 'acct_%' THEN RAISE EXCEPTION 'recipient not onboarded'; END IF;

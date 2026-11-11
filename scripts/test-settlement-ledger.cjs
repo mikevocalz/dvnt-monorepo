@@ -68,7 +68,7 @@ test('bad commission and missing attribution roll back the entire enrollment',as
 
 test('disabled control, review hold, future release, unpaid source and incomplete onboarding block reservations',async()=>{
  const db=await fixture(); try {
- await enroll(db); const [a]=await allocations(db);
+ await enroll(db); const a=(await allocations(db)).find(a=>a.role==='promoter');
  await assert.rejects(reserve(db,a.id),/held/);
  await db.exec('update dvnt_settlement.controls set transfers_enabled=true');
  await assert.rejects(reserve(db,a.id),/held/);
@@ -80,7 +80,7 @@ test('disabled control, review hold, future release, unpaid source and incomplet
  await assert.rejects(reserve(db,a.id,null),/not onboarded/);
  assert.equal((await allocations(db))[0].state,'held');
  const intent=await reserve(db,a.id); assert.equal(intent.source_transaction,'ch_fixture');
- assert.equal(Number(intent.amount),8500); assert.equal(intent.currency,'usd');
+ assert.equal(Number(intent.amount),1000); assert.equal(intent.currency,'usd');
  await assert.rejects(reserve(db,a.id),/reconcile/);
  }finally{await db.close();}
 });
@@ -88,12 +88,14 @@ test('disabled control, review hold, future release, unpaid source and incomplet
 test('partial completion survives retry; late onboarding keeps recipient identity and bank payout unverified',async()=>{
  const db=await fixture(); try {
  await enroll(db); await enable(db); const [host,promo]=await allocations(db);
- await reserve(db,host.id); await reconcile(db,host); await reconcile(db,host);
- await assert.rejects(reserve(db,host.id),/reconcile/);
+ await assert.rejects(reserve(db,host.id),/promoter settlement pending/);
  await assert.rejects(reserve(db,promo.id,null),/not onboarded/);
  const intent=await reserve(db,promo.id,'acct_later');
  assert.equal(intent.idempotency_key,promo.idempotency_key);
+ await assert.rejects(reserve(db,host.id),/promoter settlement pending/);
  await reconcile(db,promo,{transfer:'tr_later',destination:'acct_later'});
+ await reserve(db,host.id); await reconcile(db,host); await reconcile(db,host);
+ await assert.rejects(reserve(db,host.id),/reconcile/);
  assert.ok((await allocations(db)).every(a=>a.state==='transferred'&&a.bank_payout_state==='unverified'));
  }finally{await db.close();}
 });
@@ -111,10 +113,10 @@ test('refund first prevents all reservations and never automatically requeues',a
 test('dispute after reservation quarantines unknown outcome and tracks confirmed transfer as recovery owed',async()=>{
  const db=await fixture(); try {
  await enroll(db); await enable(db); const [host,promo]=await allocations(db);
- await reserve(db,host.id); await reserve(db,promo.id); await reconcile(db,host);
+ await reserve(db,promo.id); await reconcile(db,promo,{transfer:'tr_promoter'}); await reserve(db,host.id);
  await db.query("select dvnt_settlement.hold($1,'evt_dispute_fixture','dispute')",[order]);
- assert.deepEqual((await allocations(db)).map(a=>a.state),['recovery_required','uncertain']);
- await reconcile(db,promo,{transfer:'tr_promoter'});
+ assert.deepEqual((await allocations(db)).map(a=>a.state),['uncertain','recovery_required']);
+ await reconcile(db,host);
  assert.ok((await allocations(db)).every(a=>a.state==='recovery_required'&&a.bank_payout_state==='unverified'));
  for(const a of await allocations(db)) await assert.rejects(reserve(db,a.id),/held/);
  }finally{await db.close();}
@@ -124,13 +126,13 @@ test('reconciliation requires exact frozen transfer evidence and unique transfer
  const db=await fixture(); try {
  await enroll(db); await enable(db); const [host,promo]=await allocations(db);
  await assert.rejects(reconcile(db,host),/mismatch/);
- await reserve(db,host.id); await reserve(db,promo.id);
- for(const mismatch of [{amount:8499},{currency:'eur'},{charge:'ch_other'},{destination:'acct_other'},{transfer:null}]) {
- await assert.rejects(reconcile(db,host,mismatch),/mismatch/);
+ await reserve(db,promo.id);
+ for(const mismatch of [{amount:999},{currency:'eur'},{charge:'ch_other'},{destination:'acct_other'},{transfer:null}]) {
+ await assert.rejects(reconcile(db,promo,mismatch),/mismatch/);
  }
- await reconcile(db,host);
- await assert.rejects(reconcile(db,promo),/unique/);
- await assert.rejects(reconcile(db,host,{transfer:'tr_replaced'}),/mismatch/);
+ await reconcile(db,promo); await reserve(db,host.id);
+ await assert.rejects(reconcile(db,host),/unique/);
+ await assert.rejects(reconcile(db,promo,{transfer:'tr_replaced'}),/mismatch/);
  }finally{await db.close();}
 });
 
@@ -153,12 +155,12 @@ test('buyer/anonymous roles cannot call financial functions or read ledger; serv
 
 test('enrolled source economics cannot change, but refunds remain writable and force recovery',async()=>{
  const db=await fixture(); try {
- await enroll(db); await enable(db); const [host]=await allocations(db);
+ await enroll(db); await enable(db); const host=(await allocations(db)).find(a=>a.role==='promoter');
  for(const change of ["charge_model='destination_charge'","total_cents=12000","promoter_commission_amount_cents=0","event_id=2","stripe_payment_intent_id='pi_other'"]) {
   await assert.rejects(db.exec('update orders set '+change),/immutable/);
  }
  await reserve(db,host.id); await db.exec("update orders set status='refunded'");
  await reconcile(db,host);
- assert.equal((await allocations(db))[0].state,'recovery_required');
+ assert.equal((await allocations(db)).find(a=>a.id===host.id).state,'recovery_required');
  }finally{await db.close();}
 });

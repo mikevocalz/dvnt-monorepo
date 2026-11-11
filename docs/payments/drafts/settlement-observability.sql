@@ -23,6 +23,12 @@ CREATE FUNCTION public.settlement_health() RETURNS jsonb LANGUAGE sql SECURITY D
   JOIN dvnt_settlement.deliveries d ON d.allocation_id=a.id WHERE d.state IN ('held','reserved','uncertain') AND s.release_at<=now()),
  'blocked_order_count',(SELECT count(*) FROM dvnt_settlement.checkouts WHERE last_error IS NOT NULL),
  'onboarding_or_account_blocked',(SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error IN ('onboarding_required','recipient_restricted')),
+ 'organizer_waiting_on_promoter',(SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error='promoter_pending'),
+ 'held_promoter_liabilities',(SELECT coalesce(jsonb_object_agg(currency,cents),'{}'::jsonb) FROM (
+  SELECT s.currency,sum(a.amount_cents) AS cents FROM dvnt_settlement.allocations a
+  JOIN dvnt_settlement.orders s ON s.order_id=a.order_id JOIN dvnt_settlement.deliveries d ON d.allocation_id=a.id
+  WHERE a.role='promoter' AND d.state IN ('held','reserved','uncertain')
+   AND NOT dvnt_settlement.promoter_obligation_satisfied(a.id) GROUP BY s.currency) p),
  'funding_blocked',(SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error='funding_required'),
  'source_audit_blocked',(SELECT count(*) FROM dvnt_settlement.checkouts WHERE last_error IN ('source_audit_limit','source_verification_stale'))+
   (SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error IN ('source_audit_limit','source_verification_stale')),
