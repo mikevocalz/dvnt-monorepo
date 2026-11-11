@@ -32,8 +32,10 @@ const PERSISTED_KEY_PREFIXES = [
 
 // Keep this static environment check in the API package to avoid an app dependency.
 function protectedMediaEnabled() {
-  return process.env.EXPO_PUBLIC_FF_PROTECTED_POST_MEDIA === 'true' ||
-    process.env.NEXT_PUBLIC_FF_PROTECTED_POST_MEDIA === 'true';
+  try {
+    return process.env.EXPO_PUBLIC_FF_PROTECTED_POST_MEDIA === 'true' ||
+      process.env.NEXT_PUBLIC_FF_PROTECTED_POST_MEDIA === 'true';
+  } catch { return false; }
 }
 function filterProtectedSnapshots(snapshot: any) {
   if (!protectedMediaEnabled() || !snapshot?.clientState?.queries) return snapshot;

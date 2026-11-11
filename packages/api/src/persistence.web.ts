@@ -32,8 +32,10 @@ const PERSISTED_KEY_PREFIXES = [
 
 // Keep this static environment check in the API package to avoid an app dependency.
 function protectedMediaEnabled() {
-  return process.env.EXPO_PUBLIC_FF_PROTECTED_POST_MEDIA === 'true' ||
-    process.env.NEXT_PUBLIC_FF_PROTECTED_POST_MEDIA === 'true';
+  try {
+    return process.env.EXPO_PUBLIC_FF_PROTECTED_POST_MEDIA === 'true' ||
+      process.env.NEXT_PUBLIC_FF_PROTECTED_POST_MEDIA === 'true';
+  } catch { return false; }
 }
 function filterProtectedSnapshots(snapshot: any) {
   if (!protectedMediaEnabled() || !snapshot?.clientState?.queries) return snapshot;
@@ -58,8 +60,10 @@ export function createPlatformPersister() {
 
   return createSyncStoragePersister({
     key: DVNT_QUERY_CACHE_KEY,
-    serialize: snapshot => JSON.stringify(filterProtectedSnapshots(snapshot)),
-    deserialize: raw => filterProtectedSnapshots(JSON.parse(raw)),
+    ...(protectedMediaEnabled() ? {
+      serialize: (snapshot: unknown) => JSON.stringify(filterProtectedSnapshots(snapshot)),
+      deserialize: (raw: string) => filterProtectedSnapshots(JSON.parse(raw)),
+    } : {}),
     storage: {
       // Permission can also change after initialization. A failed read is a
       // cache miss, and failure to remove an optional snapshot is non-fatal.

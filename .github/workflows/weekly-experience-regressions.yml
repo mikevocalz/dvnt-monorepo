@@ -86,7 +86,7 @@ jobs:
         run: >-
           npm install --prefix "$RUNNER_TEMP/weekly" --ignore-scripts --no-audit --no-fund --no-save
           imagescript@3.20.2 typescript@5.9.3 esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
-          zustand@5.0.14 @tanstack/react-query@5.90.16 happy-dom@20.0.11
+          zustand@5.0.14 @tanstack/react-query@5.90.16 happy-dom@20.0.11 jsdom@26.1.0
           @electric-sql/pglite@0.3.14
       - name: Settings, event, location and navigation regressions
         env:

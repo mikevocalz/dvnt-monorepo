@@ -20,3 +20,17 @@ for (const file of ['packages/api/src/persistence.ts','packages/api/src/persiste
   process.env.EXPO_PUBLIC_FF_PROTECTED_POST_MEDIA='false';assert.equal(api.shouldDehydrateQuery({queryKey:['posts','detail','1']}),true);
  } finally {if(previous===undefined)delete process.env.EXPO_PUBLIC_FF_PROTECTED_POST_MEDIA;else process.env.EXPO_PUBLIC_FF_PROTECTED_POST_MEDIA=previous;global.window=previousWindow;}
 });
+
+test('build-time flags activate without a process global; unconfigured standalone bundles stay disabled',()=>{
+ const vm=require('node:vm');
+ for(const file of ['packages/app/lib/media/post-media-delivery.ts','packages/api/src/persistence.ts','packages/api/src/persistence.web.ts']){
+  const original=fs.readFileSync(file,'utf8');
+  for(const inline of [false,true]){
+   const exports={};const source=inline?original.replaceAll("process.env.EXPO_PUBLIC_FF_PROTECTED_POST_MEDIA",'"true"').replaceAll("process.env.NEXT_PUBLIC_FF_PROTECTED_POST_MEDIA",'"false"'):original;
+   const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+   vm.runInNewContext(code,{exports,require:()=>({})});
+   if(exports.protectedPostMediaEnabled)assert.equal(exports.protectedPostMediaEnabled(),inline);
+   else assert.equal(exports.shouldDehydrateQuery({queryKey:['profile']}),!inline);
+  }
+ }
+});
