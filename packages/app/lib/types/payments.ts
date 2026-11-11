@@ -103,6 +103,8 @@ export type CheckoutFailureReason =
   | "technical_failure";
 
 export interface Order {
+  /** Review entry only; never proof of cancellation or permission to charge. */
+  canReviewCheckoutReplacement?: boolean;
   id: string;
   status: OrderStatus;
   /** Null means not classified, not a proven card decline. */

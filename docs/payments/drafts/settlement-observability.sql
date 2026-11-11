@@ -3,6 +3,46 @@ ALTER TABLE dvnt_settlement.controls ADD COLUMN last_worker_started_at timestamp
  ADD COLUMN last_worker_completed_at timestamptz, ADD COLUMN last_worker_error_at timestamptz,
  ADD COLUMN last_worker_summary jsonb,
  ADD COLUMN platform_payout_policy_verified boolean, ADD COLUMN platform_payout_policy_checked_at timestamptz;
+-- Advance before work, so a killed invocation cannot pin the first phase.
+ALTER TABLE dvnt_settlement.controls ADD COLUMN worker_phase integer NOT NULL DEFAULT 0 CHECK(worker_phase BETWEEN 0 AND 4);
+CREATE FUNCTION public.settlement_worker_next_phase() RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE phase integer;
+BEGIN
+ UPDATE dvnt_settlement.controls SET worker_phase=(worker_phase+1)%5 WHERE singleton
+ RETURNING (worker_phase+4)%5 INTO phase;
+ RETURN phase;
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_worker_next_phase() FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.settlement_worker_next_phase() TO service_role;
+-- Operational attention only; these rows never authorize financial retries.
+CREATE TABLE dvnt_settlement.runtime_attention(
+ phase text NOT NULL CHECK(phase IN ('refund','recovery','bank','order','cleanup')),
+ work_key text NOT NULL CHECK(length(work_key) BETWEEN 1 AND 200),
+ first_exhausted_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ last_exhausted_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(phase,work_key)
+);
+REVOKE ALL ON dvnt_settlement.runtime_attention FROM PUBLIC,anon,authenticated,service_role;
+CREATE FUNCTION public.settlement_runtime_observation(p_phase text,p_work_key text,p_outcome text,p_run_started_at timestamptz)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF p_phase IS NULL OR p_phase NOT IN ('refund','recovery','bank','order','cleanup') OR p_work_key IS NULL
+  OR length(p_work_key) NOT BETWEEN 1 AND 200 OR p_outcome IS NULL OR p_outcome NOT IN ('budget','completed')
+  OR p_run_started_at IS NULL OR NOT isfinite(p_run_started_at) OR p_run_started_at>clock_timestamp()
+ THEN RAISE EXCEPTION 'invalid runtime observation'; END IF;
+ IF p_outcome='budget' THEN
+  INSERT INTO dvnt_settlement.runtime_attention(phase,work_key) VALUES(p_phase,p_work_key)
+  ON CONFLICT(phase,work_key) DO UPDATE SET last_exhausted_at=clock_timestamp();
+ ELSE
+  -- An older overlapping invocation must not erase a newer exhausted attempt.
+  DELETE FROM dvnt_settlement.runtime_attention WHERE phase=p_phase AND work_key=p_work_key
+   AND last_exhausted_at<p_run_started_at;
+ END IF;
+ RETURN jsonb_build_object('ok',true);
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_runtime_observation(text,text,text,timestamptz) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.settlement_runtime_observation(text,text,text,timestamptz) TO service_role;
 CREATE FUNCTION public.settlement_worker_observation(p_phase text,p_summary jsonb DEFAULT '{}'::jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
@@ -12,7 +52,7 @@ BEGIN
  last_worker_completed_at=CASE WHEN p_phase='completed' THEN clock_timestamp() ELSE last_worker_completed_at END,
  last_worker_error_at=CASE WHEN p_phase='error' THEN clock_timestamp() ELSE last_worker_error_at END,
  last_worker_summary=p_summary WHERE singleton;
- RETURN jsonb_build_object('ok',true);
+ RETURN jsonb_build_object('ok',true,'observed_at',clock_timestamp());
 END $$;
 CREATE FUNCTION public.settlement_platform_policy_observation(p_verified boolean) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -58,6 +98,9 @@ CREATE FUNCTION public.settlement_health() RETURNS jsonb LANGUAGE sql SECURITY D
   WHERE a.role='promoter' AND d.state IN ('held','reserved','uncertain')
    AND NOT dvnt_settlement.promoter_obligation_satisfied(a.id) GROUP BY s.currency) p),
  'funding_blocked',(SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error='funding_required'),
+ 'runtime_budget_blocked',(SELECT count(*) FROM dvnt_settlement.runtime_attention)+
+  (SELECT count(*) FROM dvnt_settlement.checkouts WHERE last_error='runtime_budget_required')+
+  (SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error='runtime_budget_required'),
  'source_audit_blocked',(SELECT count(*) FROM dvnt_settlement.checkouts WHERE last_error IN ('source_audit_limit','source_verification_stale'))+
   (SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error IN ('source_audit_limit','source_verification_stale')),
  'uncertain_transfers',(SELECT count(*) FROM dvnt_settlement.deliveries WHERE state IN ('reserved','uncertain')),

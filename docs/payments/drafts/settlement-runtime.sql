@@ -561,7 +561,7 @@ $$;
 CREATE FUNCTION public.settlement_processing_error(p_order_id uuid,p_code text,p_allocation uuid DEFAULT NULL) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
- IF p_code NOT IN ('onboarding_required','recipient_restricted','funding_required','source_audit_limit','source_verification_stale','verification_required','hold_required','promoter_pending','platform_payout_policy_unverified') THEN RAISE EXCEPTION 'unknown processing reason'; END IF;
+ IF p_code NOT IN ('runtime_budget_required','onboarding_required','recipient_restricted','funding_required','source_audit_limit','source_verification_stale','verification_required','hold_required','promoter_pending','platform_payout_policy_unverified') THEN RAISE EXCEPTION 'unknown processing reason'; END IF;
  IF p_allocation IS NULL THEN
   UPDATE dvnt_settlement.checkouts SET last_error=p_code WHERE order_id=p_order_id AND coalesce(last_error,'') NOT LIKE 'hold:%';
  ELSE

@@ -3,11 +3,27 @@ on:
   pull_request:
     paths:
       - 'apps/mobile/supabase/functions/_shared/settlement-*'
+      - 'apps/mobile/supabase/functions/_shared/legacy-event-checkout-route*'
+      - 'apps/mobile/supabase/functions/_shared/ticket-embed-commerce*'
+      - 'apps/mobile/supabase/functions/ticket-embed/**'
+      - 'apps/mobile/supabase/functions/door-sell/**'
+      - 'apps/mobile/supabase/functions/ticket-upgrade/**'
+      - 'apps/mobile/supabase/functions/_shared/checkout-recovery*'
+      - 'apps/mobile/supabase/functions/_shared/checkout-replacement*'
+      - 'apps/mobile/supabase/functions/checkout-recovery/**'
+      - 'apps/mobile/supabase/functions/checkout-replacement/**'
+      - 'packages/app/lib/api/checkout-replacement*'
+      - 'packages/app/features/events/checkout-replacement*'
+      - 'scripts/test-checkout-replacement*'
+      - 'scripts/test-checkout-outcome-ui.cjs'
       - 'apps/mobile/supabase/functions/settlements-process/**'
       - 'apps/mobile/supabase/migrations/*settlement*.sql'
       - 'docs/payments/drafts/settlement-*.sql'
       - 'scripts/fixtures/settlement/**'
       - 'scripts/test-settlement-*'
+      - 'scripts/test-recovery-privacy.cjs'
+      - 'packages/observability/src/**'
+      - 'apps/web/src/instrumentation-client.ts'
       - 'scripts/test-promoter-first-budget.cjs'
       - 'scripts/build-settlement-migration.mjs'
       - 'scripts/verify-issuance-invariants*'
@@ -17,22 +33,27 @@ permissions:
 jobs:
   postgres-locks:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Compile test runner
-        run: python3 -m py_compile scripts/test-settlement-concurrency.py
+        run: python3 -m py_compile scripts/test-settlement-concurrency.py scripts/test-settlement-replacement-concurrency.py scripts/test-settlement-fulfillment-concurrency.py
       - name: Overlapping transactions in disposable local databases
         run: |
           set -euo pipefail
           sudo systemctl start postgresql
           python3 scripts/test-settlement-concurrency.py --disposable-ci-postgres
+          python3 scripts/test-settlement-replacement-concurrency.py --disposable-ci-postgres
+          python3 scripts/test-settlement-fulfillment-concurrency.py --disposable-ci-postgres
 
   offline-integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,7 +62,7 @@ jobs:
         with:
           node-version: '24'
       - name: Install isolated synthetic test dependencies
-        run: npm install --prefix "$RUNNER_TEMP/settlement-tests" --ignore-scripts --no-audit --no-fund @electric-sql/pglite@0.3.14 typescript@5.9.3 esbuild@0.25.12 happy-dom@20.0.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @tanstack/react-query@5.90.16
+        run: npm install --prefix "$RUNNER_TEMP/settlement-tests" --ignore-scripts --no-audit --no-fund @electric-sql/pglite@0.3.14 typescript@5.9.3 esbuild@0.25.12 happy-dom@20.0.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @tanstack/react-query@5.90.16 @sentry/browser@10.69.0
       - name: Reproducible migration and bounded-concurrency offline tests
         env:
           NODE_PATH: ${{ runner.temp }}/settlement-tests/node_modules
@@ -49,8 +70,14 @@ jobs:
           node scripts/build-settlement-migration.mjs --check
           node --test --test-concurrency=1 scripts/test-settlement-*.cjs scripts/test-promoter-first-budget.cjs
           node --test --test-concurrency=1 apps/mobile/supabase/functions/_shared/payout-readiness*.test.cjs apps/mobile/supabase/functions/_shared/settlement-readiness.test.cjs apps/mobile/supabase/functions/db-health/payout-readiness.test.cjs apps/mobile/supabase/functions/promoter-self/index.test.cjs
+          node --test --test-concurrency=1 apps/mobile/supabase/functions/ticket-embed/index.test.cjs apps/mobile/supabase/functions/_shared/door-sell-idempotency.test.cjs
           node scripts/test-promoter-payout-ui.cjs
           node --test scripts/verify-issuance-invariants.test.cjs
           node scripts/verify-issuance-invariants.mjs
+          node --test packages/app/lib/api/checkout-replacement.test.cjs
+          node scripts/test-checkout-outcome-ui.cjs
+          node --test scripts/test-recovery-privacy.cjs
+          node scripts/test-checkout-replacement-ui.cjs
+          node scripts/test-checkout-replacement-entry-ui.cjs
           node scripts/verify-edge-functions.mjs
           node scripts/verify-no-live-identifiers.mjs

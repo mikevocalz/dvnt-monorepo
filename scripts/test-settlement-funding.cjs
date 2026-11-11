@@ -1,5 +1,8 @@
 /** Offline provider fixture + real PostgreSQL semantics through PGlite. */
 const {test}=require('node:test');const assert=require('node:assert/strict');
+const {issuePaidOrder}=require('./fixtures/settlement/issuance.cjs');
+const {setup:fulfillmentFixture}=require('./fixtures/settlement/fulfillment.cjs');
+const {sessionAdapter}=require('./fixtures/settlement/session-adapter.cjs');
 const {setup,engine,funding}=require('./test-settlement-engine.cjs');
 const tx=(id,net,{currency='usd',type='charge',status='available',source='ch_'+id}={})=>({id:'txn_'+id,object:'balance_transaction',source,type,currency,created:100,amount:net,fee:0,net,status});
 async function other(f,suffix,{commission=1000,currency='usd'}={}){
@@ -12,7 +15,7 @@ async function other(f,suffix,{commission=1000,currency='usd'}={}){
  Object.assign(charge.balance_transaction,{id:'txn_'+suffix,source:charge.id,currency});
  return {...p,charge};
 }
-async function enroll(f,o){await f.call('settlement_verify_source',{p_order_id:o.order_id,p_charge:o.charge.id,p_pi:o.charge.payment_intent,p_currency:o.charge.currency,p_gross:11000,p_tax:0});await f.call('settlement_record_funding_source',{p_order_id:o.order_id,p_platform_account:'acct_platform_fixture',p_proof:funding.fundingSourceProof(o.charge,0)});}
+async function enroll(f,o){await issuePaidOrder(f.pg,o.order_id);await f.call('settlement_verify_source',{p_order_id:o.order_id,p_charge:o.charge.id,p_pi:o.charge.payment_intent,p_currency:o.charge.currency,p_gross:11000,p_tax:0});await f.call('settlement_record_funding_source',{p_order_id:o.order_id,p_platform_account:'acct_platform_fixture',p_proof:funding.fundingSourceProof(o.charge,0)});}
 async function audit(f,transactions,{currency='usd',available=100000,checkpoint}={}){const c=checkpoint||await f.call('settlement_balance_checkpoint',{});return f.call('settlement_record_funding_audit',{p_currency:currency,p_available:available,p_balance_epoch:c.epoch,p_started_at:c.observed_at,p_platform_account:'acct_platform_fixture',p_livemode:false,p_audit_from:0,p_transactions:transactions.map(t=>funding.fundingTransaction(t,0))});}
 
 test('paid at Stripe but DB pending contributes no host funding; later verified enrollment protects its commission',async()=>{
@@ -110,11 +113,11 @@ test('a pending balance transaction becoming available with the same ID does not
 });
 
 test('processing and failed payment intent responses never enroll a source or send',async()=>{
- for(const status of ['processing','requires_payment_method','canceled']){const f=await setup();try{f.intent.status=status;await assert.rejects(f.run(),/invalid nonpaid intent proof/);Object.assign(f.intent,{amount_received:0,latest_charge:null});const r=await f.run();assert.equal(r.state,'awaiting_payment');assert.equal(f.transfers.length,0);assert.equal((await f.pg.query('select count(*)::int n from dvnt_settlement.funding_sources')).rows[0].n,0);}finally{await f.pg.close();}}
+ for(const status of ['processing','requires_payment_method','canceled']){const f=await setup({issue:false});try{f.intent.status=status;await assert.rejects(f.run(),/invalid nonpaid intent proof/);Object.assign(f.intent,{amount_received:0,latest_charge:null});const r=await f.run();assert.equal(r.state,'awaiting_payment');assert.equal(f.transfers.length,0);assert.equal((await f.pg.query('select count(*)::int n from dvnt_settlement.funding_sources')).rows[0].n,0);}finally{await f.pg.close();}}
 });
 
 test('tax is never recognized as spendable and malformed actual fee/net proof fails closed',async()=>{
- const f=await setup();try{const b=await other(f,'tax');await f.call('settlement_verify_source',{p_order_id:b.order_id,p_charge:b.charge.id,p_pi:b.charge.payment_intent,p_currency:'usd',p_gross:11500,p_tax:500});b.charge.amount=11500;Object.assign(b.charge.balance_transaction,{amount:11500,fee:500,net:11000});const proof=funding.fundingSourceProof(b.charge,500);await f.call('settlement_record_funding_source',{p_order_id:b.order_id,p_platform_account:'acct_platform_fixture',p_proof:proof});assert.equal((await audit(f,[b.charge.balance_transaction])).available,10500);assert.throws(()=>funding.fundingSourceProof({...b.charge,balance_transaction:{...b.charge.balance_transaction,net:11500}},500),/Invalid/);await assert.rejects(f.call('settlement_record_funding_source',{p_order_id:b.order_id,p_platform_account:'acct_platform_fixture',p_proof:{...proof,tax:0}}),/mismatch/);}finally{await f.pg.close();}
+ const f=await fulfillmentFixture({rail:'ticket-checkout',hostedPiUnknown:true});try{const adapter=await sessionAdapter(f,{tax:500});assert.equal((await adapter.run()).issued,1);const b={order_id:f.p.order_id,charge:f.charge};await f.call('settlement_verify_source',{p_order_id:b.order_id,p_charge:b.charge.id,p_pi:b.charge.payment_intent,p_currency:'usd',p_gross:11500,p_tax:500});b.charge.amount=11500;Object.assign(b.charge.balance_transaction,{amount:11500,fee:500,net:11000});const proof=funding.fundingSourceProof(b.charge,500);await f.call('settlement_record_funding_source',{p_order_id:b.order_id,p_platform_account:'acct_platform_fixture',p_proof:proof});assert.equal((await audit(f,[b.charge.balance_transaction])).available,10500);assert.throws(()=>funding.fundingSourceProof({...b.charge,balance_transaction:{...b.charge.balance_transaction,net:11500}},500),/Invalid/);await assert.rejects(f.call('settlement_record_funding_source',{p_order_id:b.order_id,p_platform_account:'acct_platform_fixture',p_proof:{...proof,tax:0}}),/mismatch/);}finally{await f.pg.close();}
 });
 
 test('credited currency cannot offset another currency and re-observed debit is counted only once',async()=>{
@@ -127,7 +130,7 @@ test('pending negative is encumbered immediately and availability transition nei
 });
 
 test('one order per charge and one immutable balance-transaction credit, including equal-amount wrong sources',async()=>{
- const f=await setup();try{await f.run(false);await enroll(f,{order_id:f.p.order_id,charge:f.charge});const b=await other(f,'duplicate_membership');
+ const f=await setup();try{await f.run(false);await enroll(f,{order_id:f.p.order_id,charge:f.charge});const b=await other(f,'duplicate_membership');await issuePaidOrder(f.pg,b.order_id);
  await assert.rejects(f.call('settlement_verify_source',{p_order_id:b.order_id,p_charge:f.charge.id,p_pi:b.charge.payment_intent,p_currency:'usd',p_gross:11000,p_tax:0}),/unique|duplicate/);
  await f.call('settlement_verify_source',{p_order_id:b.order_id,p_charge:b.charge.id,p_pi:b.charge.payment_intent,p_currency:'usd',p_gross:11000,p_tax:0});
  const proof=funding.fundingSourceProof(b.charge,0);await assert.rejects(f.call('settlement_record_funding_source',{p_order_id:b.order_id,p_platform_account:'acct_platform_fixture',p_proof:{...proof,id:f.charge.balance_transaction.id}}),/unique|duplicate/);

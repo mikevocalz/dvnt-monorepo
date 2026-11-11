@@ -3,6 +3,7 @@
  * Never infer a bank payout from a transfer or from an account-wide total.
  */
 export interface RecoveryProvider {
+ assertCanStart?():void;
  get(path:string, connectedAccount?:string):Promise<any>;
  post(path:string,body:Record<string,string>,key:string):Promise<any>;
 }
@@ -149,6 +150,7 @@ async function allPages(provider:RecoveryProvider,path:string,account?:string) {
  * until read-only reconciliation proves the exact provider reversal exists. */
 export async function executeSettlementRecovery(db:any,provider:RecoveryProvider,recoveryId:string,enabled=false) {
  if(!enabled)throw new Error('Recovery execution disabled');
+ provider.assertCanStart?.();
  const intent=await rpc(db,'settlement_claim_recovery',{p_recovery_id:recoveryId});
  if(intent.claimed!==true)throw new Error('Recovery already attempted; reconciliation required');
  try {

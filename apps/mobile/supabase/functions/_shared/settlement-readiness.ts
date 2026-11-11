@@ -14,6 +14,7 @@ export function settlementReadinessIssues(s: any): string[] {
  // Real liabilities remain visible when execution is paused after collection.
  if(s.oldest_due_at && Date.parse(s.observed_at)-Date.parse(s.oldest_due_at)>90*60_000) issues.push('due_settlement_attention');
  if(s.oldest_checkout_outcome_unknown_at && Date.parse(s.observed_at)-Date.parse(s.oldest_checkout_outcome_unknown_at)>90*60_000) issues.push('checkout_outcome_unknown');
+ if(s.runtime_budget_blocked>0) issues.push('runtime_budget_required');
  if(s.failed_bank_deliveries>0) issues.push('bank_delivery_failed');
  if(s.platform_payout_policy_blocked > 0) issues.push('platform_payout_policy_unverified');
  if(s.manual_review_count > 0) issues.push('manual_recovery_review');

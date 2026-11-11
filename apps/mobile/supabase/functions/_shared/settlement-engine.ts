@@ -3,6 +3,7 @@ import { auditFundingTransactions, fundingSourceProof } from "./settlement-fundi
  * No automatic retries on provider writes. Database reservations survive errors.
  */
 export interface SettlementProvider {
+ assertCanStart?():void;
  get(path:string,connectedAccount?:string):Promise<any>;
  post(path:string,body:Record<string,string>,idempotencyKey:string):Promise<any>;
 }
@@ -15,6 +16,8 @@ export async function settlementRpc(db:SettlementDatabase,name:string,args:Recor
 }
 export function settlementFailureCode(error:unknown):string {
  const message=error instanceof Error?error.message:String(error);
+ if(/run admission budget/i.test(message))return 'runtime_budget_required';
+ if(/fulfillment_required/i.test(message))return 'fulfillment_required';
  if(/platform payout policy/i.test(message))return 'platform_payout_policy_unverified';
  if(/promoter settlement pending/i.test(message))return 'promoter_pending';
  if(/onboarding/i.test(message))return 'onboarding_required';
@@ -250,6 +253,7 @@ export async function processSettlementOrder(db:SettlementDatabase,provider:Sett
     p_available:Math.min(availableCurrency(before,source.currency),availableCurrency(after,source.currency)),
     p_balance_epoch:checkpoint.epoch,p_started_at:checkpoint.observed_at,p_platform_account:account.id,
     p_livemode:after.livemode,p_audit_from:checkpoint.funding_policy.audit_from,p_transactions:transactions});
+   provider.assertCanStart?.();
    const reservation=await settlementRpc(db,'settlement_reserve',{p_allocation:a.id,p_destination:destination,
     p_available:funding.available,p_balance_epoch:funding.epoch});
    const expected={...a,destination,charge_id:source.charge,currency:source.currency};

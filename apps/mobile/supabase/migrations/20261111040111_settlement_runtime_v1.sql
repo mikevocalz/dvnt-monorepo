@@ -16,11 +16,36 @@ BEGIN
   ('orders','currency','text'),('orders','stripe_payment_intent_id','text'),
   ('event_promoters','id','uuid'),('event_promoters','user_id','text'),('event_promoters','stripe_account_id','text'),
   ('organizer_accounts','host_id','text'),('promoter_attributions','order_id','uuid'),
-  ('promoter_ledger_entries','order_id','uuid'),('promoter_ledger_entries','currency','text')
+  ('promoter_ledger_entries','order_id','uuid'),('promoter_ledger_entries','currency','text'),
+  ('events','fee_mode','text'),('events','visibility','text'),('events','is_hidden','boolean'),('events','publish_at','timestamp with time zone'),
+  ('orders','guest_email','text'),('orders','cart_id','uuid'),('orders','paid_at','timestamp with time zone'),
+  ('carts','user_id','text'),('carts','event_id','integer'),('carts','stripe_pi_id','text'),('carts','currency','text'),
+  ('cart_line_items','id','uuid'),('cart_line_items','cart_id','uuid'),('cart_line_items','tier_id','uuid'),
+  ('cart_line_items','addon_id','uuid'),('cart_line_items','variant_id','uuid'),('cart_line_items','quantity','integer'),
+  ('cart_line_items','unit_price_cents','integer'),('cart_line_items','refunded_amount_cents','integer'),
+  ('cart_holds','cart_id','uuid'),('cart_holds','line_item_id','uuid'),('cart_holds','expires_at','timestamp with time zone'),('cart_holds','released','boolean'),
+  ('ticket_holds','payment_intent_id','text'),('ticket_holds','status','text'),('ticket_holds','expires_at','timestamp with time zone'),
+  ('ticket_types','id','uuid'),('ticket_types','price_cents','integer'),('ticket_types','quantity_total','integer'),
+  ('ticket_types','price_schedule','jsonb'),('ticket_types','sub_allocations','jsonb'),
+  ('ticket_addons','id','uuid'),('ticket_addons','price_cents','integer'),('ticket_addons','binding_mode','text'),
+  ('ticket_addon_variants','id','uuid'),('ticket_addon_variants','price_cents','integer'),
+  ('tickets','order_id','uuid'),('tickets','cart_id','uuid'),('tickets','stripe_payment_intent_id','text'),
+  ('order_addons','order_id','uuid'),('order_addons','cart_id','uuid'),('cart_line_refunds','cart_id','uuid')
  ) AS r(table_name,column_name,data_type) LOOP
   IF NOT EXISTS(SELECT 1 FROM information_schema.columns c WHERE c.table_schema='public'
    AND c.table_name=required.table_name AND c.column_name=required.column_name AND c.data_type=required.data_type)
   THEN RAISE EXCEPTION 'settlement source schema contract mismatch: %.%',required.table_name,required.column_name; END IF;
+ END LOOP;
+ FOR required IN SELECT * FROM (VALUES
+  ('ticket_purchase_hold_atomic(uuid,integer,text,text,text,integer,text)'),
+  ('cart_create_hold(uuid,integer,jsonb)'),
+  ('paid_ticket_issuance_atomic(uuid,uuid,text,text,bigint,jsonb)'),
+  ('complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamp with time zone)'),
+  ('cart_complete_issuance(uuid,text,jsonb,jsonb)'),('addon_available(uuid)'),('addon_variant_available(uuid)')
+ ) AS f(signature) LOOP
+  IF to_regprocedure('public.'||required.signature) IS NULL THEN
+   RAISE EXCEPTION 'settlement source function contract mismatch: %',required.signature;
+  END IF;
  END LOOP;
  IF to_regclass('dvnt_settlement.controls') IS NOT NULL THEN
   RAISE EXCEPTION 'settlement runtime already exists; reconcile migration history before applying';
@@ -824,7 +849,7 @@ $$;
 CREATE FUNCTION public.settlement_processing_error(p_order_id uuid,p_code text,p_allocation uuid DEFAULT NULL) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
- IF p_code NOT IN ('onboarding_required','recipient_restricted','funding_required','source_audit_limit','source_verification_stale','verification_required','hold_required','promoter_pending','platform_payout_policy_unverified') THEN RAISE EXCEPTION 'unknown processing reason'; END IF;
+ IF p_code NOT IN ('runtime_budget_required','onboarding_required','recipient_restricted','funding_required','source_audit_limit','source_verification_stale','verification_required','hold_required','promoter_pending','platform_payout_policy_unverified') THEN RAISE EXCEPTION 'unknown processing reason'; END IF;
  IF p_allocation IS NULL THEN
   UPDATE dvnt_settlement.checkouts SET last_error=p_code WHERE order_id=p_order_id AND coalesce(last_error,'') NOT LIKE 'hold:%';
  ELSE
@@ -1328,6 +1353,46 @@ ALTER TABLE dvnt_settlement.controls ADD COLUMN last_worker_started_at timestamp
  ADD COLUMN last_worker_completed_at timestamptz, ADD COLUMN last_worker_error_at timestamptz,
  ADD COLUMN last_worker_summary jsonb,
  ADD COLUMN platform_payout_policy_verified boolean, ADD COLUMN platform_payout_policy_checked_at timestamptz;
+-- Advance before work, so a killed invocation cannot pin the first phase.
+ALTER TABLE dvnt_settlement.controls ADD COLUMN worker_phase integer NOT NULL DEFAULT 0 CHECK(worker_phase BETWEEN 0 AND 4);
+CREATE FUNCTION public.settlement_worker_next_phase() RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE phase integer;
+BEGIN
+ UPDATE dvnt_settlement.controls SET worker_phase=(worker_phase+1)%5 WHERE singleton
+ RETURNING (worker_phase+4)%5 INTO phase;
+ RETURN phase;
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_worker_next_phase() FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.settlement_worker_next_phase() TO service_role;
+-- Operational attention only; these rows never authorize financial retries.
+CREATE TABLE dvnt_settlement.runtime_attention(
+ phase text NOT NULL CHECK(phase IN ('refund','recovery','bank','order','cleanup')),
+ work_key text NOT NULL CHECK(length(work_key) BETWEEN 1 AND 200),
+ first_exhausted_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ last_exhausted_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(phase,work_key)
+);
+REVOKE ALL ON dvnt_settlement.runtime_attention FROM PUBLIC,anon,authenticated,service_role;
+CREATE FUNCTION public.settlement_runtime_observation(p_phase text,p_work_key text,p_outcome text,p_run_started_at timestamptz)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF p_phase IS NULL OR p_phase NOT IN ('refund','recovery','bank','order','cleanup') OR p_work_key IS NULL
+  OR length(p_work_key) NOT BETWEEN 1 AND 200 OR p_outcome IS NULL OR p_outcome NOT IN ('budget','completed')
+  OR p_run_started_at IS NULL OR NOT isfinite(p_run_started_at) OR p_run_started_at>clock_timestamp()
+ THEN RAISE EXCEPTION 'invalid runtime observation'; END IF;
+ IF p_outcome='budget' THEN
+  INSERT INTO dvnt_settlement.runtime_attention(phase,work_key) VALUES(p_phase,p_work_key)
+  ON CONFLICT(phase,work_key) DO UPDATE SET last_exhausted_at=clock_timestamp();
+ ELSE
+  -- An older overlapping invocation must not erase a newer exhausted attempt.
+  DELETE FROM dvnt_settlement.runtime_attention WHERE phase=p_phase AND work_key=p_work_key
+   AND last_exhausted_at<p_run_started_at;
+ END IF;
+ RETURN jsonb_build_object('ok',true);
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_runtime_observation(text,text,text,timestamptz) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.settlement_runtime_observation(text,text,text,timestamptz) TO service_role;
 CREATE FUNCTION public.settlement_worker_observation(p_phase text,p_summary jsonb DEFAULT '{}'::jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
@@ -1337,7 +1402,7 @@ BEGIN
  last_worker_completed_at=CASE WHEN p_phase='completed' THEN clock_timestamp() ELSE last_worker_completed_at END,
  last_worker_error_at=CASE WHEN p_phase='error' THEN clock_timestamp() ELSE last_worker_error_at END,
  last_worker_summary=p_summary WHERE singleton;
- RETURN jsonb_build_object('ok',true);
+ RETURN jsonb_build_object('ok',true,'observed_at',clock_timestamp());
 END $$;
 CREATE FUNCTION public.settlement_platform_policy_observation(p_verified boolean) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
@@ -1383,6 +1448,9 @@ CREATE FUNCTION public.settlement_health() RETURNS jsonb LANGUAGE sql SECURITY D
   WHERE a.role='promoter' AND d.state IN ('held','reserved','uncertain')
    AND NOT dvnt_settlement.promoter_obligation_satisfied(a.id) GROUP BY s.currency) p),
  'funding_blocked',(SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error='funding_required'),
+ 'runtime_budget_blocked',(SELECT count(*) FROM dvnt_settlement.runtime_attention)+
+  (SELECT count(*) FROM dvnt_settlement.checkouts WHERE last_error='runtime_budget_required')+
+  (SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error='runtime_budget_required'),
  'source_audit_blocked',(SELECT count(*) FROM dvnt_settlement.checkouts WHERE last_error IN ('source_audit_limit','source_verification_stale'))+
   (SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error IN ('source_audit_limit','source_verification_stale')),
  'uncertain_transfers',(SELECT count(*) FROM dvnt_settlement.deliveries WHERE state IN ('reserved','uncertain')),
@@ -1487,8 +1555,8 @@ CREATE FUNCTION public.claim_settlement_readiness_alert(p_issue_codes text[]) RE
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE codes text[]; claimed boolean;
 BEGIN
- IF p_issue_codes IS NULL OR cardinality(p_issue_codes)>12 OR EXISTS(SELECT 1 FROM unnest(p_issue_codes) code WHERE code IS NULL OR code NOT IN
- ('snapshot_unavailable','checkout_outcome_unknown','due_settlement_attention','bank_delivery_failed','platform_payout_policy_unverified','manual_recovery_review','scheduler_unverified','scheduler_missing','scheduler_duplicate','worker_never_completed','worker_stale','worker_failed'))
+ IF p_issue_codes IS NULL OR cardinality(p_issue_codes)>13 OR EXISTS(SELECT 1 FROM unnest(p_issue_codes) code WHERE code IS NULL OR code NOT IN
+ ('runtime_budget_required','snapshot_unavailable','checkout_outcome_unknown','due_settlement_attention','bank_delivery_failed','platform_payout_policy_unverified','manual_recovery_review','scheduler_unverified','scheduler_missing','scheduler_duplicate','worker_never_completed','worker_stale','worker_failed'))
  THEN RAISE EXCEPTION 'invalid settlement readiness codes'; END IF;
  SELECT coalesce(array_agg(DISTINCT code ORDER BY code),'{}'::text[]) INTO codes FROM unnest(p_issue_codes) code;
  INSERT INTO dvnt_settlement.readiness_alert_state(singleton) VALUES(true) ON CONFLICT DO NOTHING;
@@ -2220,6 +2288,1491 @@ REVOKE ALL ON FUNCTION public.settlement_record_funding_source(uuid,text,jsonb),
 GRANT EXECUTE ON FUNCTION public.settlement_record_funding_source(uuid,text,jsonb),
  public.settlement_record_funding_audit(text,bigint,bigint,timestamptz,text,boolean,bigint,jsonb),
  public.settlement_reserve(uuid,text,bigint,bigint) TO service_role;
+
+
+-- SOURCE: docs/payments/drafts/settlement-guest-recovery.sql
+-- Default-off identity recovery only. No replacement or provider dispatch authority.
+
+ALTER TABLE dvnt_settlement.controls ADD COLUMN IF NOT EXISTS guest_checkout_recovery_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE dvnt_settlement.controls ADD COLUMN IF NOT EXISTS checkout_replacement_enabled boolean NOT NULL DEFAULT false;
+CREATE TABLE dvnt_settlement.guest_recovery_limits (
+ scope text PRIMARY KEY, window_start timestamptz NOT NULL, attempts integer NOT NULL CHECK(attempts>0)
+);
+CREATE TABLE dvnt_settlement.guest_recovery_capabilities (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES public.orders(id),
+ capability_hash text NOT NULL UNIQUE CHECK(capability_hash ~ '^[a-f0-9]{64}$'),
+ purpose text NOT NULL DEFAULT 'replace_canceled_checkout' CHECK(purpose='replace_canceled_checkout'),
+ created_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz NOT NULL DEFAULT now()+interval '15 minutes',
+ exchanged_at timestamptz
+);
+CREATE TABLE dvnt_settlement.guest_recovery_sessions (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES public.orders(id),
+ capability_id uuid NOT NULL UNIQUE REFERENCES dvnt_settlement.guest_recovery_capabilities(id),
+ session_hash text NOT NULL UNIQUE CHECK(session_hash ~ '^[a-f0-9]{64}$'),
+ purpose text NOT NULL DEFAULT 'replace_canceled_checkout' CHECK(purpose='replace_canceled_checkout'),
+ created_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz NOT NULL DEFAULT now()+interval '15 minutes',
+ consumed_at timestamptz
+);
+ALTER TABLE dvnt_settlement.guest_recovery_limits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dvnt_settlement.guest_recovery_capabilities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dvnt_settlement.guest_recovery_sessions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON dvnt_settlement.guest_recovery_limits,dvnt_settlement.guest_recovery_capabilities,dvnt_settlement.guest_recovery_sessions FROM PUBLIC,anon,authenticated,service_role;
+
+-- One UPSERT is the rate-limit check and consumption: no check/record race.
+-- Fixed one-hour windows anchored at first use, not caller-selected buckets.
+CREATE FUNCTION dvnt_settlement.consume_guest_recovery_limit(p_scope text,p_max integer) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE n integer;
+BEGIN
+ INSERT INTO dvnt_settlement.guest_recovery_limits(scope,window_start,attempts) VALUES(p_scope,now(),1)
+ ON CONFLICT(scope) DO UPDATE SET
+  attempts=CASE WHEN guest_recovery_limits.window_start<=now()-interval '1 hour' THEN 1 ELSE guest_recovery_limits.attempts+1 END,
+  window_start=CASE WHEN guest_recovery_limits.window_start<=now()-interval '1 hour' THEN now() ELSE guest_recovery_limits.window_start END
+ WHERE guest_recovery_limits.window_start<=now()-interval '1 hour' OR guest_recovery_limits.attempts<p_max
+ RETURNING attempts INTO n;
+ RETURN n IS NOT NULL;
+END $$;
+REVOKE ALL ON FUNCTION dvnt_settlement.consume_guest_recovery_limit(text,integer) FROM PUBLIC,anon,authenticated,service_role;
+
+CREATE FUNCTION public.settlement_guest_recovery_issue(p_order_id uuid,p_email text,p_capability_hash text,p_email_hash text,p_ip_hash text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE; cap uuid; email_allowed boolean; ip_allowed boolean;
+BEGIN
+ IF NOT coalesce((SELECT guest_checkout_recovery_enabled AND checkout_replacement_enabled FROM dvnt_settlement.controls WHERE singleton),false) THEN RETURN jsonb_build_object('issued',false); END IF;
+ IF p_capability_hash IS NULL OR p_capability_hash !~ '^[a-f0-9]{64}$' OR p_email_hash IS NULL OR p_email_hash !~ '^[a-f0-9]{64}$'
+ OR p_ip_hash IS NULL OR p_ip_hash !~ '^[a-f0-9]{64}$' OR p_email IS NULL OR length(p_email)>254 THEN RETURN jsonb_build_object('issued',false); END IF;
+ -- Canonical lock order for every issue: global, IP, then email. The global
+ -- cap also bounds new limiter rows per hour despite spoofed forwarding headers.
+ IF NOT dvnt_settlement.consume_guest_recovery_limit('issue:global',1000) THEN RETURN jsonb_build_object('issued',false); END IF;
+ -- Never expose
+ -- whether either limit or the exact stored identity matched to a client.
+ ip_allowed:=dvnt_settlement.consume_guest_recovery_limit('issue:ip:'||p_ip_hash,10);
+ email_allowed:=dvnt_settlement.consume_guest_recovery_limit('issue:email:'||p_email_hash,3);
+ IF NOT ip_allowed OR NOT email_allowed THEN RETURN jsonb_build_object('issued',false); END IF;
+ SELECT * INTO o FROM public.orders WHERE id=p_order_id;
+ IF NOT FOUND OR o.user_id IS NOT NULL OR nullif(o.guest_email,'') IS NULL OR lower(o.guest_email) IS DISTINCT FROM lower(btrim(p_email))
+ OR o.charge_model IS DISTINCT FROM 'separate_charges_and_transfers' OR o.status IS NULL
+ OR o.status NOT IN ('created','payment_pending','payment_failed','failed','canceled','cancelled') OR o.paid_at IS NOT NULL
+ OR NOT EXISTS(SELECT 1 FROM dvnt_settlement.checkouts WHERE order_id=o.id) THEN RETURN jsonb_build_object('issued',false); END IF;
+ INSERT INTO dvnt_settlement.guest_recovery_capabilities(order_id,capability_hash) VALUES(o.id,p_capability_hash) RETURNING id INTO cap;
+ RETURN jsonb_build_object('issued',true,'email',o.guest_email,'capability_id',cap);
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_guest_recovery_issue(uuid,text,text,text,text) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.settlement_guest_recovery_issue(uuid,text,text,text,text) TO service_role;
+
+CREATE FUNCTION public.settlement_guest_recovery_exchange(p_capability_hash text,p_session_hash text,p_ip_hash text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE cap dvnt_settlement.guest_recovery_capabilities%ROWTYPE; expires timestamptz;
+BEGIN
+ IF NOT coalesce((SELECT guest_checkout_recovery_enabled AND checkout_replacement_enabled FROM dvnt_settlement.controls WHERE singleton),false) THEN RETURN jsonb_build_object('ok',false); END IF;
+ IF p_capability_hash IS NULL OR p_capability_hash !~ '^[a-f0-9]{64}$' OR p_session_hash IS NULL OR p_session_hash !~ '^[a-f0-9]{64}$'
+ OR p_ip_hash IS NULL OR p_ip_hash !~ '^[a-f0-9]{64}$' THEN RETURN jsonb_build_object('ok',false); END IF;
+ IF NOT dvnt_settlement.consume_guest_recovery_limit('exchange:global',3000) THEN RETURN jsonb_build_object('ok',false); END IF;
+ IF NOT dvnt_settlement.consume_guest_recovery_limit('exchange:ip:'||p_ip_hash,30) THEN RETURN jsonb_build_object('ok',false); END IF;
+ SELECT * INTO cap FROM dvnt_settlement.guest_recovery_capabilities WHERE capability_hash=p_capability_hash FOR UPDATE;
+ IF NOT FOUND OR cap.expires_at<=now() OR cap.exchanged_at IS NOT NULL OR cap.purpose<>'replace_canceled_checkout'
+ OR NOT EXISTS(SELECT 1 FROM public.orders WHERE id=cap.order_id AND user_id IS NULL AND guest_email IS NOT NULL) THEN RETURN jsonb_build_object('ok',false); END IF;
+ INSERT INTO dvnt_settlement.guest_recovery_sessions(order_id,capability_id,session_hash) VALUES(cap.order_id,cap.id,p_session_hash) RETURNING expires_at INTO expires;
+ UPDATE dvnt_settlement.guest_recovery_capabilities SET exchanged_at=now() WHERE id=cap.id;
+ RETURN jsonb_build_object('ok',true,'order_id',cap.order_id,'expires_at',expires);
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_guest_recovery_exchange(text,text,text) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.settlement_guest_recovery_exchange(text,text,text) TO service_role;
+
+-- Called only inside the replacement transaction, after locking original order.
+-- Returning an ID is identity proof, not a grant to create a payment. The caller
+-- must also validate cancellation/financial state and consume in that transaction.
+CREATE FUNCTION dvnt_settlement.validate_guest_recovery_session(p_order_id uuid,p_session_hash text) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE s dvnt_settlement.guest_recovery_sessions%ROWTYPE;
+BEGIN
+ IF NOT coalesce((SELECT guest_checkout_recovery_enabled AND checkout_replacement_enabled FROM dvnt_settlement.controls WHERE singleton),false) THEN RAISE EXCEPTION 'guest recovery unavailable'; END IF;
+ SELECT * INTO s FROM dvnt_settlement.guest_recovery_sessions WHERE order_id=p_order_id AND session_hash=p_session_hash FOR UPDATE;
+ IF NOT FOUND OR s.expires_at<=now() OR s.consumed_at IS NOT NULL OR s.purpose<>'replace_canceled_checkout'
+ OR NOT EXISTS(SELECT 1 FROM public.orders WHERE id=p_order_id AND user_id IS NULL AND guest_email IS NOT NULL) THEN RAISE EXCEPTION 'guest recovery unavailable'; END IF;
+ RETURN s.id;
+END $$;
+REVOKE ALL ON FUNCTION dvnt_settlement.validate_guest_recovery_session(uuid,text) FROM PUBLIC,anon,authenticated,service_role;
+
+
+-- SOURCE: docs/payments/drafts/settlement-replacement.sql
+-- DRAFT. Install after guest recovery and the complete funding/external stack.
+-- No gate is enabled and no provider call is made by this migration.
+
+DO $$ DECLARE signature text; BEGIN
+ FOREACH signature IN ARRAY ARRAY[
+  'public.ticket_purchase_hold_atomic(uuid,integer,text,text,text,integer,text)',
+  'public.cart_create_hold(uuid,integer,jsonb)',
+  'public.paid_ticket_issuance_atomic(uuid,uuid,text,text,bigint,jsonb)',
+  'public.complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz)',
+  'dvnt_settlement.validate_guest_recovery_session(uuid,text)'
+ ] LOOP
+  IF to_regprocedure(signature) IS NULL THEN RAISE EXCEPTION 'replacement required source function missing: %',signature; END IF;
+ END LOOP;
+END $$;
+ALTER TABLE dvnt_settlement.controls ADD COLUMN IF NOT EXISTS checkout_replacement_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE dvnt_settlement.controls ADD COLUMN max_active_replacements integer NOT NULL DEFAULT 2 CHECK(max_active_replacements BETWEEN 1 AND 10);
+ALTER TABLE dvnt_settlement.controls ADD COLUMN max_active_replacement_units integer NOT NULL DEFAULT 40 CHECK(max_active_replacement_units BETWEEN 1 AND 200);
+CREATE TABLE dvnt_settlement.replacement_quotes (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), original_order_id uuid NOT NULL REFERENCES public.orders(id),
+ actor_id text, guest_session_id uuid REFERENCES dvnt_settlement.guest_recovery_sessions(id),
+ snapshot jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ expires_at timestamptz NOT NULL DEFAULT clock_timestamp()+interval '5 minutes',
+ accepted_at timestamptz, successor_order_id uuid UNIQUE REFERENCES public.orders(id),
+ CHECK((actor_id IS NOT NULL)<>(guest_session_id IS NOT NULL)),
+ CHECK((accepted_at IS NULL)=(successor_order_id IS NULL))
+);
+CREATE TABLE dvnt_settlement.replacement_recovery_resumptions (
+ session_id uuid PRIMARY KEY REFERENCES dvnt_settlement.guest_recovery_sessions(id),
+ quote_id uuid NOT NULL REFERENCES dvnt_settlement.replacement_quotes(id),created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+ALTER TABLE dvnt_settlement.replacement_recovery_resumptions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON dvnt_settlement.replacement_recovery_resumptions FROM PUBLIC,anon,authenticated,service_role;
+CREATE TRIGGER immutable_replacement_resumption BEFORE UPDATE OR DELETE ON dvnt_settlement.replacement_recovery_resumptions
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.reject_external_change();
+CREATE TRIGGER no_truncate_replacement_resumption BEFORE TRUNCATE ON dvnt_settlement.replacement_recovery_resumptions
+ FOR EACH STATEMENT EXECUTE FUNCTION dvnt_settlement.reject_external_change();
+CREATE TABLE dvnt_settlement.checkout_replacements (
+ original_order_id uuid PRIMARY KEY REFERENCES public.orders(id),
+ successor_order_id uuid NOT NULL UNIQUE REFERENCES public.orders(id),
+ quote_id uuid NOT NULL UNIQUE REFERENCES dvnt_settlement.replacement_quotes(id),
+ proof jsonb NOT NULL, original_cart_id uuid REFERENCES public.carts(id), successor_cart_id uuid UNIQUE REFERENCES public.carts(id),
+ line_map jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ CHECK(original_order_id<>successor_order_id), CHECK((original_cart_id IS NULL)=(successor_cart_id IS NULL)),
+ CHECK(original_cart_id IS DISTINCT FROM successor_cart_id OR original_cart_id IS NULL)
+);
+-- Release evidence exists only inside successful canceled-replacement or
+-- verified-paid fulfillment transactions. A timeout or failed payment attempt
+-- never authorizes giving an outstanding payment's inventory to another buyer.
+CREATE TABLE dvnt_settlement.replacement_inventory_releases (
+ order_id uuid NOT NULL REFERENCES public.orders(id), reason text NOT NULL CHECK(reason IN('canceled','fulfilled')),
+ proof jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp(), PRIMARY KEY(order_id,reason)
+);
+ALTER TABLE dvnt_settlement.replacement_inventory_releases ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON dvnt_settlement.replacement_inventory_releases FROM PUBLIC,anon,authenticated,service_role;
+CREATE TRIGGER immutable_replacement_inventory_release BEFORE UPDATE OR DELETE ON dvnt_settlement.replacement_inventory_releases
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.reject_external_change();
+CREATE TRIGGER no_truncate_replacement_inventory_release BEFORE TRUNCATE ON dvnt_settlement.replacement_inventory_releases
+ FOR EACH STATEMENT EXECUTE FUNCTION dvnt_settlement.reject_external_change();
+ALTER TABLE dvnt_settlement.replacement_quotes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dvnt_settlement.checkout_replacements ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON dvnt_settlement.replacement_quotes,dvnt_settlement.checkout_replacements FROM PUBLIC,anon,authenticated,service_role;
+CREATE TRIGGER immutable_checkout_replacement BEFORE UPDATE OR DELETE ON dvnt_settlement.checkout_replacements
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.reject_external_change();
+CREATE TRIGGER no_truncate_checkout_replacement BEFORE TRUNCATE ON dvnt_settlement.checkout_replacements
+ FOR EACH STATEMENT EXECUTE FUNCTION dvnt_settlement.reject_external_change();
+CREATE FUNCTION dvnt_settlement.freeze_replacement_quote() RETURNS trigger LANGUAGE plpgsql SET search_path='' AS $$
+BEGIN
+ IF TG_OP<>'UPDATE' THEN RAISE EXCEPTION 'replacement quote immutable'; END IF;
+ IF (to_jsonb(NEW)-'accepted_at'-'successor_order_id') IS DISTINCT FROM (to_jsonb(OLD)-'accepted_at'-'successor_order_id')
+ OR OLD.accepted_at IS NOT NULL OR NEW.accepted_at IS NULL OR NEW.successor_order_id IS NULL
+ THEN RAISE EXCEPTION 'replacement quote immutable'; END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER immutable_replacement_quote BEFORE UPDATE OR DELETE ON dvnt_settlement.replacement_quotes
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.freeze_replacement_quote();
+CREATE TRIGGER no_truncate_replacement_quote BEFORE TRUNCATE ON dvnt_settlement.replacement_quotes
+ FOR EACH STATEMENT EXECUTE FUNCTION dvnt_settlement.reject_external_change();
+
+-- Lock order: buyer mutex -> actor/event mutex -> ancestry cart/order locks -> controls -> checkout.
+-- This is the same original-order barrier used by source, refund and dispute
+-- writers. FK inserts for financial/fulfillment rows also wait on this lock.
+CREATE FUNCTION dvnt_settlement.replacement_authorize(p_order_id uuid,p_actor_id text,p_guest_session_hash text,p_replay_quote uuid DEFAULT NULL)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE; session_id uuid; ancestor uuid;
+BEGIN
+ SELECT * INTO o FROM public.orders WHERE id=p_order_id;
+ IF o.id IS NULL THEN RAISE EXCEPTION 'replacement unavailable'; END IF;
+ -- Match ordinary preparation's actor mutex before taking cart/order locks.
+ PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('replacement-buyer:'||
+  CASE WHEN o.user_id IS NOT NULL THEN 'member:'||o.user_id ELSE 'guest:'||lower(o.guest_email) END,2));
+ PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('checkout:'||
+  CASE WHEN o.user_id IS NOT NULL THEN 'member:'||o.user_id ELSE 'guest:'||lower(o.guest_email) END||':'||o.event_id::text,1));
+ -- Match paid-cart fulfillment's cart->order order, and financial writers'
+ -- order->controls order. Lock immutable ancestry root-first.
+ FOR ancestor IN WITH RECURSIVE chain(id,depth) AS(SELECT p_order_id,0 UNION ALL
+  SELECT r.original_order_id,pathnode.depth+1 FROM dvnt_settlement.checkout_replacements r JOIN chain pathnode ON r.successor_order_id=pathnode.id)
+  SELECT id FROM chain ORDER BY depth DESC LOOP
+  PERFORM 1 FROM public.carts WHERE id=(SELECT cart_id FROM public.orders WHERE id=ancestor) FOR UPDATE;
+  PERFORM 1 FROM public.orders WHERE id=ancestor FOR UPDATE;
+ END LOOP;
+ SELECT * INTO o FROM public.orders WHERE id=p_order_id;
+ IF o.id IS NULL THEN RAISE EXCEPTION 'replacement unavailable'; END IF;
+ IF o.user_id IS NOT NULL THEN
+  IF p_actor_id IS NULL OR p_actor_id IS DISTINCT FROM o.user_id OR p_guest_session_hash IS NOT NULL THEN RAISE EXCEPTION 'replacement unavailable'; END IF;
+ ELSE
+  IF p_actor_id IS NOT NULL OR p_guest_session_hash IS NULL THEN RAISE EXCEPTION 'replacement unavailable'; END IF;
+  IF p_replay_quote IS NOT NULL THEN
+   SELECT s.id INTO session_id FROM dvnt_settlement.guest_recovery_sessions s
+   JOIN dvnt_settlement.replacement_quotes q ON (q.guest_session_id=s.id OR EXISTS(SELECT 1 FROM dvnt_settlement.replacement_recovery_resumptions r WHERE r.session_id=s.id AND r.quote_id=q.id))
+   WHERE q.id=p_replay_quote AND q.original_order_id=o.id AND q.accepted_at IS NOT NULL
+    AND s.order_id=o.id AND s.session_hash=p_guest_session_hash AND s.expires_at>clock_timestamp()
+    AND s.purpose='replace_canceled_checkout' FOR UPDATE OF s;
+  END IF;
+  IF session_id IS NULL THEN session_id:=dvnt_settlement.validate_guest_recovery_session(o.id,p_guest_session_hash); END IF;
+ END IF;
+
+ PERFORM 1 FROM dvnt_settlement.controls WHERE singleton FOR UPDATE;
+ IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.controls WHERE singleton AND checkout_enabled AND checkout_replacement_enabled)
+ THEN RAISE EXCEPTION 'checkout replacement disabled'; END IF;
+ IF o.user_id IS NULL AND NOT EXISTS(SELECT 1 FROM dvnt_settlement.controls WHERE singleton AND guest_checkout_recovery_enabled) THEN RAISE EXCEPTION 'guest recovery unavailable'; END IF;
+ IF o.charge_model IS DISTINCT FROM 'separate_charges_and_transfers' OR o.type IS DISTINCT FROM 'event_ticket'
+ OR NOT EXISTS(SELECT 1 FROM dvnt_settlement.checkouts WHERE order_id=o.id AND attempted_at IS NOT NULL)
+ THEN RAISE EXCEPTION 'replacement unavailable'; END IF;
+ PERFORM 1 FROM dvnt_settlement.checkouts WHERE order_id=o.id FOR UPDATE;
+ RETURN session_id;
+END $$;
+
+CREATE FUNCTION dvnt_settlement.replacement_assert_clear(p_order_id uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE; c dvnt_settlement.checkouts%ROWTYPE;
+BEGIN
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id FOR UPDATE;
+ SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=p_order_id FOR UPDATE;
+ IF o.status IS NULL OR o.status NOT IN('created','payment_pending','payment_failed','canceled','cancelled','failed')
+ OR o.paid_at IS NOT NULL OR c.source_verified_at IS NOT NULL OR coalesce(c.last_error,'') LIKE 'hold:%'
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.orders WHERE order_id=o.id)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.allocations WHERE order_id=o.id)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.holds WHERE order_id=o.id)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.funding_sources WHERE order_id=o.id)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.refunds WHERE order_id=o.id)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.refund_outflows WHERE order_id=o.id)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.dispute_outflows WHERE order_id=o.id)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.external_promoter_rows WHERE order_id=o.id)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.external_recovery_reviews WHERE order_id=o.id)
+ OR EXISTS(SELECT 1 FROM public.promoter_ledger_entries WHERE order_id=o.id)
+ OR EXISTS(SELECT 1 FROM public.tickets WHERE order_id=o.id OR (o.cart_id IS NOT NULL AND cart_id=o.cart_id)
+   OR (o.stripe_payment_intent_id IS NOT NULL AND stripe_payment_intent_id=o.stripe_payment_intent_id)
+   OR (o.stripe_checkout_session_id IS NOT NULL AND stripe_checkout_session_id=o.stripe_checkout_session_id))
+ OR EXISTS(SELECT 1 FROM public.order_addons WHERE order_id=o.id OR (o.cart_id IS NOT NULL AND cart_id=o.cart_id))
+ OR EXISTS(SELECT 1 FROM public.cart_line_refunds WHERE cart_id=o.cart_id)
+ OR EXISTS(SELECT 1 FROM public.cart_line_items WHERE cart_id=o.cart_id AND coalesce(refunded_amount_cents,0)>0)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.external_event_exclusions WHERE event_id=o.event_id)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.legacy_execution_claims WHERE event_id=o.event_id)
+ OR EXISTS(SELECT 1 FROM dvnt_settlement.event_stops WHERE event_id=o.event_id)
+ THEN RAISE EXCEPTION 'replacement financial or fulfillment evidence blocks retry'; END IF;
+END $$;
+
+CREATE FUNCTION public.settlement_replacement_context(p_order_id uuid,p_actor_id text DEFAULT NULL,p_guest_session_hash text DEFAULT NULL,p_replay_quote uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE; c dvnt_settlement.checkouts%ROWTYPE; policy dvnt_settlement.funding_policy%ROWTYPE;
+BEGIN
+ PERFORM dvnt_settlement.replacement_authorize(p_order_id,p_actor_id,p_guest_session_hash,p_replay_quote);
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id;
+ SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=p_order_id;
+ SELECT * INTO STRICT policy FROM dvnt_settlement.funding_policy WHERE singleton FOR SHARE;
+ PERFORM dvnt_settlement.replacement_assert_clear(o.id);
+ RETURN jsonb_build_object('ok',true,'order_id',o.id,'snapshot',c.snapshot,'stripe_params',c.stripe_params,
+  'stripe_payment_intent_id',o.stripe_payment_intent_id,'stripe_checkout_session_id',o.stripe_checkout_session_id,
+  'platform_account',policy.platform_account,'livemode',policy.livemode,'accepted_quote',(SELECT jsonb_build_object('quote_id',q.id,'original_order_id',q.original_order_id,'total_cents',q.snapshot->'order'->'total_cents','currency',q.snapshot->'order'->>'currency','snapshot',q.snapshot,'accepted',true,'resume_only',true,'tax_mode',q.snapshot->>'tax_mode') FROM dvnt_settlement.replacement_quotes q JOIN dvnt_settlement.checkout_replacements r ON r.quote_id=q.id WHERE r.original_order_id=o.id));
+END $$;
+
+-- Current catalog economics, evaluated while the event, tier and promoter rows
+-- are locked. No original price is used to authorize a new charge. Restricted
+-- and dynamic-price catalogs require their own reviewed quote adapter.
+CREATE FUNCTION dvnt_settlement.replacement_snapshot(p_order_id uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE; c dvnt_settlement.checkouts%ROWTYPE; e public.events%ROWTYPE;
+ promoter public.event_promoters%ROWTYPE; item jsonb; lines jsonb:='[]'; selection jsonb; rowdata jsonb;
+ subtotal bigint:=0; eligible bigint:=0; qty int:=0; fee_qty int:=0; unit_price int; line_qty int;
+ discount bigint:=0; commission bigint:=0; pct bigint; flat bigint; buyer_fee bigint; org_fee bigint; total bigint;
+ v jsonb; t record; cutoff timestamptz; cart public.carts%ROWTYPE; cart_selection jsonb;
+BEGIN
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id;
+ SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=o.id;
+ SELECT * INTO STRICT e FROM public.events WHERE id=o.event_id FOR UPDATE NOWAIT;
+ cutoff:=coalesce(e.end_date,e.start_date+interval '6 hours')-interval '30 minutes';
+ IF cutoff IS NULL OR NOT isfinite(cutoff) OR clock_timestamp()>=cutoff
+ OR e.host_id IS NULL OR e.host_id IS DISTINCT FROM c.organizer_user_id
+ OR e.status IS DISTINCT FROM 'active' OR e.payout_status IN('disabled','on_hold')
+ OR e.visibility='private' OR e.is_hidden IS TRUE OR e.publish_at>clock_timestamp()
+ THEN RAISE EXCEPTION 'replacement event unavailable or requires access review'; END IF;
+ IF e.fee_mode='absorb' THEN RAISE EXCEPTION 'replacement absorb fee policy requires review'; END IF;
+ PERFORM dvnt_settlement.event_release_at(o.event_id);
+ IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.funding_policy WHERE singleton)
+ OR NOT EXISTS(SELECT 1 FROM dvnt_settlement.currency_reserves WHERE currency=o.currency)
+ THEN RAISE EXCEPTION 'replacement funding policy unavailable'; END IF;
+ IF o.promo_code_id IS NOT NULL OR coalesce(o.discount_cents,0)>coalesce(o.promoter_discount_amount_cents,0)
+ THEN RAISE EXCEPTION 'replacement promo quote requires review'; END IF;
+ IF c.snapshot->>'rail'='cart-checkout' THEN
+  SELECT * INTO STRICT cart FROM public.carts WHERE id=o.cart_id FOR UPDATE;
+  IF cart.user_id IS DISTINCT FROM o.user_id OR o.user_id IS NULL OR cart.event_id IS DISTINCT FROM o.event_id
+   OR cart.currency IS DISTINCT FROM o.currency OR cart.status='completed'
+   OR cart.stripe_pi_id IS DISTINCT FROM o.stripe_payment_intent_id THEN RAISE EXCEPTION 'replacement cart ownership or payment mismatch'; END IF;
+  PERFORM id FROM public.cart_line_items WHERE cart_id=cart.id ORDER BY id FOR UPDATE;
+  SELECT jsonb_build_object('lines',jsonb_agg(jsonb_build_object('id',l.id,'tier_id',l.tier_id,
+   'addon_id',l.addon_id,'variant_id',l.variant_id,'quantity',l.quantity) ||
+   CASE WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(c.snapshot->'selection'->'lines') x
+    WHERE x->>'id'=l.id::text AND x ? 'unit_price_cents')
+    THEN jsonb_build_object('unit_price_cents',l.unit_price_cents) ELSE '{}'::jsonb END ORDER BY l.id::text))
+   INTO cart_selection FROM public.cart_line_items l WHERE l.cart_id=cart.id;
+  IF cart_selection IS DISTINCT FROM c.snapshot->'selection' THEN RAISE EXCEPTION 'replacement cart selection changed'; END IF;
+  SELECT jsonb_agg(jsonb_build_object('id',id,'tier_id',tier_id,'addon_id',addon_id,'variant_id',variant_id,
+   'quantity',quantity,'category',category,'bound_line_item_id',bound_line_item_id,'metadata',metadata) ORDER BY id)
+   INTO selection FROM public.cart_line_items WHERE cart_id=cart.id;
+  IF selection IS NULL OR jsonb_array_length(selection)>20 THEN RAISE EXCEPTION 'replacement cart selection unavailable'; END IF;
+ ELSE
+  IF c.snapshot->>'rail' NOT IN('ticket-checkout','guest-checkout','create-payment-intent')
+   OR c.snapshot->'selection'->>'ticket_type_id' IS NULL OR o.cart_id IS NOT NULL THEN RAISE EXCEPTION 'replacement selection unavailable'; END IF;
+  selection:=jsonb_build_array(jsonb_build_object('tier_id',c.snapshot->'selection'->>'ticket_type_id','quantity',o.quantity));
+ END IF;
+ -- Fail closed rather than wait under the financial locks: legacy single-tier
+ -- issuance takes tier before order. NOWAIT avoids that lock-order inversion.
+ -- Canonical inventory allocators run only once every required row is held.
+ PERFORM id FROM public.ticket_types WHERE id IN(SELECT (x->>'tier_id')::uuid FROM jsonb_array_elements(selection) x)
+  ORDER BY id FOR UPDATE NOWAIT;
+ PERFORM id FROM public.ticket_addons WHERE id IN(SELECT (x->>'addon_id')::uuid FROM jsonb_array_elements(selection) x)
+  ORDER BY id FOR UPDATE NOWAIT;
+ PERFORM id FROM public.ticket_addon_variants WHERE id IN(SELECT (x->>'variant_id')::uuid FROM jsonb_array_elements(selection) x)
+  ORDER BY id FOR UPDATE NOWAIT;
+ FOR item IN SELECT value FROM jsonb_array_elements(selection) LOOP
+  line_qty:=(item->>'quantity')::int;
+  IF line_qty IS NULL OR line_qty<1 OR line_qty>20 THEN RAISE EXCEPTION 'replacement quantity unavailable'; END IF;
+  IF item->>'addon_id' IS NOT NULL THEN
+   SELECT to_jsonb(a)||jsonb_build_object('variant_parent',av.addon_id,'variant_price',av.price_cents,'variant_found',av.id)
+    INTO STRICT rowdata FROM public.ticket_addons a LEFT JOIN public.ticket_addon_variants av ON av.id=(item->>'variant_id')::uuid
+    WHERE a.id=(item->>'addon_id')::uuid;
+   IF (rowdata->>'event_id')::int IS DISTINCT FROM o.event_id OR rowdata->>'currency' IS DISTINCT FROM o.currency
+    OR rowdata->>'status' IS DISTINCT FROM 'on_sale' OR rowdata->>'addon_type'='donation'
+    OR rowdata->>'binding_mode' NOT IN('standalone','per_order')
+    OR (rowdata->>'binding_mode'='per_order' AND line_qty<>1) OR item->>'bound_line_item_id' IS NOT NULL
+    OR (item->>'variant_id' IS NOT NULL AND (rowdata->>'variant_found' IS NULL OR rowdata->>'variant_parent' IS DISTINCT FROM item->>'addon_id'))
+    THEN RAISE EXCEPTION 'replacement addon unavailable or binding quote requires review'; END IF;
+   unit_price:=coalesce((rowdata->>'variant_price')::int,(rowdata->>'price_cents')::int);
+   IF unit_price IS NULL OR unit_price<0 THEN RAISE EXCEPTION 'replacement addon price unavailable'; END IF;
+   subtotal:=subtotal+unit_price::bigint*line_qty;qty:=qty+line_qty;
+   IF unit_price>0 THEN fee_qty:=fee_qty+line_qty; END IF;
+   lines:=lines||jsonb_build_array(item||jsonb_build_object('category','addon','unit_price_cents',unit_price));
+   CONTINUE;
+  END IF;
+  SELECT * INTO STRICT t FROM public.ticket_types WHERE id=(item->>'tier_id')::uuid;
+  IF t.event_id IS DISTINCT FROM o.event_id OR t.currency IS DISTINCT FROM o.currency OR t.price_cents IS NULL OR t.price_cents<0
+   OR t.is_active IS FALSE OR t.status IS DISTINCT FROM 'on_sale' OR coalesce(t.tier_visibility,'public')<>'public'
+   OR (t.sale_start IS NOT NULL AND (NOT isfinite(t.sale_start) OR t.sale_start>clock_timestamp()))
+   OR (t.sale_end IS NOT NULL AND (NOT isfinite(t.sale_end) OR t.sale_end<=clock_timestamp()))
+   OR (t.sale_start IS NOT NULL AND t.sale_end IS NOT NULL AND t.sale_start>=t.sale_end)
+   OR coalesce(t.price_schedule,'[]')<>'[]'::jsonb OR coalesce(t.sub_allocations,'[]')<>'[]'::jsonb
+   THEN RAISE EXCEPTION 'replacement tier unavailable or dynamic quote requires review'; END IF;
+  unit_price:=t.price_cents;
+  subtotal:=subtotal+unit_price::bigint*line_qty;qty:=qty+line_qty;
+  IF unit_price>0 THEN fee_qty:=fee_qty+line_qty; END IF;
+  IF t.category='admission' OR c.snapshot->>'rail'<>'cart-checkout' THEN eligible:=eligible+unit_price::bigint*line_qty; END IF;
+  lines:=lines||jsonb_build_array(item||jsonb_build_object('category',t.category,'unit_price_cents',unit_price));
+ END LOOP;
+ IF o.promoter_id IS NOT NULL OR o.promoter_code IS NOT NULL THEN
+  SELECT * INTO STRICT promoter FROM public.event_promoters WHERE id=o.promoter_id AND event_id=o.event_id FOR SHARE NOWAIT;
+  IF promoter.status IS DISTINCT FROM 'active' OR upper(promoter.code) IS DISTINCT FROM upper(o.promoter_code)
+   OR promoter.user_id IS DISTINCT FROM c.promoter_user_id OR promoter.customer_discount_bps IS NULL
+   OR promoter.customer_discount_bps NOT BETWEEN 0 AND 10000 OR promoter.promoter_commission_bps IS NULL
+   OR promoter.promoter_commission_bps NOT BETWEEN 0 AND 10000 THEN RAISE EXCEPTION 'replacement promoter identity or policy unavailable'; END IF;
+  discount:=floor(eligible::numeric*promoter.customer_discount_bps/10000);
+  commission:=floor((eligible-discount)::numeric*promoter.promoter_commission_bps/10000);
+ END IF;
+ subtotal:=subtotal-discount;
+ IF qty>20 THEN RAISE EXCEPTION 'replacement maximum 20 units'; END IF;
+ IF subtotal<=0 OR subtotal>2147483647 OR fee_qty<1 THEN RAISE EXCEPTION 'replacement paid total unavailable'; END IF;
+ pct:=floor(subtotal::numeric*0.025+0.5);flat:=fee_qty*100;buyer_fee:=pct+flat;org_fee:=pct+flat;
+ IF e.fee_mode='absorb' AND buyer_fee+org_fee<=subtotal THEN buyer_fee:=0; END IF;
+ total:=subtotal+buyer_fee;
+ IF total>2147483647 OR org_fee>subtotal OR commission>subtotal-org_fee THEN RAISE EXCEPTION 'replacement economics unavailable'; END IF;
+ v:=jsonb_build_object('user_id',o.user_id,'guest_email',o.guest_email,'guest_phone',o.guest_phone,'event_id',o.event_id,
+  'quantity',qty,'currency',o.currency,'cart_id',o.cart_id,'type','event_ticket','status','payment_pending',
+  'subtotal_cents',subtotal,'total_cents',total,'platform_fee_cents',2*(pct+flat),
+  'buyer_pct_fee_cents',CASE WHEN buyer_fee=0 THEN 0 ELSE pct END,'buyer_per_ticket_fee_cents',CASE WHEN buyer_fee=0 THEN 0 ELSE flat END,
+  'buyer_fee_cents',buyer_fee,'org_pct_fee_cents',pct,'org_per_ticket_fee_cents',flat,'organizer_fee_cents',org_fee,
+  'dvnt_total_fee_cents',2*(pct+flat),'fee_policy_version','v1_250_1pt','discount_cents',discount,
+  'promoter_id',promoter.id,'promoter_code',promoter.code,'promoter_policy_version','v2_eligible_subtotal_after_discount',
+  'promoter_original_amount_cents',eligible,'promoter_customer_discount_bps',promoter.customer_discount_bps,
+  'promoter_discount_amount_cents',discount,'promoter_discounted_amount_cents',eligible-discount,
+  'promoter_commission_bps',promoter.promoter_commission_bps,'promoter_commission_amount_cents',commission);
+ RETURN jsonb_build_object('rail',c.snapshot->>'rail','order',v,'selection',c.snapshot->'selection','replacement_lines',lines,
+  'tax_mode',CASE WHEN c.stripe_params->>'automatic_tax[enabled]'='true' THEN 'at_checkout' ELSE 'none' END,'automatic_tax',coalesce(c.stripe_params->>'automatic_tax[enabled]'='true',false));
+END $$;
+
+CREATE FUNCTION public.settlement_replacement_quote(p_order_id uuid,p_actor_id text DEFAULT NULL,p_guest_session_hash text DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE s uuid; q dvnt_settlement.replacement_quotes%ROWTYPE; v_snapshot jsonb;
+BEGIN
+ s:=dvnt_settlement.replacement_authorize(p_order_id,p_actor_id,p_guest_session_hash);
+ PERFORM dvnt_settlement.replacement_assert_clear(p_order_id);
+ SELECT q2.* INTO q FROM dvnt_settlement.replacement_quotes q2 JOIN dvnt_settlement.checkout_replacements r ON r.quote_id=q2.id WHERE r.original_order_id=p_order_id;
+ IF FOUND THEN
+  RETURN jsonb_build_object('ok',true,'quote_id',q.id,'original_order_id',p_order_id,'expires_at',q.expires_at,
+   'total_cents',q.snapshot->'order'->'total_cents','currency',q.snapshot->'order'->>'currency','tax_mode',q.snapshot->>'tax_mode',
+   'snapshot',q.snapshot,'accepted',true,'resume_only',true);
+ END IF;
+ v_snapshot:=dvnt_settlement.replacement_snapshot(p_order_id);
+ SELECT * INTO q FROM dvnt_settlement.replacement_quotes oldq WHERE oldq.original_order_id=p_order_id
+  AND oldq.actor_id IS NOT DISTINCT FROM p_actor_id AND oldq.guest_session_id IS NOT DISTINCT FROM s
+  AND oldq.snapshot=v_snapshot AND oldq.accepted_at IS NULL AND oldq.expires_at>clock_timestamp()
+  ORDER BY oldq.created_at DESC LIMIT 1;
+ IF NOT FOUND THEN
+  INSERT INTO dvnt_settlement.replacement_quotes(original_order_id,actor_id,guest_session_id,snapshot)
+   VALUES(p_order_id,p_actor_id,s,v_snapshot) RETURNING * INTO q;
+ END IF;
+ RETURN jsonb_build_object('ok',true,'quote_id',q.id,'original_order_id',p_order_id,'expires_at',q.expires_at,
+  'total_cents',v_snapshot->'order'->'total_cents','currency',v_snapshot->'order'->>'currency',
+  'tax_mode',v_snapshot->>'tax_mode','automatic_tax',v_snapshot->'automatic_tax','snapshot',v_snapshot);
+END $$;
+
+CREATE FUNCTION dvnt_settlement.replacement_proof(p_order_id uuid,p_intent jsonb,p_session jsonb,p_platform_account text,p_livemode boolean,p_charges jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE; c dvnt_settlement.checkouts%ROWTYPE; policy dvnt_settlement.funding_policy%ROWTYPE; gross bigint; tax bigint:=0;
+BEGIN
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id;
+ SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=o.id;
+ SELECT * INTO STRICT policy FROM dvnt_settlement.funding_policy WHERE singleton FOR SHARE;
+ IF EXISTS(SELECT 1 FROM public.orders other WHERE other.id<>o.id AND
+  ((o.stripe_payment_intent_id IS NOT NULL AND other.stripe_payment_intent_id=o.stripe_payment_intent_id)
+   OR (o.stripe_checkout_session_id IS NOT NULL AND other.stripe_checkout_session_id=o.stripe_checkout_session_id)))
+ THEN RAISE EXCEPTION 'replacement conflicting provider binding'; END IF;
+ IF p_platform_account IS DISTINCT FROM policy.platform_account OR p_livemode IS DISTINCT FROM policy.livemode
+ OR p_charges IS DISTINCT FROM '[]'::jsonb THEN RAISE EXCEPTION 'replacement provider account or charge evidence invalid'; END IF;
+ gross:=(c.snapshot->'order'->>'total_cents')::bigint;
+ IF c.snapshot->>'rail' IN('ticket-checkout','guest-checkout') THEN
+  IF o.stripe_checkout_session_id IS NULL OR jsonb_typeof(p_session) IS DISTINCT FROM 'object'
+   OR p_session->>'id' IS DISTINCT FROM o.stripe_checkout_session_id
+   OR p_session->>'id' !~ '^cs_[A-Za-z0-9_]+$' OR p_session->>'object' IS DISTINCT FROM 'checkout.session'
+   OR p_session->>'mode' IS DISTINCT FROM 'payment' OR p_session->>'status' IS DISTINCT FROM 'expired'
+   OR p_session->>'payment_status' IS DISTINCT FROM 'unpaid' OR p_session->'livemode' IS DISTINCT FROM to_jsonb(policy.livemode)
+   OR p_session->>'currency' IS DISTINCT FROM o.currency OR p_session->'amount_subtotal' IS DISTINCT FROM to_jsonb(gross)
+   OR p_session->>'payment_intent' IS DISTINCT FROM o.stripe_payment_intent_id
+   OR p_session->'metadata'->>'settlement_order_id' IS DISTINCT FROM o.id::text
+   OR p_session->'metadata'->>'charge_model' IS DISTINCT FROM o.charge_model
+   OR jsonb_typeof(p_session->'total_details'->'amount_tax') IS DISTINCT FROM 'number'
+   OR (p_session->'total_details'->>'amount_tax')::numeric<0
+   OR trunc((p_session->'total_details'->>'amount_tax')::numeric)<>(p_session->'total_details'->>'amount_tax')::numeric
+   OR p_session->'total_details'->'amount_discount' IS DISTINCT FROM '0'::jsonb
+   OR p_session->'total_details'->'amount_shipping' IS DISTINCT FROM '0'::jsonb
+   THEN RAISE EXCEPTION 'replacement hosted proof invalid'; END IF;
+  tax:=(p_session->'total_details'->>'amount_tax')::bigint;gross:=gross+tax;
+  IF p_session->'amount_total' IS DISTINCT FROM to_jsonb(gross) THEN RAISE EXCEPTION 'replacement hosted amount invalid'; END IF;
+ ELSIF p_session IS NOT NULL OR o.stripe_checkout_session_id IS NOT NULL THEN RAISE EXCEPTION 'replacement unexpected hosted proof'; END IF;
+ IF o.stripe_payment_intent_id IS NULL OR jsonb_typeof(p_intent) IS DISTINCT FROM 'object'
+ OR p_intent->>'id' IS DISTINCT FROM o.stripe_payment_intent_id OR p_intent->>'id' !~ '^pi_[A-Za-z0-9_]+$'
+ OR p_intent->>'object' IS DISTINCT FROM 'payment_intent' OR p_intent->>'status' IS DISTINCT FROM 'canceled'
+ OR p_intent->'amount' IS DISTINCT FROM to_jsonb(gross) OR p_intent->>'currency' IS DISTINCT FROM o.currency
+ OR p_intent->'amount_received' IS DISTINCT FROM '0'::jsonb OR p_intent->'amount_capturable' IS DISTINCT FROM '0'::jsonb
+ OR p_intent->'latest_charge' IS DISTINCT FROM 'null'::jsonb OR p_intent->'livemode' IS DISTINCT FROM to_jsonb(policy.livemode)
+ OR p_intent->'transfer_data' IS DISTINCT FROM 'null'::jsonb OR p_intent->'application_fee_amount' IS DISTINCT FROM 'null'::jsonb
+ OR p_intent->'on_behalf_of' IS DISTINCT FROM 'null'::jsonb
+ OR p_intent->'metadata'->>'settlement_order_id' IS DISTINCT FROM o.id::text
+ OR p_intent->'metadata'->>'charge_model' IS DISTINCT FROM o.charge_model
+ OR jsonb_typeof(p_intent->'canceled_at') IS DISTINCT FROM 'number' OR (p_intent->>'canceled_at')::numeric<=0
+ OR trunc((p_intent->>'canceled_at')::numeric)<>(p_intent->>'canceled_at')::numeric
+ OR (p_intent->>'canceled_at')::numeric>extract(epoch FROM clock_timestamp())
+ THEN RAISE EXCEPTION 'replacement canceled zero-money proof invalid'; END IF;
+ -- Never persist customer/payment method details, client_secret or raw metadata.
+ RETURN jsonb_build_object('version',1,'order_id',o.id,'platform_account',policy.platform_account,'livemode',policy.livemode,
+  'payment_intent_id',o.stripe_payment_intent_id,'checkout_session_id',o.stripe_checkout_session_id,'currency',o.currency,
+  'base_amount_cents',c.snapshot->'order'->'total_cents','gross_amount_cents',gross,'tax_cents',tax,
+  'canceled_at',p_intent->'canceled_at','observed_at',clock_timestamp(),'charge_ids','[]'::jsonb);
+END $$;
+
+CREATE FUNCTION public.settlement_replacement_accept(p_quote_id uuid,p_actor_id text,p_guest_session_hash text,
+ p_accepted_total_cents bigint,p_accepted_currency text,p_intent jsonb,p_session jsonb,p_platform_account text,p_livemode boolean,p_charges jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE q dvnt_settlement.replacement_quotes%ROWTYPE; original public.orders%ROWTYPE; successor public.orders%ROWTYPE;
+ checkout dvnt_settlement.checkouts%ROWTYPE; s uuid; fresh jsonb; v jsonb; proof jsonb; ancestors uuid[];
+ ancestor uuid; new_cart uuid; new_order uuid:=gen_random_uuid(); item jsonb; new_line uuid; line_map jsonb:='{}';
+ hold jsonb; parent_c dvnt_settlement.checkouts%ROWTYPE; replacement dvnt_settlement.checkout_replacements%ROWTYPE;
+BEGIN
+ SELECT * INTO q FROM dvnt_settlement.replacement_quotes WHERE id=p_quote_id;
+ IF q.id IS NULL THEN RAISE EXCEPTION 'replacement unavailable'; END IF;
+ s:=dvnt_settlement.replacement_authorize(q.original_order_id,p_actor_id,p_guest_session_hash,p_quote_id);
+ SELECT * INTO STRICT q FROM dvnt_settlement.replacement_quotes WHERE id=p_quote_id FOR UPDATE;
+ IF q.actor_id IS DISTINCT FROM p_actor_id OR (q.accepted_at IS NULL AND q.guest_session_id IS DISTINCT FROM s)
+ OR p_accepted_total_cents IS DISTINCT FROM (q.snapshot->'order'->>'total_cents')::bigint
+ OR p_accepted_currency IS DISTINCT FROM q.snapshot->'order'->>'currency' THEN RAISE EXCEPTION 'replacement acceptance mismatch'; END IF;
+ IF q.accepted_at IS NOT NULL THEN
+  SELECT * INTO STRICT successor FROM public.orders WHERE id=q.successor_order_id;
+  SELECT * INTO STRICT checkout FROM dvnt_settlement.checkouts WHERE order_id=successor.id;
+  IF s IS NOT NULL THEN
+   INSERT INTO dvnt_settlement.replacement_recovery_resumptions(session_id,quote_id) VALUES(s,q.id) ON CONFLICT(session_id) DO NOTHING;
+   UPDATE dvnt_settlement.guest_recovery_sessions SET consumed_at=coalesce(consumed_at,clock_timestamp()) WHERE id=s;
+  END IF;
+ ELSE
+  IF q.expires_at<=clock_timestamp() THEN RAISE EXCEPTION 'replacement quote expired'; END IF;
+  IF EXISTS(SELECT 1 FROM dvnt_settlement.checkout_replacements WHERE original_order_id=q.original_order_id)
+   THEN RAISE EXCEPTION 'replacement already authorized; recover existing successor'; END IF;
+  SELECT * INTO STRICT original FROM public.orders WHERE id=q.original_order_id;
+  -- All events share the global buyer mutex acquired by authorization.
+  IF (SELECT count(*) FROM dvnt_settlement.checkout_replacements r JOIN public.orders o ON o.id=r.successor_order_id
+   WHERE o.id<>original.id AND (CASE WHEN original.user_id IS NOT NULL THEN o.user_id=original.user_id
+     ELSE o.user_id IS NULL AND lower(o.guest_email)=lower(original.guest_email) END)
+   AND (EXISTS(SELECT 1 FROM public.ticket_holds h WHERE h.status='active' AND h.payment_intent_id IN('replacement:'||o.id::text,o.stripe_payment_intent_id,o.stripe_checkout_session_id))
+    OR EXISTS(SELECT 1 FROM public.cart_holds h WHERE h.cart_id=o.cart_id AND NOT h.released)))
+   >=(SELECT max_active_replacements FROM dvnt_settlement.controls WHERE singleton)
+   THEN RAISE EXCEPTION 'replacement active inventory limit reached'; END IF;
+  IF (SELECT coalesce(sum(o.quantity),0) FROM dvnt_settlement.checkout_replacements r JOIN public.orders o ON o.id=r.successor_order_id
+   WHERE o.id<>original.id AND (CASE WHEN original.user_id IS NOT NULL THEN o.user_id=original.user_id
+     ELSE o.user_id IS NULL AND lower(o.guest_email)=lower(original.guest_email) END)
+   AND (EXISTS(SELECT 1 FROM public.ticket_holds h WHERE h.status='active' AND h.payment_intent_id IN('replacement:'||o.id::text,o.stripe_payment_intent_id,o.stripe_checkout_session_id))
+    OR EXISTS(SELECT 1 FROM public.cart_holds h WHERE h.cart_id=o.cart_id AND NOT h.released)))+(q.snapshot->'order'->>'quantity')::bigint
+   >(SELECT max_active_replacement_units FROM dvnt_settlement.controls WHERE singleton)
+   THEN RAISE EXCEPTION 'replacement active inventory unit limit reached'; END IF;
+  SELECT * INTO STRICT parent_c FROM dvnt_settlement.checkouts WHERE order_id=original.id;
+  WITH RECURSIVE chain(id) AS(SELECT original.id UNION SELECT r.original_order_id FROM dvnt_settlement.checkout_replacements r JOIN chain pathnode ON r.successor_order_id=pathnode.id)
+   SELECT array_agg(id ORDER BY id) INTO ancestors FROM chain;
+  FOREACH ancestor IN ARRAY ancestors LOOP PERFORM dvnt_settlement.replacement_assert_clear(ancestor); END LOOP;
+  IF EXISTS(SELECT 1 FROM dvnt_settlement.checkouts c JOIN public.orders o ON o.id=c.order_id
+   WHERE NOT(o.id=ANY(ancestors)) AND o.event_id=original.event_id
+    AND (o.status IS DISTINCT FROM 'paid' OR c.created_at>=parent_c.created_at)
+    AND (CASE WHEN original.user_id IS NOT NULL THEN o.user_id=original.user_id ELSE o.user_id IS NULL AND lower(o.guest_email)=lower(original.guest_email) END)
+    AND dvnt_settlement.checkout_selections_overlap(c.snapshot->'selection',parent_c.snapshot->'selection'))
+   THEN RAISE EXCEPTION 'replacement conflicts with another purchase'; END IF;
+  proof:=dvnt_settlement.replacement_proof(original.id,p_intent,p_session,p_platform_account,p_livemode,p_charges);
+  fresh:=dvnt_settlement.replacement_snapshot(original.id);
+  IF fresh IS DISTINCT FROM q.snapshot THEN RAISE EXCEPTION 'replacement quote changed; review fresh total'; END IF;
+  -- Original reservation history is retained. Only active holds exactly bound
+  -- to this canceled payment are expired; no deletion or identity reassignment.
+  IF EXISTS(SELECT 1 FROM public.ticket_holds h WHERE h.status='active' AND h.payment_intent_id IN(original.stripe_payment_intent_id,original.stripe_checkout_session_id)
+   AND (h.event_id IS DISTINCT FROM original.event_id OR h.user_id IS DISTINCT FROM original.user_id OR lower(h.guest_email) IS DISTINCT FROM lower(original.guest_email)
+    OR h.ticket_type_id IS DISTINCT FROM (parent_c.snapshot->'selection'->>'ticket_type_id')::uuid OR h.quantity IS DISTINCT FROM original.quantity))
+   THEN RAISE EXCEPTION 'replacement original inventory ownership mismatch'; END IF;
+  INSERT INTO dvnt_settlement.replacement_inventory_releases(order_id,reason,proof) VALUES(original.id,'canceled',proof) ON CONFLICT(order_id,reason) DO NOTHING;
+  UPDATE public.ticket_holds SET status='expired' WHERE status='active'
+   AND payment_intent_id IN(original.stripe_payment_intent_id,original.stripe_checkout_session_id);
+  IF original.cart_id IS NOT NULL THEN
+   UPDATE public.cart_holds SET released=true,released_at=clock_timestamp() WHERE cart_id=original.cart_id AND NOT released;
+   new_cart:=gen_random_uuid();
+   INSERT INTO public.carts(id,user_id,event_id,status,currency,idempotency_key)
+    VALUES(new_cart,original.user_id,original.event_id,'draft',original.currency,'replacement:'||new_order::text);
+   FOR item IN SELECT value FROM jsonb_array_elements(fresh->'replacement_lines') LOOP
+    new_line:=gen_random_uuid();line_map:=line_map||jsonb_build_object(item->>'id',new_line);
+   END LOOP;
+   FOR item IN SELECT value FROM jsonb_array_elements(fresh->'replacement_lines') LOOP
+    INSERT INTO public.cart_line_items(id,cart_id,category,tier_id,addon_id,variant_id,bound_line_item_id,quantity,unit_price_cents,metadata)
+     VALUES((line_map->>(item->>'id'))::uuid,new_cart,item->>'category',(item->>'tier_id')::uuid,(item->>'addon_id')::uuid,(item->>'variant_id')::uuid,
+      (line_map->>(item->>'bound_line_item_id'))::uuid,(item->>'quantity')::int,(item->>'unit_price_cents')::int,coalesce(item->'metadata','{}'));
+   END LOOP;
+   hold:=public.cart_create_hold(new_cart,3600,'[]');
+   IF hold->>'ok' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'replacement inventory unavailable: %',hold->>'error'; END IF;
+   fresh:=jsonb_set(fresh,'{order,cart_id}',to_jsonb(new_cart));
+   SELECT jsonb_set(fresh,'{selection}',jsonb_build_object('lines',jsonb_agg(jsonb_build_object('id',id,'tier_id',tier_id,'addon_id',addon_id,'variant_id',variant_id,'quantity',quantity,'unit_price_cents',unit_price_cents) ORDER BY id::text)))
+    INTO fresh FROM public.cart_line_items WHERE cart_id=new_cart;
+  ELSE
+   hold:=public.ticket_purchase_hold_atomic((fresh->'selection'->>'ticket_type_id')::uuid,(fresh->'order'->>'quantity')::int,
+    'replacement:'||new_order::text,original.user_id,original.guest_email,3600,'checkout');
+   IF hold->>'ok' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'replacement inventory unavailable: %',hold->>'error'; END IF;
+  END IF;
+  v:=fresh->'order';
+  INSERT INTO public.orders(id,user_id,guest_email,guest_phone,type,status,charge_model,event_id,quantity,currency,
+   subtotal_cents,total_cents,platform_fee_cents,buyer_pct_fee_cents,buyer_per_ticket_fee_cents,buyer_fee_cents,
+   org_pct_fee_cents,org_per_ticket_fee_cents,organizer_fee_cents,dvnt_total_fee_cents,fee_policy_version,
+   cart_id,discount_cents,promoter_id,promoter_code,promoter_policy_version,promoter_original_amount_cents,
+   promoter_customer_discount_bps,promoter_discount_amount_cents,promoter_discounted_amount_cents,promoter_commission_bps,promoter_commission_amount_cents)
+  VALUES(new_order,original.user_id,original.guest_email,original.guest_phone,'event_ticket','payment_pending','separate_charges_and_transfers',
+   original.event_id,(v->>'quantity')::int,original.currency,(v->>'subtotal_cents')::int,(v->>'total_cents')::int,
+   (v->>'platform_fee_cents')::int,(v->>'buyer_pct_fee_cents')::int,(v->>'buyer_per_ticket_fee_cents')::int,(v->>'buyer_fee_cents')::int,
+   (v->>'org_pct_fee_cents')::int,(v->>'org_per_ticket_fee_cents')::int,(v->>'organizer_fee_cents')::int,(v->>'dvnt_total_fee_cents')::int,v->>'fee_policy_version',
+   new_cart,(v->>'discount_cents')::int,(v->>'promoter_id')::uuid,v->>'promoter_code',v->>'promoter_policy_version',(v->>'promoter_original_amount_cents')::int,
+   (v->>'promoter_customer_discount_bps')::int,(v->>'promoter_discount_amount_cents')::int,(v->>'promoter_discounted_amount_cents')::int,
+   (v->>'promoter_commission_bps')::int,(v->>'promoter_commission_amount_cents')::int) RETURNING * INTO successor;
+  IF successor.promoter_id IS NOT NULL THEN
+   INSERT INTO public.promoter_attributions(order_id,promoter_id,locked_rev_share_bps,locked_customer_discount_bps,
+    locked_promoter_commission_bps,locked_promoter_discount_amount_cents,locked_promoter_commission_amount_cents)
+   SELECT successor.id,id,coalesce(rev_share_bps,0),customer_discount_bps,promoter_commission_bps,
+    successor.promoter_discount_amount_cents,successor.promoter_commission_amount_cents FROM public.event_promoters WHERE id=successor.promoter_id;
+  END IF;
+  INSERT INTO dvnt_settlement.checkouts(order_id,request_scope,snapshot,release_not_before,organizer_user_id,promoter_id,promoter_user_id)
+   VALUES(successor.id,'replacement:'||original.id::text,fresh,dvnt_settlement.event_release_at(original.event_id),parent_c.organizer_user_id,
+    parent_c.promoter_id,parent_c.promoter_user_id) RETURNING * INTO checkout;
+  INSERT INTO dvnt_settlement.checkout_replacements(original_order_id,successor_order_id,quote_id,proof,original_cart_id,successor_cart_id,line_map)
+   VALUES(original.id,successor.id,q.id,proof,original.cart_id,new_cart,line_map);
+  -- Outstanding/unknown provider outcomes retain inventory indefinitely.
+  UPDATE public.ticket_holds SET expires_at='infinity' WHERE payment_intent_id='replacement:'||successor.id::text AND status='active';
+  UPDATE public.cart_holds SET expires_at='infinity' WHERE cart_id=new_cart AND NOT released;
+  UPDATE dvnt_settlement.replacement_quotes SET accepted_at=clock_timestamp(),successor_order_id=successor.id WHERE id=q.id;
+  IF s IS NOT NULL THEN UPDATE dvnt_settlement.guest_recovery_sessions SET consumed_at=clock_timestamp() WHERE id=s; END IF;
+ END IF;
+ RETURN jsonb_build_object('ok',true,'order_id',successor.id,'original_order_id',q.original_order_id,'snapshot',checkout.snapshot,
+  'created_at',checkout.created_at,'idempotency_key','dvnt:checkout:v1:'||successor.id::text,'charge_model',successor.charge_model,
+  'new_cart_id',successor.cart_id,'stripe_payment_intent_id',successor.stripe_payment_intent_id,'stripe_checkout_session_id',successor.stripe_checkout_session_id);
+END $$;
+
+-- Finalize provider identity and attach ONLY the successor reservation in one
+-- transaction, including when an early webhook binds the exact new order.
+ALTER FUNCTION public.finalize_settlement_checkout(uuid,text,text) RENAME TO finalize_settlement_checkout_without_replacement;
+REVOKE ALL ON FUNCTION public.finalize_settlement_checkout_without_replacement(uuid,text,text) FROM PUBLIC,anon,authenticated,service_role;
+CREATE FUNCTION public.finalize_settlement_checkout(p_order_id uuid,p_payment_intent_id text,p_checkout_session_id text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE result jsonb; r dvnt_settlement.checkout_replacements%ROWTYPE; o public.orders%ROWTYPE; hold_key text;
+BEGIN
+ result:=public.finalize_settlement_checkout_without_replacement(p_order_id,p_payment_intent_id,p_checkout_session_id);
+ SELECT * INTO r FROM dvnt_settlement.checkout_replacements WHERE successor_order_id=p_order_id;
+ IF r.successor_order_id IS NOT NULL THEN
+  SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id;
+  IF EXISTS(SELECT 1 FROM public.orders other WHERE other.id<>o.id AND
+   ((p_payment_intent_id IS NOT NULL AND other.stripe_payment_intent_id=p_payment_intent_id)
+    OR (p_checkout_session_id IS NOT NULL AND other.stripe_checkout_session_id=p_checkout_session_id)))
+   THEN RAISE EXCEPTION 'replacement conflicting provider binding'; END IF;
+  IF r.successor_cart_id IS NOT NULL THEN
+   IF p_payment_intent_id IS NULL THEN RAISE EXCEPTION 'replacement cart requires payment intent'; END IF;
+   UPDATE public.carts SET stripe_pi_id=p_payment_intent_id,status='paying',total_cents=o.total_cents,
+    fee_cents=o.buyer_fee_cents,tax_cents=coalesce(o.tax_cents,0)
+    WHERE id=r.successor_cart_id AND user_id=o.user_id AND (stripe_pi_id IS NULL OR stripe_pi_id=p_payment_intent_id);
+   IF NOT FOUND THEN RAISE EXCEPTION 'replacement cart binding mismatch'; END IF;
+  ELSE
+   hold_key:=coalesce(p_checkout_session_id,p_payment_intent_id);
+   UPDATE public.ticket_holds SET payment_intent_id=hold_key WHERE payment_intent_id='replacement:'||p_order_id::text;
+   IF NOT FOUND AND NOT EXISTS(SELECT 1 FROM public.ticket_holds WHERE payment_intent_id=hold_key)
+    THEN RAISE EXCEPTION 'replacement inventory binding missing'; END IF;
+  END IF;
+ END IF;
+ RETURN result;
+END $$;
+
+-- A committed accepted selection cannot be edited between reservation and
+-- provider dispatch. New lines are inserted before immutable lineage is bound.
+CREATE FUNCTION dvnt_settlement.freeze_replacement_cart_identity() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM dvnt_settlement.checkout_replacements WHERE original_cart_id=OLD.id OR successor_cart_id=OLD.id) THEN
+  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'replacement cart history is immutable'; END IF;
+  IF ROW(NEW.id,NEW.user_id,NEW.event_id,NEW.currency,NEW.idempotency_key) IS DISTINCT FROM ROW(OLD.id,OLD.user_id,OLD.event_id,OLD.currency,OLD.idempotency_key)
+   OR (OLD.stripe_pi_id IS NOT NULL AND NEW.stripe_pi_id IS DISTINCT FROM OLD.stripe_pi_id)
+   OR (NEW.stripe_pi_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.orders WHERE cart_id=OLD.id AND stripe_payment_intent_id=NEW.stripe_pi_id))
+   THEN RAISE EXCEPTION 'replacement cart identity is immutable'; END IF;
+ END IF;
+ RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END $$;
+CREATE TRIGGER immutable_replacement_cart_identity BEFORE UPDATE OR DELETE ON public.carts
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.freeze_replacement_cart_identity();
+CREATE FUNCTION dvnt_settlement.freeze_replacement_cart_lines() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE cart_key uuid;
+BEGIN
+ cart_key:=CASE WHEN TG_OP='DELETE' THEN OLD.cart_id ELSE NEW.cart_id END;
+ IF EXISTS(SELECT 1 FROM dvnt_settlement.checkout_replacements WHERE successor_cart_id=cart_key OR original_cart_id=cart_key)
+ OR (TG_OP='UPDATE' AND EXISTS(SELECT 1 FROM dvnt_settlement.checkout_replacements WHERE successor_cart_id=OLD.cart_id OR original_cart_id=OLD.cart_id))
+ THEN
+  IF TG_OP='UPDATE' AND (to_jsonb(NEW)-'refunded_amount_cents'-'updated_at') IS NOT DISTINCT FROM (to_jsonb(OLD)-'refunded_amount_cents'-'updated_at') THEN RETURN NEW; END IF;
+  RAISE EXCEPTION 'replacement cart selection is immutable';
+ END IF;
+ RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END $$;
+-- Source inventory dependencies are mandatory even while the feature is off.
+DO $$ BEGIN
+ IF to_regclass('public.cart_line_items') IS NULL THEN RAISE EXCEPTION 'replacement requires cart_line_items'; ELSE
+  CREATE TRIGGER freeze_replacement_cart_selection BEFORE INSERT OR UPDATE OR DELETE ON public.cart_line_items
+   FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.freeze_replacement_cart_lines();
+ END IF;
+END $$;
+CREATE FUNCTION public.settlement_replacement_dispatch_context(p_order_id uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE;c dvnt_settlement.checkouts%ROWTYPE;r dvnt_settlement.checkout_replacements%ROWTYPE; ancestor uuid;
+ e public.events%ROWTYPE; expires timestamptz; hold_key text; held_quantity bigint;
+BEGIN
+ SELECT * INTO r FROM dvnt_settlement.checkout_replacements WHERE successor_order_id=p_order_id;
+ IF r.successor_order_id IS NULL THEN RAISE EXCEPTION 'replacement unavailable'; END IF;
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id;
+ PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('replacement-buyer:'||
+  CASE WHEN o.user_id IS NOT NULL THEN 'member:'||o.user_id ELSE 'guest:'||lower(o.guest_email) END,2));
+ PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('checkout:'||
+  CASE WHEN o.user_id IS NOT NULL THEN 'member:'||o.user_id ELSE 'guest:'||lower(o.guest_email) END||':'||o.event_id::text,1));
+ FOR ancestor IN WITH RECURSIVE chain(id,depth) AS(SELECT p_order_id,0 UNION ALL
+  SELECT x.original_order_id,pathnode.depth+1 FROM dvnt_settlement.checkout_replacements x JOIN chain pathnode ON x.successor_order_id=pathnode.id)
+  SELECT id FROM chain ORDER BY depth DESC LOOP
+  PERFORM 1 FROM public.carts WHERE id=(SELECT cart_id FROM public.orders WHERE id=ancestor) FOR UPDATE;
+  PERFORM 1 FROM public.orders WHERE id=ancestor FOR UPDATE;
+ END LOOP;
+ PERFORM 1 FROM dvnt_settlement.controls WHERE singleton FOR UPDATE;
+ IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.controls WHERE singleton AND checkout_enabled AND checkout_replacement_enabled)
+ THEN RAISE EXCEPTION 'checkout replacement disabled'; END IF;
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id;
+ SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=p_order_id FOR UPDATE;
+ IF o.status='paid' THEN RETURN jsonb_build_object('ok',true,'checkout_available',false,'order_id',o.id,'status',o.status); END IF;
+ IF o.status IS DISTINCT FROM 'payment_pending' THEN RAISE EXCEPTION 'replacement payment unavailable'; END IF;
+ FOR ancestor IN WITH RECURSIVE chain(id) AS(SELECT r.original_order_id UNION
+  SELECT x.original_order_id FROM dvnt_settlement.checkout_replacements x JOIN chain pathnode ON x.successor_order_id=pathnode.id)
+  SELECT id FROM chain LOOP PERFORM dvnt_settlement.replacement_assert_clear(ancestor); END LOOP;
+ PERFORM dvnt_settlement.replacement_assert_clear(o.id);
+ SELECT * INTO STRICT e FROM public.events WHERE id=o.event_id FOR SHARE NOWAIT;
+ IF e.status IS DISTINCT FROM 'active' OR e.payout_status IN('disabled','on_hold') OR e.host_id IS DISTINCT FROM c.organizer_user_id
+ OR e.visibility='private' OR e.is_hidden IS TRUE OR e.publish_at>clock_timestamp()
+ OR coalesce(e.end_date,e.start_date+interval '6 hours') IS NULL
+ OR coalesce(e.end_date,e.start_date+interval '6 hours')-interval '30 minutes'<=clock_timestamp()
+ THEN RAISE EXCEPTION 'replacement event no longer on sale'; END IF;
+ IF o.cart_id IS NOT NULL THEN
+  PERFORM 1 FROM public.carts WHERE id=o.cart_id AND user_id=o.user_id AND event_id=o.event_id
+   AND currency=o.currency AND status IN('holding','paying') AND stripe_pi_id IS NOT DISTINCT FROM o.stripe_payment_intent_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'replacement cart binding mismatch'; END IF;
+  IF EXISTS(SELECT 1 FROM public.cart_line_items l WHERE l.cart_id=o.cart_id AND
+   (SELECT coalesce(sum(h.qty),0) FROM public.cart_holds h WHERE h.cart_id=o.cart_id AND h.line_item_id=l.id
+    AND h.tier_id IS NOT DISTINCT FROM l.tier_id AND h.addon_id IS NOT DISTINCT FROM l.addon_id
+    AND h.variant_id IS NOT DISTINCT FROM l.variant_id AND NOT h.released AND h.expires_at>clock_timestamp())<>l.quantity)
+   OR NOT EXISTS(SELECT 1 FROM public.cart_line_items WHERE cart_id=o.cart_id)
+   THEN RAISE EXCEPTION 'replacement inventory expired or changed'; END IF;
+  SELECT min(expires_at) INTO expires FROM public.cart_holds WHERE cart_id=o.cart_id AND NOT released;
+ ELSE
+  hold_key:=coalesce(o.stripe_checkout_session_id,o.stripe_payment_intent_id,'replacement:'||o.id::text);
+  SELECT sum(h.quantity),min(h.expires_at) INTO held_quantity,expires FROM public.ticket_holds h
+   WHERE payment_intent_id=hold_key AND status='active' AND expires_at>clock_timestamp()
+    AND ticket_type_id=(c.snapshot->'selection'->>'ticket_type_id')::uuid
+    AND user_id IS NOT DISTINCT FROM o.user_id AND guest_email IS NOT DISTINCT FROM o.guest_email;
+  IF held_quantity IS DISTINCT FROM o.quantity::bigint THEN RAISE EXCEPTION 'replacement inventory expired or changed'; END IF;
+ END IF;
+ IF expires IS NULL OR expires<=clock_timestamp() THEN RAISE EXCEPTION 'replacement inventory expired'; END IF;
+ RETURN jsonb_build_object('ok',true,'checkout_available',true,'order_id',o.id,'snapshot',c.snapshot,'created_at',c.created_at,
+  'idempotency_key','dvnt:checkout:v1:'||o.id::text,'charge_model',o.charge_model,'new_cart_id',o.cart_id,'hold_expires_at',CASE WHEN c.snapshot->>'rail' IN('ticket-checkout','guest-checkout') THEN least(expires,c.created_at+interval '1 hour') ELSE expires END,
+  'stripe_payment_intent_id',o.stripe_payment_intent_id,'stripe_checkout_session_id',o.stripe_checkout_session_id);
+END $$;
+ALTER FUNCTION public.claim_settlement_checkout(uuid,jsonb) RENAME TO claim_settlement_checkout_without_replacement;
+REVOKE ALL ON FUNCTION public.claim_settlement_checkout_without_replacement(uuid,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+CREATE FUNCTION public.claim_settlement_checkout(p_order_id uuid,p_params jsonb) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE context jsonb;
+BEGIN
+ IF EXISTS(SELECT 1 FROM dvnt_settlement.checkout_replacements WHERE successor_order_id=p_order_id) THEN
+  context:=public.settlement_replacement_dispatch_context(p_order_id);
+  IF context->>'checkout_available' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'replacement payment no longer available'; END IF;
+  IF context->'snapshot'->>'rail' IN('ticket-checkout','guest-checkout') AND
+   (p_params->>'expires_at' IS NULL OR (p_params->>'expires_at')::bigint>extract(epoch FROM (context->>'hold_expires_at')::timestamptz))
+   THEN RAISE EXCEPTION 'replacement provider expiry exceeds inventory hold'; END IF;
+ END IF;
+ RETURN public.claim_settlement_checkout_without_replacement(p_order_id,p_params);
+END $$;
+
+CREATE FUNCTION dvnt_settlement.protect_replacement_inventory() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE order_key uuid; o public.orders%ROWTYPE; oldrow jsonb; newrow jsonb; permitted boolean;
+BEGIN
+ IF TG_OP<>'INSERT' THEN oldrow:=to_jsonb(OLD); END IF;
+ IF TG_OP<>'DELETE' THEN newrow:=to_jsonb(NEW); END IF;
+ IF TG_TABLE_NAME='cart_holds' THEN
+  SELECT r.successor_order_id INTO order_key FROM dvnt_settlement.checkout_replacements r
+   WHERE r.successor_cart_id=(coalesce(oldrow,newrow)->>'cart_id')::uuid;
+ ELSE
+  SELECT o2.id INTO order_key FROM public.orders o2 JOIN dvnt_settlement.checkout_replacements r ON r.successor_order_id=o2.id
+   WHERE coalesce(oldrow,newrow)->>'payment_intent_id' IN('replacement:'||o2.id::text,o2.stripe_payment_intent_id,o2.stripe_checkout_session_id);
+ END IF;
+ IF order_key IS NULL THEN RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END; END IF;
+ IF TG_OP='DELETE' THEN RAISE EXCEPTION 'replacement inventory history is immutable'; END IF;
+ SELECT * INTO STRICT o FROM public.orders WHERE id=order_key;
+ permitted:=EXISTS(SELECT 1 FROM dvnt_settlement.replacement_inventory_releases WHERE order_id=order_key);
+ IF TG_TABLE_NAME='cart_holds' THEN
+  IF TG_OP='UPDATE' AND (oldrow-'released'-'released_at'-'expires_at') IS DISTINCT FROM (newrow-'released'-'released_at'-'expires_at')
+   THEN RAISE EXCEPTION 'replacement inventory identity is immutable'; END IF;
+  IF NOT permitted THEN
+   NEW.expires_at:='infinity';
+   IF TG_OP='UPDATE' THEN NEW.released:=OLD.released;NEW.released_at:=OLD.released_at; END IF;
+  END IF;
+ ELSE
+  IF TG_OP='UPDATE' AND (oldrow-'status'-'expires_at'-'payment_intent_id'-'hold_kind') IS DISTINCT FROM (newrow-'status'-'expires_at'-'payment_intent_id'-'hold_kind')
+   THEN RAISE EXCEPTION 'replacement inventory identity is immutable'; END IF;
+  IF NEW.payment_intent_id IS DISTINCT FROM coalesce(o.stripe_checkout_session_id,o.stripe_payment_intent_id,'replacement:'||o.id::text)
+   THEN RAISE EXCEPTION 'replacement inventory payment identity mismatch'; END IF;
+  IF NEW.status='converted' AND (SELECT count(*) FROM public.tickets WHERE order_id=o.id AND ticket_type_id=NEW.ticket_type_id)>=o.quantity
+   THEN RETURN NEW; END IF;
+  IF NOT permitted THEN NEW.expires_at:='infinity';IF TG_OP='UPDATE' THEN NEW.status:=OLD.status; END IF; END IF;
+ END IF;
+ RETURN NEW;
+END $$;
+DO $$ BEGIN
+ IF to_regclass('public.ticket_holds') IS NULL THEN RAISE EXCEPTION 'replacement requires ticket_holds'; ELSE
+  CREATE TRIGGER retain_replacement_ticket_inventory BEFORE INSERT OR UPDATE OR DELETE ON public.ticket_holds
+   FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.protect_replacement_inventory();
+ END IF;
+ IF to_regclass('public.cart_holds') IS NULL THEN RAISE EXCEPTION 'replacement requires cart_holds'; ELSE
+  CREATE TRIGGER retain_replacement_cart_inventory BEFORE INSERT OR UPDATE OR DELETE ON public.cart_holds
+   FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.protect_replacement_inventory();
+ END IF;
+END $$;
+
+-- Existing complete_paid_cart_atomic already accepts only trusted, freshly
+-- verified successful provider evidence from the webhook/reconciler. Its
+-- internal release-and-rearm must be atomic with the replacement exemption.
+DO $$ BEGIN
+ IF to_regprocedure('public.complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz)') IS NULL THEN RAISE EXCEPTION 'replacement requires canonical complete_paid_cart_atomic'; ELSE
+  ALTER FUNCTION public.complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz) RENAME TO complete_paid_cart_atomic_without_replacement;
+  REVOKE ALL ON FUNCTION public.complete_paid_cart_atomic_without_replacement(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz) FROM PUBLIC,anon,authenticated,service_role;
+  EXECUTE $wrapper$
+  CREATE FUNCTION public.complete_paid_cart_atomic(p_cart_id uuid,p_payment_intent_id text,p_amount_received integer,
+   p_currency text,p_user_id text,p_event_id integer,p_ticket_rows jsonb,p_addon_rows jsonb,p_event_created_at timestamptz DEFAULT NULL)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $body$
+  DECLARE result jsonb; o public.orders%ROWTYPE;
+  BEGIN
+   IF EXISTS(SELECT 1 FROM dvnt_settlement.checkout_replacements WHERE successor_cart_id=p_cart_id) THEN
+    -- Preserve the deployed cart->order lock order used by paid fulfillment.
+    PERFORM 1 FROM public.carts WHERE id=p_cart_id FOR UPDATE;
+    SELECT * INTO STRICT o FROM public.orders WHERE cart_id=p_cart_id FOR UPDATE;
+    IF o.stripe_payment_intent_id IS DISTINCT FROM p_payment_intent_id OR o.total_cents IS DISTINCT FROM p_amount_received
+     OR o.currency IS DISTINCT FROM p_currency OR o.user_id IS DISTINCT FROM p_user_id OR o.event_id IS DISTINCT FROM p_event_id
+     OR EXISTS(SELECT 1 FROM dvnt_settlement.replacement_inventory_releases WHERE order_id=o.id AND reason='canceled')
+     THEN RAISE EXCEPTION 'replacement paid inventory proof mismatch'; END IF;
+    INSERT INTO dvnt_settlement.replacement_inventory_releases(order_id,reason,proof)
+     VALUES(o.id,'fulfilled',jsonb_build_object('payment_intent_id',p_payment_intent_id,'amount_received',p_amount_received,'currency',p_currency))
+     ON CONFLICT(order_id,reason) DO NOTHING;
+   END IF;
+   result:=public.complete_paid_cart_atomic_without_replacement(p_cart_id,p_payment_intent_id,p_amount_received,p_currency,p_user_id,p_event_id,p_ticket_rows,p_addon_rows,p_event_created_at);
+   IF o.id IS NOT NULL AND result->>'ok' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'replacement paid inventory incomplete: %',result->>'error'; END IF;
+   RETURN result;
+  END $body$;
+  $wrapper$;
+  REVOKE ALL ON FUNCTION public.complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz) FROM PUBLIC,anon,authenticated;
+  GRANT EXECUTE ON FUNCTION public.complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz) TO service_role;
+ END IF;
+END $$;
+
+DO $$ DECLARE f record; BEGIN
+ FOR f IN SELECT p.oid::regprocedure signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+ WHERE (n.nspname='dvnt_settlement' AND p.proname IN('replacement_authorize','replacement_assert_clear','replacement_snapshot','replacement_proof','freeze_replacement_quote','freeze_replacement_cart_lines','freeze_replacement_cart_identity','protect_replacement_inventory'))
+ OR (n.nspname='public' AND p.proname IN('settlement_replacement_context','settlement_replacement_quote','settlement_replacement_accept','settlement_replacement_dispatch_context','claim_settlement_checkout','finalize_settlement_checkout')) LOOP
+  EXECUTE 'REVOKE ALL ON FUNCTION '||f.signature||' FROM PUBLIC,anon,authenticated,service_role';
+  IF f.signature::text LIKE 'settlement_replacement_%' OR f.signature::text LIKE 'finalize_settlement_checkout(%' OR f.signature::text LIKE 'claim_settlement_checkout(%'
+   OR f.signature::text LIKE 'public.settlement_replacement_%' OR f.signature::text LIKE 'public.finalize_settlement_checkout(%' OR f.signature::text LIKE 'public.claim_settlement_checkout(%'
+  THEN EXECUTE 'GRANT EXECUTE ON FUNCTION '||f.signature||' TO service_role'; END IF;
+ END LOOP;
+END $$;
+
+
+-- SOURCE: docs/payments/drafts/settlement-replacement-cleanup.sql
+-- DRAFT. Install after settlement-replacement.sql. No schedule or gate enabled.
+-- CAPABILITY GATES: default-off CHECKOUT_REPLACEMENT_CLEANUP_ENABLED worker env,
+-- checkout_replacement_enabled AND replacement_cleanup_enabled database flags.
+-- Reviewed buyer terms must disclose the 60-minute cancellation window. A TTL
+-- only authorizes a cancellation attempt. It never proves nonpayment.
+-- Required release evidence: exact canceled, zero-money, charge-free intent;
+-- hosted also exact expired/unpaid session. No bound PI is manual attention.
+-- Hosted cleanup only expires Checkout; it never directly cancels Checkout's
+-- owned PI. Expiry that leaves a nonterminal PI remains held for reconciliation.
+-- Unknown mutation delivery is never retried, even after idempotency retention.
+-- Operator review/alert delivery and sandbox cancellation proof are release
+-- gates; this source installs neither scheduler nor external alert destination.
+-- Actor-wide active reservation bounds (2 attempts / 40 units / 20 per attempt)
+-- are enforced by settlement-replacement.sql under replacement-buyer mutex.
+-- Never-dispatched tombstones cannot be revived; any later replacement needs
+-- its own explicit, reviewed authorization path, not a new idempotency key.
+
+ALTER TABLE dvnt_settlement.controls ADD COLUMN replacement_cleanup_enabled boolean NOT NULL DEFAULT false;
+CREATE TABLE dvnt_settlement.replacement_cleanup (
+ order_id uuid PRIMARY KEY REFERENCES public.orders(id),
+ due_at timestamptz NOT NULL, next_check_at timestamptz NOT NULL,
+ state text NOT NULL DEFAULT 'waiting' CHECK(state IN('waiting','blocked','uncertain','released','not_dispatched','fulfilled')),
+ attempted_at timestamptz, action text CHECK(action IN('cancel_intent','expire_session')),
+ provider_object_id text, idempotency_key text UNIQUE,
+ dispatch_closed_at timestamptz, proof jsonb, reason text,
+ last_checked_at timestamptz, completed_at timestamptz,
+ CHECK((attempted_at IS NULL)=(action IS NULL)),
+ CHECK((attempted_at IS NULL)=(provider_object_id IS NULL)),
+ CHECK((attempted_at IS NULL)=(idempotency_key IS NULL))
+);
+ALTER TABLE dvnt_settlement.replacement_cleanup ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON dvnt_settlement.replacement_cleanup FROM PUBLIC,anon,authenticated,service_role;
+CREATE FUNCTION dvnt_settlement.seed_replacement_cleanup() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ INSERT INTO dvnt_settlement.replacement_cleanup(order_id,due_at,next_check_at)
+ SELECT NEW.successor_order_id,c.created_at+interval '1 hour',c.created_at+interval '1 hour'
+ FROM dvnt_settlement.checkouts c WHERE c.order_id=NEW.successor_order_id;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER seed_replacement_cleanup AFTER INSERT ON dvnt_settlement.checkout_replacements
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.seed_replacement_cleanup();
+INSERT INTO dvnt_settlement.replacement_cleanup(order_id,due_at,next_check_at)
+ SELECT r.successor_order_id,c.created_at+interval '1 hour',c.created_at+interval '1 hour'
+ FROM dvnt_settlement.checkout_replacements r JOIN dvnt_settlement.checkouts c ON c.order_id=r.successor_order_id;
+CREATE FUNCTION dvnt_settlement.freeze_replacement_cleanup() RETURNS trigger
+LANGUAGE plpgsql SET search_path='' AS $$
+BEGIN
+ IF TG_OP<>'UPDATE' THEN RAISE EXCEPTION 'cleanup evidence immutable'; END IF;
+ IF NEW.order_id IS DISTINCT FROM OLD.order_id OR NEW.due_at IS DISTINCT FROM OLD.due_at
+ OR (OLD.attempted_at IS NOT NULL AND ROW(NEW.attempted_at,NEW.action,NEW.provider_object_id,NEW.idempotency_key)
+  IS DISTINCT FROM ROW(OLD.attempted_at,OLD.action,OLD.provider_object_id,OLD.idempotency_key))
+ OR (OLD.dispatch_closed_at IS NOT NULL AND NEW.dispatch_closed_at IS DISTINCT FROM OLD.dispatch_closed_at)
+ OR (OLD.proof IS NOT NULL AND NEW.proof IS DISTINCT FROM OLD.proof)
+ OR (OLD.completed_at IS NOT NULL AND ROW(NEW.completed_at,NEW.state) IS DISTINCT FROM ROW(OLD.completed_at,OLD.state))
+ THEN RAISE EXCEPTION 'cleanup evidence immutable'; END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER freeze_replacement_cleanup BEFORE UPDATE OR DELETE ON dvnt_settlement.replacement_cleanup
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.freeze_replacement_cleanup();
+CREATE TRIGGER no_truncate_replacement_cleanup BEFORE TRUNCATE ON dvnt_settlement.replacement_cleanup
+ FOR EACH STATEMENT EXECUTE FUNCTION dvnt_settlement.reject_external_change();
+
+-- Terminal cleanup is immutable and never requeued. Clear matching operational
+-- attention in the same transaction, not by scanning completed work forever.
+CREATE FUNCTION dvnt_settlement.clear_terminal_cleanup_runtime() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF NEW.completed_at IS NOT NULL AND NEW.state IN ('released','not_dispatched','fulfilled') THEN
+  DELETE FROM dvnt_settlement.runtime_attention WHERE phase='cleanup' AND work_key=NEW.order_id::text;
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER clear_terminal_cleanup_runtime AFTER INSERT OR UPDATE OF completed_at,state
+ ON dvnt_settlement.replacement_cleanup FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.clear_terminal_cleanup_runtime();
+REVOKE ALL ON FUNCTION dvnt_settlement.clear_terminal_cleanup_runtime() FROM PUBLIC,anon,authenticated,service_role;
+
+-- Both paths lock cleanup before attention. This serializes a late budget
+-- report with terminal completion and cannot erase any unresolved attempt.
+ALTER FUNCTION public.settlement_runtime_observation(text,text,text,timestamptz) RENAME TO settlement_runtime_observation_before_cleanup;
+REVOKE ALL ON FUNCTION public.settlement_runtime_observation_before_cleanup(text,text,text,timestamptz) FROM PUBLIC,anon,authenticated,service_role;
+CREATE FUNCTION public.settlement_runtime_observation(p_phase text,p_work_key text,p_outcome text,p_run_started_at timestamptz)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE q dvnt_settlement.replacement_cleanup%ROWTYPE;
+BEGIN
+ IF p_phase='cleanup' THEN
+  IF p_work_key IS NULL OR p_work_key !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR p_outcome IS NULL
+   OR p_outcome NOT IN ('budget','completed') OR p_run_started_at IS NULL OR NOT isfinite(p_run_started_at)
+   OR p_run_started_at>clock_timestamp() THEN RAISE EXCEPTION 'invalid runtime observation'; END IF;
+  SELECT * INTO STRICT q FROM dvnt_settlement.replacement_cleanup WHERE order_id=p_work_key::uuid FOR UPDATE;
+  p_work_key:=q.order_id::text;
+  IF q.completed_at IS NOT NULL AND q.state IN ('released','not_dispatched','fulfilled') THEN
+   DELETE FROM dvnt_settlement.runtime_attention WHERE phase='cleanup' AND work_key=p_work_key;
+   RETURN jsonb_build_object('ok',true,'terminal',true);
+  END IF;
+ END IF;
+ RETURN public.settlement_runtime_observation_before_cleanup(p_phase,p_work_key,p_outcome,p_run_started_at);
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_runtime_observation(text,text,text,timestamptz) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.settlement_runtime_observation(text,text,text,timestamptz) TO service_role;
+
+CREATE FUNCTION dvnt_settlement.lock_replacement_cleanup(p_order_id uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE; ancestor uuid;
+BEGIN
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id;
+ IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.checkout_replacements WHERE successor_order_id=o.id)
+ THEN RAISE EXCEPTION 'not a replacement successor'; END IF;
+ PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('replacement-buyer:'||
+  CASE WHEN o.user_id IS NOT NULL THEN 'member:'||o.user_id ELSE 'guest:'||lower(o.guest_email) END,2));
+ PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('checkout:'||
+  CASE WHEN o.user_id IS NOT NULL THEN 'member:'||o.user_id ELSE 'guest:'||lower(o.guest_email) END||':'||o.event_id::text,1));
+ FOR ancestor IN WITH RECURSIVE chain(id,depth) AS(SELECT o.id,0 UNION ALL
+  SELECT r.original_order_id,c.depth+1 FROM dvnt_settlement.checkout_replacements r JOIN chain c ON r.successor_order_id=c.id)
+  SELECT id FROM chain ORDER BY depth DESC LOOP
+  PERFORM 1 FROM public.carts WHERE id=(SELECT cart_id FROM public.orders WHERE id=ancestor) FOR UPDATE;
+  PERFORM 1 FROM public.orders WHERE id=ancestor FOR UPDATE;
+ END LOOP;
+ PERFORM 1 FROM dvnt_settlement.controls WHERE singleton FOR UPDATE;
+ IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.controls WHERE singleton AND checkout_replacement_enabled AND replacement_cleanup_enabled)
+ THEN RAISE EXCEPTION 'replacement cleanup disabled'; END IF;
+ PERFORM 1 FROM dvnt_settlement.checkouts WHERE order_id=o.id FOR UPDATE;
+ PERFORM 1 FROM dvnt_settlement.replacement_cleanup WHERE order_id=o.id FOR UPDATE;
+END $$;
+
+CREATE FUNCTION public.settlement_replacement_cleanup_candidates(p_limit int DEFAULT 20) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE selected uuid[];
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.controls WHERE singleton AND checkout_replacement_enabled AND replacement_cleanup_enabled)
+ THEN RETURN '[]'; END IF;
+ SELECT ARRAY(SELECT order_id FROM dvnt_settlement.replacement_cleanup WHERE completed_at IS NULL
+  AND due_at<=clock_timestamp() AND next_check_at<=clock_timestamp()
+  ORDER BY last_checked_at NULLS FIRST,due_at,order_id LIMIT greatest(1,least(coalesce(p_limit,20),50)) FOR UPDATE SKIP LOCKED) INTO selected;
+ UPDATE dvnt_settlement.replacement_cleanup SET last_checked_at=clock_timestamp(),next_check_at=clock_timestamp()+interval '5 minutes'
+  WHERE order_id=ANY(selected);
+ RETURN coalesce((SELECT jsonb_agg(jsonb_build_object('order_id',id) ORDER BY n) FROM unnest(selected) WITH ORDINALITY AS s(id,n)),'[]');
+END $$;
+
+CREATE FUNCTION public.settlement_replacement_cleanup_context(p_order_id uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE; c dvnt_settlement.checkouts%ROWTYPE; q dvnt_settlement.replacement_cleanup%ROWTYPE; policy dvnt_settlement.funding_policy%ROWTYPE;
+BEGIN
+ PERFORM dvnt_settlement.lock_replacement_cleanup(p_order_id);
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id;
+ SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=o.id;
+ SELECT * INTO STRICT q FROM dvnt_settlement.replacement_cleanup WHERE order_id=o.id;
+ IF q.completed_at IS NOT NULL THEN RETURN jsonb_build_object('ok',true,'terminal',true,'state',q.state); END IF;
+ IF q.due_at>clock_timestamp() THEN RAISE EXCEPTION 'replacement checkout window still open'; END IF;
+ IF EXISTS(SELECT 1 FROM dvnt_settlement.replacement_inventory_releases WHERE order_id=o.id AND reason='fulfilled')
+ OR (o.status='paid' AND (SELECT count(*) FROM public.tickets WHERE order_id=o.id)>=o.quantity) THEN
+  UPDATE dvnt_settlement.replacement_cleanup SET state='fulfilled',completed_at=clock_timestamp(),reason=NULL WHERE order_id=o.id;
+  RETURN jsonb_build_object('ok',true,'terminal',true,'state','fulfilled');
+ END IF;
+ SELECT * INTO STRICT policy FROM dvnt_settlement.funding_policy WHERE singleton;
+ RETURN jsonb_build_object('ok',true,'terminal',false,'order_id',o.id,'snapshot',c.snapshot,
+  'stripe_payment_intent_id',o.stripe_payment_intent_id,'stripe_checkout_session_id',o.stripe_checkout_session_id,
+  'platform_account',policy.platform_account,'livemode',policy.livemode,'never_dispatched',c.attempted_at IS NULL,
+  'cleanup_attempted',q.attempted_at IS NOT NULL,'due_at',q.due_at);
+END $$;
+
+-- The pre-cancel evidence repeats all identity/economics/zero-money checks.
+-- It authorizes just one cancellation attempt, never inventory release.
+CREATE FUNCTION public.settlement_replacement_cleanup_claim(p_order_id uuid,p_intent jsonb,p_session jsonb,
+ p_platform_account text,p_livemode boolean,p_charges jsonb) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE;c dvnt_settlement.checkouts%ROWTYPE;q dvnt_settlement.replacement_cleanup%ROWTYPE;
+ policy dvnt_settlement.funding_policy%ROWTYPE; gross bigint; tax bigint; hosted boolean; action_name text; object_id text;
+BEGIN
+ PERFORM dvnt_settlement.lock_replacement_cleanup(p_order_id);
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id;
+ SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=o.id;
+ SELECT * INTO STRICT q FROM dvnt_settlement.replacement_cleanup WHERE order_id=o.id;
+ IF q.completed_at IS NOT NULL OR q.attempted_at IS NOT NULL THEN RETURN jsonb_build_object('ok',true,'claimed',false); END IF;
+ IF q.due_at>clock_timestamp() OR c.attempted_at IS NULL THEN RAISE EXCEPTION 'cleanup not due or provider not dispatched'; END IF;
+ PERFORM dvnt_settlement.replacement_assert_clear(o.id);
+ SELECT * INTO STRICT policy FROM dvnt_settlement.funding_policy WHERE singleton;
+ IF p_platform_account IS DISTINCT FROM policy.platform_account OR p_livemode IS DISTINCT FROM policy.livemode OR p_charges IS DISTINCT FROM '[]'::jsonb
+ THEN RAISE EXCEPTION 'cleanup account or charges invalid'; END IF;
+ gross:=(c.snapshot->'order'->>'total_cents')::bigint;
+ hosted:=c.snapshot->>'rail' IN('ticket-checkout','guest-checkout');
+ IF hosted THEN
+  IF o.stripe_checkout_session_id IS NULL OR jsonb_typeof(p_session) IS DISTINCT FROM 'object'
+   OR p_session->>'id' IS DISTINCT FROM o.stripe_checkout_session_id OR p_session->>'id' !~ '^cs_[A-Za-z0-9_]+$'
+   OR p_session->>'object' IS DISTINCT FROM 'checkout.session' OR p_session->>'mode' IS DISTINCT FROM 'payment'
+   OR p_session->>'status' IS DISTINCT FROM 'open' OR p_session->>'payment_status' IS DISTINCT FROM 'unpaid'
+   OR p_session->'livemode' IS DISTINCT FROM to_jsonb(policy.livemode) OR p_session->>'currency' IS DISTINCT FROM o.currency
+   OR p_session->'amount_subtotal' IS DISTINCT FROM to_jsonb(gross) OR p_session->>'payment_intent' IS DISTINCT FROM o.stripe_payment_intent_id
+   OR p_session->'metadata'->>'settlement_order_id' IS DISTINCT FROM o.id::text
+   OR p_session->'metadata'->>'charge_model' IS DISTINCT FROM o.charge_model
+   OR jsonb_typeof(p_session->'total_details'->'amount_tax') IS DISTINCT FROM 'number'
+   OR (p_session->'total_details'->>'amount_tax')::numeric<0
+   OR trunc((p_session->'total_details'->>'amount_tax')::numeric)<>(p_session->'total_details'->>'amount_tax')::numeric
+   OR p_session->'total_details'->'amount_discount' IS DISTINCT FROM '0'::jsonb
+   OR p_session->'total_details'->'amount_shipping' IS DISTINCT FROM '0'::jsonb
+   THEN RAISE EXCEPTION 'cleanup hosted evidence invalid'; END IF;
+  tax:=(p_session->'total_details'->>'amount_tax')::bigint;gross:=gross+tax;
+  IF p_session->'amount_total' IS DISTINCT FROM to_jsonb(gross) THEN RAISE EXCEPTION 'cleanup session amount invalid'; END IF;
+  action_name:='expire_session';object_id:=o.stripe_checkout_session_id;
+ ELSE
+  IF p_session IS NOT NULL OR o.stripe_checkout_session_id IS NOT NULL THEN RAISE EXCEPTION 'unexpected cleanup session'; END IF;
+  action_name:='cancel_intent';object_id:=o.stripe_payment_intent_id;
+ END IF;
+ IF o.stripe_payment_intent_id IS NULL OR jsonb_typeof(p_intent) IS DISTINCT FROM 'object'
+ OR p_intent->>'object' IS DISTINCT FROM 'payment_intent' OR p_intent->>'id' IS DISTINCT FROM o.stripe_payment_intent_id
+ OR p_intent->>'id' !~ '^pi_[A-Za-z0-9_]+$' OR p_intent->>'status' IS NULL
+ OR p_intent->>'status' NOT IN('requires_payment_method','requires_confirmation','requires_action')
+ OR p_intent->'livemode' IS DISTINCT FROM to_jsonb(policy.livemode) OR p_intent->>'currency' IS DISTINCT FROM o.currency
+ OR p_intent->'amount' IS DISTINCT FROM to_jsonb(gross) OR p_intent->'amount_received' IS DISTINCT FROM '0'::jsonb
+ OR p_intent->'amount_capturable' IS DISTINCT FROM '0'::jsonb OR p_intent->'latest_charge' IS DISTINCT FROM 'null'::jsonb
+ OR p_intent->'transfer_data' IS DISTINCT FROM 'null'::jsonb OR p_intent->'application_fee_amount' IS DISTINCT FROM 'null'::jsonb
+ OR p_intent->'on_behalf_of' IS DISTINCT FROM 'null'::jsonb
+ OR p_intent->'metadata'->>'settlement_order_id' IS DISTINCT FROM o.id::text
+ OR p_intent->'metadata'->>'charge_model' IS DISTINCT FROM o.charge_model
+ THEN RAISE EXCEPTION 'cleanup active zero-money evidence invalid'; END IF;
+ UPDATE dvnt_settlement.replacement_cleanup SET state='uncertain',attempted_at=clock_timestamp(),action=action_name,
+  provider_object_id=object_id,idempotency_key='dvnt:replacement-cleanup:v1:'||o.id::text,
+  reason='cancellation_outcome_unknown',next_check_at=clock_timestamp()+interval '5 minutes' WHERE order_id=o.id;
+ RETURN jsonb_build_object('ok',true,'claimed',true,'action',action_name,'provider_object_id',object_id,
+  'idempotency_key','dvnt:replacement-cleanup:v1:'||o.id::text);
+END $$;
+
+CREATE FUNCTION public.settlement_replacement_cleanup_release(p_order_id uuid,p_intent jsonb DEFAULT NULL,p_session jsonb DEFAULT NULL,
+ p_platform_account text DEFAULT NULL,p_livemode boolean DEFAULT NULL,p_charges jsonb DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE;c dvnt_settlement.checkouts%ROWTYPE;q dvnt_settlement.replacement_cleanup%ROWTYPE;v_proof jsonb;next_state text;
+BEGIN
+ PERFORM dvnt_settlement.lock_replacement_cleanup(p_order_id);
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id;
+ SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=o.id;
+ SELECT * INTO STRICT q FROM dvnt_settlement.replacement_cleanup WHERE order_id=o.id;
+ IF q.completed_at IS NOT NULL THEN RETURN jsonb_build_object('ok',true,'state',q.state); END IF;
+ IF q.due_at>clock_timestamp() THEN RAISE EXCEPTION 'replacement checkout window still open'; END IF;
+ PERFORM dvnt_settlement.replacement_assert_clear(o.id);
+ IF c.attempted_at IS NULL THEN
+  IF o.stripe_payment_intent_id IS NOT NULL OR o.stripe_checkout_session_id IS NOT NULL OR p_intent IS NOT NULL OR p_session IS NOT NULL
+   THEN RAISE EXCEPTION 'never-dispatched evidence inconsistent'; END IF;
+  v_proof:=jsonb_build_object('version',1,'order_id',o.id,'kind','durable_dispatch_never_authorized','observed_at',clock_timestamp());
+  next_state:='not_dispatched';
+ ELSE
+  v_proof:=dvnt_settlement.replacement_proof(o.id,p_intent,p_session,p_platform_account,p_livemode,p_charges);
+  next_state:='released';
+ END IF;
+ UPDATE dvnt_settlement.replacement_cleanup SET dispatch_closed_at=clock_timestamp(),proof=v_proof,
+  state=next_state,completed_at=clock_timestamp(),reason=NULL WHERE order_id=o.id;
+ INSERT INTO dvnt_settlement.replacement_inventory_releases(order_id,reason,proof) VALUES(o.id,'canceled',v_proof)
+  ON CONFLICT(order_id,reason) DO NOTHING;
+ UPDATE public.ticket_holds SET status='expired',expires_at=least(expires_at,clock_timestamp())
+  WHERE status='active' AND payment_intent_id IN('replacement:'||o.id::text,o.stripe_payment_intent_id,o.stripe_checkout_session_id);
+ UPDATE public.cart_holds SET released=true,released_at=clock_timestamp(),expires_at=least(expires_at,clock_timestamp())
+  WHERE cart_id=o.cart_id AND NOT released;
+ RETURN jsonb_build_object('ok',true,'state',next_state);
+END $$;
+
+CREATE FUNCTION public.settlement_replacement_cleanup_observe(p_order_id uuid,p_reason text) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF p_reason IS NULL OR p_reason NOT IN('processing','provider_link_missing','payment_or_financial_review','cancellation_outcome_unknown','proof_unavailable')
+ THEN RAISE EXCEPTION 'invalid cleanup reason'; END IF;
+ UPDATE dvnt_settlement.replacement_cleanup SET state=CASE WHEN attempted_at IS NULL THEN 'blocked' ELSE 'uncertain' END,
+  reason=p_reason,last_checked_at=clock_timestamp(),next_check_at=clock_timestamp()+interval '30 minutes'
+  WHERE order_id=p_order_id AND completed_at IS NULL;
+ RETURN jsonb_build_object('ok',true);
+END $$;
+
+-- A request that never crossed the provider claim may release its reservation
+-- only after permanently closing dispatch in the same locked transaction.
+ALTER FUNCTION public.claim_settlement_checkout(uuid,jsonb) RENAME TO claim_settlement_checkout_before_cleanup;
+REVOKE ALL ON FUNCTION public.claim_settlement_checkout_before_cleanup(uuid,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+CREATE FUNCTION public.claim_settlement_checkout(p_order_id uuid,p_params jsonb) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM dvnt_settlement.replacement_cleanup WHERE order_id=p_order_id AND dispatch_closed_at IS NOT NULL)
+ THEN RAISE EXCEPTION 'replacement dispatch permanently closed'; END IF;
+ -- The nested dispatch gate serializes on the same order/checkout locks as
+ -- cleanup. After a concurrent close, released holds block the nested claim.
+ RETURN public.claim_settlement_checkout_before_cleanup(p_order_id,p_params);
+END $$;
+
+CREATE FUNCTION public.settlement_replacement_cleanup_health() RETURNS jsonb
+LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+ SELECT jsonb_build_object('ok',true,'enabled',(SELECT replacement_cleanup_enabled FROM dvnt_settlement.controls WHERE singleton),
+ 'overdue_count',count(*) FILTER(WHERE completed_at IS NULL AND due_at<clock_timestamp()-interval '30 minutes'),
+ 'attention_count',count(*) FILTER(WHERE completed_at IS NULL AND state IN('blocked','uncertain')),
+ 'unknown_count',count(*) FILTER(WHERE completed_at IS NULL AND (reason IN('provider_link_missing','cancellation_outcome_unknown','proof_unavailable'))),
+ 'processing_count',count(*) FILTER(WHERE completed_at IS NULL AND reason='processing'),
+ 'oldest_due_at',min(due_at) FILTER(WHERE completed_at IS NULL)) FROM dvnt_settlement.replacement_cleanup;
+$$;
+
+-- Observation remains live even with cancellation gates off. An abandoned
+-- reservation is an operator obligation, not a signal to retry payment.
+CREATE FUNCTION public.settlement_replacement_cleanup_review_queue(p_limit int DEFAULT 100) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+ SELECT coalesce(jsonb_agg(to_jsonb(q)),'[]'::jsonb) FROM (
+  SELECT order_id,coalesce(reason,'cleanup_overdue') AS reason,due_at,state
+  FROM dvnt_settlement.replacement_cleanup WHERE completed_at IS NULL
+   AND (state IN('blocked','uncertain') OR due_at<now()-interval '30 minutes')
+  ORDER BY due_at,order_id LIMIT greatest(1,least(coalesce(p_limit,100),100))
+ ) q;
+$$;
+ALTER FUNCTION public.settlement_health() RENAME TO settlement_health_before_replacement_cleanup;
+REVOKE ALL ON FUNCTION public.settlement_health_before_replacement_cleanup() FROM PUBLIC,anon,authenticated,service_role;
+CREATE FUNCTION public.settlement_health() RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
+DECLARE health jsonb; cleanup jsonb; needs_review bigint;
+BEGIN
+ health:=public.settlement_health_before_replacement_cleanup();
+ cleanup:=public.settlement_replacement_cleanup_health();
+ SELECT count(*) INTO needs_review FROM dvnt_settlement.replacement_cleanup WHERE completed_at IS NULL
+  AND (state IN('blocked','uncertain') OR due_at<now()-interval '30 minutes');
+ RETURN health || jsonb_build_object('replacement_inventory',cleanup,
+  'manual_review_count',(health->>'manual_review_count')::bigint+needs_review,
+  'worker_expected',(health->>'worker_expected')::boolean OR EXISTS(SELECT 1 FROM dvnt_settlement.controls
+    WHERE singleton AND checkout_replacement_enabled AND replacement_cleanup_enabled));
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_health() FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.settlement_health() TO service_role;
+
+DO $$ DECLARE f record;BEGIN
+ FOR f IN SELECT p.oid::regprocedure signature,n.nspname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+ WHERE (n.nspname='dvnt_settlement' AND p.proname IN('seed_replacement_cleanup','freeze_replacement_cleanup','lock_replacement_cleanup'))
+ OR (n.nspname='public' AND (p.proname LIKE 'settlement_replacement_cleanup_%' OR p.proname='claim_settlement_checkout')) LOOP
+  EXECUTE 'REVOKE ALL ON FUNCTION '||f.signature||' FROM PUBLIC,anon,authenticated,service_role';
+  IF f.nspname='public' THEN EXECUTE 'GRANT EXECUTE ON FUNCTION '||f.signature||' TO service_role';END IF;
+ END LOOP;
+END $$;
+
+
+-- SOURCE: docs/payments/drafts/settlement-fulfillment.sql
+-- DRAFT follow-up. Assemble after runtime/funding and any checkout-replacement
+-- wrappers, with the real paid_ticket_issuance_atomic and complete_paid_cart_atomic
+-- source migrations already installed. No backfill, policy enablement or money
+-- movement. Historical paid flags and email outcomes are NEVER issuance proof.
+
+CREATE TABLE dvnt_settlement.fulfillments (
+ order_id uuid PRIMARY KEY REFERENCES dvnt_settlement.checkouts(order_id),
+ snapshot jsonb NOT NULL, payment_intent_id text NOT NULL UNIQUE,
+ checkout_session_id text, gross_cents bigint NOT NULL CHECK(gross_cents>0),
+ issuer text NOT NULL CHECK(issuer IN ('paid_ticket_issuance_atomic','complete_paid_cart_atomic')),
+ entitlements jsonb NOT NULL, recorded_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+ALTER TABLE dvnt_settlement.fulfillments ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON dvnt_settlement.fulfillments FROM PUBLIC,anon,authenticated,service_role;
+CREATE TRIGGER immutable_fulfillment BEFORE UPDATE OR DELETE ON dvnt_settlement.fulfillments
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.reject_allocation_change();
+
+-- Final hosted tax is unknown at checkout preparation. Pin a current captured
+-- Session/PI/Charge tuple before the canonical issuer compares its paid amount.
+-- This is NOT fulfillment or paid-status evidence and does not enroll funds.
+CREATE TABLE dvnt_settlement.hosted_captures (
+ order_id uuid PRIMARY KEY REFERENCES dvnt_settlement.checkouts(order_id),
+ checkout_session_id text NOT NULL UNIQUE, payment_intent_id text NOT NULL UNIQUE,
+ charge_id text NOT NULL UNIQUE, currency text NOT NULL,
+ pretax_cents bigint NOT NULL, tax_cents bigint NOT NULL CHECK(tax_cents>=0),
+ gross_cents bigint NOT NULL CHECK(gross_cents=pretax_cents+tax_cents AND gross_cents>0),
+ recorded_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+ALTER TABLE dvnt_settlement.hosted_captures ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON dvnt_settlement.hosted_captures FROM PUBLIC,anon,authenticated,service_role;
+CREATE TRIGGER immutable_hosted_capture BEFORE UPDATE OR DELETE ON dvnt_settlement.hosted_captures
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.reject_allocation_change();
+CREATE FUNCTION public.prepare_settlement_hosted_issuance(p_order_id uuid,p_session jsonb,p_intent jsonb,p_charge jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE; c dvnt_settlement.checkouts%ROWTYPE;
+ prior dvnt_settlement.hosted_captures%ROWTYPE; pretax bigint; tax bigint; gross bigint;
+BEGIN
+ -- This transaction ends BEFORE issuance starts. Never acquire tier, cart or
+ -- hold locks from here, and never invoke an issuer from this order lock.
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id FOR UPDATE;
+ SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=p_order_id;
+ pretax:=(c.snapshot->'order'->>'total_cents')::bigint;
+ tax:=(p_session->'total_details'->>'amount_tax')::bigint;
+ gross:=(p_session->>'amount_total')::bigint;
+ IF o.charge_model IS DISTINCT FROM 'separate_charges_and_transfers' OR o.type IS DISTINCT FROM 'event_ticket'
+ OR c.snapshot->>'rail' IS NULL OR c.snapshot->>'rail' NOT IN ('ticket-checkout','guest-checkout') OR o.cart_id IS NOT NULL
+ OR c.snapshot->'selection'->>'ticket_type_id' IS NULL
+ OR c.attempted_at IS NULL OR o.status IS NULL OR o.status NOT IN ('created','payment_pending','payment_failed','paid')
+ OR o.refunded_at IS NOT NULL OR c.last_error LIKE 'hold:%'
+ OR p_session->>'object' IS DISTINCT FROM 'checkout.session' OR p_session->>'mode' IS DISTINCT FROM 'payment'
+ OR p_session->>'id' IS NULL OR p_session->>'id' !~ '^cs_[A-Za-z0-9_]+$'
+ OR p_session->>'id' IS DISTINCT FROM o.stripe_checkout_session_id
+ OR p_session->>'status' IS DISTINCT FROM 'complete' OR p_session->>'payment_status' IS DISTINCT FROM 'paid'
+ OR p_session->>'currency' IS DISTINCT FROM o.currency OR o.currency IS DISTINCT FROM c.snapshot->'order'->>'currency'
+ OR (p_session->>'amount_subtotal')::bigint IS DISTINCT FROM pretax OR pretax IS NULL OR pretax<=0
+ OR tax IS NULL OR tax<0 OR gross IS NULL OR gross<>pretax+tax
+ OR (p_session->'total_details'->>'amount_discount')::bigint IS DISTINCT FROM 0::bigint
+ OR (p_session->'total_details'->>'amount_shipping')::bigint IS DISTINCT FROM 0::bigint
+ OR p_session->'metadata'->>'settlement_order_id' IS DISTINCT FROM o.id::text
+ OR p_session->'metadata'->>'charge_model' IS DISTINCT FROM o.charge_model
+ OR p_session->'metadata'->>'type' IS DISTINCT FROM 'event_ticket'
+ OR (p_session->'metadata'->>'event_id')::int IS DISTINCT FROM o.event_id
+ OR (p_session->'metadata'->>'quantity')::int IS DISTINCT FROM o.quantity
+ OR (p_session->'metadata'->>'ticket_type_id')::uuid IS DISTINCT FROM (c.snapshot->'selection'->>'ticket_type_id')::uuid
+ OR nullif(p_session->'metadata'->>'user_id','') IS DISTINCT FROM o.user_id
+ OR (o.user_id IS NULL AND lower(btrim(p_session->'metadata'->>'guest_email')) IS DISTINCT FROM lower(btrim(o.guest_email)))
+ OR p_intent->>'object' IS DISTINCT FROM 'payment_intent' OR p_intent->>'id' IS NULL OR p_intent->>'id' !~ '^pi_[A-Za-z0-9_]+$'
+ OR p_intent->>'id' IS DISTINCT FROM p_session->>'payment_intent'
+ OR (o.stripe_payment_intent_id IS NOT NULL AND o.stripe_payment_intent_id IS DISTINCT FROM p_intent->>'id')
+ OR p_intent->'metadata'->>'settlement_order_id' IS DISTINCT FROM o.id::text
+ OR p_intent->'metadata'->>'charge_model' IS DISTINCT FROM o.charge_model
+ OR p_intent->>'status' IS DISTINCT FROM 'succeeded' OR p_intent->>'currency' IS DISTINCT FROM o.currency
+ OR (p_intent->>'amount')::bigint IS DISTINCT FROM gross OR (p_intent->>'amount_received')::bigint IS DISTINCT FROM gross
+ OR coalesce(p_intent->'transfer_data','null'::jsonb)<>'null'::jsonb
+ OR coalesce(p_intent->'application_fee_amount','null'::jsonb)<>'null'::jsonb
+ OR coalesce(p_intent->'on_behalf_of','null'::jsonb)<>'null'::jsonb
+ OR p_charge->>'object' IS DISTINCT FROM 'charge' OR p_charge->>'id' IS NULL OR p_charge->>'id' !~ '^ch_[A-Za-z0-9_]+$'
+ OR p_charge->>'id' IS DISTINCT FROM p_intent->>'latest_charge' OR p_charge->>'payment_intent' IS DISTINCT FROM p_intent->>'id'
+ OR p_charge->>'currency' IS DISTINCT FROM o.currency OR p_charge->>'status' IS DISTINCT FROM 'succeeded'
+ OR p_charge->'paid' IS DISTINCT FROM 'true'::jsonb OR p_charge->'captured' IS DISTINCT FROM 'true'::jsonb
+ OR (p_charge->>'amount')::bigint IS DISTINCT FROM gross OR (p_charge->>'amount_captured')::bigint IS DISTINCT FROM gross
+ OR p_charge->'refunded' IS DISTINCT FROM 'false'::jsonb OR (p_charge->>'amount_refunded')::bigint IS DISTINCT FROM 0::bigint
+ OR p_charge->'disputed' IS DISTINCT FROM 'false'::jsonb
+ OR coalesce(p_charge->'transfer','null'::jsonb)<>'null'::jsonb
+ OR coalesce(p_charge->'transfer_data','null'::jsonb)<>'null'::jsonb
+ OR coalesce(p_charge->'destination','null'::jsonb)<>'null'::jsonb
+ OR coalesce(p_charge->'application_fee','null'::jsonb)<>'null'::jsonb
+ OR coalesce(p_charge->'application_fee_amount','null'::jsonb)<>'null'::jsonb
+ OR coalesce(p_charge->'on_behalf_of','null'::jsonb)<>'null'::jsonb
+ OR EXISTS(SELECT 1 FROM public.orders other WHERE other.id<>o.id AND
+  (other.stripe_payment_intent_id=p_intent->>'id' OR other.stripe_checkout_session_id=p_session->>'id'))
+ THEN RAISE EXCEPTION 'hosted capture identity/economics not eligible'; END IF;
+ SELECT * INTO prior FROM dvnt_settlement.hosted_captures WHERE order_id=o.id;
+ IF FOUND THEN
+  IF ROW(prior.checkout_session_id,prior.payment_intent_id,prior.charge_id,prior.currency,prior.pretax_cents,prior.tax_cents,prior.gross_cents)
+   IS DISTINCT FROM ROW(p_session->>'id',p_intent->>'id',p_charge->>'id',o.currency,pretax,tax,gross)
+   THEN RAISE EXCEPTION 'immutable hosted capture mismatch'; END IF;
+ ELSE
+  IF EXISTS(SELECT 1 FROM dvnt_settlement.fulfillments f WHERE f.order_id=o.id AND
+   (f.payment_intent_id IS DISTINCT FROM p_intent->>'id' OR f.checkout_session_id IS DISTINCT FROM p_session->>'id' OR f.gross_cents IS DISTINCT FROM gross))
+   THEN RAISE EXCEPTION 'immutable fulfillment capture mismatch'; END IF;
+  INSERT INTO dvnt_settlement.hosted_captures(order_id,checkout_session_id,payment_intent_id,charge_id,currency,pretax_cents,tax_cents,gross_cents)
+   VALUES(o.id,p_session->>'id',p_intent->>'id',p_charge->>'id',o.currency,pretax,tax,gross);
+ END IF;
+ -- Do not change status, paid_at, source_verified_at or frozen pre-tax fees.
+ UPDATE public.orders SET stripe_payment_intent_id=p_intent->>'id',total_cents=gross,tax_cents=tax,updated_at=now() WHERE id=o.id;
+ RETURN jsonb_build_object('ok',true,'order_id',o.id,'amount_cents',gross);
+END $$;
+REVOKE ALL ON FUNCTION public.prepare_settlement_hosted_issuance(uuid,jsonb,jsonb,jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.prepare_settlement_hosted_issuance(uuid,jsonb,jsonb,jsonb) TO service_role;
+
+-- Private constructor, not an RPC accepting caller-supplied "fulfilled" proof.
+-- Called ONLY after the actual atomic issuer's nonterminal success, in that
+-- same transaction with its inventory/order locks still held. The additional
+-- checks bind legacy duplicate-success validation to immutable paid selection.
+CREATE FUNCTION dvnt_settlement.record_fulfillment(p_order uuid,p_issuer text) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.orders%ROWTYPE; c dvnt_settlement.checkouts%ROWTYPE;
+ prior dvnt_settlement.fulfillments%ROWTYPE; expected jsonb; actual jsonb; manifest jsonb;
+ tickets jsonb; addons jsonb; total_units bigint;
+BEGIN
+ SELECT * INTO STRICT o FROM public.orders WHERE id=p_order;
+ SELECT * INTO c FROM dvnt_settlement.checkouts WHERE order_id=p_order;
+ IF NOT FOUND THEN
+  IF o.charge_model='separate_charges_and_transfers' THEN RAISE EXCEPTION 'fulfillment_required: checkout missing'; END IF;
+  RETURN;
+ END IF;
+ IF o.charge_model IS DISTINCT FROM 'separate_charges_and_transfers'
+ OR o.type IS DISTINCT FROM 'event_ticket' OR o.status IS NULL
+ OR o.status NOT IN ('created','payment_pending','payment_failed','paid') OR o.refunded_at IS NOT NULL
+ OR o.stripe_payment_intent_id IS NULL
+ OR o.event_id IS DISTINCT FROM (c.snapshot->'order'->>'event_id')::int
+ OR o.quantity IS DISTINCT FROM (c.snapshot->'order'->>'quantity')::int
+ OR o.currency IS DISTINCT FROM c.snapshot->'order'->>'currency'
+ OR o.user_id IS DISTINCT FROM c.snapshot->'order'->>'user_id'
+ OR lower(o.guest_email) IS DISTINCT FROM lower(c.snapshot->'order'->>'guest_email')
+ OR o.total_cents::bigint IS DISTINCT FROM (c.snapshot->'order'->>'total_cents')::bigint+coalesce(o.tax_cents,0)
+ THEN RAISE EXCEPTION 'fulfillment_required: order scope mismatch'; END IF;
+ -- A durable receipt describes the issuance event, not current ticket ownership.
+ -- Transfers/scans/redemption cannot erase it. Refund/dispute/manual holds are
+ -- checked independently by source verification and every new reservation.
+ SELECT * INTO prior FROM dvnt_settlement.fulfillments WHERE order_id=p_order;
+ IF FOUND THEN
+  IF prior.snapshot IS DISTINCT FROM c.snapshot OR prior.payment_intent_id IS DISTINCT FROM o.stripe_payment_intent_id
+   OR prior.checkout_session_id IS DISTINCT FROM o.stripe_checkout_session_id OR prior.gross_cents IS DISTINCT FROM o.total_cents::bigint
+   OR prior.issuer IS DISTINCT FROM p_issuer THEN RAISE EXCEPTION 'fulfillment_required: immutable receipt mismatch'; END IF;
+  RETURN;
+ END IF;
+ IF p_issuer='paid_ticket_issuance_atomic' THEN
+  IF c.snapshot->>'rail' NOT IN ('create-payment-intent','ticket-checkout','guest-checkout')
+   OR c.snapshot->>'rail' IS NULL OR o.cart_id IS NOT NULL
+   OR c.snapshot->'selection'->>'ticket_type_id' IS NULL
+   OR ((c.snapshot->>'rail' IN ('ticket-checkout','guest-checkout')) IS DISTINCT FROM (o.stripe_checkout_session_id IS NOT NULL))
+   THEN RAISE EXCEPTION 'fulfillment_required: ticket checkout scope mismatch'; END IF;
+  SELECT count(*) INTO total_units FROM public.tickets t WHERE t.order_id=o.id
+   OR t.stripe_payment_intent_id=o.stripe_payment_intent_id
+   OR (o.stripe_checkout_session_id IS NOT NULL AND t.stripe_checkout_session_id=o.stripe_checkout_session_id);
+  IF total_units IS DISTINCT FROM o.quantity::bigint OR total_units<=0 OR EXISTS (
+   SELECT 1 FROM public.tickets t WHERE (t.order_id=o.id OR t.stripe_payment_intent_id=o.stripe_payment_intent_id
+    OR (o.stripe_checkout_session_id IS NOT NULL AND t.stripe_checkout_session_id=o.stripe_checkout_session_id)) AND (
+    t.order_id IS DISTINCT FROM o.id OR t.stripe_payment_intent_id IS DISTINCT FROM o.stripe_payment_intent_id
+    OR t.stripe_checkout_session_id IS DISTINCT FROM o.stripe_checkout_session_id
+    OR t.ticket_type_id IS DISTINCT FROM (c.snapshot->'selection'->>'ticket_type_id')::uuid
+    OR t.event_id IS DISTINCT FROM o.event_id OR t.user_id IS DISTINCT FROM o.user_id
+    OR (o.user_id IS NULL AND lower(btrim(t.guest_email)) IS DISTINCT FROM lower(btrim(o.guest_email)))
+    OR t.cart_id IS NOT NULL OR t.cart_line_item_id IS NOT NULL
+    OR t.status IS NULL OR t.status NOT IN ('active','scanned','transfer_pending')
+    OR nullif(btrim(t.qr_token),'') IS NULL OR nullif(btrim(t.qr_payload),'') IS NULL
+    OR t.order_count IS DISTINCT FROM o.quantity OR t.order_index IS NULL OR t.order_index<1 OR t.order_index>o.quantity
+    OR t.purchase_amount_cents IS NULL OR t.purchase_amount_cents<0))
+   OR (SELECT count(DISTINCT order_index) FROM public.tickets WHERE order_id=o.id)<>o.quantity
+   OR (SELECT sum(purchase_amount_cents::bigint) FROM public.tickets WHERE order_id=o.id) IS DISTINCT FROM o.total_cents::bigint
+   OR EXISTS(SELECT 1 FROM public.order_addons WHERE order_id=o.id)
+   THEN RAISE EXCEPTION 'fulfillment_required: exact ticket entitlement mismatch'; END IF;
+ ELSIF p_issuer='complete_paid_cart_atomic' THEN
+  IF c.snapshot->>'rail' IS DISTINCT FROM 'cart-checkout' OR o.cart_id IS NULL
+   OR o.cart_id IS DISTINCT FROM (c.snapshot->'order'->>'cart_id')::uuid
+   OR jsonb_typeof(c.snapshot->'selection'->'lines') IS DISTINCT FROM 'array'
+   OR NOT EXISTS(SELECT 1 FROM public.carts WHERE id=o.cart_id AND status='completed'
+    AND user_id=o.user_id AND event_id=o.event_id AND stripe_pi_id=o.stripe_payment_intent_id
+    AND currency=o.currency AND total_cents=o.total_cents)
+   THEN RAISE EXCEPTION 'fulfillment_required: cart checkout scope mismatch'; END IF;
+  -- PostgreSQL UUID identities accept uppercase, compact and braced spelling.
+  -- Normalize typed IDs while retaining every other frozen selection field.
+  -- Malformed UUID text raises and rolls the issuance transaction back.
+  SELECT jsonb_agg((value-'id'-'tier_id'-'addon_id'-'variant_id')||jsonb_build_object(
+   'id',(value->>'id')::uuid,'tier_id',(value->>'tier_id')::uuid,
+   'addon_id',(value->>'addon_id')::uuid,'variant_id',(value->>'variant_id')::uuid)
+   ORDER BY (value->>'id')::uuid) INTO expected FROM jsonb_array_elements(c.snapshot->'selection'->'lines');
+  SELECT jsonb_agg(jsonb_build_object('id',id,'tier_id',tier_id,'addon_id',addon_id,'variant_id',variant_id,'quantity',quantity,'unit_price_cents',unit_price_cents) ORDER BY id),sum(quantity)
+   INTO actual,total_units FROM public.cart_line_items WHERE cart_id=o.cart_id;
+  IF actual IS DISTINCT FROM expected OR total_units IS DISTINCT FROM o.quantity::bigint OR total_units<=0
+   OR EXISTS(SELECT 1 FROM public.cart_line_items l WHERE l.cart_id=o.cart_id AND (
+    l.quantity<=0 OR l.unit_price_cents IS NULL OR l.unit_price_cents<0 OR coalesce(l.refunded_amount_cents,0)>0
+    OR ((l.tier_id IS NULL)=(l.addon_id IS NULL))
+    OR (l.tier_id IS NOT NULL AND l.quantity<>(SELECT count(*) FROM public.tickets t WHERE t.cart_line_item_id=l.id))
+    OR (l.addon_id IS NOT NULL AND l.quantity<>coalesce((SELECT sum(a.quantity) FROM public.order_addons a WHERE a.cart_line_item_id=l.id),0))))
+   OR EXISTS(SELECT 1 FROM public.tickets t WHERE (t.cart_id=o.cart_id OR t.order_id=o.id OR t.stripe_payment_intent_id=o.stripe_payment_intent_id) AND (
+    t.order_id IS DISTINCT FROM o.id OR t.cart_id IS DISTINCT FROM o.cart_id
+    OR t.stripe_payment_intent_id IS DISTINCT FROM o.stripe_payment_intent_id OR t.stripe_checkout_session_id IS NOT NULL
+    OR t.event_id IS DISTINCT FROM o.event_id OR t.user_id IS DISTINCT FROM o.user_id
+    OR NOT EXISTS(SELECT 1 FROM public.ticket_types tt WHERE tt.id=t.ticket_type_id AND tt.event_id=o.event_id AND t.category=coalesce(tt.category,'admission'))
+    OR t.status IS NULL OR t.status NOT IN ('active','scanned','transfer_pending')
+    OR nullif(btrim(t.qr_token),'') IS NULL OR nullif(btrim(t.qr_payload),'') IS NULL
+    OR NOT EXISTS(SELECT 1 FROM public.cart_line_items l WHERE l.cart_id=o.cart_id AND l.id=t.cart_line_item_id
+     AND l.tier_id=t.ticket_type_id AND l.unit_price_cents=t.purchase_amount_cents)))
+   OR EXISTS(SELECT 1 FROM public.order_addons a LEFT JOIN public.ticket_addons x ON x.id=a.addon_id
+    WHERE (a.cart_id=o.cart_id OR a.order_id=o.id) AND (
+     a.order_id IS DISTINCT FROM o.id OR a.cart_id IS DISTINCT FROM o.cart_id OR a.event_id IS DISTINCT FROM o.event_id
+     OR a.user_id IS DISTINCT FROM o.user_id OR a.quantity IS NULL OR a.quantity<=0
+     OR a.status IS NULL OR a.status NOT IN ('unfulfilled','fulfilled','redeemed') OR coalesce(a.refunded_amount_cents,0)>0
+     -- Match the canonical allocator's exact admission binding, including its
+     -- required-tier preference and deterministic fallback. A foreign, null,
+     -- wrong-tier or otherwise ineligible historical link is not proof.
+     OR a.ticket_id IS DISTINCT FROM (SELECT t.id FROM public.tickets t
+      WHERE t.cart_id=o.cart_id AND t.order_id=o.id AND t.event_id=o.event_id
+       AND t.user_id IS NOT DISTINCT FROM o.user_id AND t.category='admission'
+      ORDER BY (t.ticket_type_id IS NOT DISTINCT FROM x.requires_tier_id) DESC,t.order_index,t.id LIMIT 1)
+     OR x.id IS NULL OR (x.is_redeemable AND (a.quantity<>1 OR nullif(btrim(a.qr_token),'') IS NULL OR nullif(btrim(a.qr_payload),'') IS NULL))
+     OR NOT EXISTS(SELECT 1 FROM public.cart_line_items l WHERE l.cart_id=o.cart_id AND l.id=a.cart_line_item_id
+      AND l.addon_id=a.addon_id AND l.variant_id IS NOT DISTINCT FROM a.variant_id AND l.unit_price_cents=a.unit_price_cents)))
+   THEN RAISE EXCEPTION 'fulfillment_required: exact cart entitlement mismatch'; END IF;
+ ELSE RAISE EXCEPTION 'fulfillment_required: unknown issuer'; END IF;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'event_id',event_id,'tier_id',ticket_type_id,
+  'line_id',cart_line_item_id,'amount_cents',purchase_amount_cents) ORDER BY id),'[]') INTO tickets FROM public.tickets WHERE order_id=o.id;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'event_id',event_id,'addon_id',addon_id,'variant_id',variant_id,
+  'line_id',cart_line_item_id,'ticket_id',ticket_id,'quantity',quantity,'unit_price_cents',unit_price_cents) ORDER BY id),'[]') INTO addons FROM public.order_addons WHERE order_id=o.id;
+ manifest:=jsonb_build_object('tickets',tickets,'addons',addons);
+ INSERT INTO dvnt_settlement.fulfillments(order_id,snapshot,payment_intent_id,checkout_session_id,gross_cents,issuer,entitlements)
+  VALUES(o.id,c.snapshot,o.stripe_payment_intent_id,o.stripe_checkout_session_id,o.total_cents,p_issuer,manifest);
+END $$;
+
+-- Wrappers deliberately do not lock orders before invoking their issuer:
+-- paid ticket locks payment→tier→order; paid cart locks cart→order→inventory.
+ALTER FUNCTION public.paid_ticket_issuance_atomic(uuid,uuid,text,text,bigint,jsonb) RENAME TO paid_ticket_before_settlement_fulfillment;
+ALTER FUNCTION public.paid_ticket_before_settlement_fulfillment(uuid,uuid,text,text,bigint,jsonb) SET SCHEMA dvnt_settlement;
+ALTER FUNCTION dvnt_settlement.paid_ticket_before_settlement_fulfillment(uuid,uuid,text,text,bigint,jsonb) SET search_path='';
+CREATE FUNCTION public.paid_ticket_issuance_atomic(p_order_id uuid,p_ticket_type_id uuid,p_payment_intent_id text,p_checkout_session_id text,p_amount_cents bigint,p_ticket_rows jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE result jsonb;
+BEGIN
+ result:=dvnt_settlement.paid_ticket_before_settlement_fulfillment(p_order_id,p_ticket_type_id,p_payment_intent_id,p_checkout_session_id,p_amount_cents,p_ticket_rows);
+ IF result->>'ok'='true' AND coalesce(result->>'terminal','false')='false' THEN
+  PERFORM dvnt_settlement.record_fulfillment(p_order_id,'paid_ticket_issuance_atomic'); END IF;
+ RETURN result;
+END $$;
+ALTER FUNCTION public.complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz) RENAME TO paid_cart_before_settlement_fulfillment;
+ALTER FUNCTION public.paid_cart_before_settlement_fulfillment(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz) SET SCHEMA dvnt_settlement;
+ALTER FUNCTION dvnt_settlement.paid_cart_before_settlement_fulfillment(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz) SET search_path='';
+CREATE FUNCTION public.complete_paid_cart_atomic(p_cart_id uuid,p_payment_intent_id text,p_amount_received integer,p_currency text,p_user_id text,p_event_id integer,p_ticket_rows jsonb,p_addon_rows jsonb,p_event_created_at timestamptz DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE result jsonb; order_id uuid;
+BEGIN
+ result:=dvnt_settlement.paid_cart_before_settlement_fulfillment(p_cart_id,p_payment_intent_id,p_amount_received,p_currency,p_user_id,p_event_id,p_ticket_rows,p_addon_rows,p_event_created_at);
+ IF result->>'ok'='true' AND coalesce(result->>'terminal','false')='false' THEN
+  SELECT id INTO STRICT order_id FROM public.orders WHERE cart_id=p_cart_id;
+  PERFORM dvnt_settlement.record_fulfillment(order_id,'complete_paid_cart_atomic'); END IF;
+ RETURN result;
+END $$;
+
+CREATE FUNCTION dvnt_settlement.require_fulfillment(p_order uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ -- Never enter inventory/cart locks from settlement's order→controls locks.
+ -- This receipt can only become visible with the issuer transaction's commit.
+ IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.fulfillments f
+  JOIN dvnt_settlement.checkouts c ON c.order_id=f.order_id JOIN public.orders o ON o.id=f.order_id
+  WHERE f.order_id=p_order AND f.snapshot=c.snapshot AND f.payment_intent_id=o.stripe_payment_intent_id
+   AND f.checkout_session_id IS NOT DISTINCT FROM o.stripe_checkout_session_id AND f.gross_cents=o.total_cents)
+ THEN RAISE EXCEPTION 'fulfillment_required: recover exact paid issuance before payout'; END IF;
+END $$;
+ALTER FUNCTION public.settlement_verify_source(uuid,text,text,text,bigint,bigint) RENAME TO verify_source_before_fulfillment;
+ALTER FUNCTION public.verify_source_before_fulfillment(uuid,text,text,text,bigint,bigint) SET SCHEMA dvnt_settlement;
+CREATE FUNCTION public.settlement_verify_source(p_order_id uuid,p_charge text,p_pi text,p_currency text,p_gross bigint,p_tax bigint DEFAULT 0)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ PERFORM 1 FROM public.orders WHERE id=p_order_id FOR UPDATE;
+ PERFORM dvnt_settlement.require_fulfillment(p_order_id);
+ RETURN dvnt_settlement.verify_source_before_fulfillment(p_order_id,p_charge,p_pi,p_currency,p_gross,p_tax);
+END $$;
+-- Defensive SQL boundaries cover direct/private enrollment and every route to
+-- reservation, not just one adapter. Reconciliation of already-sent transfers
+-- remains possible without manufacturing a fulfillment receipt.
+CREATE FUNCTION dvnt_settlement.fulfillment_before_enrollment() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN PERFORM dvnt_settlement.require_fulfillment(NEW.order_id); RETURN NEW; END $$;
+CREATE TRIGGER fulfillment_before_enrollment BEFORE INSERT ON dvnt_settlement.orders
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.fulfillment_before_enrollment();
+CREATE FUNCTION dvnt_settlement.fulfillment_before_reservation() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF NEW.state='reserved' AND OLD.state IS DISTINCT FROM 'reserved' THEN
+  PERFORM dvnt_settlement.require_fulfillment((SELECT order_id FROM dvnt_settlement.allocations WHERE id=NEW.allocation_id));
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER fulfillment_before_reservation BEFORE UPDATE ON dvnt_settlement.deliveries
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.fulfillment_before_reservation();
+
+-- Explicit actionable reason, preserving the payment status used by recovery.
+CREATE OR REPLACE FUNCTION public.settlement_processing_error(p_order_id uuid,p_code text,p_allocation uuid DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF p_code NOT IN ('fulfillment_required','runtime_budget_required','onboarding_required','recipient_restricted','funding_required','source_audit_limit','source_verification_stale','verification_required','hold_required','promoter_pending','platform_payout_policy_unverified') THEN RAISE EXCEPTION 'unknown processing reason'; END IF;
+ IF p_allocation IS NULL THEN
+  UPDATE dvnt_settlement.checkouts SET last_error=p_code WHERE order_id=p_order_id AND coalesce(last_error,'') NOT LIKE 'hold:%';
+ ELSE UPDATE dvnt_settlement.deliveries SET last_error=p_code WHERE allocation_id=p_allocation
+  AND EXISTS(SELECT 1 FROM dvnt_settlement.allocations a WHERE a.id=p_allocation AND a.order_id=p_order_id); END IF;
+ RETURN jsonb_build_object('ok',true);
+END $$;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA dvnt_settlement FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.paid_ticket_issuance_atomic(uuid,uuid,text,text,bigint,jsonb),
+ public.complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz),
+ public.settlement_verify_source(uuid,text,text,text,bigint,bigint),public.settlement_processing_error(uuid,text,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.paid_ticket_issuance_atomic(uuid,uuid,text,text,bigint,jsonb),
+ public.complete_paid_cart_atomic(uuid,text,integer,text,text,integer,jsonb,jsonb,timestamptz),
+ public.settlement_verify_source(uuid,text,text,text,bigint,bigint),public.settlement_processing_error(uuid,text,uuid) TO service_role;
 
 
 NOTIFY pgrst, 'reload schema';

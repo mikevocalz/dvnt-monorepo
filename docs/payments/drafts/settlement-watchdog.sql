@@ -67,8 +67,8 @@ CREATE FUNCTION public.claim_settlement_readiness_alert(p_issue_codes text[]) RE
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE codes text[]; claimed boolean;
 BEGIN
- IF p_issue_codes IS NULL OR cardinality(p_issue_codes)>12 OR EXISTS(SELECT 1 FROM unnest(p_issue_codes) code WHERE code IS NULL OR code NOT IN
- ('snapshot_unavailable','checkout_outcome_unknown','due_settlement_attention','bank_delivery_failed','platform_payout_policy_unverified','manual_recovery_review','scheduler_unverified','scheduler_missing','scheduler_duplicate','worker_never_completed','worker_stale','worker_failed'))
+ IF p_issue_codes IS NULL OR cardinality(p_issue_codes)>13 OR EXISTS(SELECT 1 FROM unnest(p_issue_codes) code WHERE code IS NULL OR code NOT IN
+ ('runtime_budget_required','snapshot_unavailable','checkout_outcome_unknown','due_settlement_attention','bank_delivery_failed','platform_payout_policy_unverified','manual_recovery_review','scheduler_unverified','scheduler_missing','scheduler_duplicate','worker_never_completed','worker_stale','worker_failed'))
  THEN RAISE EXCEPTION 'invalid settlement readiness codes'; END IF;
  SELECT coalesce(array_agg(DISTINCT code ORDER BY code),'{}'::text[]) INTO codes FROM unnest(p_issue_codes) code;
  INSERT INTO dvnt_settlement.readiness_alert_state(singleton) VALUES(true) ON CONFLICT DO NOTHING;

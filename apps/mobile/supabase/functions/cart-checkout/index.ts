@@ -457,7 +457,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
           }
         : {}),
     };
-    const settlement = await prepareSettlementCheckout(supabase, { rail: "cart-checkout", order: orderSnapshot, selection: { lines: lineItems.map((line: any) => ({ id: line.id, tier_id: line.tier_id ?? null, addon_id: line.addon_id ?? null, variant_id: line.variant_id ?? null, quantity: line.quantity })).sort((a: any, b: any) => String(a.id).localeCompare(String(b.id))) } }, cart.idempotency_key);
+    const settlement = await prepareSettlementCheckout(supabase, { rail: "cart-checkout", order: orderSnapshot, selection: { lines: lineItems.map((line: any) => ({ id: line.id, tier_id: line.tier_id ?? null, addon_id: line.addon_id ?? null, variant_id: line.variant_id ?? null, quantity: line.quantity, unit_price_cents: line.unit_price_cents })).sort((a: any, b: any) => String(a.id).localeCompare(String(b.id))) } }, cart.idempotency_key);
 
     let piBody: Record<string, string> = {
       amount: fees.customer_charge_amount.toString(),

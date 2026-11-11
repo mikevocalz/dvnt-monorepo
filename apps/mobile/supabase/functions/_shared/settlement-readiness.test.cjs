@@ -32,3 +32,5 @@ test('unknown checkout outcomes alert distinctly with healthy or paused workers 
  }
  for(const at of [undefined,'bad',12])assert.throws(()=>issues({...clean(),oldest_checkout_outcome_unknown_at:at}));
 });
+
+test('in-item runtime exhaustion alerts separately from ordinary between-item deferral',()=>{assert.deepEqual(issues({...clean(),runtime_budget_blocked:1}),['runtime_budget_required']);assert.deepEqual(issues({...clean(),last_summary:{budget_exhausted:true}}),[]);});

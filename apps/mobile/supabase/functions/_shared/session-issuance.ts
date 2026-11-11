@@ -9,6 +9,7 @@
  * unsent guest email remain independently repairable after that transaction.
  */
 
+import { prepareSettlementHostedIssuance } from "./settlement-hosted-issuance.ts";
 import { createSignedQrPayload } from "./hmac-qr.ts";
 import { issuePaidTicketsAtomically, paidTicketAmount } from "./paid-ticket-issuance.ts";
 import { maybeFireCapacityAlerts } from "./capacity-alerts.ts";
@@ -109,6 +110,26 @@ export async function issueTicketsForCheckoutSession(
   opts: { eventCreatedAt: string; logPrefix: string },
 ): Promise<SessionIssuanceResult> {
   const { eventCreatedAt, logPrefix } = opts;
+  // Resolve the order up front so tickets stamp the authoritative
+  // order_id link (pre-migration rows used only the Stripe links).
+  const { data: orderRow, error: orderError } = await supabase
+    .from("orders")
+    .select("id, ticket_email_status, guest_phone, charge_model, status")
+    .eq("stripe_checkout_session_id", session.id)
+    .maybeSingle();
+
+  if (orderError) throw orderError;
+  if (!orderRow) throw new Error("Paid checkout order is not available yet");
+
+  if (orderRow.charge_model === "separate_charges_and_transfers") {
+    if (["refunded", "partially_refunded", "disputed", "cancelled", "canceled"].includes(orderRow.status)) {
+      return { issued: 0, alreadyIssued: true, orderId: orderRow.id, terminal: true };
+    }
+    // This RPC only freezes verified captured tax/total. It never marks paid,
+    // issues entitlements, enrolls funds or takes an inventory lock.
+    session = await prepareSettlementHostedIssuance(supabase, orderRow.id, session.id);
+  }
+
   const metadata = session.metadata || {};
 
   // ── Issue tickets ────────────────────────────────
@@ -132,17 +153,6 @@ export async function issueTicketsForCheckoutSession(
   } catch {
     attendeeNames = [];
   }
-
-  // Resolve the order up front so tickets stamp the authoritative
-  // order_id link (pre-migration rows used only the Stripe links).
-  const { data: orderRow, error: orderError } = await supabase
-    .from("orders")
-    .select("id, ticket_email_status, guest_phone")
-    .eq("stripe_checkout_session_id", session.id)
-    .maybeSingle();
-
-  if (orderError) throw orderError;
-  if (!orderRow) throw new Error("Paid checkout order is not available yet");
 
   const ticketRows = [];
   for (let i = 0; i < quantity; i++) {

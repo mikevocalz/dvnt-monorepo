@@ -7,6 +7,7 @@ not exactly-once payment execution across an out-of-band provider.
 import argparse
 import importlib.util
 import inspect
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -76,7 +77,7 @@ def duplicate_receipt_idempotency():
         db.quarantine()
         sql = db.record(ledger, key=str(uuid.uuid4()))
         first = db.holding(sql)
-        assert '"replayed": true' in db.sql(sql)
+        assert json.loads(db.competing(first, sql))["replayed"] is True
         db.finish(first)
         assert db.sql("SELECT count(*) FROM dvnt_settlement.external_promoter_payments") == "1"
 
@@ -86,7 +87,7 @@ def different_requests_same_obligation():
         _, ledger = db.source("different")
         db.quarantine()
         first = db.holding(db.record(ledger))
-        error = db.sql(db.record(ledger, transaction="fixture-second", digest="b" * 64), ok=False)
+        error = db.competing(first, db.record(ledger, transaction="fixture-second", digest="b" * 64), ok=False)
         db.finish(first)
         assert "eligibility mismatch" in error, error
         assert db.sql("SELECT count(*) FROM dvnt_settlement.external_promoter_rows") == "1"
@@ -98,7 +99,7 @@ def reused_receipt_race():
         _, b = db.source("reuseb")
         db.quarantine()
         first = db.holding(db.record(a))
-        error = db.sql(db.record(b), ok=False)
+        error = db.competing(first, db.record(b), ok=False)
         db.finish(first)
         assert "unique constraint" in error, error
         assert db.sql("SELECT count(*) FROM promoter_ledger_entries WHERE paid_out_at IS NULL") == "1"
@@ -110,7 +111,7 @@ def external_wins_stripe_reservation():
         db.quarantine()
         reserve = db.promoter_reserve(order)
         first = db.holding(db.record(ledger))
-        error = db.sql(reserve, ok=False)
+        error = db.competing(first, reserve, ok=False)
         db.finish(first)
         # Completion invalidates a stale funding snapshot before any dispatch.
         assert "externally" in error or "insufficient unreserved funds" in error or "funding audit missing or stale" in error, error
@@ -122,7 +123,7 @@ def stripe_reservation_wins_external():
         order, ledger = db.source("stripefirst", enrolled=True)
         db.quarantine()
         first = db.holding(db.promoter_reserve(order))
-        error = db.sql(db.record(ledger), ok=False)
+        error = db.competing(first, db.record(ledger), ok=False)
         db.finish(first)
         assert "eligibility mismatch" in error, error
         assert db.sql("SELECT count(*) FROM dvnt_settlement.external_promoter_payments") == "0"
@@ -133,7 +134,7 @@ def external_wins_legacy_claim_after_hold_clear():
         _, ledger = db.source("legacyafter")
         db.quarantine()
         first = db.holding(db.record(ledger))
-        error = db.sql("BEGIN; UPDATE events SET payout_status='pending'; " +
+        error = db.competing(first, "BEGIN; UPDATE events SET payout_status='pending'; " +
                        base.call("settlement_claim_legacy_event", p_event_id=1) + " COMMIT;", ok=False)
         db.finish(first)
         assert "excluded" in error, error
@@ -145,7 +146,7 @@ def legacy_claim_wins_external():
         _, ledger = db.source("legacyfirst")
         db.sql("UPDATE events SET payout_release_at=NULL;")
         first = db.holding(base.call("settlement_claim_legacy_event", p_event_id=1))
-        error = db.sql(db.record(ledger), ok=False)
+        error = db.competing(first, db.record(ledger), ok=False)
         db.finish(first)
         assert "execution requires reconciliation" in error, error
         assert db.sql("SELECT count(*) FROM dvnt_settlement.external_promoter_payments") == "0"
@@ -158,9 +159,9 @@ def bank_proof_and_refund_lock_order():
         # Expose the delivery lock BEFORE the bank-only update. The competing
         # refund takes source first and waits on this delivery. Bank bookkeeping
         # must not then ask for source, or both sessions deadlock.
-        lock_then_proof = "SELECT 1 FROM dvnt_settlement.deliveries WHERE allocation_id=" + base.literal(allocation) + " FOR UPDATE; SELECT 'LOCKS_HELD'; SELECT pg_sleep(1); " + paid_sql
-        first = db.holding(lock_then_proof)
-        db.rpc("settlement_hold", p_order_id=order, p_event_id="fixture-bank-refund", p_reason="refund")
+        lock_then_proof = "SELECT 1 FROM dvnt_settlement.deliveries WHERE allocation_id=" + base.literal(allocation) + " FOR UPDATE;"
+        first = db.holding(lock_then_proof, before_commit=paid_sql)
+        db.competing(first, base.call("settlement_hold", p_order_id=order, p_event_id="fixture-bank-refund", p_reason="refund"))
         db.finish(first)
         assert db.sql("SELECT state FROM dvnt_settlement.deliveries WHERE allocation_id=" + base.literal(allocation)) == "recovery_required"
 
@@ -170,9 +171,9 @@ def bank_failure_and_refund_lock_order():
         allocation, paid_sql, failed_sql = base.bank_setup(db, "externalbankfailure")
         db.sql(paid_sql)
         order = db.sql("SELECT order_id FROM dvnt_settlement.allocations WHERE id=" + base.literal(allocation))
-        lock_then_failure = "SELECT 1 FROM dvnt_settlement.deliveries WHERE allocation_id=" + base.literal(allocation) + " FOR UPDATE; SELECT 'LOCKS_HELD'; SELECT pg_sleep(1); " + failed_sql
-        first = db.holding(lock_then_failure)
-        db.rpc("settlement_hold", p_order_id=order, p_event_id="fixture-bank-failure-refund", p_reason="refund")
+        lock_then_failure = "SELECT 1 FROM dvnt_settlement.deliveries WHERE allocation_id=" + base.literal(allocation) + " FOR UPDATE;"
+        first = db.holding(lock_then_failure, before_commit=failed_sql)
+        db.competing(first, base.call("settlement_hold", p_order_id=order, p_event_id="fixture-bank-failure-refund", p_reason="refund"))
         db.finish(first)
         assert db.sql("SELECT bank_payout_state FROM dvnt_settlement.deliveries WHERE allocation_id=" + base.literal(allocation)) == "failed"
 

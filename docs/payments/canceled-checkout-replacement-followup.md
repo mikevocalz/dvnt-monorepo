@@ -1,6 +1,6 @@
 # Follow-up contract: safely replace a canceled checkout
 
-The integrated draft retires an exactly proved zero-money canceled attempt from automatic polling. It deliberately does not authorize a replacement charge. End-to-end canceled-checkout retry remains unfinished.
+The original integrated draft retired an exactly proved zero-money canceled attempt from automatic polling without authorizing a replacement charge. The default-off implementation now follows this contract for a bounded catalog scope; see canceled-checkout-replacement-implementation.md for actual behavior, tests, exclusions and unresolved release gates. This contract remains the review standard, not a production-completion claim.
 
 ## Current blocks
 

@@ -10,6 +10,7 @@ on:
       - 'packages/app/components/payout-setup-reminder.native.tsx'
       - 'apps/web/src/components/payout-setup-reminder*'
       - '.github/workflows/payout-setup-reminder.yml'
+      - 'scripts/ci-install-payout-reminder*'
 permissions:
   contents: read
 jobs:
@@ -24,7 +25,8 @@ jobs:
         with:
           node-version: '22'
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: node --test scripts/ci-install-payout-reminder.test.cjs
+      - run: node scripts/ci-install-payout-reminder.cjs
       - run: node --test apps/mobile/supabase/functions/_shared/payout-setup-reminder.test.cjs
       - name: Typecheck web integration and native Expo screen
         run: |

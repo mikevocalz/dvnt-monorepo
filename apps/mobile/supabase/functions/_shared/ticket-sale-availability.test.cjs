@@ -70,6 +70,7 @@ function checkout(rail, patch = {}, options = {}) {
         assert.equal(args.p_event_id, 42);
         return { data: { ok: true, charge_model: "destination_charge" }, error: null };
       }
+      if (name === "lookup_settlement_checkout") return { data: { exists: false }, error: null };
       if (name === "free_ticket_checkout_atomic") {
         if (options.freeError) return { data: null, error: options.freeError };
         if (options.freeResult) return { data: options.freeResult, error: null };
