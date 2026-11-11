@@ -304,6 +304,7 @@ test('native stale-save failure never restores identities after a newer realtime
   const { sanitizeEventAttendance } = load('packages/app/lib/events/event-attendee-visibility.ts');
   const context = {
     id: 'event', updateData: { showAttendees: false },
+    expectedAuthId: 'organizer', expectedSessionEpoch: 1,
     updateEventMutation: { mutateAsync: async () => {
       // Shared mutation performs the sanitized optimistic update, not the screen.
       current = sanitizeEventAttendance({ ...current, showAttendees: false });
