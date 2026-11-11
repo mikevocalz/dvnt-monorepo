@@ -34,3 +34,36 @@ Read the event's orders, actual Stripe PaymentIntents/charges/destination transf
 `node --test apps/mobile/supabase/functions/payouts-release/safety.test.cjs`
 
 Tests use a mocked database/Stripe transport, including concurrent claims and uncertain responses. They never call Stripe or the deployed function. PostgreSQL concurrency, actual Stripe behavior and production deployment are not verified by these tests.
+
+## Platform-owner dispute policy (not a payment enablement)
+
+`DVNT_PLATFORM_OWNER_AUTH_ID` is a server-owned edge-function setting containing
+one exact, verified canonical `users.auth_id`. It defaults to empty, which keeps
+normal whole-event dispute holds. Provisioning or changing it is a separate
+reviewed operation; this change contains no live identity or configuration.
+Never derive it from a username, display name, admin role, request field, or
+user-editable metadata. The policy reads the event host from the database.
+
+For a configured owner-hosted event, `charge.dispute.created` first persists the
+order's disputed status, then skips only the new blanket event hold. It does not
+clear existing holds or remove the order's dispute/timeline. Identity read
+failures retain the normal hold. No money moves through this policy helper.
+
+**This is not yet a working owner payout path.** The release job still refuses
+an owner event with disputed orders, reporting
+`owner_dispute_requires_order_settlement`. This is a settlement implementation
+prerequisite, not the normal owner-wide dispute-risk rule. The current SQL
+summary includes ticket/add-on revenue without excluding disputed orders, so
+bypassing the release gate would transfer disputed money. It must not happen.
+The separate draft order-allocation ledger has no production transfer adapter.
+Unrelated promoter allocations can only be released after that adapter safely
+isolates their funding and excludes disputed/refunded allocations. This patch
+intentionally does not calculate an unsafe prorated event amount.
+
+Before enabling any actual owner settlement, reconcile legacy NULL/destination
+charge models, prior transfers and uncertain intents; verify per-order refund
+and dispute debits, fees, reserves, available platform funds (including negative
+balances), and Stripe account capabilities. Existing durable claim/intent and
+prior settlement guards remain intact. Do not requeue an existing generic hold
+or configure this exception as a workaround for those checks. Deployment,
+configuration, migration, reconciliation and fund movement are outside this PR.
