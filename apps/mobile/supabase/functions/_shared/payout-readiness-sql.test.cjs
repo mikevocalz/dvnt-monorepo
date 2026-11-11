@@ -99,6 +99,7 @@ test('only service role can query readiness and claim alerts, and no clients can
     assert.equal((await db.query(`SELECT has_function_privilege('${role}','public.claim_payout_readiness_alert(text[])','EXECUTE') AS allowed`)).rows[0].allowed, false);
     assert.equal((await db.query(`SELECT has_table_privilege('${role}','public.payout_readiness_alert_state','SELECT') AS allowed`)).rows[0].allowed, false);
   }
+  assert.equal((await db.query("SELECT has_table_privilege('service_role','public.payout_readiness_alert_state','INSERT') AS allowed")).rows[0].allowed, false);
   await db.exec('SET ROLE service_role;');
   assert.equal((await db.query('SELECT get_payout_readiness() AS value')).rows[0].value.missingReleaseDates, 0);
   assert.equal((await db.query("SELECT claim_payout_readiness_alert(ARRAY['heartbeat_missing']) AS value")).rows[0].value, true);

@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS public.payout_readiness_alert_state (
 );
 ALTER TABLE public.payout_readiness_alert_state ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.payout_readiness_alert_state FROM PUBLIC, anon, authenticated;
+-- Service operators can inspect the clamp; only the RPC writes it.
+GRANT SELECT ON TABLE public.payout_readiness_alert_state TO service_role;
 
 CREATE OR REPLACE FUNCTION public.claim_payout_readiness_alert(p_issue_codes text[])
 RETURNS boolean

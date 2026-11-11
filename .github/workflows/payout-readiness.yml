@@ -33,4 +33,6 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/payout-tests/node_modules
         run: node --test apps/mobile/supabase/functions/_shared/payout-readiness*.test.cjs apps/mobile/supabase/functions/db-health/payout-readiness.test.cjs
       - name: Edge function static checks
-        run: node scripts/verify-edge-functions.mjs
+        run: |
+          node scripts/verify-edge-functions.mjs
+          node scripts/verify-issuance-invariants.mjs
