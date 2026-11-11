@@ -26,8 +26,8 @@ SQL tests use disposable PostgreSQL with the relevant real schema/migration sour
 
 ## Approved rollout checklist
 
-1. Review and apply the source migrations `20261111120000_accepted_cohost_event_editing.sql`, `20261111121000_ticket_catalog_private_management.sql`, and `20261111140000_guard_cohost_addon_catalog.sql` through the normal migration process.
-2. Deploy `notify-event-change`, `manage-promo-code`, and `event-cancel`, then release updated web/native clients. Coordinate the private ticket-read boundary with client rollout; older direct-table buyer reads must not remain in use.
+1. Apply additive `20261111052229_ticket_catalog_safe_labels.sql` before updated clients. It creates only the authenticated id/name/category projection and reloads the schema cache, leaving legacy buyer reads unchanged. Apply the cohost write migrations `20261111120000_accepted_cohost_event_editing.sql` and `20261111140000_guard_cohost_addon_catalog.sql` before enabling editor writes.
+2. Deploy `notify-event-change`, `manage-promo-code`, and `event-cancel`, then release updated web/native clients. Apply restrictive `20261111121000_ticket_catalog_private_management.sql` only after compatible clients are available under the native upgrade/rollout plan; older direct-table buyer reads must not remain in use. Do not blindly apply all pending migrations ahead of clients. The new clients can read safe catalog/history views before the restrictive step.
 3. On staging with synthetic accounts, verify owner/admin/editor content, flyer, ticket-price, add-on and promo persistence after reload. Verify scanner, pending, removed and unrelated denials, including direct API calls and revocation during a save.
 4. Verify public buyer catalog/checkout, unlock-code secrecy, inventory/holds/refunds and historical order references. Verify native device media selection and upload interruption, not only DOM adapters.
 5. Verify owner-only financial/destructive actions and admin-grant/revoke restrictions. Monitor permission and save failures during rollout.
