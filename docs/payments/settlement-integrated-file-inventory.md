@@ -161,3 +161,18 @@ Total: 120 changed paths. The PR commit/tree and required exact-head CI are veri
 - A `docs/payments/drafts/settlement-checkout-cutover.sql`
 - A `scripts/test-settlement-checkout-cutover.cjs`
 - A `scripts/test-settlement-unsupported-checkout-rails.cjs`
+
+## Reviewed checkout confirmation and privacy
+
+- A `apps/mobile/supabase/functions/_shared/cart-fulfillment.ts`
+- A `apps/mobile/supabase/functions/get-cart-status/index.test.cjs`
+- M `apps/mobile/supabase/functions/get-cart-status/index.ts`
+- M `apps/mobile/supabase/functions/ticket-upgrade/category.test.cjs`
+- M `packages/app/features/events/checkout-success.web.tsx`
+- M `packages/app/features/routes/screens/(protected)/checkout/success.tsx`
+- M `packages/app/lib/contracts/dto.ts`
+- M `packages/app/lib/tickets/checkout-outcome.test.ts`
+- M `packages/app/lib/tickets/checkout-outcome.ts`
+- A `scripts/test-cart-status-postgrest.cjs`
+- A `scripts/test-checkout-outcome-ui.cjs`
+- A `.github/workflows/cart-fulfillment-snapshot.yml`

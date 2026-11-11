@@ -1,0 +1,49 @@
+name: Cart fulfillment snapshot
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/get-cart-status/**'
+      - 'apps/mobile/supabase/functions/_shared/cart-fulfillment.ts'
+      - 'packages/app/lib/contracts/dto.ts'
+      - 'packages/app/lib/tickets/checkout-outcome*'
+      - 'packages/app/features/events/checkout-success.web.tsx'
+      - 'packages/app/features/routes/screens/(protected)/checkout/success.tsx'
+      - 'scripts/test-checkout-outcome-ui.cjs'
+      - 'scripts/test-cart-status-postgrest.cjs'
+      - '.github/workflows/cart-fulfillment-snapshot.yml'
+permissions:
+  contents: read
+jobs:
+  snapshot-and-confirmation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated synthetic test dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/cart-snapshot-tests" --ignore-scripts --no-audit --no-fund typescript@5.9.3 esbuild@0.25.12 happy-dom@20.0.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @tanstack/react-query@5.90.16 pg@8.16.3 @embedded-postgres/linux-x64@17.6.0-beta.15
+          # Only restore the pinned package's local shared-library symlinks.
+          (cd "$RUNNER_TEMP/cart-snapshot-tests/node_modules/@embedded-postgres/linux-x64" && node scripts/hydrate-symlinks.js)
+      - name: Install pinned official PostgREST test binary
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/cart-postgrest"
+          curl --fail --location --retry 2 --output "$RUNNER_TEMP/cart-postgrest/postgrest.tar.xz" https://github.com/PostgREST/postgrest/releases/download/v14.1/postgrest-v14.1-linux-static-x86-64.tar.xz
+          echo "bdab6ab3389ca0d6c1f3b8363491674dbca71875c3f30261d92d8fecdde35277  $RUNNER_TEMP/cart-postgrest/postgrest.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/cart-postgrest/postgrest.tar.xz" -C "$RUNNER_TEMP/cart-postgrest"
+      - name: Actual handler and mounted confirmation contracts
+        env:
+          NODE_PATH: ${{ runner.temp }}/cart-snapshot-tests/node_modules
+        run: |
+          node --test --test-concurrency=1 apps/mobile/supabase/functions/get-cart-status/index.test.cjs packages/app/lib/tickets/checkout-outcome.test.ts
+          node scripts/test-checkout-outcome-ui.cjs
+      - name: Exact relationship query in disposable native PostgreSQL and PostgREST
+        env:
+          NODE_PATH: ${{ runner.temp }}/cart-snapshot-tests/node_modules
+          SYNTHETIC_POSTGREST_BIN: ${{ runner.temp }}/cart-postgrest/postgrest
+        run: node scripts/test-cart-status-postgrest.cjs

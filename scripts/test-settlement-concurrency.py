@@ -454,9 +454,18 @@ def cohort_cutover_requires_draining_prior_legacy_requests():
     # a legacy request admitted before policy commit must be drained externally.
     with Database() as db:
         db.sql("INSERT INTO events VALUES(3,'fixture-host','2020-01-01','pending','2019-12-30','published','2019-12-29')")
-        first = db.holding("INSERT INTO dvnt_settlement.release_policies VALUES(3,'end_plus_five_business_days','UTC','synthetic staged cutover')")
-        before = db.rpc("settlement_checkout_route", p_event_id=3)
-        db.finish(first)
+        # Keep the policy uncommitted until the observer has actually read it.
+        # A fixed one-second delay can expire before a slower client connects.
+        db.sql("CREATE TABLE public.fixture_cutover_barrier(observed boolean); INSERT INTO public.fixture_cutover_barrier VALUES(false)")
+        first = db.holding(
+            "INSERT INTO dvnt_settlement.release_policies VALUES(3,'end_plus_five_business_days','UTC','synthetic staged cutover');",
+            before_commit="DO $$ BEGIN WHILE NOT (SELECT observed FROM public.fixture_cutover_barrier) LOOP PERFORM pg_sleep(0.01); END LOOP; END $$;",
+        )
+        try:
+            before = db.rpc("settlement_checkout_route", p_event_id=3)
+        finally:
+            db.sql("UPDATE public.fixture_cutover_barrier SET observed=true")
+            db.finish(first)
         assert before["charge_model"] == "destination_charge"
         assert db.rpc("settlement_checkout_route", p_event_id=3)["charge_model"] == "separate_charges_and_transfers"
         db.sql("DELETE FROM dvnt_settlement.release_policies WHERE event_id=3; UPDATE dvnt_settlement.controls SET checkout_enabled=false")

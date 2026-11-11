@@ -140,6 +140,7 @@ export const CartDTO = z.object({
 export type Cart = z.infer<typeof CartDTO>;
 
 export const MixedTicketDTO = z.object({
+  usable: z.boolean().optional(),
   id: z.string().uuid(),
   event_id: z.number().int().positive(),
   ticket_type_id: z.string().uuid().nullable().optional(),
@@ -188,7 +189,16 @@ export const CartCheckoutResponseDTO = z.object({
 });
 export type CartCheckoutResponse = z.infer<typeof CartCheckoutResponseDTO>;
 
+export const CartFulfillmentDTO = z.object({
+  state: z.enum(["ready", "history", "partial", "unverified"]),
+  paymentVerified: z.boolean(), complete: z.boolean(),
+  expectedTickets: z.number().int().nonnegative(), expectedAddons: z.number().int().nonnegative(),
+  usableTickets: z.number().int().nonnegative(), usableAddons: z.number().int().nonnegative(),
+  historicalTickets: z.number().int().nonnegative(), historicalAddons: z.number().int().nonnegative(),
+  lines: z.array(z.object({lineId:z.string().uuid(),kind:z.enum(["ticket","addon"]),expected:z.number().int().positive(),observed:z.number().int().nonnegative(),usable:z.number().int().nonnegative(),historical:z.number().int().nonnegative()})),
+});
 export const CartStatusResponseDTO = z.object({
+  fulfillment: CartFulfillmentDTO.optional(),
   ok: z.literal(true),
   cart: z.object({
     id: z.string().uuid(),
@@ -233,10 +243,12 @@ export const CartStatusResponseDTO = z.object({
         addon_id: z.string().uuid(),
         variant_id: z.string().uuid().nullable().optional(),
         addon_name: z.string(),
+        usable: z.boolean().optional(),
+        cart_line_item_id: z.string().uuid().nullable().optional(),
         variant_name: z.string().nullable().optional(),
         quantity: z.number().int().positive(),
         unit_price_cents: z.number().int().nonnegative(),
-        status: z.enum(["unfulfilled", "fulfilled", "redeemed", "refunded"]),
+        status: z.string(),
         is_redeemable: z.boolean().optional(),
         qr_token: z.string().nullable().optional(),
       }),

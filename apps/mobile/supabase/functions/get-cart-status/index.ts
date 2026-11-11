@@ -1,3 +1,4 @@
+import { cartFulfillmentSnapshot } from "../_shared/cart-fulfillment.ts";
 /**
  * get-cart-status Edge Function
  *
@@ -47,92 +48,26 @@ Deno.serve(async (req: Request) => {
     const cartId = String(body.cartId || "").trim();
     if (!UUID_RE.test(cartId)) return errorResponse("Invalid cartId", 400);
 
-    const { data: cart, error: cartError } = await supabase
-      .from("carts")
-      .select(
-        "id, user_id, event_id, status, stripe_pi_id, total_cents, fee_cents, tax_cents, currency, created_at, updated_at",
-      )
-      .eq("id", cartId)
-      .maybeSingle();
-
-    if (cartError) {
-      console.error("[get-cart-status] cart lookup failed", cartError);
-      return errorResponse("Could not load cart", 500);
-    }
-    if (!cart || cart.user_id !== authId) {
-      return errorResponse("Cart not found", 404);
-    }
-
-    const { data: lineItems, error: lineItemsError } = await supabase
-      .from("cart_line_items")
-      .select(
-        "id, category, tier_id, addon_id, variant_id, quantity, unit_price_cents, refunded_amount_cents, metadata, ticket_types(name, price_cents, category), ticket_addons(name)",
-      )
-      .eq("cart_id", cartId)
-      .order("created_at", { ascending: true });
-
-    if (lineItemsError) {
-      console.error(
-        "[get-cart-status] line item lookup failed",
-        lineItemsError,
-      );
-      return errorResponse("Could not load cart line items", 500);
-    }
-
-    const { data: activeHolds, error: holdsError } = await supabase
-      .from("cart_holds")
-      .select("id, line_item_id, tier_id, addon_id, variant_id, qty, expires_at")
-      .eq("cart_id", cartId)
-      .eq("released", false)
-      .gt("expires_at", new Date().toISOString())
-      .order("expires_at", { ascending: true });
-
-    if (holdsError) {
-      console.error("[get-cart-status] hold lookup failed", holdsError);
-      return errorResponse("Could not load cart holds", 500);
-    }
-
-    const { data: tickets, error: ticketsError } = await supabase
-      .from("tickets")
-      .select(
-        "id, event_id, ticket_type_id, status, qr_token, qr_payload, purchase_amount_cents, category, cart_id, cart_line_item_id, created_at, ticket_types(name), events(title, cover_image_url, start_date, end_date, location)",
-      )
-      .eq("cart_id", cartId)
-      .eq("user_id", authId)
-      .order("created_at", { ascending: true });
-
-    if (ticketsError) {
-      console.error("[get-cart-status] ticket lookup failed", ticketsError);
-      return errorResponse("Could not load issued tickets", 500);
-    }
-
-    // Issued add-ons for this cart (order_addons rows written by
-    // cart_complete_issuance). Non-fatal: an error yields an empty list so
-    // ticket recovery still works.
-    const { data: orderAddons, error: orderAddonsError } = await supabase
-      .from("order_addons")
-      .select(
-        "id, addon_id, variant_id, quantity, unit_price_cents, status, qr_token, ticket_addons(name, is_redeemable), ticket_addon_variants(name)",
-      )
-      .eq("cart_id", cartId)
-      .order("created_at", { ascending: true });
-    if (orderAddonsError) {
-      console.error(
-        "[get-cart-status] order_addons lookup failed",
-        orderAddonsError,
-      );
-    }
-
-    const activeHoldExpiresAt = activeHolds?.[0]?.expires_at ?? null;
-    const issuedTickets = (tickets || []).map((ticket: any) => ({
-      ...ticket,
-      ticket_type_name: ticket.ticket_types?.name || "General",
-      event_title: ticket.events?.title || "",
-      event_image: ticket.events?.cover_image_url || "",
-      event_date: ticket.events?.start_date || "",
-      event_end_date: ticket.events?.end_date || null,
-      event_location: ticket.events?.location || "",
-    }));
+    // One PostgREST relationship statement: counts, ownership and financial
+    // status come from the same MVCC snapshot. Counts detect truncated embeds.
+    const { data: cart, error: cartError } = await supabase.from("carts").select(`
+      id,user_id,event_id,status,stripe_pi_id,total_cents,fee_cents,tax_cents,currency,updated_at,
+      line_count:cart_line_items!cart_id(count),ticket_count:tickets!cart_id(count),
+      addon_count:order_addons!cart_id(count),order_count:orders!cart_id(count),
+      line_items:cart_line_items!cart_id(id,cart_id,category,tier_id,addon_id,variant_id,quantity,unit_price_cents,refunded_amount_cents,metadata,ticket_types(name),ticket_addons(name)),
+      order_rows:orders!cart_id(id,cart_id,user_id,event_id,status,currency,total_cents,paid_at,stripe_payment_intent_id),
+      ticket_rows:tickets!cart_id(id,user_id,order_id,event_id,ticket_type_id,status,qr_token,qr_payload,purchase_amount_cents,category,cart_id,cart_line_item_id,ticket_types(name),events(title,cover_image_url,start_date,end_date,location)),
+      addon_rows:order_addons!cart_id(id,user_id,order_id,event_id,cart_id,cart_line_item_id,ticket_id,addon_id,variant_id,quantity,unit_price_cents,status,qr_token,qr_payload,ticket_addons(name,is_redeemable),ticket_addon_variants(name),bound_ticket:tickets!ticket_id(id,user_id,status,event_id)),
+      hold_rows:cart_holds!cart_id(id,line_item_id,tier_id,addon_id,variant_id,qty,expires_at,released)
+    `).eq("id", cartId).eq("user_id", authId).maybeSingle();
+    if (cartError) return errorResponse("Could not verify cart status", 500);
+    if (!cart || cart.user_id !== authId) return errorResponse("Cart not found", 404);
+    const snapshot = cartFulfillmentSnapshot(cart, authId);
+    const lineItems = Array.isArray(cart.line_items) ? cart.line_items : [];
+    const activeHolds = (Array.isArray(cart.hold_rows) ? cart.hold_rows : [])
+      .filter((hold: any) => hold.released === false && Date.parse(hold.expires_at) > Date.now())
+      .sort((a: any,b: any) => String(a.expires_at).localeCompare(String(b.expires_at)));
+    const activeHoldExpiresAt = activeHolds[0]?.expires_at ?? null;
 
     return jsonResponse({
       ok: true,
@@ -156,12 +91,8 @@ Deno.serve(async (req: Request) => {
         tierName:
           item.ticket_types?.name || item.ticket_addons?.name || "General",
         quantity: item.quantity,
-        // Held addon lines carry the server-priced unit_price_cents (variant
-        // override resolved by cart_create_hold); tier lines prefer the live
-        // tier price as before.
-        unitPriceCents: item.addon_id
-          ? item.unit_price_cents
-          : (item.ticket_types?.price_cents ?? item.unit_price_cents),
+        // Receipt prices are the original held snapshot, not today's catalog.
+        unitPriceCents: item.unit_price_cents,
         refundedAmountCents: item.refunded_amount_cents,
         metadata: item.metadata || {},
         addonId: item.addon_id ?? null,
@@ -172,19 +103,9 @@ Deno.serve(async (req: Request) => {
         expiresAt: activeHoldExpiresAt,
         items: activeHolds || [],
       },
-      tickets: issuedTickets,
-      addons: (orderAddons || []).map((row: any) => ({
-        id: row.id,
-        addon_id: row.addon_id,
-        variant_id: row.variant_id ?? null,
-        addon_name: row.ticket_addons?.name || "Add-on",
-        variant_name: row.ticket_addon_variants?.name ?? null,
-        quantity: row.quantity,
-        unit_price_cents: row.unit_price_cents,
-        status: row.status,
-        is_redeemable: !!row.ticket_addons?.is_redeemable,
-        qr_token: row.qr_token ?? null,
-      })),
+      tickets: snapshot.tickets,
+      addons: snapshot.addons,
+      fulfillment: snapshot.fulfillment,
       completed: cart.status === "completed",
     });
   } catch (err) {
