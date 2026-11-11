@@ -6,7 +6,7 @@
  * commission payouts.
  */
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -14,15 +14,18 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
-  Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
+import { usePromoterPayout } from "@dvnt/app/lib/hooks/use-promoter-payout";
+import { promoterEventId, promoterSettlementPresentation } from "@dvnt/app/lib/payments/promoter-payout-status";
 import { Megaphone, ArrowLeft, Wallet, AlertCircle } from "lucide-react-native";
 import { promotersApi } from "@dvnt/app/lib/api/promoters";
 import { formatCents } from "@dvnt/app/lib/stripe/fee-calculator";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+
+import * as WebBrowser from "expo-web-browser";
 
 const ACCENT = "#8A40CF";
 const ACCENT_TEXT = "#C084FC";
@@ -33,42 +36,44 @@ function bpsLabel(bps: number): string {
 
 export default function PromoterSelfScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const eventId = parseInt(id || "0", 10);
+  const eventId = promoterEventId(id);
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const { meQuery, connectQuery, setup, refreshing, refresh, viewerId, authenticated } = usePromoterPayout(eventId);
+  const current = useRef({ eventId, viewerId });
+  current.current = { eventId, viewerId };
+  const starting = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const showToast = useUIStore((s) => s.showToast);
 
-  const meQuery = useQuery({
-    queryKey: ["promoter-self", eventId],
-    queryFn: () => promotersApi.me(eventId),
-    enabled: Number.isFinite(eventId) && eventId > 0,
-    staleTime: 15_000,
-  });
-
   const connectStart = useMutation({
-    mutationFn: () => promotersApi.connectStart(eventId),
-    onSuccess: async ({ url }) => {
-      const canOpen = await Linking.canOpenURL(url);
-      if (canOpen) {
-        await Linking.openURL(url);
-      } else {
-        showToast("error", "Cannot open onboarding", "No browser available.");
+    mutationFn: async () => {
+      const owner = current.current;
+      try {
+        const { url } = await promotersApi.connectStart(eventId, "native");
+        if (!mounted.current || current.current.eventId !== owner.eventId || current.current.viewerId !== owner.viewerId) return;
+        // Returning or cancelling is not proof of successful verification.
+        await WebBrowser.openAuthSessionAsync(url, "dvnt://stripe/connect");
+        if (mounted.current && current.current.eventId === owner.eventId && current.current.viewerId === owner.viewerId) {
+          await refresh();
+        }
+      } finally {
+        starting.current = false;
       }
     },
-    onError: (err: any) => {
-      showToast("error", "Connect failed", err?.message || "Try again.");
+    onError: (err: Error) => {
+      if (mounted.current) showToast("error", "Connect failed", err?.message || "Try again.");
     },
   });
 
-  const connectStatus = useMutation({
-    mutationFn: () => promotersApi.connectStatus(eventId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["promoter-self", eventId] });
-    },
-    onError: (err: any) => {
-      showToast("error", "Status refresh failed", err?.message || "Try again.");
-    },
-  });
+  const startOnboarding = () => {
+    if (starting.current || refreshing) return;
+    starting.current = true;
+    connectStart.mutate();
+  };
 
   if (!Number.isFinite(eventId) || eventId <= 0) {
     return (
@@ -78,7 +83,7 @@ export default function PromoterSelfScreen() {
     );
   }
 
-  if (meQuery.isLoading) {
+  if (!authenticated || meQuery.isPending) {
     return (
       <SafeAreaView style={[styles.container, styles.center]}>
         <ActivityIndicator color="rgba(255,255,255,0.4)" />
@@ -91,6 +96,8 @@ export default function PromoterSelfScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <Text style={styles.dim}>Couldn&apos;t load your promoter info.</Text>
+        <Pressable disabled={meQuery.isFetching} onPress={() => void meQuery.refetch()} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Retry</Text></Pressable>
+        <Pressable onPress={() => router.back()} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Back</Text></Pressable>
       </SafeAreaView>
     );
   }
@@ -119,7 +126,7 @@ export default function PromoterSelfScreen() {
   }
 
   const p = meQuery.data.promoter!;
-  const connected = p.connect.detailsSubmitted && p.connect.payoutsEnabled;
+  const settlement = promoterSettlementPresentation(p.payout);
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -157,12 +164,23 @@ export default function PromoterSelfScreen() {
               <Text style={styles.statValue}>{p.attributedOrders}</Text>
             </View>
             <View style={styles.stat}>
-              <Text style={styles.statLabel}>Earnings</Text>
+              <Text style={styles.statLabel}>Net earnings</Text>
               <Text style={[styles.statValue, { color: "#22c55e" }]}>
                 {formatCents(p.earnedCents)}
               </Text>
             </View>
           </View>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.titleSm}>{settlement.title}</Text>
+          <Text style={styles.dimSm}>{settlement.detail}</Text>
+          {p.payout && <View style={styles.statsGrid}>
+            <View style={styles.stat}><Text style={styles.statLabel}>Awaiting settlement</Text><Text style={styles.statValue}>{formatCents(p.payout.unsettledCents)}</Text></View>
+            <View style={styles.stat}><Text style={styles.statLabel}>Settled in ledger</Text><Text style={styles.statValue}>{formatCents(p.payout.settledCents)}</Text></View>
+          </View>}
+          {p.payout?.hasRecordedTransfer && <Text style={styles.dimSm}>A Stripe transfer is recorded. Bank delivery is not confirmed.</Text>}
+          <Text style={styles.dimSm}>Bank deposit status is not available here. Stripe transfers and bank payouts are separate steps.</Text>
         </View>
 
         <View style={styles.card}>
@@ -173,46 +191,37 @@ export default function PromoterSelfScreen() {
             <View>
               <Text style={styles.titleSm}>Payout setup</Text>
               <Text style={styles.dimSm}>
-                {connected
-                  ? "Connected — payouts enabled"
-                  : p.connect.detailsSubmitted
-                    ? "Details submitted — waiting on Stripe"
-                    : "Connect your bank account to get paid"}
+                {setup.title}
               </Text>
             </View>
           </View>
 
-          {!connected && (
-            <View style={styles.notice}>
-              <AlertCircle size={16} color="rgba(255,255,255,0.7)" />
-              <Text style={styles.noticeText}>
-                Commissions are held until you complete Stripe Connect. Tap below
-                to set up your account.
-              </Text>
-            </View>
-          )}
+          <View style={styles.notice}>
+            <AlertCircle size={16} color="rgba(255,255,255,0.7)" />
+            <Text style={styles.noticeText} accessibilityRole={connectQuery.isError ? "alert" : undefined}>{setup.detail}</Text>
+          </View>
 
           <View style={styles.btnRow}>
-            {!connected && (
+            {setup.action && (
               <Pressable
-                onPress={() => connectStart.mutate()}
-                disabled={connectStart.isPending}
+                onPress={startOnboarding}
+                disabled={connectStart.isPending || refreshing}
                 style={[styles.ctaBtn, connectStart.isPending && { opacity: 0.6 }]}
               >
                 {connectStart.isPending ? (
                   <ActivityIndicator color="#fff" size="small" />
                 ) : (
-                  <Text style={styles.ctaText}>Connect bank account</Text>
+                  <Text style={styles.ctaText}>{setup.action}</Text>
                 )}
               </Pressable>
             )}
             <Pressable
-              onPress={() => connectStatus.mutate()}
-              disabled={connectStatus.isPending}
-              style={[styles.secondaryBtn, connectStatus.isPending && { opacity: 0.6 }]}
+              onPress={() => void refresh()}
+              disabled={refreshing || connectStart.isPending}
+              style={[styles.secondaryBtn, refreshing && { opacity: 0.6 }]}
             >
               <Text style={styles.secondaryText}>
-                {connectStatus.isPending ? "Refreshing…" : "Refresh status"}
+                {refreshing ? "Refreshing…" : "Refresh status"}
               </Text>
             </Pressable>
           </View>
@@ -346,6 +355,7 @@ const styles = StyleSheet.create({
   btnRow: {
     flexDirection: "row",
     gap: 12,
+    flexWrap: "wrap",
   },
   ctaBtn: {
     flex: 1,

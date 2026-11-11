@@ -14,9 +14,10 @@ function load(source, mocks) {
 
 function harness({ ledger = [], attributions = [], failure, cap = 1000,
   userId = 'member', promoter = { id: 'promoter', event_id: 42, user_id: 'member', status: 'active' },
-  missingCount = false } = {}) {
+  missingCount = false, eventStatus = "pending" } = {}) {
   let handler;
   const queries = [];
+  ledger = ledger.map(row => ({ payout_status: "pending", paid_out_at: null, stripe_transfer_id: null, entry_type: "earning", ...row }));
   const client = {
     from(table) {
       const filters = [];
@@ -39,7 +40,8 @@ function harness({ ledger = [], attributions = [], failure, cap = 1000,
             return Promise.resolve({ data: null, count: null, error: { code: '42703' } }).then(resolve, reject);
           }
           let rows = (table === 'event_promoters' ? (promoter ? [promoter] : [])
-            : table === 'promoter_ledger_entries' ? ledger : attributions).filter(row => filters.every(f => f(row)));
+            : table === 'promoter_ledger_entries' ? ledger
+            : table === 'events' ? [{ id: 42, payout_status: eventStatus }] : attributions).filter(row => filters.every(f => f(row)));
           if (cursor) rows = [...rows].sort((a, b) => a[cursor] < b[cursor] ? -1 : 1);
           return Promise.resolve({
             data: options?.head ? null : rows.slice(0, limit),
@@ -59,6 +61,7 @@ function harness({ ledger = [], attributions = [], failure, cap = 1000,
       if (name.includes('supabase-js')) return { createClient: () => client };
       if (name.includes('verify-session')) return { verifySession: async () => userId };
       if (name.includes('read-all-rows')) return shared;
+      if (name.includes('promoter-payout-summary')) return load(fs.readFileSync(__dirname + '/../_shared/promoter-payout-summary.ts', 'utf8'), {});
       if (name.includes('sentry')) return { withSentry: (_name, fn) => fn };
       throw new Error('Unexpected import: ' + name);
     },
@@ -166,3 +169,45 @@ for (const promoter of [
     assert.deepEqual(h.queries.map(q => q.table), ['event_promoters']);
   });
 }
+
+const earning = (id, amount, status = 'pending', extra = {}) => ({ id, promoter_id: 'promoter', amount_cents: amount, payout_status: status, ...extra });
+test('pending and held commissions stay distinct from settled amounts and bank payment', async () => {
+  const r = await harness({ ledger: [earning('1', 500), earning('2', 300, 'held'), earning('3', -100, 'held')] }).call();
+  assert.deepEqual(r.body.promoter.payout, { settledCents: 0, unsettledCents: 700, heldCents: 200, hasRecordedTransfer: false, status: 'held' });
+});
+test('event hold does not invent a transfer failure or a payout date', async () => {
+  const r = await harness({ eventStatus: 'on_hold', ledger: [earning('1', 500)] }).call();
+  assert.equal(r.body.promoter.payout.status, 'held');
+  assert.equal(r.body.promoter.payout.hasRecordedTransfer, false);
+  assert.equal(r.body.promoter.payout.releaseAt, undefined);
+});
+test('settled net includes reversals but a transfer record is not bank payment', async () => {
+  const r = await harness({ ledger: [
+    earning('1', 500, 'paid', { paid_out_at: '2026-01-01', stripe_transfer_id: 'tr_test' }),
+    earning('2', -100, 'paid', { paid_out_at: '2026-01-01', entry_type: 'reversal' }),
+    earning('3', 200),
+  ] }).call();
+  assert.deepEqual(r.body.promoter.payout, { settledCents: 400, unsettledCents: 200, heldCents: 0, hasRecordedTransfer: true, status: 'pending' });
+  assert.equal(r.body.promoter.earnedCents, 600);
+});
+test('no-transfer zero settlement never implies a transfer', async () => {
+  const r = await harness({ ledger: [
+    earning('1', 500, 'paid', { paid_out_at: '2026-01-01' }),
+    earning('2', -500, 'paid', { paid_out_at: '2026-01-01', entry_type: 'reversal' }),
+  ] }).call();
+  assert.equal(r.body.promoter.payout.settledCents, 0);
+  assert.equal(r.body.promoter.payout.hasRecordedTransfer, false);
+});
+for (const row of [earning('1', 500, 'paid'), earning('1', 500, 'held', {paid_out_at: '2026-01-01'}), earning('1', 500, 'unexpected')]) {
+  test('inconsistent settlement state is unavailable, not paid/pending: ' + JSON.stringify(row), async () => {
+    const r = await harness({ ledger: [row] }).call();
+    assert.equal(r.body.promoter.payout, null);
+    assert.equal(r.body.promoter.earnedCents, 500);
+  });
+}
+test('event payout status failure preserves earnings but not fabricated status', async () => {
+  const r = await harness({ failure: 'events', ledger: [earning('1', 500)] }).call();
+  assert.equal(r.status, 200);
+  assert.equal(r.body.promoter.earnedCents, 500);
+  assert.equal(r.body.promoter.payout, null);
+});
