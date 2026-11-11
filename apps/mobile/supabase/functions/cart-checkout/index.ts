@@ -382,6 +382,14 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
       return errorResponse("Organizer has not completed payment setup", 400);
     }
 
+    // A retry may fill a legacy NULL, but must never relabel a different rail.
+    const { data: existingOrder, error: existingOrderError } = await supabase
+      .from("orders").select("charge_model").eq("cart_id", cartId).maybeSingle();
+    if (existingOrderError) return errorResponse("Could not load checkout order", 500);
+    if (existingOrder?.charge_model != null && existingOrder.charge_model !== "destination_charge") {
+      return errorResponse("Checkout charge model does not match this payment rail", 409);
+    }
+
     const customerId = await getOrCreateCustomer(supabase, authId);
     const stripeIdempotencyKey = `cart_pi_${cart.idempotency_key}`;
 
@@ -420,6 +428,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
         : { "automatic_payment_methods[enabled]": "true" }),
       "transfer_data[destination]": organizer.stripe_account_id,
       application_fee_amount: fees.application_fee_amount.toString(),
+      "metadata[charge_model]": "destination_charge",
       "metadata[type]": "cart_checkout",
       "metadata[cart_id]": cartId,
       "metadata[event_id]": String(cart.event_id),
@@ -487,6 +496,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
         user_id: authId,
         type: "event_ticket",
         status: "payment_pending",
+        charge_model: "destination_charge",
         quantity,
         subtotal_cents: fees.subtotal,
         platform_fee_cents: fees.dvnt_total_fee,
