@@ -14,6 +14,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as Sentry from "npm:@sentry/deno@10";
 import { withSentry, captureEdge } from "../_shared/sentry.ts";
+import { watchPayoutReadiness } from "../_shared/payout-readiness.ts";
 
 const MONITOR_SLUG = "db-health";
 // captureCheckIn's upsert config (verified: @sentry/core exports.d.ts:142)
@@ -55,8 +56,8 @@ const MONEY_JOB_SLA: Record<string, JobSla> = {
   // documented "every 15 minutes" (reconcile-orders header); NOT in live
   // cron.job — cadence unverified, generous margin to avoid false positives.
   "reconcile-orders": { intervalMs: 15 * MINUTE, marginMs: 15 * MINUTE, note: "~15m, not in cron.job (unverified)" },
-  // documented "hourly" (payouts-release header); NOT in live cron.job.
-  "payouts-release": { intervalMs: 60 * MINUTE, marginMs: 30 * MINUTE, note: "~hourly, not in cron.job (unverified)" },
+  // payouts-release is monitored separately, including missing/never-OK rows
+  // and financial readiness. Never enable a money-moving job to silence it.
   // client-fired on feed load (lib/api/promotions.ts sweep), not cron — lenient.
   "spotlight-expiry": { intervalMs: 60 * MINUTE, marginMs: 60 * MINUTE, note: "client-fired on feed load, not cron" },
 };
@@ -129,13 +130,24 @@ Deno.serve(
     // Dead-man sweep of the money-job fleet (clamped, one error per overdue
     // job). Isolated from the probe/check-in outcome above.
     await watchMoneyJobs();
+    // Existing scheduled check-in only. Public uptime requests do not trigger
+    // additional financial queries; no counts/identifiers enter the response.
+    let payoutMonitoringOk = true;
+    if (isCheckin) {
+      const db = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+        { auth: { persistSession: false, autoRefreshToken: false } },
+      );
+      payoutMonitoringOk = await watchPayoutReadiness(db, captureEdge);
+    }
 
     if (checkInId) {
       Sentry.captureCheckIn(
         {
           checkInId,
           monitorSlug: MONITOR_SLUG,
-          status: result.ok ? "ok" : "error",
+          status: result.ok && payoutMonitoringOk ? "ok" : "error",
           duration: result.latencyMs / 1000,
         },
         MONITOR_CONFIG,
@@ -148,8 +160,11 @@ Deno.serve(
     }
     await Sentry.flush(2000);
 
-    return new Response(JSON.stringify(result), {
-      status: result.ok ? 200 : 503,
+    // A broken monitor must not look green to the scheduled probe. Ordinary
+    // db-health uptime checks retain their existing database-only contract.
+    const response = isCheckin ? { ...result, payoutMonitoringOk } : result;
+    return new Response(JSON.stringify(response), {
+      status: result.ok && payoutMonitoringOk ? 200 : 503,
       headers: { "Content-Type": "application/json" },
     });
   }),
