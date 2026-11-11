@@ -7,6 +7,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
+import { readVisiblePostForEngagement } from "../_shared/post-engagement-access.ts";
 import { projectVisiblePosts } from "../_shared/post-access.ts";
 
 const corsHeaders = {
@@ -228,6 +229,15 @@ Deno.serve(async (req) => {
     const nextCursor = hasMore && last
       ? { likedAt: last.likedAt, userId: last.userId }
       : null;
+    // Recheck fresh metadata/relationships after the privileged page reads.
+    if (!await readVisiblePostForEngagement(supabaseAdmin, postIdInt, {
+      authId: authUserId, userId: viewerId,
+    })) {
+      return new Response(JSON.stringify({ error: "Post not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     return new Response(JSON.stringify({ likers, likesCount, nextCursor }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

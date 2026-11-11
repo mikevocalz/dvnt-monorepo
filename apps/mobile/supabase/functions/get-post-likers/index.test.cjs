@@ -5,8 +5,8 @@ const vm = require('node:vm');
 const ts = require('typescript');
 const path = require('node:path');
 
-function harness({ count = 650, actor = 'viewer', failCount = false, failPage = false, visibility = 'public', ownerId = 1, viewerId = 2, missingPost = false, failPost = false, privateProfile = false, following = false, blocked = false, spicy = false, minor = false, denied = false, failAccess = false, failViewer = false, failAdmission = false } = {}) {
-  let handler;
+function harness({ count = 650, actor = 'viewer', failCount = false, failPage = false, visibility = 'public', ownerId = 1, viewerId = 2, missingPost = false, failPost = false, privateProfile = false, following = false, blocked = false, spicy = false, minor = false, denied = false, failAccess = false, failViewer = false, failAdmission = false, revokeDuringPage = false } = {}) {
+  let handler, revoked = false;
   const calls = [];
   const rows = Array.from({ length: count }, (_, index) => ({
     user_id: count - index, created_at: '2026-10-20T12:00:00.123456+00:00',
@@ -16,7 +16,7 @@ function harness({ count = 650, actor = 'viewer', failCount = false, failPage = 
     async rpc(name, args) {
       assert.equal(name, 'post_relationship_access');
       assert.equal(args.p_viewer, viewerId);
-      return {data: failAccess ? null : [{author_id: ownerId, is_private: privateProfile, is_following: following, is_blocked: blocked, enforcement_ready: true}], error: failAccess ? {message:'access unavailable'} : null};
+      return {data: failAccess ? null : [{author_id: ownerId, is_private: privateProfile, is_following: following && !revoked, is_blocked: blocked, enforcement_ready: true}], error: failAccess ? {message:'access unavailable'} : null};
     },
     from(table) {
     calls.push({ table });
@@ -38,6 +38,7 @@ function harness({ count = 650, actor = 'viewer', failCount = false, failPage = 
       then(resolve, reject) {
         if (table === 'identity_verifications') return Promise.resolve({data:minor ? [{user_id:actor}] : [],error:null}).then(resolve,reject);
         if (state.head) return Promise.resolve({ count, error: failCount ? { message: 'count unavailable' } : null }).then(resolve, reject);
+        if (revokeDuringPage) revoked = true;
         const before = state.cursor ? Number(state.cursor.match(/user_id\.lt\.(\d+)/)[1]) : Infinity;
         return Promise.resolve({ data: rows.filter(row => row.user_id < before).slice(0, state.limit), error: failPage ? { message: 'page unavailable' } : null }).then(resolve, reject);
       },
@@ -166,4 +167,11 @@ for (const [name, options] of [
   assert.equal(response.body.likers.length,3);
   assert.equal(response.body.likesCount,650);
   assert.equal(response.cacheControl,'private, no-store');
+});
+
+test('revocation during page reads redacts names, count and pagination', async () => {
+  const h = harness({privateProfile:true,following:true,revokeDuringPage:true});
+  const r = await h.read({postId:42,limit:2});
+  assert.equal(r.status,404);
+  assert.deepEqual(r.body,{error:'Post not found'});
 });
