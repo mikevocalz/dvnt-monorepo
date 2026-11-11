@@ -77,7 +77,7 @@ function Requests() {
         )}
       </View>
       <Text className="mt-1 text-sm text-muted-foreground">
-        Approve new follow requests to let members see your private posts.
+        Approve new follow requests to unlock your Spicy posts and private profile posts. Existing followers keep their access.
         Existing followers keep their access, including when you switch from
         Public to Private. If they unfollow or are removed, they will need your
         approval to follow again while your account is Private.
