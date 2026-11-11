@@ -31,6 +31,12 @@ on:
       - "packages/app/lib/stores/web-post-share-store.ts"
       - "packages/app/lib/query-keys.ts"
       - "apps/mobile/supabase/functions/get-post-likers/**"
+      - "apps/mobile/supabase/functions/post-like/**"
+      - "apps/mobile/supabase/functions/post-unlike/**"
+      - "apps/mobile/supabase/functions/toggle-like/**"
+      - "apps/mobile/supabase/functions/_shared/post-engagement-access*"
+      - "apps/mobile/supabase/functions/_shared/post-access.ts"
+      - "apps/mobile/supabase/functions/_shared/spicy-access.ts"
       - "apps/web/src/app/(frontend)/layout.tsx"
       - "apps/web/src/app/(frontend)/globals.css"
       - "scripts/test-caption-composer.cjs"
@@ -66,7 +72,7 @@ jobs:
         env:
           NODE_PATH: ${{ runner.temp }}/social/node_modules
         run: |
-          node --test packages/app/lib/posts/text-post-theme-parity.test.ts apps/mobile/supabase/functions/get-post-likers/index.test.cjs
+          node --test packages/app/lib/posts/text-post-theme-parity.test.ts apps/mobile/supabase/functions/get-post-likers/index.test.cjs apps/mobile/supabase/functions/_shared/post-engagement-access.test.cjs
           node scripts/test-web-post-likes-dom.cjs
           node scripts/test-post-social-actions.cjs
           node scripts/test-post-like-state.cjs

@@ -7,12 +7,14 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
+import { projectVisiblePosts } from "../_shared/post-access.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-auth-token, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Cache-Control": "private, no-store",
 };
 
 interface LikerRow {
@@ -104,23 +106,22 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Service-role reads must mirror the post SELECT policy rather than bypass
-    // visibility. Followers-only posts intentionally remain owner-only until a
-    // follower policy exists (20260916210000_authors_can_read_their_own_posts).
-    const { data: post, error: postError } = await supabaseAdmin
-      .from("posts")
-      .select("author_id, visibility")
-      .eq("id", postIdInt)
-      .maybeSingle();
-    let canView = !postError && !!post && (post.visibility == null || post.visibility === "public");
-    if (!postError && post && !canView) {
-      const { data: viewer, error: viewerError } = await supabaseAdmin
-        .from("users")
-        .select("id")
-        .eq("auth_id", authUserId)
-        .maybeSingle();
-      canView = !viewerError && !!viewer && viewer.id === post.author_id;
-    }
+    // A public visibility flag is not sufficient: private profiles, pending
+    // requests, Spicy admission and blocks must match the content read gate.
+    // Resolve the viewer only from the verified session, never request fields.
+    const [{ data: post, error: postError }, { data: viewer, error: viewerError }] = await Promise.all([
+      supabaseAdmin.from("posts")
+        .select("id, author_id, visibility, is_nsfw")
+        .eq("id", postIdInt).maybeSingle(),
+      supabaseAdmin.from("users").select("id")
+        .eq("auth_id", authUserId).maybeSingle(),
+    ]);
+    const viewerId = Number(viewer?.id);
+    const canView = !postError && !!post && !viewerError &&
+      Number.isSafeInteger(viewerId) && viewerId > 0 &&
+      (await projectVisiblePosts(supabaseAdmin, [post], {
+        authId: authUserId, userId: viewerId,
+      })).length === 1;
     if (!canView) {
       return new Response(JSON.stringify({ error: "Post not found" }), {
         status: 404,
