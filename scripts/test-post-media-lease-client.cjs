@@ -111,3 +111,16 @@ test('legacy poster rows and MP4 animated MIME keep correct renderer kind and or
  lease.media=[{order:3,type:'thumbnail',url},{order:1,type:'video',mimeType:'video/mp4+animated',url}];
  f.requests[0].resolve(lease);await tick();const media=f.cache.snapshot('1');assert.equal(media.length,1);assert.equal(media[0].order,1);assert.equal(media[0].type,'animated_video');assert.equal(media[0].thumbnail,url);release();
 });
+
+test('default browser clock preserves native timer receiver during lease retirement', async()=>{
+ const vm=require('node:vm');
+ const code=ts.transpileModule(fs.readFileSync(path.join(root,'packages/app/lib/media/post-media-lease.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const context=vm.createContext({exports:{},require:()=>signedUrls,Date});
+ vm.runInContext(`let schedules=0,cancels=0; function setTimeout(){ if(this!==globalThis)throw Error('Illegal invocation'); return ++schedules; } function clearTimeout(){ if(this!==globalThis)throw Error('Illegal invocation'); cancels++; }`,context);
+ vm.runInContext(code,context);
+ const expiresAt=Math.floor(Date.now()/1000)+120;
+ const cache=context.exports.createPostMediaLeaseCache(async()=>({postId:1,expiresAt,media:[{order:0,type:'image',url:`https://fixture.invalid/post-image/a.jpg?token=HS256-${'a'.repeat(43)}&expires=${expiresAt}`}]}));
+ const release=cache.retain('1');await tick();assert.equal(cache.snapshot('1').length,1);
+ cache.retire();await tick();release();
+ assert.ok(vm.runInContext('schedules>=2 && cancels>=4',context));
+});

@@ -564,8 +564,9 @@ export const postsApi = {
           verified: false,
           name: "You",
         },
-        media: (data.media || []).map((m) => ({
+        media: (data.media || []).map((m, order) => ({
           ...m,
+          order,
           // Convert the flat DB-shaped input (type: "image"|"video" + mimeType)
           // back into the rich in-memory MediaKind so the feed grid / detail
           // screen renders GIFs, Live Photos, and animated videos correctly

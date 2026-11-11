@@ -20,7 +20,8 @@ export const EMPTY_POST_MEDIA: LeasedPostMedium[] = [];
 export function createPostMediaLeaseCache(
   fetchLease: (postId: number) => Promise<PostMediaLease>,
   clock: { now: () => number; schedule: (fn: () => void, ms: number) => any; cancel: (id: any) => void } = {
-    now: Date.now, schedule: setTimeout, cancel: clearTimeout,
+    now: Date.now, schedule: (fn, ms) => globalThis.setTimeout(fn, ms),
+    cancel: (id) => globalThis.clearTimeout(id),
   },
 ) {
   type Entry = { media: LeasedPostMedium[]; refs: number; listeners: Set<() => void>; generation: number; pending?: Promise<void>; refresh?: any; expiry?: any };
