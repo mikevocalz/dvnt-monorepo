@@ -16,20 +16,18 @@ export interface SettlementCheckout {
   currency: string;
 }
 export async function prepareSettlementCheckout(db: any, snapshot: {rail: string; order: Record<string, any>; selection?: Record<string, unknown>}, requestKey: string | null | undefined): Promise<SettlementCheckout | null> {
+  const eventId = Number(snapshot.order.event_id);
+  if (!Number.isSafeInteger(eventId) || eventId <= 0) throw new SettlementCheckoutError("Checkout route unavailable");
+  // Reviewed per-event cohort is the routing authority, never a fresh key or
+  // current deployment flag. The migration is an explicit deployment dependency:
+  // missing/stale schema and read failures must not silently select legacy.
+  const {data: route, error: routeError} = await db.rpc("settlement_checkout_route", {p_event_id: eventId});
+  if (routeError || route?.ok !== true || !["destination_charge", "separate_charges_and_transfers"].includes(route.charge_model)) {
+    throw new SettlementCheckoutError("Checkout route unavailable; do not retry another payment");
+  }
+  if (route.charge_model === "destination_charge") return null;
   if (Deno.env.get("TICKET_SEPARATE_CHARGES_ENABLED") !== "true") {
-    // A flag rollback must not turn a separate-charge retry into a second,
-    // destination-funded payment. This lookup returns no payment capability.
-    if (requestKey) {
-      const {data,error} = await db.rpc("lookup_settlement_checkout", {
-        p_rail: snapshot.rail,p_request_key: requestKey,
-        p_user_id: snapshot.order.user_id || null,p_guest_email: snapshot.order.guest_email || null,
-      });
-      if (error?.code === "PGRST202") return null; // Schema not installed yet.
-      if (error || typeof data?.exists !== "boolean" || data.exists) {
-        throw new SettlementCheckoutError("Checkout requires reconciliation before retrying");
-      }
-    }
-    return null;
+    throw new SettlementCheckoutError("Checkout for this event is paused; the original payment must not be replaced automatically");
   }
   if (!requestKey || !/^[A-Za-z0-9:_-]{16,128}$/.test(requestKey)) {
     throw new SettlementCheckoutError("A checkout request key is required");

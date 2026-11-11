@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 export const sources=[
- 'settlement-preflight.sql','settlement-ledger.sql','settlement-runtime.sql','settlement-release-policy.sql',
+ 'settlement-preflight.sql','settlement-ledger.sql','settlement-runtime.sql','settlement-release-policy.sql','settlement-checkout-cutover.sql',
  'settlement-recovery.sql','settlement-outflows.sql','settlement-observability.sql',
  'settlement-watchdog.sql','settlement-external.sql','settlement-legacy-ownership.sql','settlement-funding.sql',
 ];

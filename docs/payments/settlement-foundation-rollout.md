@@ -4,12 +4,38 @@ The code is more than a foundation, but is **not approved for production rollout
 
 ## Implemented in the draft
 
-- Durable charge-model and economic snapshots across the four paid checkout rails, defaulting to the existing destination-charge path while the new model is disabled.
+- Durable charge-model and economic snapshots across four paid checkout rails. Never-cutover events retain destination checkout; permanently cutover events pause if the new-model execution gates are off. Unsupported paid door, embedded and upgrade paths are denied after cutover.
 - Immutable recipient allocations, source-charge verification, funding epochs, reserved/uncertain delivery accounting, per-currency risk reserves and promoter-first organizer release. A promoter bank deposit is not required to unlock its organizer allocation; exact confirmed transfer or reviewed external-settlement evidence is required.
 - Refund interlocks, durable outflow reservation/reconciliation, provider-backed reversal recovery, and verified connected-account bank-payout membership. Unknown transfer or refund outcomes remain held rather than blindly retried.
 - Explicit reviewed event cohorts and release policy: canonical end is end_date, otherwise start_date + six hours; add five weekdays in the reviewed timezone. Original checkout release, current rescheduled release and an explicit later payout_release_at form a not-before maximum. No cohort or timezone is implicitly approved.
 - Read-only missing/never-successful/stale worker alerts, scheduler inventory, private manual-review queues, and distinct setup, transfer and bank delivery UI. Frozen actor-owned new allocations and external legacy receipts remain visible, including summary-only history for removed/reassigned promoters. Plain legacy earnings/referral totals have no immutable actor evidence and are explicitly unavailable pending ownership review, never reassigned to the current roster owner or reported as zero.
 - Reproducible ordered SQL assembly at scripts/build-settlement-migration.mjs, with source-schema preflight. The generated migration installs no schedule and enables no execution, cohort or reserve policy.
+
+## Checkout routing and irreversible event cutover
+
+The reviewed event release/cohort policy is now the checkout routing authority.
+Installing the schema with its empty policies leaves never-cutover events on
+legacy destination checkout. Adding an event's reviewed policy permanently
+records its separate-charge cutover. Removing that policy, changing request
+keys, switching hosted/native/cart rails, or turning the deployment flag off
+cannot return that event to legacy payment creation. A cutover event with its
+deployment or database checkout gate off is paused; unrelated never-cutover
+events remain on the legacy rail. The model flag is not an app-wide kill switch.
+
+The new routing RPC is a deployment dependency. Missing schema, stale RPC cache,
+malformed routing data and database failures fail closed, including PGRST202.
+Install and verify the backward-compatible empty-policy migration before
+deploying these adapters. Do not deploy the new adapter against an old schema
+and expect a permissive fallback.
+
+Before changing an event's cohort, quiesce that event's checkout entrypoints,
+drain all already-running legacy requests and reconcile their provider results,
+then commit the reviewed policy/fence and enable the prepared new-model path.
+The route read cannot retroactively stop a legacy request admitted before that
+commit. The native race fixture deliberately demonstrates that boundary; it is
+not an atomic mixed-model transition guarantee. No drain controller or live
+cutover is installed by this draft. Never remove the permanent fence to recover
+from a rollout problem; keep the affected event paused and reconcile instead.
 
 ## Execution flags do not make a read-only diagnostic
 

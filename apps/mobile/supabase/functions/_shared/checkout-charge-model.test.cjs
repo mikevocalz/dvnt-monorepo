@@ -26,7 +26,7 @@ test('guest paid order, session and underlying PI all stamp destination',async()
 });
 function database({model=null,failWrite=false,failRead=false,rpcHandler=null}={}) {
  const tier={id:'tier',event_id:1,name:'Admission',price_cents:5000,currency:'usd',quantity_total:100,quantity_sold:0,max_per_user:20};
- return {rpc:async(name,args)=>rpcHandler?rpcHandler(name,args):({data:name==='lookup_settlement_checkout'?{exists:false}:{ok:true}}),from(table){
+ return {rpc:async(name,args)=>rpcHandler?rpcHandler(name,args):({data:name==='settlement_checkout_route'?{ok:true,charge_model:'destination_charge'}:name==='lookup_settlement_checkout'?{exists:false}:{ok:true}}),from(table){
   let op='read';
   const value=()=>({data:table==='ticket_types'?tier:table==='events'?{host_id:'staff',title:'Test',fee_mode:'pass'}:
    table==='organizer_accounts'?{stripe_account_id:'acct_test',charges_enabled:true}:
@@ -60,6 +60,7 @@ function settlementFixture(options={}) {
  const orderId='22222222-2222-4222-8222-222222222222';const calls=[];let snapshot;
  const rpcHandler=async(name,args)=>{
   calls.push({name,args});
+  if(name==='settlement_checkout_route')return options.lookupError?{error:options.lookupError}:{data:{ok:true,charge_model:options.legacy?'destination_charge':'separate_charges_and_transfers'}};
   if(name==='lookup_settlement_checkout')return options.lookupError?{error:options.lookupError}:{data:{exists:!!options.exists}};
   if(name==='prepare_settlement_checkout'){
    snapshot=args.p_snapshot;
@@ -91,7 +92,7 @@ for(const rail of ['ticket-checkout','create-payment-intent','cart-checkout'])te
  for(const key of ['transfer_data[destination]','application_fee_amount','payment_intent_data[transfer_data][destination]','payment_intent_data[application_fee_amount]'])assert.equal(p.has(key),false);
  assert.equal(p.get('metadata[charge_model]'),'separate_charges_and_transfers');
  assert.equal(p.get('metadata[settlement_order_id]'),'22222222-2222-4222-8222-222222222222');
- assert.deepEqual(f.calls.filter(c=>c.name.includes('settlement_checkout')).map(c=>c.name),['prepare_settlement_checkout','claim_settlement_checkout','finalize_settlement_checkout']);
+ assert.deepEqual(f.calls.filter(c=>c.name.includes('settlement_checkout')).map(c=>c.name),['settlement_checkout_route','prepare_settlement_checkout','claim_settlement_checkout','finalize_settlement_checkout']);
  assert.equal(h.writes.filter(w=>w.table==='orders').length,0);
  assert.equal(f.snapshot.order.currency,'usd');assert.equal(f.snapshot.order.stripe_payment_intent_id,undefined);
  if(rail==='cart-checkout')assert.equal(f.snapshot.selection.lines[0].tier_id,'tier');
@@ -115,7 +116,7 @@ test('guest enabled prepares durable order, claims once and finalizes before rel
  const p=g.stripe[0].params;assert.equal(p['metadata[charge_model]'],'separate_charges_and_transfers');
  assert.equal(p['payment_intent_data[metadata][settlement_order_id]'],'22222222-2222-4222-8222-222222222222');
  assert.equal(p['payment_intent_data[transfer_data][destination]'],undefined);
- assert.deepEqual(f.calls.filter(c=>c.name.includes('settlement_checkout')).map(c=>c.name),['prepare_settlement_checkout','claim_settlement_checkout','finalize_settlement_checkout']);
+ assert.deepEqual(f.calls.filter(c=>c.name.includes('settlement_checkout')).map(c=>c.name),['settlement_checkout_route','prepare_settlement_checkout','claim_settlement_checkout','finalize_settlement_checkout']);
 });
 for(const [label,opts] of [['already claimed',{claimFailure:true}],['link failed',{finalizeFailure:true}]])test(`guest enabled ${label} never releases URL`,async()=>{
  const f=settlementFixture(opts);const g=fixture({env:{TICKET_SEPARATE_CHARGES_ENABLED:'true'},settlementRpc:f.rpcHandler,stripeResponse:f.stripeFetch});
@@ -129,7 +130,7 @@ for(const rail of ['ticket-checkout','create-payment-intent'])test(`${rail}: lin
  assert.ok(!f.calls.some(c=>c.name==='claim_settlement_checkout'));
  assert.ok(!h.requests.some(x=>x.url.endsWith('/payment_intents')||x.url.endsWith('/checkout/sessions')));
 });
-for(const [label,options,expected] of [['flag rollback existing SCT',{exists:true},409],['lookup outage',{lookupError:{code:'08006'}},409],['missing migration',{lookupError:{code:'PGRST202'}},200],['no prior SCT',{},200]])test(`disabled rollout: ${label}`,async()=>{
+for(const [label,options,expected] of [['flag rollback existing SCT',{exists:true},409],['lookup outage',{lookupError:{code:'08006'}},409],['missing migration',{lookupError:{code:'PGRST202'}},409],['never-cutover event',{legacy:true},200]])test(`disabled rollout: ${label}`,async()=>{
  const f=settlementFixture(options);const h=harness({database:database({rpcHandler:f.rpcHandler})});
  const r=await h.invoke('ticket-checkout',{...selection,idempotency_key:'paid-attempt-fixture-001'});assert.equal(r.status,expected,await r.text());
  if(expected===409)assert.ok(!h.requests.some(x=>x.url.endsWith('/checkout/sessions')));

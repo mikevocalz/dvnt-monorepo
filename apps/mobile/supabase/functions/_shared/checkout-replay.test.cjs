@@ -71,6 +71,7 @@ function checkout(rail, patch = {}, options = {}) {
     },
     rpc: async (name, args) => {
       ops.push({ action: "rpc", name, args });
+      if (name === "settlement_checkout_route") return {data:{ok:true,charge_model:"destination_charge"}};
       if (name === "lookup_settlement_checkout") return {data:{exists:false}};
       if (name === "free_ticket_checkout_atomic") {
         if (options.raceOrder) { insertLost = true; return { data: { ok: true, idempotent: true, order: options.raceOrder, tickets: options.tickets }, error: null }; }

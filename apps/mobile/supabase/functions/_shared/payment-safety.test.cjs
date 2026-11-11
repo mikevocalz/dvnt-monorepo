@@ -40,6 +40,7 @@ function harness(config = {}) {
     return q;
   }, async rpc(name, args) {
     calls.push({ name, args });
+    if (name === 'settlement_checkout_route') return Object.hasOwn(config,'checkoutRoute') ? config.checkoutRoute : {data:{ok:true,charge_model:'destination_charge'}};
     if (name === 'lookup_settlement_checkout') return {data:{exists:false}};
     if (name === 'door_free_sale_atomic') return config.rpcError
       ? { error: { message: 'RPC unavailable' } }

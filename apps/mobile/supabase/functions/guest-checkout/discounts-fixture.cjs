@@ -34,7 +34,8 @@ function fixture(options={}){
  const writes=[],stripe=[],emails=[],usage=[],logs=[],profileCalls=[],qr=[];let serial=0;
  const db={rpc:async(fn,args)=>{
   writes.push({table:'rpc',fn,args});
-  if(options.settlementRpc && fn.endsWith('_settlement_checkout'))return options.settlementRpc(fn,args);
+  if(options.settlementRpc && (fn.endsWith('_settlement_checkout') || fn==='settlement_checkout_route'))return options.settlementRpc(fn,args);
+  if(fn==='settlement_checkout_route')return{data:{ok:true,charge_model:'destination_charge'}};
   if(fn==='lookup_settlement_checkout')return{data:{exists:false}};
   if(fn==='ticket_purchase_hold_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
   if(fn==='guest_free_checkout_atomic'){

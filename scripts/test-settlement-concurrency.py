@@ -449,6 +449,20 @@ def overlapping_paid_rails_share_checkout_mutex():
             assert db.sql("SELECT count(*) FROM dvnt_settlement.checkouts WHERE attempted_at IS NOT NULL") == "0"
 
 
+def cohort_cutover_requires_draining_prior_legacy_requests():
+    # Deliberately records the transition boundary, not a false atomicity claim:
+    # a legacy request admitted before policy commit must be drained externally.
+    with Database() as db:
+        db.sql("INSERT INTO events VALUES(3,'fixture-host','2020-01-01','pending','2019-12-30','published','2019-12-29')")
+        first = db.holding("INSERT INTO dvnt_settlement.release_policies VALUES(3,'end_plus_five_business_days','UTC','synthetic staged cutover')")
+        before = db.rpc("settlement_checkout_route", p_event_id=3)
+        db.finish(first)
+        assert before["charge_model"] == "destination_charge"
+        assert db.rpc("settlement_checkout_route", p_event_id=3)["charge_model"] == "separate_charges_and_transfers"
+        db.sql("DELETE FROM dvnt_settlement.release_policies WHERE event_id=3; UPDATE dvnt_settlement.controls SET checkout_enabled=false")
+        assert db.rpc("settlement_checkout_route", p_event_id=3)["charge_model"] == "separate_charges_and_transfers"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--disposable-ci-postgres", action="store_true")
@@ -475,7 +489,8 @@ def main():
                  risk_policy_change_invalidates_concurrent_reserve,
                  reservation_serializes_before_risk_policy_change,
                  risk_policy_truncate_rejects_without_lock_inversion,
-                 overlapping_paid_rails_share_checkout_mutex):
+                 overlapping_paid_rails_share_checkout_mutex,
+                 cohort_cutover_requires_draining_prior_legacy_requests):
         test()
         print("PASS", test.__name__, flush=True)
 

@@ -149,3 +149,15 @@ Complete payout-only diff against the verified master tree `a153580fb21436a3abd5
 - A `scripts/test-settlement-webhook-link.cjs`
 
 Total: 120 changed paths. The PR commit/tree and required exact-head CI are verified separately; this inventory is not production authorization.
+
+## Reviewed event cutover follow-up
+
+- A `apps/mobile/supabase/functions/_shared/legacy-event-checkout-route.ts`
+- M `apps/mobile/supabase/functions/_shared/ticket-embed-commerce.ts`
+- M `apps/mobile/supabase/functions/door-sell/index.ts`
+- M `apps/mobile/supabase/functions/ticket-embed/index.test.cjs`
+- M `apps/mobile/supabase/functions/ticket-upgrade/index.ts`
+- A `docs/payments/checkout-cutover-entrypoints.md`
+- A `docs/payments/drafts/settlement-checkout-cutover.sql`
+- A `scripts/test-settlement-checkout-cutover.cjs`
+- A `scripts/test-settlement-unsupported-checkout-rails.cjs`
