@@ -115,10 +115,11 @@ export function useCommentLikeState(
   const mutation = useMutation({
     mutationKey: ["commentLike", commentId, viewerId],
     mutationFn: async ({ isLiked }: { isLiked: boolean }) => {
-      if (!viewerId) {
+      const owner = useAuthStore.getState().user;
+      if (!viewerId || owner?.id !== viewerId) {
         throw new Error("Must be logged in to like comments");
       }
-      return commentsApiClient.likeComment(commentId, isLiked);
+      return commentsApiClient.likeComment(commentId, isLiked, () => useAuthStore.getState().user === owner);
     },
     onMutate: async ({ isLiked }) => {
       const owner = useAuthStore.getState().user;

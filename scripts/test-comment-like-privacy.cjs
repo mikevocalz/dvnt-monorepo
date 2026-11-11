@@ -37,3 +37,19 @@ for(const base of ['packages/app','apps/mobile'])test(base+' API preserves redac
  const exp={};new Function('exports','supabase','requireBetterAuthToken','console',code)(exp,{functions:{invoke:async()=>({data:{ok:true,data:{liked:false,likesCount:0,countHidden:true}}})}},async()=> 'fixture',{log(){},error(){}});
  assert.deepEqual(await exp.api.likeComment('9',true),{liked:false,likes:0,countHidden:true});
 });
+test('global reset tombstones all comment-like states without cache-only refetch',async()=>{
+ const client=new QueryClient(),exp={};
+ const code=ts.transpileModule(fs.readFileSync('packages/app/lib/hooks/reset-follow-access-caches.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ new Function('require','exports',code)(()=>({resetPostAccessOverlays(){}}),exp);
+ for(const id of ['9','10'])client.setQueryData(['commentLikeState','1',id],{likesCount:72,hasLiked:true});
+ client.setQueryData(['comments','3'],[{id:'9',content:'protected'}]);
+ await exp.resetFollowAccessCaches(client,false);
+ for(const id of ['9','10'])assert.equal(client.getQueryData(['commentLikeState','1',id]),null);
+ assert.equal(client.getQueryData(['comments','3']),undefined);client.clear();
+});
+for(const base of ['packages/app','apps/mobile'])test(base+' token-await identity change cannot dispatch a comment like',async()=>{
+ const src=fs.readFileSync(base+'/lib/api/comments.ts','utf8');const method=src.split('  async likeComment(')[1].split('\n  /**')[0];
+ const code=ts.transpileModule('export const api={async likeComment('+method+'};',{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ let current=true,writes=0;const exp={};new Function('exports','supabase','requireBetterAuthToken','console',code)(exp,{functions:{invoke:async()=>{writes++;return {}}}},async()=>{current=false;return 'fixture'},{log(){},error(){}});
+ await assert.rejects(exp.api.likeComment('9',true,()=>current),/Session changed/);assert.equal(writes,0);
+});

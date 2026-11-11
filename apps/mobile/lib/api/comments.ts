@@ -151,11 +151,14 @@ export const commentsApi = {
   async likeComment(
     commentId: string,
     isLiked: boolean,
+    isCurrent?: () => boolean,
   ): Promise<{ liked: boolean; likes: number; countHidden?: boolean }> {
     try {
       console.log("[Comments] likeComment:", commentId, "isLiked:", isLiked);
 
+      if (isCurrent && !isCurrent()) throw new Error("Session changed while liking comment");
       const token = await requireBetterAuthToken();
+      if (isCurrent && !isCurrent()) throw new Error("Session changed while liking comment");
       const commentIdInt = parseInt(commentId);
       if (isNaN(commentIdInt)) throw new Error("Invalid comment ID");
 

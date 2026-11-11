@@ -16,12 +16,14 @@ export async function resetFollowAccessCaches(
     // Follow lists can contain identities visible only to accepted followers.
     ["users", "followers"], ["users", "following"],
   ];
-  const cancellations = prefixes.map(prefix => client.cancelQueries({ queryKey: prefix }, { revert: false }));
+  // Comment-like state is cache-only; null prevents reseeding stale props.
+  const clearPrefixes = [...prefixes, ["commentLikeState"]];
+  const cancellations = clearPrefixes.map(prefix => client.cancelQueries({ queryKey: prefix }, { revert: false }));
   const clear = () => {
-    for (const prefix of prefixes) {
+    for (const prefix of clearPrefixes) {
       for (const query of client.getQueryCache().findAll({ queryKey: prefix })) {
         // invalidate alone preserves the old authorized media while refetching.
-        query.setState({ data: undefined, dataUpdatedAt: 0, error: null, status: "pending" });
+        query.setState({ data: prefix[0] === "commentLikeState" ? null : undefined, dataUpdatedAt: 0, error: null, status: "pending" });
       }
     }
   };
