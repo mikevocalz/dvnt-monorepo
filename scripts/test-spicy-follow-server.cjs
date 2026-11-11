@@ -72,6 +72,13 @@ function fixture(options = {}) {
   const calls = [];
   const db = {
     rpc(name, args) {
+      if (name === "profile_is_private") {
+        const pref = options.preference ?? false;
+        return Promise.resolve({
+          data: options.privacyMissing ? null : options.private === true || (pref !== false && pref !== "false"),
+          error: options.privacyError ? { message: "privacy unavailable" } : null,
+        });
+      }
       assert.equal(name, "post_relationship_access");
       const pref = options.preference ?? false;
       const isPrivate = options.private === true || (pref !== false && pref !== "false");
@@ -445,3 +452,23 @@ for (const name of ["get-posts", "bootstrap-feed", "bootstrap-profile", "get-boo
     }
   });
 }
+
+for (const [label, options, expected] of [
+  ["settings-only private", { preference: true }, true],
+  ["legacy private flag", { private: true }, true],
+  ["public", {}, false],
+  ["malformed legacy private", { preference: "unexpected" }, true],
+]) test(`bootstrap-profile presents effective privacy: ${label}`, async () => {
+  const f = fixture(options);
+  const response = await f.run("bootstrap-profile", { user_id: 2 });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).profile.isPrivate, expected);
+});
+for (const options of [{privacyError:true}, {privacyMissing:true}])
+  test("bootstrap-profile does not guess Public when privacy lookup fails", async () => {
+    const f = fixture(options);
+    const response = await f.run("bootstrap-profile", { user_id: 2 });
+    assert.equal(response.status, 503);
+    const body = await response.text();
+    assert.doesNotMatch(body, /PRIVATE_SOURCE_SENTINEL|isPrivate|media/);
+  });

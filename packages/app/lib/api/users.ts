@@ -1,3 +1,4 @@
+import { readEffectiveProfilePrivacy } from "@dvnt/app/lib/profile/effective-profile-privacy";
 import { supabase } from "../supabase/client";
 import { DB } from "../supabase/db-map";
 import { getCurrentUserId, getCurrentUserIdSync } from "./auth-helper";
@@ -173,15 +174,20 @@ export const usersApi = {
 
       const [{ data, error }] = await Promise.all([userFetch]);
 
+      if (error && error.code !== "PGRST116") {
+        throw Object.assign(new Error("Could not verify profile privacy. Please retry."), { name: "ProfilePrivacyUnavailable" });
+      }
+
       if (data) {
         const targetUserId = data[DB.users.id];
         const authId = data[DB.users.authId];
         const dbAvatar =
           (data.avatar as any)?.url || (data.avatar as any)?.[0]?.url || "";
-        const [betterAuthUser, liveCounts, { isFollowing, followsYou }] = await Promise.all([
+        const [betterAuthUser, liveCounts, { isFollowing, followsYou }, isPrivate] = await Promise.all([
           !dbAvatar && authId ? getBetterAuthUserById(authId) : null,
           getLiveProfileCounts(targetUserId),
           getFollowRelationship(currentUserId, targetUserId),
+          readEffectiveProfilePrivacy(supabase, Number(targetUserId)),
         ]);
         const displayNameParts = buildDisplayNameParts(betterAuthUser?.name);
         const resolvedUsername =
@@ -216,7 +222,7 @@ export const usersApi = {
             0,
           postsCount:
             (liveCounts?.postsCount ?? Number(data[DB.users.postsCount])) || 0,
-          isPrivate: data[DB.users.isPrivate] || false,
+          isPrivate,
           isFollowing,
           followsYou,
           createdAt: data[DB.users.createdAt],
@@ -246,6 +252,7 @@ export const usersApi = {
       return null;
     } catch (error) {
       if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
+      if (error instanceof Error && error.name === "ProfilePrivacyUnavailable") throw error;
       console.error("[Users] getProfileByUsername error:", error);
       return null;
     }
@@ -302,10 +309,11 @@ export const usersApi = {
       const authId = data[DB.users.authId];
       const dbAvatar =
         (data.avatar as any)?.url || (data.avatar as any)?.[0]?.url || "";
-      const [betterAuthUser, liveCounts, { isFollowing, followsYou }] = await Promise.all([
+      const [betterAuthUser, liveCounts, { isFollowing, followsYou }, isPrivate] = await Promise.all([
         !dbAvatar && authId ? getBetterAuthUserById(authId) : null,
         getLiveProfileCounts(data[DB.users.id]),
         getFollowRelationship(currentUserId, data[DB.users.id]),
+        readEffectiveProfilePrivacy(supabase, Number(data[DB.users.id])),
       ]);
       const displayNameParts = buildDisplayNameParts(betterAuthUser?.name);
       const resolvedUsername =
@@ -339,13 +347,14 @@ export const usersApi = {
           0,
         postsCount:
           (liveCounts?.postsCount ?? Number(data[DB.users.postsCount])) || 0,
-        isPrivate: data[DB.users.isPrivate] || false,
+        isPrivate,
         isFollowing,
         followsYou,
         createdAt: data[DB.users.createdAt],
       };
     } catch (error) {
       if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
+      if (error instanceof Error && error.name === "ProfilePrivacyUnavailable") throw error;
       console.error("[Users] getProfileById error:", error);
       return null;
     }
@@ -361,7 +370,7 @@ export const usersApi = {
       const currentUserId = await getViewerIdForRelationshipChecks();
 
       // First try the app `users` table via auth_id
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from(DB.users.table)
         .select(
           `
@@ -387,6 +396,10 @@ export const usersApi = {
         .eq(DB.users.authId, authId)
         .maybeSingle();
 
+      if (profileError) {
+        throw Object.assign(new Error("Could not verify profile privacy. Please retry."), { name: "ProfilePrivacyUnavailable" });
+      }
+
       if (profile) {
         const targetUserId = profile[DB.users.id];
         const resolvedAuthId = profile[DB.users.authId];
@@ -394,12 +407,13 @@ export const usersApi = {
           (profile.avatar as any)?.url ||
           (profile.avatar as any)?.[0]?.url ||
           "";
-        const [betterAuthUser, liveCounts, { isFollowing, followsYou }] = await Promise.all([
+        const [betterAuthUser, liveCounts, { isFollowing, followsYou }, isPrivate] = await Promise.all([
           (!dbAvatar || !profile[DB.users.firstName]) && resolvedAuthId
             ? getBetterAuthUserById(resolvedAuthId)
             : null,
           getLiveProfileCounts(targetUserId),
           getFollowRelationship(currentUserId, targetUserId),
+          readEffectiveProfilePrivacy(supabase, Number(targetUserId)),
         ]);
         const displayNameParts = buildDisplayNameParts(betterAuthUser?.name);
         const resolvedUsername =
@@ -434,7 +448,7 @@ export const usersApi = {
           postsCount:
             (liveCounts?.postsCount ?? Number(profile[DB.users.postsCount])) ||
             0,
-          isPrivate: profile[DB.users.isPrivate] || false,
+          isPrivate,
           isFollowing,
           followsYou,
           createdAt: profile[DB.users.createdAt],
@@ -480,6 +494,7 @@ export const usersApi = {
       };
     } catch (error) {
       if (error instanceof Error && error.name === "FollowRelationshipUnavailable") throw error;
+      if (error instanceof Error && error.name === "ProfilePrivacyUnavailable") throw error;
       console.error("[Users] getProfileByAuthUserId error:", error);
       return null;
     }

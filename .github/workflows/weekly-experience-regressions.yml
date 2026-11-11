@@ -108,6 +108,9 @@ jobs:
           node scripts/test-weekly-post-follow-sql.cjs
           node scripts/test-weekly-post-share-metadata.cjs
           node scripts/test-private-follow-requests-sql.cjs
+          node scripts/test-profile-effective-privacy-sql.cjs
+          node scripts/test-profile-effective-privacy-api.cjs
+          node --test packages/app/lib/profile/effective-profile-privacy.test.ts
           node scripts/test-spicy-follow-server.cjs
           node scripts/test-protected-photo-preview.cjs
           node scripts/test-follow-hook.cjs
