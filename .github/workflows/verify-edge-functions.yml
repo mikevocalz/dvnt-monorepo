@@ -146,12 +146,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --prefix "$RUNNER_TEMP/shared-test-deps" --ignore-scripts --no-audit --no-fund typescript@5.9.2 zod@3.25.76
+      - run: npm install --prefix "$RUNNER_TEMP/shared-test-deps" --ignore-scripts --no-audit --no-fund typescript@5.9.2 zod@3.25.76 @electric-sql/pglite@0.3.14
       - name: All shared Node suites
         run: |
           mapfile -d '' tests < <(find apps/mobile/supabase/functions/_shared -type f \( -name '*.test.cjs' -o -name '*.test.mjs' \) -print0)
           test "${#tests[@]}" -gt 0
-          NODE_PATH="$RUNNER_TEMP/shared-test-deps/node_modules" node --test "${tests[@]}"
+          NODE_PATH="$RUNNER_TEMP/shared-test-deps/node_modules" node --test --test-concurrency=1 "${tests[@]}"
       - name: All shared Deno suites
         run: |
           mapfile -d '' tests < <(find apps/mobile/supabase/functions/_shared -type f -name '*.test.ts' -print0)

@@ -67,10 +67,13 @@ const stripComments = (sql) =>
 // Tables a migration creates and then drops in the same file are ignored, as
 // are temp tables. A grant anywhere in the repo's migration history counts —
 // the grant does not have to be in the creating migration, only to exist.
+// Consume the entire qualified name before deciding whether it is public.
+// Otherwise a private schema such as dvnt_settlement is mistaken for a public
+// table, incorrectly demanding direct grants that would break its RPC boundary.
 const CREATE_TABLE =
-  /\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?(?:public\.)?["']?([a-z0-9_]+)["']?/gi;
+  /\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?(?:"?([a-z0-9_]+)"?\s*\.\s*)?"?([a-z0-9_]+)"?(?=\s|\()/gi;
 const GRANT_TO_SERVICE_ROLE =
-  /\bgrant\s+([^;]*?)\s+on\s+(?:table\s+)?(?:public\.)?["']?([a-z0-9_]+)["']?\s+to\s+([^;]*?)service_role/gi;
+  /\bgrant\s+([^;]*?)\s+on\s+(?:table\s+)?(?:"?([a-z0-9_]+)"?\s*\.\s*)?"?([a-z0-9_]+)"?\s+to\s+([^;]*?)service_role/gi;
 const GRANT_ALL_TABLES =
   /\bgrant\s+[^;]*?\s+on\s+all\s+tables\s+in\s+schema\s+public\s+to\s+[^;]*?service_role/i;
 
@@ -83,9 +86,12 @@ function checkGrants(files) {
     const body = stripComments(sql);
     if (GRANT_ALL_TABLES.test(body)) blanketGrant = name;
     for (const m of body.matchAll(CREATE_TABLE)) {
-      if (!created.has(m[1])) created.set(m[1], name);
+      if (m[1] && m[1].toLowerCase() !== "public") continue;
+      if (!created.has(m[2])) created.set(m[2], name);
     }
-    for (const m of body.matchAll(GRANT_TO_SERVICE_ROLE)) granted.add(m[2]);
+    for (const m of body.matchAll(GRANT_TO_SERVICE_ROLE)) {
+      if (!m[2] || m[2].toLowerCase() === "public") granted.add(m[3]);
+    }
   }
 
   for (const [table, where] of created) {

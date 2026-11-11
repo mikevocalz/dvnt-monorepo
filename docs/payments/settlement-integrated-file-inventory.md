@@ -4,12 +4,20 @@ Complete payout-only diff against the verified master tree `a153580fb21436a3abd5
 
 ## CI workflows
 
+- M `.github/workflows/verify-edge-functions.yml`
+
 - A `.github/workflows/external-settlement-recording.yml`
 - A `.github/workflows/payout-readiness.yml`
 - A `.github/workflows/payout-release-safety.yml`
 - A `.github/workflows/promoter-payout-journey.yml`
 - A `.github/workflows/promoter-self-summary.yml`
 - A `.github/workflows/settlement-concurrency.yml`
+
+## Follow-up scanner and guard files
+
+- M `scripts/verify-issuance-invariants.mjs`
+- A `scripts/verify-issuance-invariants.test.cjs`
+- A `scripts/test-settlement-checkout-duplicate-guard.cjs`
 
 ## Runbooks and scope
 

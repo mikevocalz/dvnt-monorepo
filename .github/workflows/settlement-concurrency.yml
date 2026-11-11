@@ -10,6 +10,7 @@ on:
       - 'scripts/test-settlement-*'
       - 'scripts/test-promoter-first-budget.cjs'
       - 'scripts/build-settlement-migration.mjs'
+      - 'scripts/verify-issuance-invariants*'
       - '.github/workflows/settlement-concurrency.yml'
 permissions:
   contents: read
@@ -49,5 +50,7 @@ jobs:
           node --test --test-concurrency=1 scripts/test-settlement-*.cjs scripts/test-promoter-first-budget.cjs
           node --test --test-concurrency=1 apps/mobile/supabase/functions/_shared/payout-readiness*.test.cjs apps/mobile/supabase/functions/_shared/settlement-readiness.test.cjs apps/mobile/supabase/functions/db-health/payout-readiness.test.cjs apps/mobile/supabase/functions/promoter-self/index.test.cjs
           node scripts/test-promoter-payout-ui.cjs
+          node --test scripts/verify-issuance-invariants.test.cjs
+          node scripts/verify-issuance-invariants.mjs
           node scripts/verify-edge-functions.mjs
           node scripts/verify-no-live-identifiers.mjs

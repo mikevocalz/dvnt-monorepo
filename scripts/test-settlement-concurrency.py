@@ -426,6 +426,29 @@ def risk_policy_truncate_rejects_without_lock_inversion():
         assert db.sql("SELECT count(*) FROM dvnt_settlement.deliveries WHERE state='reserved'") == "1"
 
 
+def overlapping_paid_rails_share_checkout_mutex():
+    # Both callers use fresh request keys. The first transaction has not yet
+    # committed its order when the second request enters preparation.
+    for first_rail, second_rail in [("create-payment-intent", "ticket-checkout"),
+                                    ("cart-checkout", "create-payment-intent")]:
+        with Database() as db:
+            snapshot = {"rail": first_rail, "selection": {"ticket_type_id": "fixture-tier"}, "order": {
+                "user_id": "fixture-buyer", "event_id": 1, "quantity": 1, "currency": "usd",
+                "total_cents": 11000, "subtotal_cents": 10000, "organizer_fee_cents": 500}}
+            if first_rail == "cart-checkout":
+                snapshot["selection"] = {"lines": [{"id": "fixture-line", "tier_id": "fixture-tier", "quantity": 1}]}
+            first = db.holding(call("prepare_settlement_checkout", p_snapshot=snapshot,
+                                    p_request_key="fixture-first-rail-key"))
+            second = {**snapshot, "rail": second_rail, "selection": {"ticket_type_id": "fixture-tier"},
+                      "order": {**snapshot["order"], "event_id": "01"}}
+            error = db.sql(call("prepare_settlement_checkout", p_snapshot=second,
+                                p_request_key="fixture-second-rail-key"), ok=False)
+            db.finish(first)
+            assert "existing checkout requires reconciliation" in error, error
+            assert db.sql("SELECT count(*) FROM orders") == "1"
+            assert db.sql("SELECT count(*) FROM dvnt_settlement.checkouts WHERE attempted_at IS NOT NULL") == "0"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--disposable-ci-postgres", action="store_true")
@@ -451,7 +474,8 @@ def main():
                  observed_pending_debit_invalidates_concurrent_reserve,
                  risk_policy_change_invalidates_concurrent_reserve,
                  reservation_serializes_before_risk_policy_change,
-                 risk_policy_truncate_rejects_without_lock_inversion):
+                 risk_policy_truncate_rejects_without_lock_inversion,
+                 overlapping_paid_rails_share_checkout_mutex):
         test()
         print("PASS", test.__name__, flush=True)
 

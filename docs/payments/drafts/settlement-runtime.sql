@@ -160,6 +160,42 @@ REVOKE ALL ON FUNCTION dvnt_settlement.bind_allocation_identity() FROM PUBLIC,an
 CREATE TRIGGER bind_settlement_recipient BEFORE INSERT ON dvnt_settlement.allocations
  FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.bind_allocation_identity();
 
+-- The same catalog item can arrive through hosted, native or cart checkout.
+-- IDs of cart lines and request keys are attempt identities, not a different
+-- purchase. Unknown selection shapes fail closed for this buyer/event only.
+CREATE FUNCTION dvnt_settlement.checkout_selections_overlap(p_left jsonb,p_right jsonb)
+RETURNS boolean LANGUAGE plpgsql IMMUTABLE SET search_path='' AS $$
+DECLARE selection jsonb; line jsonb; targets text[]; left_targets text[]; side int:=0;
+BEGIN
+ FOREACH selection IN ARRAY ARRAY[p_left,p_right] LOOP
+  side:=side+1; targets:='{}';
+  IF jsonb_typeof(selection) IS DISTINCT FROM 'object' THEN RETURN true; END IF;
+  IF nullif(selection->>'ticket_type_id','') IS NOT NULL THEN
+   targets:=array_append(targets,'tier:'||((selection->>'ticket_type_id')::uuid)::text);
+  END IF;
+  IF selection ? 'lines' THEN
+   IF jsonb_typeof(selection->'lines') IS DISTINCT FROM 'array' THEN RETURN true; END IF;
+   FOR line IN SELECT value FROM jsonb_array_elements(selection->'lines') LOOP
+    IF jsonb_typeof(line) IS DISTINCT FROM 'object' THEN RETURN true; END IF;
+    IF nullif(line->>'tier_id','') IS NOT NULL AND nullif(line->>'addon_id','') IS NULL THEN
+     targets:=array_append(targets,'tier:'||((line->>'tier_id')::uuid)::text);
+    ELSIF nullif(line->>'addon_id','') IS NOT NULL AND nullif(line->>'tier_id','') IS NULL THEN
+     targets:=array_append(targets,'addon:'||((line->>'addon_id')::uuid)::text||':variant:'||coalesce((nullif(line->>'variant_id','')::uuid)::text,''));
+    ELSE RETURN true;
+    END IF;
+   END LOOP;
+  END IF;
+  IF cardinality(targets)=0 THEN RETURN true; END IF;
+  IF side=1 THEN left_targets:=targets; END IF;
+ END LOOP;
+ RETURN left_targets && targets;
+EXCEPTION WHEN invalid_text_representation THEN
+ -- PostgreSQL accepts multiple spellings of a UUID. Malformed historical
+ -- selections cannot safely establish that two pending purchases differ.
+ RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION dvnt_settlement.checkout_selections_overlap(jsonb,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+
 CREATE FUNCTION public.prepare_settlement_checkout(p_snapshot jsonb,p_request_key text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE v jsonb:=p_snapshot->'order'; c dvnt_settlement.checkouts%ROWTYPE;
@@ -184,10 +220,13 @@ BEGIN
  ELSE
   -- A remounted client that lost its key cannot silently create a second
   -- payment for the same selection while the earlier outcome is unresolved.
-  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended((p_snapshot->>'rail')||':'||coalesce(v->>'user_id',lower(v->>'guest_email'))||':'||(v->>'event_id'),1));
+  -- All paid rails share this mutex. Rail-scoped locks allow simultaneous
+  -- hosted/native requests to both observe no prior attempt and charge twice.
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('checkout:'||
+   CASE WHEN v->>'user_id' IS NOT NULL THEN 'member:'||(v->>'user_id') ELSE 'guest:'||lower(v->>'guest_email') END||':'||((v->>'event_id')::int)::text,1));
   IF EXISTS(SELECT 1 FROM dvnt_settlement.checkouts prior JOIN public.orders old ON old.id=prior.order_id
-   WHERE prior.snapshot->>'rail'=p_snapshot->>'rail' AND prior.snapshot->'selection'=p_snapshot->'selection'
-   AND old.event_id=(v->>'event_id')::int AND old.status IN ('created','payment_pending','payment_failed')
+   WHERE dvnt_settlement.checkout_selections_overlap(prior.snapshot->'selection',p_snapshot->'selection')
+   AND old.event_id=(v->>'event_id')::int AND old.status IS DISTINCT FROM 'paid'
    AND (CASE WHEN v->>'user_id' IS NOT NULL THEN old.user_id=v->>'user_id' ELSE old.user_id IS NULL AND lower(old.guest_email)=lower(v->>'guest_email') END))
   THEN RAISE EXCEPTION 'existing checkout requires reconciliation'; END IF;
   IF v->>'cart_id' IS NOT NULL THEN
