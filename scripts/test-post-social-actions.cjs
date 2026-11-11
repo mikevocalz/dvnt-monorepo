@@ -27,6 +27,7 @@ const fixture = {
     export const conversations=[{id:'c1',user:{id:'2',username:'alice',avatar:'alice.jpg'}},{id:'c2',user:{id:'3',username:'bob',avatar:'bob.jpg'}}];
     export const conversationData=create(()=>({data:conversations,isPending:false,isError:false,refetch(){}}));
     export const messagesApi={sendMessage:async input=>{state.sent.push(input);if(state.releaseSend)await new Promise(resolve=>{state.resolveSend=resolve});if(state.failSend)throw new Error('send refused');return {id:'m1'}}};`,
+  "solito/link": `export const Link=({href,children,...props})=><a href={typeof href === "string" ? href : href?.pathname} {...props}>{children}</a>;`,
   "solito/navigation": `import {router} from 'social-fixture';export const useRouter=()=>router;export const useParams=()=>({id:'11'});`,
   "react-native": `export const Text=({children})=><span>{children}</span>;export const useWindowDimensions=()=>({width:375,height:812});`,
   "@dvnt/app/components/ui/card-link.web": `export const CardLink=({href,children,className,ariaLabel})=><a href={href} className={className} aria-label={ariaLabel}>{children}</a>;`,
@@ -50,7 +51,8 @@ const fixture = {
   "@dvnt/app/lib/hooks/use-verified-gate": `import {state} from 'social-fixture';export const useVerifiedGate=()=> (action,run)=>{if(state.deferGate)state.gate=run;else if(!state.blocked)run()};`,
   // Keep the real follow-identity/session guards; only the auth-service edge is
   // offline, as in test-follow-requests-dom.cjs. Never bundle a live DB client.
-  "@dvnt/app/lib/auth/identity": `import {auth} from 'social-fixture';export const getAuthIdFromStore=()=>auth.getState().user?.authId ?? null;`,
+  "@dvnt/app/lib/supabase/client": `export const supabase={functions:{invoke:async(name)=>{if(name!=="protected-photo-preview")throw Error("Unexpected function: "+name);return {data:{preview:null},error:null};}}};`,
+  "@dvnt/app/lib/auth/identity": `import {auth} from 'social-fixture';export const requireBetterAuthToken=async()=>"fixture-session-token";export const getAuthIdFromStore=()=>auth.getState().user?.authId ?? null;`,
   "@dvnt/app/lib/stores/auth-store": `export {auth as useAuthStore} from 'social-fixture';`,
   "@dvnt/app/lib/stores/ui-store": `import {state} from 'social-fixture';const value={showToast:(...args)=>state.toasts.push(args)};export const useUIStore=s=>s(value);useUIStore.getState=()=>value;`,
   "@dvnt/app/lib/hooks/use-messages": `import {conversationData} from 'social-fixture';export const useConversations=()=>conversationData();`,

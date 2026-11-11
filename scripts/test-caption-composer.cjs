@@ -7,7 +7,9 @@ const http = require('node:http');
 const esbuild = require('esbuild');
 const ROOT = path.resolve(__dirname, '..');
 const fixture = {
-  'caption-fixture': `export const state={post:{id:'7',kind:'media',caption:'Old #caption',author:{id:'1'},media:[]},published:[],updated:[],navigations:[],uploads:[],people:[]};
+  // Classification has its own contract. Keep caption/queue tests deterministic.
+  './nudity-scan.web': `import {state} from 'caption-fixture';export const scanPostMedia=async()=>state.scanResult;`,
+  'caption-fixture': `export const state={scanResult:{flagged:false,incomplete:false},post:{id:'7',kind:'media',caption:'Old #caption',author:{id:'1'},media:[]},published:[],updated:[],navigations:[],uploads:[],people:[]};
     export const router={push:p=>state.navigations.push(p),replace:p=>state.navigations.push(p),back:()=>state.navigations.push('back')};
     export const createPost=async input=>{state.published.push(input);return {id:77}};
     export const uploadMultiple=async files=>{state.uploads.push(files);return files.map(file=>({success:true,type:file.type,url:'https://fixture.invalid/image.jpg'}))};`,
@@ -107,7 +109,16 @@ window.runCaptionScenarios=async()=>{
   await setInput(Array(31).fill('#same').join(' '));
   check(button('Share').disabled,'hashtag abuse bound disables Share');
   await setInput(caption);
+  state.scanResult={flagged:true,incomplete:false};
   await flush(()=>{button('Share').click();button('Share')?.click()});
+  check(state.published.length===0&&state.uploads.length===0,'flagged media cannot upload before review');
+  check(!!button('Review draft'),'flagged media shows the real review dialog');
+  await flush(()=>button('Review draft').click());
+  check(store.getState().caption===caption&&state.published.length===0,'cancel review preserves draft without publishing');
+  state.scanResult={flagged:false,incomplete:true};
+  await flush(()=>button('Share').click());
+  check(!!button('Share with current label'),'incomplete scan is explicit, not a silent pass');
+  await flush(()=>{button('Share with current label').click();button('Share with current label')?.click()});
   check(state.published.length===1,'repeated Share only publishes once');
   check(state.published[0].content===caption,'actual publish hook keeps inline caption without text-card tags');
   check(state.uploads.length===1,'real queue still uploads the selected media once');
@@ -160,6 +171,8 @@ window.runCaptionScenarios=async()=>{
     const {JSDOM}=require('jsdom');
     const dom=new JSDOM('<!doctype html><div id="root"></div>',{url:'https://fixture.invalid',runScripts:'outside-only',pretendToBeVisual:true});
     dom.window.MessageChannel=class {constructor(){this.port1={onmessage:null};this.port2={postMessage:()=>setTimeout(()=>this.port1.onmessage?.(),0)}}};
+    dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true};
+    dom.window.HTMLDialogElement.prototype.close=function(){this.open=false};
     dom.window.eval(bundle);
     try{console.log(await dom.window.runCaptionScenarios())}finally{dom.window.close()}
     return;

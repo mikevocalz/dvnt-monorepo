@@ -4,8 +4,10 @@ const { build } = require('esbuild');
 const { chromium, webkit } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const mocks = {
+  'solito/navigation': `export const useRouter=()=>({push:p=>{window.fixture.route=p}});`,
+  '@dvnt/app/lib/stores/events-screen-store': `export const useEventsScreenStore={getState:()=>({setSelectedMapEventId:id=>{window.fixture.selection=id},setShowMapView:v=>{window.fixture.openedMap=v}})};`,
   '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage={getItem:k=>window.fixture.storage[k]||null,setItem:(k,v)=>{window.fixture.storage[k]=v}};`,
-  '@dvnt/app/lib/stores/auth-store': `import {useSyncExternalStore} from 'react';export const useAuthStore=s=>useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>s({user:window.fixture.owner?{authId:window.fixture.owner}:null}));`,
+  '@dvnt/app/lib/stores/auth-store': `import {useSyncExternalStore} from 'react';export const useAuthStore=s=>useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>s({user:window.fixture.owner?{authId:window.fixture.owner}:null}));useAuthStore.getState=()=>({user:window.fixture.owner?{authId:window.fixture.owner}:null});`,
   '@dvnt/app/lib/hooks/use-member-map': `import {useSyncExternalStore} from 'react';function tick(){useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>window.fixture.version)}export function useLocationSettings(){tick();return {...window.fixture.location,setSharing:async n=>{window.fixture.stops.push(n)},setOverall:async n=>{window.fixture.overall.push(n)},refresh:async()=>{}}}export function useMapSharingConsent(){tick();return {busy:false,error:window.fixture.error,share:async()=>{window.fixture.shares++;return window.fixture.result},cancel:()=>{window.fixture.cancels++}}}`,
   'react-native': `import React from 'react';export const View=({children,...p})=><div>{children}</div>;export const ScrollView=View;export const Text=({children,accessibilityRole})=><p role={accessibilityRole==='header'?'heading':accessibilityRole}>{children}</p>;export const Pressable=({children,onPress,disabled})=><button disabled={disabled} onClick={onPress}>{children}</button>;export const Modal=({visible,children})=>visible?<div role="dialog">{children}</div>:null;`,
 };
@@ -44,6 +46,16 @@ async function bundle(native) {
  // Signing in after visiting Events prompts for the newly signed-in owner.
  await reset({owner:null,map:false});assert.equal(await page.getByRole('dialog').count(),0);
  await page.evaluate(()=>{window.fixture.owner='signed-in-later';window.fixture.version++;dispatchEvent(new Event('fixturechange'));});await page.getByRole('dialog').waitFor();
+ if(!native){
+ await reset({map:false,result:true});await page.getByRole('dialog').waitFor();
+ await page.getByRole('button',{name:'Share my location',exact:true}).click();
+ await page.waitForFunction(()=>window.fixture.openedMap===true);
+ assert.equal(await page.evaluate(()=>window.fixture.route),'/events','successful explicit sharing opens Events on phone-sized web');
+ assert.equal(await page.evaluate(()=>window.fixture.selection),null,'clear stale event selection to show nearby members');
+ await reset({map:false,result:false});await page.getByRole('dialog').waitFor();
+ await page.getByRole('button',{name:'Share my location',exact:true}).click();
+ assert.equal(await page.evaluate(()=>window.fixture.openedMap),undefined,'failed or denied permission does not open map');
+ }
  // Ineligible/error state fails closed; successful existing sharing never re-prompts.
  await reset({map:false,location:{loading:false,busy:false,error:null,needsLocationStop:false,sharing:true,settings:{sessionKey:'session-a',sessionExpiresAt:'2099-01-01T00:00:00Z',locationEnabled:true,eventsMapEnabled:true,revision:4,shareUntil:new Date(Date.now()+3600000).toISOString()}}});await page.waitForTimeout(50);assert.equal(await page.getByRole('dialog').isVisible().catch(()=>false),false);assert.equal(await page.evaluate(()=>window.fixture.shares),0);
  if(!native){await reset();await page.getByRole('dialog').waitFor();assert.equal(await page.evaluate(()=>{const ids=[...document.querySelectorAll('[id]')].map(e=>e.id);return ids.length===new Set(ids).size}),true,'entry/map dialog labels have unique IDs');}

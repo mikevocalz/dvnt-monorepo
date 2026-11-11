@@ -31,7 +31,7 @@ const mocks = {
   '@dvnt/app/lib/stores/ui-store': `export const useUIStore=selector=>selector({showToast:()=>{}});`,
   '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage={getItem:()=>null,setItem:()=>{},removeItem:()=>{}};`,
   '@dvnt/app/lib/hooks/use-events': `const event={id:'fixture-event',hostId:'fixture-owner',title:'Fixture edit event',startDate:'2026-12-31T20:00:00Z',event_tz:'America/New_York',location:'Test venue',category:'party',price:0,visibility:'public'}; export const useEvent=()=>({data:event,isLoading:false}); export const useCreateEvent=()=>({isPending:false,mutateAsync:async()=>{throw Error('publishing forbidden in layout test')}}); export const useUpdateEvent=useCreateEvent;`,
-  '@dvnt/app/lib/hooks/use-verified-gate': `export const useVerifiedGate=()=>()=>{};`,
+  '@dvnt/app/lib/hooks/use-verified-gate': `export const useVerifiedGate=()=>(action)=>{window.editorFixture.guards=(window.editorFixture.guards||[]).concat(action)};`,
   '@dvnt/app/lib/hooks/use-places-autocomplete': `export const usePlacesAutocomplete=()=>({predictions:[],isLoading:false,onChangeText:()=>{},onSelectPrediction:()=>{}});`,
   '@dvnt/app/lib/hooks/use-event-media-preupload': `export const useEventMediaPreupload=()=>{};`,
   '@dvnt/app/lib/media/use-event-flyer-preparation.web': `export const useEventFlyerPreparation=()=>({isPreparing:false,isBusy:()=>false,prepare:async()=>null,cancel:()=>{}});`,
@@ -125,6 +125,29 @@ const mocks = {
       assert.deepEqual(small,[],'editable mobile controls must not trigger iOS focus zoom');
     };
     await bar.waitFor();await pinned('initial create');await fits('initial create');await readable();
+    const publish=page.getByRole('button',{name:'Publish',exact:true});
+    assert.equal(await publish.count(),1,'only one publish action');
+    assert.equal(await publish.evaluate(el=>el.closest('[data-event-publish-footer]')!==null),true);
+    await page.getByRole('button',{name:'More details (optional)'}).click();
+    const bottomPublish=async()=>{
+      // Force the same end-of-form scroll a user can make; Playwright's
+      // scrollIntoViewIfNeeded ignores overlays when a button is already in view.
+      await publish.evaluate(el=>el.scrollIntoView({block:'center',behavior:'instant'}));await nextFrame();
+      const geometry=await publish.evaluate(el=>{
+        const r=el.getBoundingClientRect();
+        const editor=el.closest('[data-dvnt-event-editor]');
+        const fields=[...editor.querySelectorAll('input:not([type="file"]),select,textarea')].filter(n=>n.getBoundingClientRect().height>0);
+        const tab=document.querySelector('[data-dvnt-tab-bar]');
+        return {top:r.top,bottom:r.bottom,height:r.height,lastField:Math.max(...fields.map(n=>n.getBoundingClientRect().bottom)),limit:tab?tab.getBoundingClientRect().top:innerHeight,hit:el.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))};
+      });
+      assert.ok(geometry.top>=geometry.lastField,'publish follows every form field');
+      assert.ok(geometry.height>=44,'touch target');
+      assert.ok(geometry.bottom<=geometry.limit,'publish clears navigation '+JSON.stringify(geometry));
+      assert.equal(geometry.hit,true,'publish is unobstructed');
+    };
+    await bottomPublish();
+    await publish.click();await publish.click();
+    assert.deepEqual(await page.evaluate(()=>window.editorFixture.guards),['host_event','host_event'],'every click retains verification guard');
     await page.getByPlaceholder("What's the event called?").fill('Retain this draft');
     const initialMounts=await page.evaluate(()=>window.editorFixture.mounts);
     await page.getByRole('heading',{name:'Tickets',exact:true}).scrollIntoViewIfNeeded();
@@ -148,6 +171,7 @@ const mocks = {
       if(viewport.width<768){await bar.waitFor();await pinned('resize '+JSON.stringify(viewport));await readable();}
       else await bar.waitFor({state:'detached'});
       await fits('resize '+JSON.stringify(viewport));
+      await bottomPublish();
       assert.equal(await page.getByPlaceholder("What's the event called?").inputValue(),'Retain this draft');
       assert.equal(await page.evaluate(()=>window.editorFixture.mounts),initialMounts);
     }

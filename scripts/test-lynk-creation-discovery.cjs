@@ -288,7 +288,9 @@ function extractFunction(file, name) {
     assert.match(node.textContent,/Your rooms & invitations/);assert.match(node.textContent,/Waiting for host/);
     assert.equal(node.querySelector('[aria-label^="Studio hangout"]').disabled,true);
     await refresh([fresh({isLive:false,availability:'inactive'})]);assert.doesNotMatch(node.textContent,/Studio hangout/,'inactive public strangers are omitted');
-    await refresh([fresh({isLive:false,availability:'inactive',isOwner:true})]);assert.match(node.textContent,/Resume/);
+    await refresh([fresh({isLive:false,availability:'inactive',isOwner:true,resumeAllowed:true,createdBy:'auth-me',resumeExpiresAt:new Date(Date.now()+600_000).toISOString()})]);assert.match(node.textContent,/Resume/);
+    await refresh([fresh({isLive:false,availability:'inactive',isOwner:true,resumeAllowed:true,createdBy:'auth-me',resumeExpiresAt:new Date(Date.now()-1).toISOString()})]);assert.doesNotMatch(node.textContent,/Resume/,'expired host window cannot resume');
+    await refresh([fresh({isLive:false,availability:'inactive',isOwner:true,resumeAllowed:true,createdBy:'another-host',resumeExpiresAt:new Date(Date.now()+600_000).toISOString()})]);assert.doesNotMatch(node.textContent,/Resume/,'another host cannot grant guest resume');
     await refresh([fresh({isLive:false,status:'ended',availability:'ended'})]);assert.match(node.textContent,/Recently ended/);assert.equal(node.querySelector('[aria-label^="Studio hangout"]').disabled,true);
     await act(()=>global.__historyFixture.setState({rooms:[{...room,source:'sneaky_lynk',host:{...room.host,id:'me'},isOwner:true}]}));
     await refresh([]);assert.match(node.textContent,/Studio hangout/);assert.equal(node.querySelector('[aria-label^="Studio hangout"]').disabled,true,'local history never grants Join/Resume');

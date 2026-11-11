@@ -86,7 +86,7 @@ now += 21_000; monotonic += 21_000;
 liveCard.props.onPress(); openRoom(live);
 assert.equal(navigation.length, 2, "expired render cannot navigate without rerender");
 assertInert(live, "Status unavailable");
-const owner = room({ isOwner: true, isLive: false, availability: "inactive" });
+const owner = room({ isOwner: true, resumeAllowed: true, resumeExpiresAt: new Clock(now + 600_000).toISOString(), isLive: false, availability: "inactive" });
 const ownerCard = render(owner);
 assert.equal(ownerCard.props.disabled, false); assert.match(text(ownerCard), /Resume/);
 ownerCard.props.onPress(); assert.equal(navigation.length, 3, "fresh owner can resume inactive room");

@@ -5,8 +5,12 @@ export interface DiscoveryProof {
   presenceKnown?: boolean;
   observedAt?: string | null;
   presenceExpiresAt?: string | null;
+  /** Server-derived inactivity deadline; never extended by a discovery refresh. */
+  resumeExpiresAt?: string | null;
   endsAt?: string | null;
   isOwner?: boolean;
+  resumeAllowed?: boolean;
+  createdBy?: string;
   isInvited?: boolean;
   /** Local request-start clocks. Network/authentication time consumes the lease. */
   requestStartedAt?: number;
@@ -17,6 +21,12 @@ export interface DiscoveryRoom extends DiscoveryProof {
   isLive: boolean;
   listeners: number;
   maxParticipants?: number;
+}
+/** Server role permission must also belong to this authenticated viewer. */
+export function hasDiscoveryResumeOwnership(room: DiscoveryProof, selfIds: string[]): boolean {
+  return room.resumeAllowed === true && room.isOwner === true &&
+    typeof room.createdBy === "string" && room.createdBy.length > 0 &&
+    !/^\d+$/.test(room.createdBy) && selfIds.includes(room.createdBy);
 }
 const LEASE_MS = 90_000;
 type Observation = { elapsed: number; liveExpired: boolean; ownerExpired: boolean; ended: boolean };
@@ -54,7 +64,9 @@ export function discoveryRoomState(room: DiscoveryRoom, now = Date.now(), monoto
   if (observation && ended) observation.ended = true;
   const lease = Math.min(LEASE_MS, expiresAt - observedAt);
   const liveExpired = !Number.isFinite(lease) || lease <= 0 || elapsed >= lease;
-  const ownerExpired = elapsed >= LEASE_MS;
+  const resumeDeadline = Date.parse(room.resumeExpiresAt ?? "");
+  const resumeExpired = !Number.isFinite(resumeDeadline) || serverNow >= resumeDeadline;
+  const ownerExpired = elapsed >= LEASE_MS || (room.availability !== "scheduled" && resumeExpired);
   if (observation) {
     observation.liveExpired ||= liveExpired;
     observation.ownerExpired ||= ownerExpired;
@@ -63,7 +75,7 @@ export function discoveryRoomState(room: DiscoveryRoom, now = Date.now(), monoto
   const fresh = current && hasClocks && Number.isFinite(observedAt) && !ended;
   const live = fresh && room.availability === "live" && room.presenceKnown === true && room.isLive === true &&
     !liveExpired && !observation?.liveExpired;
-  const canResume = fresh && room.isOwner === true && room.status === "open" &&
+  const canResume = fresh && room.resumeAllowed === true && room.isOwner === true && room.status === "open" &&
     (room.availability === "live" || room.availability === "inactive" || room.availability === "scheduled") &&
     !ownerExpired && !observation?.ownerExpired;
   const countKnown = live || (ended && room.presenceKnown === true);
@@ -72,5 +84,5 @@ export function discoveryRoomState(room: DiscoveryRoom, now = Date.now(), monoto
     room.availability === "inactive" && room.isInvited ? "Waiting for host" : room.availability === "inactive" ? "Inactive" : "Status unavailable";
   return { ended, live, countKnown, full, label, canJoin: live, canResume,
     actionable: live || canResume,
-    actionLabel: live ? full ? "Check room" : "Join" : canResume ? "Resume" : undefined };
+    actionLabel: live ? full ? "Check room" : "Join" : canResume ? room.availability === "scheduled" ? "Start" : "Resume" : undefined };
 }

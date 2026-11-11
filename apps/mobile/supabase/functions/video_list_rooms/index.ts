@@ -174,11 +174,16 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ ok: true, data: { rooms: visible.map(({ room, link, availability, isOwner, isInvited }) => {
       const creator = creatorsById.get(room.created_by);
       const stats = presence.get(room.id);
+      const membership = members.filter((member) => member.room_id === room.id && member.user_id === userId)
+        .sort((a, b) => b.id - a.id)[0];
+      // Creation alone is not a current host role after demotion/removal.
+      const resumeAllowed = isOwner && (!membership ||
+        (["host", "co-host"].includes(membership.role) && !["banned", "kicked"].includes(membership.status)));
       return {
         id: room.uuid || String(room.id), createdBy: room.created_by || "",
         title: room.title || "Untitled Lynk", topic: room.topic || "", description: room.description || "",
         sweetSpicyMode: room.sweet_spicy_mode || "sweet", ...availability,
-        isLive: availability.availability === "live", isOwner, isInvited,
+        isLive: availability.availability === "live", isOwner, isInvited, resumeAllowed,
         hasVideo: room.has_video ?? false, isPublic: room.is_public ?? true,
         status: room.status, createdAt: room.created_at, endedAt: room.ended_at || undefined,
         host: {
