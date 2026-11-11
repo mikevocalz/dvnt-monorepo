@@ -13,8 +13,10 @@ CREATE OR REPLACE FUNCTION public.engagement_comment_visible(p_comment_id bigint
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path=public,pg_temp AS $$
   SELECT EXISTS (SELECT 1 FROM public.comments c WHERE c.id=p_comment_id
-    AND CASE WHEN c.post_id IS NOT NULL THEN public.engagement_post_visible(c.post_id)
-      ELSE c.event_id IS NOT NULL END);
+    -- Post comments and event_comments are separate ID namespaces. Never use
+    -- an event-comment collision to authorize a missing/hidden post parent.
+    AND c.post_id IS NOT NULL
+    AND public.engagement_post_visible(c.post_id));
 $$;
 REVOKE ALL ON FUNCTION public.engagement_post_visible(bigint),public.engagement_comment_visible(bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.engagement_post_visible(bigint),public.engagement_comment_visible(bigint) TO anon,authenticated,service_role;

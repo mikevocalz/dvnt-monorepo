@@ -26,7 +26,10 @@ async function fixture(preserve = false) {
     CREATE TABLE posts(id bigint PRIMARY KEY,author_id integer,is_nsfw boolean,content text);
     CREATE TABLE posts_media(id bigint PRIMARY KEY,_parent_id bigint,url text,type text DEFAULT 'image',_order integer DEFAULT 0);
     CREATE TABLE post_text_slides(id bigint PRIMARY KEY,post_id bigint,content text);
-    CREATE TABLE comments(id bigint PRIMARY KEY,post_id bigint,content text);
+    -- Actual production post-comment columns; event comments live separately.
+    CREATE TABLE comments(id integer PRIMARY KEY,author_id integer,post_id integer,
+      content varchar,created_at timestamptz,updated_at timestamptz,parent_id integer,
+      likes_count integer,client_mutation_id text,root_id bigint,depth smallint,attachment jsonb);
     CREATE TABLE follows(id serial PRIMARY KEY,follower_id bigint,following_id bigint,UNIQUE(follower_id,following_id));
     CREATE TABLE blocks(blocker_id bigint,blocked_id bigint);
     CREATE TABLE identity_verifications(user_id text,date_of_birth date);
@@ -57,7 +60,7 @@ async function fixture(preserve = false) {
       (71,7,true,'malformed privacy secret');
     INSERT INTO posts_media(id,_parent_id,url) SELECT id,id,'https://fixture.invalid/secret/'||id FROM posts;
     INSERT INTO post_text_slides SELECT id,id,'slide secret '||id FROM posts;
-    INSERT INTO comments SELECT id,id,'comment secret '||id FROM posts;
+    INSERT INTO comments(id,post_id,content) SELECT id,id,'comment secret '||id FROM posts;
     INSERT INTO posts_media(id,_parent_id,url) VALUES(99,999,'orphan secret');
     INSERT INTO post_text_slides VALUES(99,999,'orphan secret');
     INSERT INTO identity_verifications VALUES('minor',CURRENT_DATE-INTERVAL '15 years');
@@ -83,8 +86,10 @@ test('raw engagement cannot enumerate protected posts or forge another member',a
  const db=await fixture();try {
   await activate(db);
   await db.exec(`ALTER TABLE posts ADD COLUMN visibility text DEFAULT 'public';
-   ALTER TABLE comments ADD COLUMN event_id bigint;
-   INSERT INTO comments VALUES(100,NULL,'event comment',90),(101,NULL,'orphan',NULL);
+   CREATE TABLE event_comments(id integer PRIMARY KEY,event_id integer,content text);
+   INSERT INTO event_comments VALUES(31,90,'collision with private post comment'),
+     (100,90,'collision with parentless post comment'),(102,90,'event-only comment');
+   INSERT INTO comments(id,post_id,content) VALUES(100,NULL,'parentless'),(101,999,'missing post');
    CREATE TABLE likes(id serial PRIMARY KEY,post_id bigint,user_id integer);
    CREATE TABLE comment_likes(id serial PRIMARY KEY,comment_id bigint,user_id integer);
    ALTER TABLE likes ENABLE ROW LEVEL SECURITY;ALTER TABLE comment_likes ENABLE ROW LEVEL SECURITY;
@@ -107,7 +112,7 @@ test('raw engagement cannot enumerate protected posts or forge another member',a
   const sql=fs.readFileSync(path.join(migrations,'20261111042000_protected_post_engagement.sql'),'utf8');
   await db.exec(sql);await db.exec(sql);
   assert.deepEqual(await as(null,()=>ids('likes'),'anon'),[2]);
-  assert.deepEqual(await as(null,()=>ids('comment_likes'),'anon'),[2,3],'public/event semantics retained; orphan hidden');
+  assert.deepEqual(await as(null,()=>ids('comment_likes'),'anon'),[2],'only visible post comments; null/missing parents and event collisions hidden');
   await as(null,()=>assert.rejects(()=>db.query('INSERT INTO likes(post_id,user_id) VALUES(12,1)'),e=>e.code==='42501'),'anon');
   await as('viewer',()=>assert.rejects(()=>db.query('INSERT INTO likes(post_id,user_id) VALUES(12,1)'),e=>e.code==='42501'));
   await as('viewer',()=>assert.rejects(()=>db.query('INSERT INTO likes(post_id,user_id) VALUES(31,2)'),e=>e.code==='42501'));
@@ -127,7 +132,11 @@ test('raw engagement cannot enumerate protected posts or forge another member',a
   assert.equal((await db.query('SELECT count(*)::int n FROM likes WHERE user_id=2')).rows[0].n,0,'actual delete works after revoke');
   assert.equal((await db.query('SELECT count(*)::int n FROM comment_likes WHERE user_id=2')).rows[0].n,0);
   await as('viewer',()=>assert.rejects(()=>db.query('INSERT INTO comment_likes(comment_id,user_id) VALUES(100,1)'),e=>e.code==='42501'));
-  await as('viewer',()=>db.query('INSERT INTO comment_likes(comment_id,user_id) VALUES(100,2)'));
+  for (const commentId of [100,101,102,999]) {
+   assert.equal((await as('viewer',()=>db.query('SELECT engagement_comment_visible($1) AS visible',[commentId]))).rows[0].visible,false);
+   await as('viewer',()=>assert.rejects(()=>db.query('INSERT INTO comment_likes(comment_id,user_id) VALUES($1,2)',[commentId]),e=>e.code==='42501'));
+  }
+  assert.equal((await db.query('SELECT count(*)::int n FROM event_comments')).rows[0].n,3,'separate event comments untouched');
   await db.exec('CREATE POLICY future_update ON likes FOR UPDATE USING(true) WITH CHECK(true);CREATE POLICY future_update ON comment_likes FOR UPDATE USING(true) WITH CHECK(true)');
   await as('author-public',()=>db.query('UPDATE likes SET user_id=2 WHERE post_id=12'));
   await as('author-public',()=>db.query('UPDATE comment_likes SET user_id=2 WHERE comment_id=12'));
