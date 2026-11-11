@@ -545,6 +545,7 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
       "automatic_payment_methods[allow_redirects]": "always",
       "transfer_data[destination]": organizer.stripe_account_id,
       application_fee_amount: fees.application_fee_amount.toString(),
+      "metadata[charge_model]": "destination_charge",
       "metadata[type]": "event_ticket",
       "metadata[event_id]": event_id.toString(),
       "metadata[ticket_type_id]": ticket_type_id,
@@ -638,10 +639,11 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
     }
 
     // ── Create order row in payment_pending state (fee components stored) ──
-    await supabase.from("orders").insert({
+    const { error: orderError } = await supabase.from("orders").insert({
       user_id,
       type: "event_ticket",
       status: "payment_pending",
+      charge_model: "destination_charge",
       quantity,
       subtotal_cents: fees.subtotal,
       platform_fee_cents: fees.dvnt_total_fee,
@@ -675,6 +677,11 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
           }
         : {}),
     });
+    if (orderError) {
+      console.error("[create-payment-intent] order insert failed", orderError);
+      throw new Error("Could not save checkout order");
+    }
+
 
     return json({
       paymentIntent: pi.client_secret,

@@ -678,9 +678,11 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       // Destination charge: DVNT keeps application_fee_amount, rest goes to organizer
       "payment_intent_data[application_fee_amount]":
         fees.application_fee_amount.toString(),
+      "payment_intent_data[metadata][charge_model]": "destination_charge",
       "payment_intent_data[transfer_data][destination]":
         organizer.stripe_account_id,
       // Fee metadata for webhook reconciliation
+      "metadata[charge_model]": "destination_charge",
       "metadata[type]": "event_ticket",
       "metadata[event_id]": event_id.toString(),
       "metadata[ticket_type_id]": ticket_type_id,
@@ -760,11 +762,12 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
     // stripe-webhook increments usage inside checkout.session.completed after payment is confirmed.
 
     // ── Create order row in payment_pending state (fee components stored) ──
-    await supabase.from("orders").insert({
+    const { error: orderError } = await supabase.from("orders").insert({
       user_id: isGuest ? null : user_id,
       guest_email: isGuest ? trimmedGuestEmail : null,
       type: "event_ticket",
       status: "payment_pending",
+      charge_model: "destination_charge",
       quantity,
       subtotal_cents: fees.subtotal,
       platform_fee_cents: fees.dvnt_total_fee,
@@ -798,6 +801,11 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
           }
         : {}),
     });
+    if (orderError) {
+      console.error("[ticket-checkout] order insert failed", orderError);
+      throw new Error("Could not save checkout order");
+    }
+
 
     // Made by the webhook once payment lands, never for an abandoned session.
     if (isGuest && profileFields) {
