@@ -1,3 +1,4 @@
+import { isConfiguredPlatformOwner } from "../_shared/owner-dispute-policy.ts";
 /**
  * Payouts Release Cron Edge Function
  *
@@ -343,7 +344,11 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
           results.push({
             event_id: event.id,
             status: "on_hold",
-            reason: "dispute",
+            // Aggregate financials include disputed tickets. Never fund them
+            // by merely skipping the owner event-wide dispute policy.
+            reason: isConfiguredPlatformOwner(event.host_id, Deno.env.get("DVNT_PLATFORM_OWNER_AUTH_ID"))
+              ? "owner_dispute_requires_order_settlement"
+              : "dispute",
           });
           continue;
         }

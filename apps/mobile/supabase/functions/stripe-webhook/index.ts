@@ -23,6 +23,7 @@
  * IDEMPOTENT: Uses stripe_events table to deduplicate.
  */
 
+import { applyEventDisputeHold } from "../_shared/owner-dispute-policy.ts";
 import { withSentry, captureEdge } from "../_shared/sentry.ts";
 import {
   checkoutFailureLabel,
@@ -1190,26 +1191,28 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             .single();
 
           if (ticket?.event_id) {
-            await supabase
-              .from("events")
-              .update({ payout_status: "on_hold" })
-              .eq("id", ticket.event_id);
-
             // Update order status + add timeline
-            const { data: disputedOrder } = await supabase
+            const { data: disputedOrder, error: disputedOrderError } = await supabase
               .from("orders")
               .select("id")
               .eq("stripe_payment_intent_id", paymentIntent)
               .single();
 
+            if (disputedOrderError || !disputedOrder) {
+              throw disputedOrderError || new Error("Disputed order requires reconciliation");
+            }
             if (disputedOrder) {
-              await supabase
+              const { data: disputeWrite, error: disputeWriteError } = await supabase
                 .from("orders")
                 .update({
                   status: "disputed",
                   updated_at: new Date().toISOString(),
                 })
-                .eq("id", disputedOrder.id);
+                .eq("id", disputedOrder.id).select("id");
+              if (disputeWriteError) throw disputeWriteError;
+              if (!disputeWrite || disputeWrite.length !== 1) {
+                throw new Error("Disputed order marker was not persisted");
+              }
 
               await supabase.from("order_timeline").insert({
                 order_id: disputedOrder.id,
@@ -1219,11 +1222,18 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
               });
             }
 
+            const eventWideHold = await applyEventDisputeHold(
+              supabase, ticket.event_id,
+              Deno.env.get("DVNT_PLATFORM_OWNER_AUTH_ID") || "",
+            );
+
             // Notify host + co-hosts
             await notifyEventOrganizers(supabase, ticket.event_id, {
               type: "event_update",
               title: "Dispute opened",
-              body: "A buyer has disputed a charge for your event. Payouts are on hold until resolved.",
+              body: eventWideHold
+                ? "A buyer has disputed a charge for your event. Payouts are on hold until resolved."
+                : "A buyer has disputed a charge for your event. The disputed order is withheld; other allocations still require settlement safety checks.",
               data: {
                 entityType: "event",
                 entityId: ticket.event_id,
@@ -1233,7 +1243,7 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             });
 
             console.log(
-              "[stripe-webhook] Event payout on_hold due to dispute:",
+              "[stripe-webhook] Dispute recorded; event-wide hold:", eventWideHold,
               ticket.event_id,
             );
           }

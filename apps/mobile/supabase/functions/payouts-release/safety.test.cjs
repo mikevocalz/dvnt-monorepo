@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { stripTypeScriptTypes } = require('node:module');
 const { assertSafeRelease, checkedWrite } = require('./safety.ts');
+const { isConfiguredPlatformOwner } = require('../_shared/owner-dispute-policy.ts');
 const goodOrder = { id: 'order', total_cents: 1000, currency: 'usd', charge_model: 'separate_charges_and_transfers' };
 function harness(options = {}) {
   let handler, state = 'pending';
@@ -32,7 +33,7 @@ function harness(options = {}) {
           const match = table === 'promoter_ledger_entries' ? (options.ledger || []).filter(r => filters.every(([k,v]) => k === 'event_id' || r[k] === v)) : [{id:1}];
           return { data: options.zeroWrite === table ? [] : match, error:null };
         }
-        let data = table === 'orders' ? (filters.some(([k,v]) => k === 'status' && v === 'disputed') ? [] : options.orders || [goodOrder])
+        let data = table === 'orders' ? (filters.some(([k,v]) => k === 'status' && v === 'disputed') ? options.disputes || [] : options.orders || [goodOrder])
           : table === 'payouts' ? payoutRows
           : table === 'promoter_ledger_entries' ? options.ledger || []
           : table === 'event_financials' ? {gross_cents:1000, net_cents:900, dvnt_fee_cents:100}
@@ -43,8 +44,8 @@ function harness(options = {}) {
   }, rpc: async () => ({error:null}) };
   const source = fs.readFileSync(__dirname + '/index.ts','utf8').replace(/^import[\s\S]*?from [^;]+;\n/gm,'');
   vm.runInNewContext(stripTypeScriptTypes(source), { console: {log(){},error(){},warn(){}}, Request, Response, URLSearchParams, crypto,
-    Deno: {env:{get: k => k === 'RESEND_API_KEY' ? '' : 'test'}, serve: fn => {handler=fn;}},
-    createClient: () => db, assertSafeRelease, checkedWrite,
+    Deno: {env:{get: k => k === 'DVNT_PLATFORM_OWNER_AUTH_ID' ? (options.owner || '') : k === 'RESEND_API_KEY' ? '' : 'test'}, serve: fn => {handler=fn;}},
+    createClient: () => db, assertSafeRelease, checkedWrite, isConfiguredPlatformOwner,
     withSentry: (_,fn) => fn, withHeartbeat: (_,fn) => fn(), tryClaimJob: async()=>true, releaseJob: async()=>{},
     fetch: async (url,opts) => { transfers.push(opts); if(options.stripeThrow) throw new Error('uncertain response'); return Response.json({id:'tr_test'}); },
   });
@@ -109,4 +110,11 @@ test('dispute.closed cannot silently requeue generic payout holds',()=>{
  const source=fs.readFileSync(__dirname+'/../stripe-webhook/index.ts','utf8');
  const closed=source.slice(source.indexOf('case "charge.dispute.closed"'),source.indexOf('case "charge.dispute.closed"')+9000);
  assert.doesNotMatch(closed,/update\(\{ payout_status: "pending" \}\)/);
+});
+
+for (const owner of ['', 'host']) test(`dispute release stays blocked with owner config ${owner || 'empty'}`, async()=>{
+ const h=harness({owner, disputes:[{id:'disputed-order'}]});
+ const response=await h.invoke(); const body=await response.json();
+ assert.equal(response.status,503); assert.equal(h.transfers.length,0);
+ assert.match(JSON.stringify(body), owner ? /owner_dispute_requires_order_settlement/ : /"reason":"dispute"/);
 });
