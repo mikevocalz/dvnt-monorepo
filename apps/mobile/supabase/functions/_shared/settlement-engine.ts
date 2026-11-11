@@ -14,6 +14,7 @@ export async function settlementRpc(db:SettlementDatabase,name:string,args:Recor
 }
 export function settlementFailureCode(error:unknown):string {
  const message=error instanceof Error?error.message:String(error);
+ if(/promoter settlement pending/i.test(message))return 'promoter_pending';
  if(/onboarding/i.test(message))return 'onboarding_required';
  if(/capability|ownership|recipient binding/i.test(message))return 'recipient_restricted';
  if(/page limit|pagination/i.test(message))return 'source_audit_limit';
@@ -170,10 +171,20 @@ export async function processSettlementOrder(db:SettlementDatabase,provider:Sett
  // Fresh list after enrollment, plus reservations from concurrent processes.
  const fresh=await settlementRpc(db,'settlement_order',{p_order_id:order.order_id});
  let transferred=0;const held:string[]=[];
- for(const a of fresh.allocations||[]) {
-  if(a.state!=='held')continue;
+ // Explicit order is necessary even if a database JSON aggregate reorders.
+ // The database repeats the dependency check under lock; sorting is not a lock.
+ const allocations=[...(fresh.allocations||[])].sort((a:any,b:any)=>
+  (a.role==='promoter'?0:1)-(b.role==='promoter'?0:1));
+ for(const a of allocations) {
+  if(a.state!=='held'||a.obligation_satisfied===true)continue;
   const destination=a.candidate_destination;
   try {
+   if(a.role==='organizer') {
+    const current=await settlementRpc(db,'settlement_order',{p_order_id:order.order_id});
+    if(current.allocations.some((p:any)=>p.role==='promoter'&&p.obligation_satisfied!==true)) {
+     throw new Error('promoter settlement pending');
+    }
+   }
    if(!destination)throw new Error('Recipient onboarding incomplete');
    verifyRecipient(await provider.get(`/v2/core/accounts/${encodeURIComponent(destination)}?include[0]=configuration.recipient`),destination,a);
    // Reverify source immediately before each reservation; a prior recipient's

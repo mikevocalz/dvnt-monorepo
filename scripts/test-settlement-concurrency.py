@@ -52,7 +52,7 @@ class Database:
             self.sql(schema)
             for file in ("settlement-ledger.sql", "settlement-runtime.sql", "settlement-recovery.sql"):
                 self.sql((ROOT / "docs/payments/drafts" / file).read_text())
-            self.sql("UPDATE dvnt_settlement.controls SET checkout_enabled=true,transfers_enabled=true,release_delay_seconds=86400;")
+            self.sql("UPDATE dvnt_settlement.controls SET checkout_enabled=true,transfers_enabled=true,release_delay_seconds=86400; INSERT INTO dvnt_settlement.currency_reserves VALUES('usd',0,'synthetic fixture only'); UPDATE event_promoters SET stripe_account_id='acct_promoter';")
             return self
         except BaseException:
             self.__exit__(None, None, None)
@@ -74,7 +74,7 @@ class Database:
     def rpc(self, name, **args):
         return json.loads(self.sql(call(name, **args)))
 
-    def paid(self, suffix):
+    def paid(self, suffix, settle_promoter=True, enroll=True):
         snapshot = {"rail": "create-payment-intent", "selection": {"ticket_type_id": "fixture-tier"}, "order": {
             "user_id": "fixture-buyer", "event_id": 1, "quantity": 1, "currency": "usd",
             "total_cents": 11000, "subtotal_cents": 10000, "organizer_fee_cents": 500,
@@ -85,13 +85,24 @@ class Database:
         order = self.rpc("prepare_settlement_checkout", p_snapshot=snapshot, p_request_key="fixture-request-" + suffix)["order_id"]
         self.rpc("claim_settlement_checkout", p_order_id=order, p_params={"amount": "11000"})
         self.rpc("finalize_settlement_checkout", p_order_id=order, p_payment_intent_id="pi_" + suffix, p_checkout_session_id=None)
+        if not enroll:
+            self.sql("UPDATE public.orders SET status='paid' WHERE id="+literal(order))
+            return order, None
         self.rpc("settlement_verify_source", p_order_id=order, p_charge="ch_" + suffix,
                  p_pi="pi_" + suffix, p_currency="usd", p_gross=11000, p_tax=0)
         result = self.rpc("settlement_order", p_order_id=order)
         host = next(a for a in result["allocations"] if a["role"] == "organizer")
+        promo = next(a for a in result["allocations"] if a["role"] == "promoter")
+        if settle_promoter:
+            self.rpc("settlement_reserve", p_allocation=promo["id"], p_destination="acct_promoter",
+                     p_available=1000000, p_balance_epoch=self.rpc("settlement_balance_checkpoint")["epoch"])
+            self.rpc("settlement_reconcile_transfer", p_allocation=promo["id"], p_transfer="tr_promo_"+suffix,
+                     p_destination="acct_promoter", p_charge="ch_"+suffix, p_currency="usd", p_amount=1000)
         return order, host["id"]
 
-    def reserve(self, allocation, epoch=0, amount=10000):
+    def reserve(self, allocation, epoch=None, amount=10000):
+        if epoch is None:
+            epoch = self.rpc("settlement_balance_checkpoint")["epoch"]
         return call("settlement_reserve", p_allocation=allocation, p_destination="acct_host",
                     p_available=amount, p_balance_epoch=epoch)
 
@@ -164,7 +175,7 @@ def refund_wins_before_reservation():
         error = db.sql(db.reserve(allocation), ok=False)
         db.finish(first)
         assert "settlement held" in error, error
-        assert db.sql("SELECT count(*) FROM dvnt_settlement.deliveries WHERE state<>'held';") == "0"
+        assert db.sql("SELECT state FROM dvnt_settlement.deliveries WHERE allocation_id=" + literal(allocation)) == "held"
 
 
 def reservation_wins_then_refund_quarantines():
@@ -174,7 +185,7 @@ def reservation_wins_then_refund_quarantines():
         db.rpc("settlement_hold", p_order_id=order, p_event_id="re_fixture", p_reason="refund")
         db.finish(first)
         assert db.sql("SELECT state FROM dvnt_settlement.deliveries WHERE allocation_id=" + literal(allocation)) == "uncertain"
-        assert "settlement held" in db.sql(db.reserve(allocation), ok=False)
+        assert "settlement held" in db.sql(db.reserve(allocation, amount=30000), ok=False)
 
 
 def bank_setup(db, suffix):
@@ -214,6 +225,48 @@ def bank_proof_races_uncommitted_failure():
         assert db.sql("SELECT bank_payout_state FROM dvnt_settlement.deliveries WHERE allocation_id=" + literal(allocation)) == "failed"
 
 
+def promoter_claim_blocks_concurrent_host():
+    with Database() as db:
+        order, host = db.paid("priority", settle_promoter=False)
+        promo = next(a for a in db.rpc("settlement_order", p_order_id=order)["allocations"] if a["role"] == "promoter")
+        epoch = db.rpc("settlement_balance_checkpoint")["epoch"]
+        first = db.holding(call("settlement_reserve", p_allocation=promo["id"], p_destination="acct_promoter",
+                                p_available=100000, p_balance_epoch=epoch))
+        error = db.sql(db.reserve(host, epoch=epoch), ok=False)
+        db.finish(first)
+        assert "promoter settlement pending" in error, error
+        assert db.sql("SELECT state FROM dvnt_settlement.deliveries WHERE allocation_id="+literal(host)) == "held"
+
+
+def promoter_completion_invalidates_concurrent_host_balance():
+    with Database() as db:
+        order, host = db.paid("completion", settle_promoter=False)
+        promo = next(a for a in db.rpc("settlement_order", p_order_id=order)["allocations"] if a["role"] == "promoter")
+        epoch = db.rpc("settlement_balance_checkpoint")["epoch"]
+        db.rpc("settlement_reserve", p_allocation=promo["id"], p_destination="acct_promoter", p_available=100000, p_balance_epoch=epoch)
+        first = db.holding(call("settlement_reconcile_transfer", p_allocation=promo["id"], p_transfer="tr_priority",
+                                p_destination="acct_promoter", p_charge="ch_completion", p_currency="usd", p_amount=1000))
+        error = db.sql(db.reserve(host, epoch=epoch), ok=False)
+        db.finish(first)
+        assert "insufficient unreserved funds" in error, error
+        db.sql(db.reserve(host))
+
+
+def enrollment_serializes_liability_representation_change():
+    with Database() as db:
+        _, host = db.paid("enrollment_host")
+        pending, _ = db.paid("enrollment_pending", enroll=False)
+        old = db.rpc("settlement_balance_checkpoint")["epoch"]
+        first = db.holding(call("settlement_verify_source", p_order_id=pending, p_charge="ch_enrollment_pending",
+                                p_pi="pi_enrollment_pending", p_currency="usd", p_gross=11000, p_tax=0))
+        error = db.sql(db.reserve(host, epoch=old, amount=100000), ok=False)
+        db.finish(first)
+        assert "insufficient unreserved funds" in error, error
+        assert db.rpc("settlement_balance_checkpoint")["epoch"] > old
+        assert "insufficient unreserved funds" in db.sql(db.reserve(host, amount=9499), ok=False)
+        db.sql(db.reserve(host, amount=9500))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--disposable-ci-postgres", action="store_true")
@@ -232,7 +285,9 @@ def main():
                    input=roles, text=True, check=True, timeout=20)
     for test in (duplicate_reservation, shared_funding_mutex, stale_balance_after_transfer,
                  refund_wins_before_reservation, reservation_wins_then_refund_quarantines,
-                 bank_failure_races_first_paid_proof, bank_proof_races_uncommitted_failure):
+                 bank_failure_races_first_paid_proof, bank_proof_races_uncommitted_failure,
+                 promoter_claim_blocks_concurrent_host, promoter_completion_invalidates_concurrent_host_balance,
+                 enrollment_serializes_liability_representation_change):
         test()
         print("PASS", test.__name__, flush=True)
 

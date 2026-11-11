@@ -3,6 +3,16 @@ ALTER TABLE dvnt_settlement.controls ADD COLUMN checkout_enabled boolean NOT NUL
  ADD COLUMN owner_host_ids text[] NOT NULL DEFAULT '{}',
  ADD COLUMN release_delay_seconds integer CHECK(release_delay_seconds>=0),
  ADD COLUMN funding_epoch bigint NOT NULL DEFAULT 0;
+-- No default is a safe risk reserve. Reviewed rollout must configure each
+-- currency for platform-paid Connect fees, refunds, disputes and balance risk.
+-- This does not fund or enroll legacy destination-charge commission debt.
+CREATE TABLE dvnt_settlement.currency_reserves (
+ currency text PRIMARY KEY CHECK(currency ~ '^[a-z]{3}$'),
+ reserve_cents bigint NOT NULL CHECK(reserve_cents>=0),
+ policy_reference text NOT NULL CHECK(length(btrim(policy_reference))>0)
+);
+ALTER TABLE dvnt_settlement.currency_reserves ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON dvnt_settlement.currency_reserves FROM PUBLIC,anon,authenticated,service_role;
 CREATE TABLE dvnt_settlement.event_stops(event_id int PRIMARY KEY REFERENCES public.events(id),reason text NOT NULL CHECK(reason IN ('dispute_only','manual','recovery')));
 ALTER TABLE dvnt_settlement.event_stops ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON dvnt_settlement.event_stops FROM PUBLIC,anon,authenticated,service_role;
@@ -185,6 +195,7 @@ BEGIN
   coalesce((SELECT jsonb_agg(jsonb_build_object('id',a.id,'role',a.role,'recipient_id',a.recipient_id,'recipient_user_id',a.recipient_user_id,
    'amount_cents',a.amount_cents,'state',d.state,'destination',d.destination,'stripe_transfer_id',d.stripe_transfer_id,
    'idempotency_key',d.idempotency_key,'charge_id',s.charge_id,'currency',s.currency,
+   'obligation_satisfied',CASE WHEN a.role='promoter' THEN dvnt_settlement.promoter_obligation_satisfied(a.id) ELSE false END,
    'candidate_destination',CASE WHEN a.role='organizer' THEN
      (SELECT oa.stripe_account_id FROM public.organizer_accounts oa WHERE oa.host_id=a.recipient_id LIMIT 1)
     ELSE (SELECT coalesce(ep.stripe_account_id,(SELECT oa.stripe_account_id FROM public.organizer_accounts oa WHERE oa.host_id=a.recipient_user_id LIMIT 1))
@@ -211,6 +222,10 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE o public.orders%ROWTYPE;c dvnt_settlement.checkouts%ROWTYPE; v_release_at timestamptz; existing_release timestamptz; delay_seconds int;
 BEGIN
  SELECT * INTO STRICT o FROM public.orders WHERE id=p_order_id FOR UPDATE;
+ -- Enrollment switches a commission from checkout liability to allocation
+ -- liability. Serialize that representation change with the global budget even
+ -- when a prior webhook has already set status='paid'.
+ PERFORM 1 FROM dvnt_settlement.controls WHERE singleton FOR UPDATE;
  SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=o.id FOR UPDATE;
  SELECT release_delay_seconds INTO delay_seconds FROM dvnt_settlement.controls WHERE singleton;
  IF delay_seconds IS NULL THEN RAISE EXCEPTION 'release policy not configured'; END IF;
@@ -221,6 +236,7 @@ BEGIN
   OR c.last_error LIKE 'hold:%' OR o.status IN ('refunded','partially_refunded','disputed','canceled','cancelled','failed') THEN RAISE EXCEPTION 'source not eligible'; END IF;
  IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.orders WHERE order_id=o.id) THEN
   UPDATE public.orders SET status='paid',total_cents=p_gross,tax_cents=p_tax,paid_at=coalesce(paid_at,now()) WHERE id=o.id;
+  UPDATE dvnt_settlement.controls SET funding_epoch=funding_epoch+1 WHERE singleton;
  END IF;
  PERFORM dvnt_settlement.enroll(o.id,p_charge,p_pi,p_currency,p_gross,coalesce(existing_release,v_release_at));
  UPDATE dvnt_settlement.orders SET release_at=greatest(dvnt_settlement.orders.release_at,v_release_at) WHERE order_id=o.id;
@@ -238,7 +254,7 @@ LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$ SELECT jsonb_build_object
 CREATE FUNCTION public.settlement_reserve(p_allocation uuid,p_destination text,p_available bigint,p_balance_epoch bigint)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE a dvnt_settlement.allocations%ROWTYPE; o public.orders%ROWTYPE;
- e public.events%ROWTYPE; expected text; pending bigint; result jsonb; c dvnt_settlement.checkouts%ROWTYPE;
+ e public.events%ROWTYPE; expected text; pending bigint; protected_commission bigint; risk_reserve bigint; result jsonb; c dvnt_settlement.checkouts%ROWTYPE;
 BEGIN
  SELECT * INTO STRICT a FROM dvnt_settlement.allocations WHERE id=p_allocation;
  SELECT * INTO STRICT o FROM public.orders WHERE id=a.order_id FOR UPDATE;
@@ -257,11 +273,28 @@ BEGIN
  ELSE SELECT coalesce(ep.stripe_account_id,oa.stripe_account_id) INTO expected FROM public.event_promoters ep
   LEFT JOIN public.organizer_accounts oa ON oa.host_id=a.recipient_user_id WHERE ep.id::text=a.recipient_id; END IF;
  IF expected IS NULL OR expected IS DISTINCT FROM p_destination THEN RAISE EXCEPTION 'recipient binding mismatch'; END IF;
+ -- Held promoter liabilities remain reserved even without an account or
+ -- after an error. In-flight/unknown sends are counted once, never twice.
  SELECT coalesce(sum(x.amount_cents),0) INTO pending FROM dvnt_settlement.allocations x
   JOIN dvnt_settlement.deliveries d ON d.allocation_id=x.id JOIN dvnt_settlement.orders s ON s.order_id=x.order_id
   WHERE d.state IN ('reserved','uncertain') AND s.currency=o.currency;
+ SELECT coalesce(sum(x.amount_cents),0) INTO protected_commission FROM dvnt_settlement.allocations x
+  JOIN dvnt_settlement.deliveries d ON d.allocation_id=x.id JOIN dvnt_settlement.orders s ON s.order_id=x.order_id
+  WHERE x.role='promoter' AND x.id<>a.id AND d.state='held' AND s.currency=o.currency
+    AND NOT dvnt_settlement.promoter_obligation_satisfied(x.id);
+ -- A successful new-model payment can precede enrollment. Its frozen
+ -- commission cannot be spent in that webhook/verification gap. Payment-pending
+ -- checkout attempts do not pretend money exists. Legacy orders stay excluded.
+ SELECT protected_commission+coalesce(sum((q.snapshot->'order'->>'promoter_commission_amount_cents')::bigint),0)
+ INTO protected_commission FROM dvnt_settlement.checkouts q JOIN public.orders src ON src.id=q.order_id
+ WHERE src.charge_model='separate_charges_and_transfers' AND src.status IN ('paid','partially_refunded','disputed')
+  AND src.currency=o.currency AND NOT EXISTS(SELECT 1 FROM dvnt_settlement.orders enrolled WHERE enrolled.order_id=src.id);
+ SELECT reserve_cents INTO risk_reserve FROM dvnt_settlement.currency_reserves WHERE currency=o.currency;
+ IF risk_reserve IS NULL THEN RAISE EXCEPTION 'platform risk reserve funding policy missing'; END IF;
  IF p_balance_epoch IS DISTINCT FROM (SELECT funding_epoch FROM dvnt_settlement.controls WHERE singleton)
-  OR p_available IS NULL OR p_available<pending+a.amount_cents THEN RAISE EXCEPTION 'insufficient unreserved funds'; END IF;
+  OR p_available IS NULL OR p_available<pending+protected_commission+risk_reserve+a.amount_cents THEN
+  RAISE EXCEPTION 'insufficient unreserved funds';
+ END IF;
  result:=dvnt_settlement.reserve(a.id,p_destination);
  UPDATE dvnt_settlement.deliveries SET last_error=NULL WHERE allocation_id=a.id;
  RETURN result || jsonb_build_object('order_id',o.id,'transfer_group','dvnt_settlement_'||o.id::text);
@@ -324,6 +357,20 @@ REVOKE ALL ON FUNCTION dvnt_settlement.hold_on_money_state() FROM PUBLIC,anon,au
 CREATE TRIGGER settlement_money_state_hold AFTER UPDATE ON public.orders
  FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.hold_on_money_state();
 
+-- A newly paid checkout changes the protected-liability set. Serialize its
+-- commit with reservations, invalidating pre-commit available-balance reads.
+CREATE FUNCTION dvnt_settlement.funding_liability_changed() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF NEW.charge_model='separate_charges_and_transfers' AND NEW.status IS DISTINCT FROM OLD.status THEN
+  UPDATE dvnt_settlement.controls SET funding_epoch=funding_epoch+1 WHERE singleton;
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION dvnt_settlement.funding_liability_changed() FROM PUBLIC,anon,authenticated,service_role;
+CREATE TRIGGER settlement_funding_liability_change AFTER UPDATE ON public.orders
+ FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.funding_liability_changed();
+
 CREATE FUNCTION public.settlement_legacy_event_eligible(p_event_id int) RETURNS jsonb
 LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
  SELECT jsonb_build_object('eligible',NOT EXISTS(SELECT 1 FROM dvnt_settlement.checkouts c
@@ -354,7 +401,7 @@ $$;
 CREATE FUNCTION public.settlement_processing_error(p_order_id uuid,p_code text,p_allocation uuid DEFAULT NULL) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
- IF p_code NOT IN ('onboarding_required','recipient_restricted','funding_required','source_audit_limit','source_verification_stale','verification_required','hold_required') THEN RAISE EXCEPTION 'unknown processing reason'; END IF;
+ IF p_code NOT IN ('onboarding_required','recipient_restricted','funding_required','source_audit_limit','source_verification_stale','verification_required','hold_required','promoter_pending') THEN RAISE EXCEPTION 'unknown processing reason'; END IF;
  IF p_allocation IS NULL THEN
   UPDATE dvnt_settlement.checkouts SET last_error=p_code WHERE order_id=p_order_id AND coalesce(last_error,'') NOT LIKE 'hold:%';
  ELSE

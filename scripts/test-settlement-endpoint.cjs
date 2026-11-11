@@ -19,7 +19,7 @@ test('actual worker entrypoint rejects missing auth and default-disabled rollout
 test('actual worker entrypoint + complete SQL + fake Stripe processes only explicitly enabled transfers',async()=>{
  const f=await setup();try{await f.pg.exec(readFileSync(resolve(root,'docs/payments/drafts/settlement-recovery.sql'),'utf8'));await f.pg.exec(readFileSync(resolve(root,'docs/payments/drafts/settlement-observability.sql'),'utf8'));
  const h=endpoint(f.db,f.provider,{SETTLEMENT_WORKER_ENABLED:'true'});assert.equal((await h.call()).status,200);assert.equal(f.transfers.length,0);
- const enabled=endpoint(f.db,f.provider,{SETTLEMENT_WORKER_ENABLED:'true',SETTLEMENT_TRANSFERS_ENABLED:'true'});const result=await enabled.call();assert.equal(result.status,200);assert.equal(f.transfers.length,1);
+ const enabled=endpoint(f.db,f.provider,{SETTLEMENT_WORKER_ENABLED:'true',SETTLEMENT_TRANSFERS_ENABLED:'true'});const result=await enabled.call();assert.equal(result.status,200);assert.equal(f.transfers.length,2);assert.deepEqual(f.transfers.map(t=>t.destination),['acct_promoter','acct_host']);
  assert.ok(enabled.headers.every(x=>x['Stripe-Version']==='2026-09-30.endive'));
 }finally{await f.pg.close()}});
 test('bank verifier provider requests preserve connected account context and hide provider response errors',async()=>{

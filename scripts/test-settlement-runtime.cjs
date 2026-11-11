@@ -9,7 +9,7 @@ async function fixture(){const db=new PGlite();
 const snapshot=()=>({rail:'create-payment-intent',selection:{ticket_type_id:'fixture-tier'},order:{user_id:'fixture-buyer',event_id:1,quantity:1,currency:'usd',total_cents:11000,subtotal_cents:10000,organizer_fee_cents:500,platform_fee_cents:1000,dvnt_total_fee_cents:1000,promoter_code:'FIXTURE',promoter_commission_amount_cents:1000,promoter_commission_bps:1000,promoter_customer_discount_bps:0}});
 async function rpc(db,name,args){if(name==='settlement_reserve'&&args.p_balance_epoch==null)args={...args,p_balance_epoch:(await db.query('select funding_epoch from dvnt_settlement.controls')).rows[0].funding_epoch};const keys=Object.keys(args);const {rows}=await db.query(`select public.${name}(${keys.map((k,i)=>`${k}=>$${i+1}`).join(',')}) as v`,Object.values(args));return rows[0].v;}
 async function prepare(db,s=snapshot(),key='fixture-request-0001'){return rpc(db,'prepare_settlement_checkout',{p_snapshot:s,p_request_key:key});}
-async function enabled(db){await db.exec('update dvnt_settlement.controls set checkout_enabled=true,transfers_enabled=true,release_delay_seconds=86400');}
+async function enabled(db){await db.exec("update dvnt_settlement.controls set checkout_enabled=true,transfers_enabled=true,release_delay_seconds=86400; insert into dvnt_settlement.currency_reserves values('usd',0,'synthetic fixture only') on conflict do nothing");}
 async function paid(db){await enabled(db);const p=await prepare(db);await rpc(db,'claim_settlement_checkout',{p_order_id:p.order_id,p_params:{amount:'11000'}});await rpc(db,'finalize_settlement_checkout',{p_order_id:p.order_id,p_payment_intent_id:'pi_fixture',p_checkout_session_id:null});await rpc(db,'settlement_verify_source',{p_order_id:p.order_id,p_charge:'ch_fixture',p_pi:'pi_fixture',p_currency:'usd',p_gross:11000,p_tax:0});return p;}
 
 test('real checkout RPCs: disabled gate, durable snapshot, exact replay, claim once, immutable links',async()=>{
@@ -37,11 +37,14 @@ const db=await fixture();try{const p=await paid(db);const order=await rpc(db,'se
  await assert.rejects(rpc(db,'settlement_reserve',{p_allocation:host.id,p_destination:'acct_host',p_available:-1}),/insufficient/);
  await db.exec("update events set payout_status='on_hold'");await assert.rejects(rpc(db,'settlement_reserve',{p_allocation:host.id,p_destination:'acct_host',p_available:10000}),/event dispute/);
  await db.exec("update dvnt_settlement.controls set owner_host_ids=ARRAY['fixture-host']; INSERT INTO dvnt_settlement.event_stops VALUES(1,'dispute_only')");
- const r=await rpc(db,'settlement_reserve',{p_allocation:host.id,p_destination:'acct_host',p_available:10000});assert.equal(r.amount,8500);
+ await assert.rejects(rpc(db,'settlement_reserve',{p_allocation:host.id,p_destination:'acct_host',p_available:10000}),/promoter settlement pending/);
  await db.exec("update event_promoters set stripe_account_id='acct_promoter'");
- await assert.rejects(rpc(db,'settlement_reserve',{p_allocation:promoter.id,p_destination:'acct_promoter',p_available:9000}),/insufficient/);
+ await assert.rejects(rpc(db,'settlement_reserve',{p_allocation:promoter.id,p_destination:'acct_promoter',p_available:999}),/insufficient/);
  await rpc(db,'settlement_reserve',{p_allocation:promoter.id,p_destination:'acct_promoter',p_available:10000});
  await assert.rejects(rpc(db,'settlement_reserve',{p_allocation:promoter.id,p_destination:'acct_promoter',p_available:20000}),/reconcile/);
+ await assert.rejects(rpc(db,'settlement_reserve',{p_allocation:host.id,p_destination:'acct_host',p_available:20000}),/promoter settlement pending/);
+ await rpc(db,'settlement_reconcile_transfer',{p_allocation:promoter.id,p_transfer:'tr_promoter',p_destination:'acct_promoter',p_charge:'ch_fixture',p_currency:'usd',p_amount:1000});
+ const r=await rpc(db,'settlement_reserve',{p_allocation:host.id,p_destination:'acct_host',p_available:9000});assert.equal(r.amount,8500);
 }finally{await db.close()}});
 
 test('refund holds before enrollment and after reservation survive verified source replays',async()=>{
@@ -71,10 +74,10 @@ test('more than 100 blocked orders cannot starve newer payable work',async()=>{
 });
 test('funding epoch rejects a stale available balance after transfer commit',async()=>{
  const db=await fixture();try{const p=await paid(db);const o=await rpc(db,'settlement_order',{p_order_id:p.order_id});const host=o.allocations.find(a=>a.role==='organizer');const promo=o.allocations.find(a=>a.role==='promoter');
- const checkpoint=await rpc(db,'settlement_balance_checkpoint',{});await rpc(db,'settlement_reserve',{p_allocation:host.id,p_destination:'acct_host',p_available:10000,p_balance_epoch:checkpoint.epoch});
- await rpc(db,'settlement_reconcile_transfer',{p_allocation:host.id,p_transfer:'tr_fixture',p_destination:'acct_host',p_charge:'ch_fixture',p_currency:'usd',p_amount:8500});
  await db.exec("update event_promoters set stripe_account_id='acct_promoter'");
- await assert.rejects(rpc(db,'settlement_reserve',{p_allocation:promo.id,p_destination:'acct_promoter',p_available:10000,p_balance_epoch:checkpoint.epoch}),/insufficient/);
+ const checkpoint=await rpc(db,'settlement_balance_checkpoint',{});await rpc(db,'settlement_reserve',{p_allocation:promo.id,p_destination:'acct_promoter',p_available:10000,p_balance_epoch:checkpoint.epoch});
+ await rpc(db,'settlement_reconcile_transfer',{p_allocation:promo.id,p_transfer:'tr_fixture',p_destination:'acct_promoter',p_charge:'ch_fixture',p_currency:'usd',p_amount:1000});
+ await assert.rejects(rpc(db,'settlement_reserve',{p_allocation:host.id,p_destination:'acct_host',p_available:10000,p_balance_epoch:checkpoint.epoch}),/insufficient/);
  }finally{await db.close()}
 });
 test('frozen recipient ownership survives host and promoter account-link changes',async()=>{
