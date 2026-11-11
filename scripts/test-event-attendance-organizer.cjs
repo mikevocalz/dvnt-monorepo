@@ -194,12 +194,17 @@ test('mounted web and native controls show only protected events and preserve ex
   } finally { dom.window.close(); }
 });
 
+test('legacy edit route forwards to the canonical native editor tested below', () => {
+  const source = fs.readFileSync(path.join(root, 'packages/app/features/routes/screens/(protected)/events/edit/[id].tsx'), 'utf8');
+  assert.match(source, /export \{ default \} from "\.\.\/\[id\]\/edit"/);
+  assert.doesNotMatch(source, /mutateAsync|function .*Edit/);
+});
+
 test('every platform submit payload forwards only explicit attendee opt-in', () => {
   const cases = [
     ['packages/app/features/events/event-edit.web.tsx', 'updateData', 's'],
     ['packages/app/features/routes/screens/(protected)/events/create.tsx', 'eventData', 'showAttendees'],
     ['packages/app/features/routes/screens/(protected)/events/[id]/edit.tsx', 'updateData', 'showAttendees'],
-    ['packages/app/features/routes/screens/(protected)/events/edit/[id].tsx', null, 'attendance'],
   ];
   for (const [file, variableName, binding] of cases) {
     const filename = path.join(root, file);
@@ -243,7 +248,6 @@ test('all editor hydration paths prefer raw fields, including explicit null, ove
   for (const file of [
     'packages/app/features/events/event-edit.web.tsx',
     'packages/app/features/routes/screens/(protected)/events/[id]/edit.tsx',
-    'packages/app/features/routes/screens/(protected)/events/edit/[id].tsx',
   ]) {
     const filename = path.join(root, file);
     const source = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
