@@ -104,7 +104,7 @@ test('unfollow immediately clears payload and stale account result cannot mutate
 test('all protected payload families and detached overlays clear before cancellation awaits', async () => {
  const h=harness(); const keys=[
   ['posts','detail',1],['profilePosts','author'],['profileTaggedPosts','author'],
-  ['postTags',1],['search','posts','query'],['search','v2','discover'],
+  ['postLikers',1,'a'],['postTags',1],['search','posts','query'],['search','v2','discover'],
   ['search','v2','results','query'],['comments','post',1],['comments','thread',2],
   ['bookmarks','posts','a'],['activities','a'],['likedPosts','a'],['notifications','a'],
   ['users','followers','private-owner'],['users','following','private-owner'],
@@ -116,9 +116,11 @@ test('all protected payload families and detached overlays clear before cancella
   for(const key of keys)h.client.setQueryData(key,{secret:'protected media or identity'});
   h.client.setQueryData(['events','public'],{title:'Keep unrelated event cache'});
   h.client.setQueryData(['users','profile','public-owner'],{username:'Keep public header'});
+  h.client.setQueryData(['likeState','a','1'],{hasLiked:true,likes:77});
   const pending=h.reset(h.client);
   assert.equal(h.lifecycle[0],'overlays-cleared');
   for(const key of keys)assert.equal(h.client.getQueryData(key),undefined,JSON.stringify(key)+' must clear synchronously');
+  assert.equal(h.client.getQueryData(['likeState','a','1']),null,'cache-only engagement uses a tombstone');
   assert.equal(invalidated.length,0,'no refetch before cancellation settles');
   assert.equal(h.client.getQueryData(['events','public']).title,'Keep unrelated event cache');
   assert.equal(h.client.getQueryData(['users','profile','public-owner']).username,'Keep public header');
