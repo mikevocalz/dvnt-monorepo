@@ -16,6 +16,12 @@ const ADDON_LINE = '00000000-0000-4000-8000-0000000000b1';
 
 // Fake service-role client. Each read resolves to the rows `tables` lists for
 // that table, filtered by the .eq() calls the handler made.
+function loadRealHelper(file) {
+ const exports = {};
+ const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ vm.runInNewContext(code, {exports, console, encodeURIComponent});
+ return exports;
+}
 function fakeDb(tables) {
   const reads = [], rpcs = [];
   return {
@@ -69,7 +75,7 @@ function loadRefund(db) {
       stripe.push({ url, body: new URLSearchParams(init.body) });
       return Response.json({ id: 're_test' });
     },
-    require: name => name.includes('supabase-js') ? { createClient: () => db } : stubs[path.basename(name)],
+    require: name => name.includes('supabase-js') ? { createClient: () => db } : stubs[path.basename(name)] || loadRealHelper(path.resolve(__dirname,name)),
   });
   return {
     stripe,

@@ -71,6 +71,7 @@ function checkout(rail, patch = {}, options = {}) {
     },
     rpc: async (name, args) => {
       ops.push({ action: "rpc", name, args });
+      if (name === "lookup_settlement_checkout") return {data:{exists:false}};
       if (name === "free_ticket_checkout_atomic") {
         if (options.raceOrder) { insertLost = true; return { data: { ok: true, idempotent: true, order: options.raceOrder, tickets: options.tickets }, error: null }; }
         issued.push(...args.p_ticket_rows);
@@ -110,7 +111,7 @@ function checkout(rail, patch = {}, options = {}) {
   };
   const realHelpers = new Set([
     "checkout-replay.ts", "tier-sale-availability.ts", "tier-visibility.ts", "sales-cutoff.ts",
-    "fee-calculator.ts", "async-settlement.ts", "checkout-line-items.ts",
+    "fee-calculator.ts", "async-settlement.ts", "checkout-line-items.ts", "settlement-checkout.ts",
   ]);
   let handler;
   const context = {

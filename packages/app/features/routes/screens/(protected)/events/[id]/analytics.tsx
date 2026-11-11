@@ -1,3 +1,4 @@
+import { settlementSummaryLines } from "@dvnt/app/lib/payments/settlement-status";
 /**
  * Event Analytics — Organizer Dashboard
  *
@@ -330,6 +331,9 @@ function EventAnalyticsContent() {
         }
       >
         {/* ── Top-line stats ── */}
+<View style={{ padding: 16, gap: 6 }}><Text style={{ color: "white", fontWeight: "600" }}>Settlement status</Text>
+            {settlementSummaryLines(data.settlement, "organizer").map((line, i) => <Text key={i} style={{ color: "#b8b8c5" }}>{line}</Text>)}
+            <Text style={{ color: "#9090a0", fontSize: 12 }}>Amounts are gross transfers; bank totals may be reduced by fees or adjustments.</Text></View>
         <View style={styles.statGrid}>
           <StatCard
             icon={<DollarSign size={16} color="#22c55e" />}

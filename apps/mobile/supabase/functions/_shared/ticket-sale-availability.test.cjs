@@ -106,7 +106,7 @@ function checkout(rail, patch = {}, options = {}) {
   };
   const realHelpers = new Set([
     "checkout-replay.ts", "tier-sale-availability.ts", "tier-visibility.ts", "sales-cutoff.ts",
-    "fee-calculator.ts", "async-settlement.ts", "checkout-line-items.ts",
+    "fee-calculator.ts", "async-settlement.ts", "checkout-line-items.ts", "settlement-checkout.ts",
   ]);
   let handler;
   const context = {

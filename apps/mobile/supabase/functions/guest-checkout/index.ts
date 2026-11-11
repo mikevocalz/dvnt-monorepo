@@ -1,3 +1,4 @@
+import { prepareSettlementCheckout, settlementStripeParams, settlementProviderObject, finalizeSettlementCheckout, SettlementCheckoutError } from "../_shared/settlement-checkout.ts";
 /**
  * Edge Function: guest-checkout
  *
@@ -97,12 +98,13 @@ async function recordFreePromoterAttribution(supabase: any, order: {
 }
 
 
-async function stripePost(endpoint: string, body: Record<string, string>): Promise<any> {
+async function stripePost(endpoint: string, body: Record<string, string>, idempotencyKey?: string): Promise<any> {
   const res = await fetch(`https://api.stripe.com/v1${endpoint}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       "Content-Type": "application/x-www-form-urlencoded",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: new URLSearchParams(body).toString(),
   });
@@ -436,7 +438,33 @@ Deno.serve(async (req) => {
 
     // Hosted Checkout Session. Metadata mirrors what stripe-webhook reads for
     // guest event_ticket issuance (user_id omitted → treated as a guest).
-    const params: Record<string, string> = {
+    const orderSnapshot = {
+      currency: "usd",
+      user_id: null,
+      guest_email: guestEmail,
+      guest_phone: guestPhone,
+      type: "event_ticket",
+      status: "payment_pending",
+      quantity,
+      subtotal_cents: fees.subtotal,
+      platform_fee_cents: fees.dvnt_total_fee,
+      // Moded breakdown: customer_charge == subtotal and buyer_* == 0 in
+      // absorb mode, so the columns can be written straight through.
+      total_cents: fees.customer_charge_amount,
+      buyer_pct_fee_cents: fees.buyer_pct_fee,
+      buyer_per_ticket_fee_cents: fees.buyer_per_ticket_fee,
+      buyer_fee_cents: fees.buyer_fee,
+      org_pct_fee_cents: fees.org_pct_fee,
+      org_per_ticket_fee_cents: fees.org_per_ticket_fee,
+      organizer_fee_cents: fees.organizer_fee,
+      dvnt_total_fee_cents: fees.dvnt_total_fee,
+      fee_policy_version: fees.fee_policy_version,
+      event_id: eventId,
+      ...pricing.orderFields,
+    };
+    const settlement = await prepareSettlementCheckout(supabase, { rail: "guest-checkout", order: orderSnapshot, selection: { ticket_type_id: ticketTypeId } }, idempotencyKey);
+
+    let params: Record<string, string> = {
       mode: "payment",
       "payment_method_types[0]": "card",
       customer_email: guestEmail,
@@ -447,6 +475,7 @@ Deno.serve(async (req) => {
       expires_at: String(Math.floor(Date.now() / 1000) + 30 * 60),
       success_url: `${SITE_URL}/checkout/success?email=${encodeURIComponent(guestEmail)}`,
       cancel_url: `${SITE_URL}/events`,
+      "metadata[charge_model]": "destination_charge",
       "metadata[type]": "event_ticket",
       "metadata[event_id]": String(eventId),
       "metadata[ticket_type_id]": ticketTypeId,
@@ -458,6 +487,7 @@ Deno.serve(async (req) => {
         ? { "metadata[attendee_names]": JSON.stringify(attendeeNames) }
         : {}),
       // Destination charge → organizer's connected account; DVNT keeps the fee.
+      "payment_intent_data[metadata][charge_model]": "destination_charge",
       "payment_intent_data[transfer_data][destination]": organizer.stripe_account_id,
       "payment_intent_data[application_fee_amount]": String(fees.application_fee_amount),
       "payment_intent_data[metadata][type]": "event_ticket",
@@ -478,7 +508,13 @@ Deno.serve(async (req) => {
       params[`line_items[${feeLine}][price_data][product_data][name]`] = "Service fee";
       params[`line_items[${feeLine}][quantity]`] = "1";
     }
-    const session = await stripePost("/checkout/sessions", params);
+    params = settlementStripeParams(settlement, params, true);
+    const session = await settlementProviderObject(supabase, settlement, params, true,
+      (key) => stripePost("/checkout/sessions", params, key));
+    await finalizeSettlementCheckout(supabase, settlement, {
+      checkoutSessionId: session.id,
+      paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : null,
+    });
 
     // Reserve inventory for the redirect window. The stripe-webhook converts
     // this hold (status → converted) by payment_intent_id = session.id on
@@ -528,34 +564,13 @@ Deno.serve(async (req) => {
     // nothing to attach to. Fee columns are server-truth from computeFees;
     // in absorb mode the buyer-side fee is zeroed (organizer eats it) and
     // total is just the subtotal.
-    const { error: guestOrderError } = await supabase.from("orders").insert({
-      user_id: null,
-      guest_email: guestEmail,
-      guest_phone: guestPhone,
-      type: "event_ticket",
-      status: "payment_pending",
-      quantity,
-      subtotal_cents: fees.subtotal,
-      platform_fee_cents: fees.dvnt_total_fee,
-      // Moded breakdown: customer_charge == subtotal and buyer_* == 0 in
-      // absorb mode, so the columns can be written straight through.
-      total_cents: fees.customer_charge_amount,
-      buyer_pct_fee_cents: fees.buyer_pct_fee,
-      buyer_per_ticket_fee_cents: fees.buyer_per_ticket_fee,
-      buyer_fee_cents: fees.buyer_fee,
-      org_pct_fee_cents: fees.org_pct_fee,
-      org_per_ticket_fee_cents: fees.org_per_ticket_fee,
-      organizer_fee_cents: fees.organizer_fee,
-      dvnt_total_fee_cents: fees.dvnt_total_fee,
-      fee_policy_version: fees.fee_policy_version,
-      event_id: eventId,
-      stripe_checkout_session_id: session.id,
-      ...pricing.orderFields,
+    const { error: guestOrderError } = settlement ? { error: null } : await supabase.from("orders").insert({
+      ...orderSnapshot, charge_model: "destination_charge", stripe_checkout_session_id: session.id,
     });
     if (guestOrderError) {
-      // Non-fatal: the Stripe session is already live. Log loudly —
-      // reconciliation can still repair the order later.
+      // Do not release a payment URL without a durable order.
       console.error("[guest-checkout] order insert failed:", guestOrderError);
+      return err("checkout_failed", "Could not save checkout order.", 500);
     }
 
     // The profile is made when the webhook issues the tickets, not now: an
@@ -567,6 +582,7 @@ Deno.serve(async (req) => {
 
     return json({ ok: true, url: session.url });
   } catch (e) {
+    if (e instanceof SettlementCheckoutError) return err("checkout_reconciliation_required", e.message, e.status);
     if (e instanceof GuestPriceError) return err("invalid_discount", e.message, 400);
     console.error("[guest-checkout]", e);
     return err("internal_error", "Could not start checkout.", 500);
