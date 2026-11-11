@@ -1,4 +1,5 @@
 "use client";
+import { usePostGridLease } from "@dvnt/app/lib/media/use-post-preview-lease";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 
@@ -213,6 +214,7 @@ function GridCell({
   interactive: boolean;
   onPress: () => void;
 }) {
+  tile = usePostGridLease(tile);
   if (useSpicyPostLocked(tile)) return <SpicyFollowGate author={tile.author} height={fallbackHeight} />;
   const isVideo = tile.kind === "video";
   const isCarousel = tile.kind === "carousel";

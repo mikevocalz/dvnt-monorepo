@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Image } from "npm:imagescript@3.20.2";
 import { verifySession } from "../_shared/verify-session.ts";
 import { projectVisiblePosts } from "../_shared/post-access.ts";
+import { signPostMediaUrl } from "../_shared/post-media-lease.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { safeSourceUrl, readBoundedImage, previewPixels } from "../_shared/protected-photo-preview.ts";
 const headers = {
@@ -34,7 +35,14 @@ Deno.serve(async (req) => {
     if (!media || !["image", "photo"].includes(media.type)) return json({ preview: null });
     const url = safeSourceUrl(media.url, Deno.env.get("BUNNY_PULLZONE_BASE_URL") || "");
     if (!url) return json({ preview: null });
-    const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(8000) });
+    // Origin-enforced zones require a server-only capability for this lossy
+    // derivative too. It never crosses the response boundary to the viewer.
+    const protectedOrigin = Deno.env.get("POST_MEDIA_DELIVERY_MODE") === "bunny-hs256";
+    const fetchUrl = protectedOrigin ? await signPostMediaUrl(url, {
+      baseUrl: Deno.env.get("BUNNY_PULLZONE_BASE_URL") || "",
+      tokenKey: Deno.env.get("BUNNY_TOKEN_AUTH_KEY") || "",
+    }, Math.floor(Date.now() / 1000) + 30) : url;
+    const response = await fetch(fetchUrl, { redirect: "error", signal: AbortSignal.timeout(8000) });
     const original = await Image.decode(await readBoundedImage(response), { maxPixels: 4_000_000 });
     const output = new Image(48, 48);
     output.bitmap.set(previewPixels(original.bitmap, original.width, original.height));

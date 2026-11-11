@@ -1,3 +1,5 @@
+import { usePostMediaLease } from "@dvnt/app/lib/media/use-post-media-lease";
+import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delivery";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { isSpicyPostLocked, useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 import {
@@ -66,6 +68,8 @@ const MIN_TILE = 110;
 const MIN_DISCOVER_TILE = 120;
 
 function getSearchPreviewUrls(posts: Post[]) {
+  // Rendering owns per-post leases; never warm raw search URLs.
+  if (protectedPostMediaEnabled()) return [];
   return posts
     .flatMap((post) => {
       if (isSpicyPostLocked(post)) return [];
@@ -95,6 +99,8 @@ function PostGridTile({
   router: ReturnType<typeof useRouter>;
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
+  const leasedMedia = usePostMediaLease(post.id, post.media || []);
+  post = { ...post, media: leasedMedia, thumbnail: protectedPostMediaEnabled() ? leasedMedia[0]?.thumbnail : post.thumbnail };
   if (useSpicyPostLocked(post)) return <View style={{ width: size }}><SpicyFollowGate author={post.author} height={size} /></View>;
   const firstMedia = post.media?.[0];
   const isTextPost = post.kind === "text";

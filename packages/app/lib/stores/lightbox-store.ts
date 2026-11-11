@@ -1,6 +1,9 @@
 import { create } from "zustand";
 
 export type LightboxItem = {
+  postId?: string;
+  order?: number;
+  expiresAt?: number;
   type?: string;
   url: string;
   poster?: string;

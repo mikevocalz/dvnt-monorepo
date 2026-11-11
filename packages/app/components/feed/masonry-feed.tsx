@@ -1,3 +1,4 @@
+import { useLeasedPost } from "@dvnt/app/lib/media/use-post-media-lease";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
@@ -347,11 +348,12 @@ const MasonryCell = memo(function MasonryCell(props: MasonryCellProps) {
   return useSpicyPostLocked(props.post) ? <View style={{ width: props.width, marginBottom: COLUMN_GAP }}><SpicyFollowGate postId={props.post.id} presentation="feed" author={props.post.author} height={props.height} /></View> : <UnlockedMasonryCell {...props} />;
 });
 const UnlockedMasonryCell = memo(function UnlockedMasonryCell({
-  post,
+  post: rawPost,
   width,
   height,
   onPress,
 }: MasonryCellProps) {
+  const post = useLeasedPost(rawPost)!;
   const bookmarkedPosts = useBookmarkStore((s) => s.bookmarkedPosts);
   const isBookmarked = bookmarkedPosts.includes(post.id);
   const toggleBookmark = useToggleBookmark();

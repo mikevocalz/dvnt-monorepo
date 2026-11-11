@@ -42,7 +42,7 @@ export interface BootstrapPost {
     avatar: string;
     verified: boolean;
   };
-  media: { type: string; url: string; mimeType?: string; livePhotoVideoUrl?: string }[];
+  media: { order?: number; type: string; url: string; mimeType?: string; livePhotoVideoUrl?: string }[];
 }
 
 export interface BootstrapStory {

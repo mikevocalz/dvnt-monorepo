@@ -1,3 +1,5 @@
+import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delivery";
+import { useSharePostToStory } from "@dvnt/app/lib/hooks/use-share-post-to-story";
 import {
   View,
   Text,
@@ -259,6 +261,7 @@ export function Feed({
   const showToast = useUIStore((s) => s.showToast);
   const deletePostMutation = useDeletePost();
   const createStoryMutation = useCreateStory();
+  const protectedStoryShare = useSharePostToStory();
 
   // Likes sheet — centralized controller at app root, no per-screen instance
   // FeedPost now calls useLikesSheet() directly; handleShowLikes kept as fallback for onShowLikes prop
@@ -692,6 +695,10 @@ export function Feed({
   }, [actionPost, setActionSheetPostId]);
 
   const handleActionShareToStory = useCallback(async () => {
+    if (protectedPostMediaEnabled()) {
+      if (actionPost) protectedStoryShare.share(actionPost, () => setActionSheetPostId(null));
+      return;
+    }
     const media = actionPost?.media?.[0];
     if (!media?.url) {
       showToast("error", "Error", "This post has no media to share");
@@ -710,7 +717,7 @@ export function Feed({
       );
     }
     setActionSheetPostId(null);
-  }, [actionPost, createStoryMutation, showToast, setActionSheetPostId]);
+  }, [actionPost, createStoryMutation, protectedStoryShare, showToast, setActionSheetPostId]);
 
   // Show the feed skeleton only while the feed itself is loading. Stories
   // and events live in their own lanes (StoriesBar at the HomeScreen level,

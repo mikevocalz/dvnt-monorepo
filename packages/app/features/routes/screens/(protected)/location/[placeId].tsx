@@ -1,3 +1,4 @@
+import { usePostPreviewLease } from "@dvnt/app/lib/media/use-post-preview-lease";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
@@ -136,8 +137,8 @@ function PostGridItem({
   /** Cell size from the screen's responsive grid — never a module constant. */
   size: number;
 }) {
+  const imageUri = usePostPreviewLease(post.id, post.thumbnail || post.media?.[0]?.url);
   if (useSpicyPostLocked(post)) return <View style={{ width: size }}><SpicyFollowGate author={post.author} height={size} /></View>;
-  const imageUri = post.thumbnail || post.media?.[0]?.url;
   const isVideo = post.type === "video";
 
   return (

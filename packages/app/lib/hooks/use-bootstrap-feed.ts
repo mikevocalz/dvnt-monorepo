@@ -81,7 +81,8 @@ function hydrateFromBootstrap(
           avatar: p.author.avatar,
           verified: p.author.verified,
         },
-        media: media.map((m) => ({
+        media: media.map((m, index) => ({
+          order: m.order ?? index,
           type: m.type,
           url: m.url,
           ...(m.mimeType ? { mimeType: m.mimeType } : {}),

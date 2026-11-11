@@ -30,6 +30,17 @@ const PERSISTED_KEY_PREFIXES = [
   'activities',
 ];
 
+// Keep this static environment check in the API package to avoid an app dependency.
+function protectedMediaEnabled() {
+  return process.env.EXPO_PUBLIC_FF_PROTECTED_POST_MEDIA === 'true' ||
+    process.env.NEXT_PUBLIC_FF_PROTECTED_POST_MEDIA === 'true';
+}
+function filterProtectedSnapshots(snapshot: any) {
+  if (!protectedMediaEnabled() || !snapshot?.clientState?.queries) return snapshot;
+  return {...snapshot, clientState: {...snapshot.clientState, mutations: [],
+    queries: snapshot.clientState.queries.filter((query: any) => shouldDehydrateQuery(query))}};
+}
+
 export function createPlatformPersister() {
   if (typeof window === 'undefined') {
     return undefined;
@@ -47,6 +58,8 @@ export function createPlatformPersister() {
 
   return createSyncStoragePersister({
     key: DVNT_QUERY_CACHE_KEY,
+    serialize: snapshot => JSON.stringify(filterProtectedSnapshots(snapshot)),
+    deserialize: raw => filterProtectedSnapshots(JSON.parse(raw)),
     storage: {
       // Permission can also change after initialization. A failed read is a
       // cache miss, and failure to remove an optional snapshot is non-fatal.
@@ -69,5 +82,6 @@ export function createPlatformPersister() {
 /** Only persist whitelisted keys. Passed to PersistQueryClientProvider. */
 export function shouldDehydrateQuery(query: { queryKey: readonly unknown[] }) {
   const root = query.queryKey?.[0];
+  if (protectedMediaEnabled()) return ['badges', 'events', 'tickets'].includes(String(root));
   return typeof root === 'string' && PERSISTED_KEY_PREFIXES.includes(root);
 }

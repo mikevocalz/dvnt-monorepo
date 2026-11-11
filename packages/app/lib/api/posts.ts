@@ -230,6 +230,7 @@ export function transformPost(
         livePhotoVideoUrl,
         thumbnail: m[DB.postsMedia.thumbnail] || undefined,
         sortOrder,
+        order: sortOrder,
       };
     })
     .sort((a: any, b: any) => a.sortOrder - b.sortOrder);

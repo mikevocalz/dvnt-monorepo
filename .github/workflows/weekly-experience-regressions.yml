@@ -42,7 +42,7 @@ jobs:
         with:
           deno-version: v2.x
       - name: Check actual Edge Function types
-        run: deno check --no-config apps/mobile/supabase/functions/protected-photo-preview/index.ts
+        run: deno check --no-config apps/mobile/supabase/functions/protected-photo-preview/index.ts apps/mobile/supabase/functions/post-media-lease/index.ts
       - name: Real Deno image codecs and allocation bounds
         run: deno test --no-config apps/mobile/supabase/functions/_shared/protected-photo-preview.test.ts
 
@@ -110,6 +110,7 @@ jobs:
           node scripts/test-private-follow-requests-sql.cjs
           node scripts/test-spicy-follow-server.cjs
           node scripts/test-protected-photo-preview.cjs
+          node --test scripts/test-post-media-delivery.cjs scripts/test-post-media-delivery-sql.cjs scripts/test-post-media-lease-client.cjs scripts/test-post-media-secondary.cjs scripts/test-handoff-upload-lease.cjs
           node scripts/test-follow-hook.cjs
           node scripts/test-follow-requests-dom.cjs
           node scripts/test-private-profile-presentation.cjs

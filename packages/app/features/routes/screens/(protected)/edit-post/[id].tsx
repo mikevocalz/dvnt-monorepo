@@ -1,3 +1,5 @@
+import { usePostMediaLease } from "@dvnt/app/lib/media/use-post-media-lease";
+import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delivery";
 import { getCaptionMetrics, validatePostCaption, MAX_CAPTION_LENGTH, MAX_CAPTION_RAW_LENGTH } from "@dvnt/app/lib/posts/post-caption";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 /**
@@ -91,6 +93,7 @@ function EditPostScreenContent() {
 
   // ─── Fetch post ───
   const { data: post, isLoading, isError } = usePost(id || "");
+  const leasedMedia = usePostMediaLease(post?.id, post?.media || []);
 
   // ─── Local form state ───
   const [caption, setCaption] = useState("");
@@ -295,8 +298,9 @@ function EditPostScreenContent() {
         for (const [indexStr, degrees] of Object.entries(rotations)) {
           if (degrees % 360 === 0) continue;
           const idx = parseInt(indexStr, 10);
-          const mediaItem = post.media[idx];
-          if (!mediaItem?.url || mediaItem.type === "video") continue;
+          const mediaItem = leasedMedia[idx];
+          if (!mediaItem?.url) throw new Error("Media access expired. Please reopen this post before editing.");
+          if (mediaItem.type === "video") continue;
 
           // Rotate locally with expo-image-manipulator
           const rotated = await ImageManipulator.manipulateAsync(
@@ -347,6 +351,7 @@ function EditPostScreenContent() {
     hasRotations,
     rotations,
     post?.media,
+    leasedMedia,
     isRotating,
     showToast,
   ]);
@@ -492,7 +497,7 @@ function EditPostScreenContent() {
   // ═══════════════════════════════════════════
   // MAIN EDIT FORM
   // ═══════════════════════════════════════════
-  const mediaItems = post.media || [];
+  const mediaItems = leasedMedia;
   const hasMedia = mediaItems.length > 0;
   const hasMultipleMedia = mediaItems.length > 1;
 

@@ -1,3 +1,4 @@
+import { retirePostMediaLeases } from "@dvnt/app/lib/media/post-media-lease-events";
 import type { QueryClient } from "@tanstack/react-query";
 import { resetPostAccessOverlays } from "@dvnt/app/lib/posts/revoke-post-overlays";
 
@@ -8,6 +9,7 @@ export async function resetFollowAccessCaches(
   isCurrent: () => boolean = () => true,
 ) {
   if (!isCurrent()) return;
+  retirePostMediaLeases();
   // Detached lightboxes and share sheets must disappear in the same frame.
   resetPostAccessOverlays();
   const prefixes: readonly (readonly string[])[] = [
