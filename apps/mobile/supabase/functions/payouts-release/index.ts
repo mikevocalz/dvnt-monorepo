@@ -134,7 +134,7 @@ async function settlePromoters(
         .eq("event_id", eventId)
         .eq("promoter_id", promoterId)
         .in("id", rowIds)
-        .is("paid_out_at", null));
+        .is("paid_out_at", null), rowIds.length);
       continue;
     }
 
@@ -165,7 +165,7 @@ async function settlePromoters(
         .eq("event_id", eventId)
         .eq("promoter_id", promoterId)
         .in("id", rowIds)
-        .is("paid_out_at", null));
+        .is("paid_out_at", null), rowIds.length);
       result.heldCents += net;
       result.transfers.push({
         promoterId,
@@ -209,7 +209,7 @@ async function settlePromoters(
       .eq("promoter_id", promoterId)
         .in("id", rowIds)
       .eq("entry_type", "earning")
-      .is("paid_out_at", null));
+      .is("paid_out_at", null), rows.filter((r: any) => r.promoter_id === promoterId && r.entry_type === "earning").length);
     await checkedWrite(supabase
       .from("promoter_ledger_entries")
       .update({ paid_out_at: nowIso, payout_status: "paid" })
@@ -217,7 +217,7 @@ async function settlePromoters(
       .eq("promoter_id", promoterId)
         .in("id", rowIds)
       .eq("entry_type", "reversal")
-      .is("paid_out_at", null));
+      .is("paid_out_at", null), rows.filter((r: any) => r.promoter_id === promoterId && r.entry_type === "reversal").length);
 
     result.paidCents += net;
     result.transfers.push({
@@ -395,6 +395,17 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
         // organizer's payout. Any uncertain result requires reconciliation.
         const windowKey =
           event.payout_release_at || event.end_date || String(event.id);
+        // Persist intent BEFORE the first transfer. Even an erroneous/admin
+        // requeue must encounter this evidence and stop for reconciliation.
+        const payoutIntentId = crypto.randomUUID();
+        await checkedWrite(supabase.from("payouts").insert({
+          id: payoutIntentId,
+          event_id: event.id,
+          host_id: event.host_id,
+          status: "pending",
+          gross_cents: grossCents,
+          release_at: event.payout_release_at,
+        }));
         const settlement = await settlePromoters(
           supabase,
           event.id,
@@ -408,6 +419,10 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
 
         if (organizerNetCents <= 0) {
           // Promoters may have been paid above; organizer has nothing left.
+          await checkedWrite(supabase.from("payouts").update({
+            status: settlement.heldCents > 0 ? "on_hold" : "paid",
+            net_cents: 0,
+          }).eq("id", payoutIntentId));
           await checkedWrite(supabase
             .from("events")
             .update({ payout_status: settlement.heldCents > 0 ? "on_hold" : "released" })
@@ -459,7 +474,7 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
         );
 
         // Record payout (organizer's net, after promoter split)
-        await checkedWrite(supabase.from("payouts").insert({
+        await checkedWrite(supabase.from("payouts").update({
           event_id: event.id,
           host_id: event.host_id,
           stripe_payout_id: transfer.id,
@@ -467,7 +482,7 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
           gross_cents: grossCents,
           net_cents: organizerNetCents,
           release_at: event.payout_release_at,
-        }));
+        }).eq("id", payoutIntentId));
 
         // Mark event payout as released
         await checkedWrite(supabase

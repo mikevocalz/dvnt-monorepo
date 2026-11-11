@@ -5,10 +5,12 @@
 ## Current safety contract
 
 - The event claim is an atomic compare-and-set from `pending` to `on_hold`, using the existing schema. Only the winning request proceeds. The global TTL job lock is an optimization, not a financial lock.
+- Before the first transfer, a durable `payouts` intent row is inserted with `status=pending`. Any later run rejects that event even if its status was reset. The same row is updated after organizer settlement; failed/uncertain intents remain for reconciliation.
+- `dispute.closed` no longer automatically clears generic holds: it cannot distinguish a dispute hold from an active payout claim.
 - A crash, timeout, Stripe uncertainty, database error, dispute, missing account, unknown funding model, or held promoter share leaves the event held. There is no automatic reset to `pending`.
 - Nonzero orders must explicitly use `separate_charges_and_transfers` and USD. Unknown/NULL, destination-funded, or mixed events fail closed before either promoter or organizer transfers. The aggregate financial summary cannot safely isolate destination-funded money.
 - Any previous payout record or settled promoter ledger row requires reconciliation. This prevents retrying with already-paid promoter deductions omitted.
-- Reads must succeed and bounded order/ledger reads must be complete. Invalid amounts and promoter cuts exceeding the event net block settlement. Ledger writes are checked and limited to the rows read.
+- Reads must succeed and bounded order/ledger reads must be complete. Invalid amounts and promoter cuts exceeding the event net block settlement. Ledger writes are limited to the rows read. All settlement writes must return exactly the expected row count; zero matched updates are failures.
 - Successful Stripe transfers are not bank payouts. Held promoter money is not reported as a fully released event.
 - Any per-event error/hold returns HTTP 503, so the heartbeat does not report a successful release run.
 

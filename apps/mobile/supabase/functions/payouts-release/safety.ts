@@ -1,7 +1,8 @@
 /** Conservative release preflight. No charge-model inference from missing data. */
-export async function checkedWrite(query: PromiseLike<any>): Promise<void> {
-  const { error } = await query;
+export async function checkedWrite(query: any, expectedRows = 1): Promise<void> {
+  const { data, error } = await query.select("id");
   if (error) throw error;
+  if (!data || data.length !== expectedRows) throw new Error("Settlement write did not match expected rows");
 }
 
 export async function assertSafeRelease(db: any, eventId: number): Promise<number> {

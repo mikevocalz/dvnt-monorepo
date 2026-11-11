@@ -3,11 +3,13 @@ on:
   pull_request:
     paths:
       - 'apps/mobile/supabase/functions/payouts-release/**'
+      - 'apps/mobile/supabase/functions/stripe-webhook/index.ts'
       - '.github/workflows/payout-release-safety.yml'
   push:
     branches: [master]
     paths:
       - 'apps/mobile/supabase/functions/payouts-release/**'
+      - 'apps/mobile/supabase/functions/stripe-webhook/index.ts'
       - '.github/workflows/payout-release-safety.yml'
 permissions:
   contents: read
