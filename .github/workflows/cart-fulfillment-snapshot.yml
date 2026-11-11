@@ -26,7 +26,7 @@ jobs:
           node-version: '24'
       - name: Install isolated synthetic test dependencies
         run: |
-          npm install --prefix "$RUNNER_TEMP/cart-snapshot-tests" --ignore-scripts --no-audit --no-fund typescript@5.9.3 esbuild@0.25.12 happy-dom@20.0.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @tanstack/react-query@5.90.16 pg@8.16.3 @embedded-postgres/linux-x64@17.6.0-beta.15
+          npm install --prefix "$RUNNER_TEMP/cart-snapshot-tests" --ignore-scripts --no-audit --no-fund typescript@5.9.3 zod@4.5.0 esbuild@0.25.12 happy-dom@20.0.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @tanstack/react-query@5.90.16 pg@8.16.3 @embedded-postgres/linux-x64@17.6.0-beta.15
           # Only restore the pinned package's local shared-library symlinks.
           (cd "$RUNNER_TEMP/cart-snapshot-tests/node_modules/@embedded-postgres/linux-x64" && node scripts/hydrate-symlinks.js)
       - name: Install pinned official PostgREST test binary
