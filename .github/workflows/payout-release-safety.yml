@@ -1,0 +1,22 @@
+name: Payout release safety
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/payouts-release/**'
+      - '.github/workflows/payout-release-safety.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'apps/mobile/supabase/functions/payouts-release/**'
+      - '.github/workflows/payout-release-safety.yml'
+permissions:
+  contents: read
+jobs:
+  offline-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test apps/mobile/supabase/functions/payouts-release/safety.test.cjs
