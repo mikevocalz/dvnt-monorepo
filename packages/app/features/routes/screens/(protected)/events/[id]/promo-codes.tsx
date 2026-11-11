@@ -34,7 +34,7 @@ import {
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
-import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
+import { createEventPromoCode } from "@dvnt/app/lib/api/promo-codes";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
@@ -124,24 +124,10 @@ function PromoCodesScreenContent() {
 
     setIsCreating(true);
     try {
-      const authId = await getCurrentUserAuthId();
-      const { error } = await supabase.from("promo_codes").insert({
-        event_id: eventId,
-        code: newCode.trim().toUpperCase(),
-        discount_type: discountType,
-        discount_value: numValue,
-        max_uses: maxUses ? parseInt(maxUses) : null,
-        created_by: authId,
+      await createEventPromoCode({
+        eventId, code: newCode, discountType, discountValue: numValue,
+        maxUses: maxUses ? Number(maxUses) : null,
       });
-
-      if (error) {
-        if (error.code === "23505") {
-          showToast("error", "Duplicate", "This code already exists");
-        } else {
-          throw error;
-        }
-        return;
-      }
 
       showToast(
         "success",
@@ -155,7 +141,7 @@ function PromoCodesScreenContent() {
       loadPromoCodes();
     } catch (err: any) {
       console.error("[PromoCodes] Create error:", err);
-      showToast("error", "Error", err.message || "Failed to create promo code");
+      showToast("error", err.duplicate ? "Duplicate" : "Error", err.message || "Failed to create promo code");
     } finally {
       setIsCreating(false);
     }

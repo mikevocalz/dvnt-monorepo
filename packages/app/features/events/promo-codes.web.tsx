@@ -4,17 +4,10 @@
  * Event Promo Codes Screen — WEB port of the native organizer screen
  * (`app/(protected)/events/[id]/promo-codes.tsx`).
  *
- * Law 1 (data flow is sacred): consumes the EXACT same server contract as
- * native — list/create use the `promo_codes` table. Delete calls the
- * owner-authorized `manage-promo-code` Edge Function so prior orders retain
- * their promo references and clients never need direct DELETE privileges. The list is `from("promo_codes").select("*").eq("event_id", id)
- * .order("created_at", { ascending: false })`; create is the same `.insert({...})`
- * payload (code upper-cased, dollars→cents, `created_by` from
- * `getCurrentUserAuthId()`, duplicate `23505` → "already exists"); deletion is
- * an authenticated revoke. Toasts go through `useUIStore.showToast`,
- * exactly like native. The read/create/delete are wrapped in TanStack Query
- * (`useQuery` + two `useMutation`s) so the web cache invalidates the list — the
- * underlying supabase calls are byte-for-byte the native ones.
+ * List uses the existing promo_codes read; creation and revocation use the
+ * authenticated manage-promo-code function. Creation verifies the owner or an
+ * accepted admin/editor; revocation remains owner/admin-only and preserves
+ * prior orders. Both platforms share the create adapter and error handling.
  *
  * Law 2 (web lists = TanStack Virtual): the codes list renders through
  * `@tanstack/react-virtual` over a scroll container — never FlatList / FlashList.
@@ -37,7 +30,7 @@ import { create } from "zustand";
 import { X, Plus, Tag, Trash2, Copy, Percent, DollarSign } from "lucide-react";
 import { FormField, Dialog } from "@dvnt/ui";
 import { supabase } from "@dvnt/app/lib/supabase/client";
-import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
+import { createEventPromoCode } from "@dvnt/app/lib/api/promo-codes";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { usePromoCodesUIStore } from "@dvnt/app/lib/stores/promo-codes-ui-store";
@@ -182,7 +175,7 @@ export function EventPromoCodesScreen() {
 
   const promoCodes = useMemo(() => data ?? [], [data]);
 
-  // CREATE — exact native supabase insert (incl. duplicate 23505 handling).
+  // CREATE — server verifies the accepted event role, not a client JWT bridge.
   const createMutation = useMutation({
     mutationFn: async () => {
       const code = newCode.trim().toUpperCase();
@@ -190,24 +183,10 @@ export function EventPromoCodesScreen() {
         discountType === "percent"
           ? parseFloat(discountValue)
           : Math.round(parseFloat(discountValue) * 100); // dollars → cents
-      const authId = await getCurrentUserAuthId();
-      const { error } = await supabase.from("promo_codes").insert({
-        event_id: eventId,
-        code,
-        discount_type: discountType,
-        discount_value: numValue,
-        max_uses: maxUses ? parseInt(maxUses) : null,
-        created_by: authId,
+      await createEventPromoCode({
+        eventId, code, discountType, discountValue: numValue,
+        maxUses: maxUses ? Number(maxUses) : null,
       });
-      if (error) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if ((error as any).code === "23505") {
-          const dup = new Error("This code already exists");
-          (dup as Error & { duplicate?: boolean }).duplicate = true;
-          throw dup;
-        }
-        throw error;
-      }
       return code;
     },
     onSuccess: (code) => {
