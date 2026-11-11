@@ -17,9 +17,15 @@ test('public catalog stays readable while secret-bearing base rows require accep
   try {
     await db.exec(`
       CREATE ROLE authenticated; CREATE ROLE anon; CREATE ROLE service_role BYPASSRLS;
-      CREATE TABLE events(id integer PRIMARY KEY,host_id text);
+      CREATE SCHEMA auth;
+      CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$ SELECT NULLIF(current_setting('request.jwt.claims',true),'')::jsonb $$;
+      GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
+      CREATE TABLE events(id integer PRIMARY KEY,host_id text,visibility text DEFAULT 'public',is_hidden boolean DEFAULT false,publish_at timestamptz);
+      CREATE TABLE event_invites(event_id integer,invited_user_id text,invited_email text,status text);
+      CREATE TABLE public."user"(id text,email text,"emailVerified" boolean);
+      CREATE TABLE tickets(id integer PRIMARY KEY,event_id integer,user_id text,category text,status text);
       CREATE TABLE event_co_organizers(event_id integer,user_id text,accepted boolean,role text);
-      INSERT INTO events VALUES(1,'host'),(2,'foreign-host');
+      INSERT INTO events(id,host_id) VALUES(1,'host'),(2,'foreign-host');
       INSERT INTO event_co_organizers VALUES (1,'admin',true,'admin'),(1,'editor',true,'editor'),
         (1,'scanner',true,'scanner'),(1,'pending',false,'editor'),(1,'null-acceptance',null,'admin');
       GRANT SELECT ON events,event_co_organizers TO authenticated;
@@ -36,6 +42,7 @@ test('public catalog stays readable while secret-bearing base rows require accep
     await db.exec(read('20260413100001_fix_event_detail_comments_table.sql').split('\n').filter(l=>l.startsWith('ALTER TABLE ticket_types ADD COLUMN')).join('\n'));
     await db.exec(read('20260424_ticket_types_capacity_alert.sql'));
     await db.exec(read('20260613144937_ticket_tier_model_v2.sql'));
+    await db.exec(read('20260516123000_ticket_categories_and_event_visibility.sql'));
     await db.exec(`
       ALTER TABLE ticket_types ENABLE ROW LEVEL SECURITY;
       CREATE POLICY ticket_types_select ON ticket_types FOR SELECT USING(true);
@@ -47,6 +54,8 @@ test('public catalog stays readable while secret-bearing base rows require accep
       CREATE FUNCTION maintain_inventory() RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path='' AS
         $$ UPDATE public.ticket_types SET quantity_sold=quantity_sold+1 WHERE event_id=1 $$;
     `);
+    await db.exec(read('20261003110000_event_hide_and_publish_at.sql').match(/^CREATE OR REPLACE FUNCTION public\.can_view_event\(p_event_id integer\)[\s\S]*?^\$function\$;/m)[0]);
+    await db.exec(`CREATE POLICY event_private_boundary ON ticket_types AS RESTRICTIVE FOR SELECT TO anon,authenticated USING(public.can_view_event(event_id));`);
     await db.exec(read('20260806200000_ticket_types_public_view.sql'));
     await db.exec(read('20260806400000_ticket_addons_host_write_policies.sql'));
     await db.exec(read('20261111120000_accepted_cohost_event_editing.sql'));
@@ -98,6 +107,40 @@ test('public catalog stays readable while secret-bearing base rows require accep
       assert.deepEqual(await query('SELECT unlock_code FROM ticket_types'),[]);
       assert.deepEqual(await query('UPDATE ticket_types SET price_cents=1 RETURNING id'),[]);
       assert.ok((await query('SELECT * FROM ticket_types_public')).length>0);
+    });
+    await t.test('real event visibility survives definer views: private, hidden and future remain private', async () => {
+      await db.exec(`RESET ROLE;
+        INSERT INTO events(id,host_id,visibility,is_hidden,publish_at) VALUES
+          (31,'private-owner','private',false,null),(32,'private-owner','public',true,null),(33,'private-owner','public',false,now()+interval '1 day');
+        INSERT INTO ticket_types(event_id,name,price_cents) VALUES(31,'Private',1),(32,'Hidden',1),(33,'Future',1);
+        INSERT INTO event_co_organizers VALUES(31,'private-editor',true,'editor');
+        INSERT INTO event_invites VALUES(31,'invitee',null,'accepted');
+        INSERT INTO tickets VALUES(1,31,'holder','admission','active');
+        INSERT INTO ticket_types(event_id,name,price_cents,is_active) VALUES(1,'Retired purchased tier',1,false);`);
+      for(const role of ['anon','authenticated']) {
+        await login('stranger',role);
+        assert.deepEqual(await query('SELECT event_id FROM ticket_types_public WHERE event_id>=31'),[]);
+      }
+      for(const actor of ['private-owner','private-editor','invitee','holder']) {
+        await login(actor);
+        assert.equal((await query('SELECT event_id FROM ticket_types_public WHERE event_id=31')).length,1,actor);
+      }
+      for(const actor of ['buyer','scanner']) {
+        await login(actor);
+        assert.deepEqual(await query("SELECT name FROM ticket_types_public WHERE name='Retired purchased tier'"),[]);
+        assert.deepEqual(await query("SELECT name FROM ticket_type_labels WHERE name='Retired purchased tier'"),[{name:'Retired purchased tier'}]);
+        assert.deepEqual(await query("SELECT name FROM ticket_type_labels WHERE name IN ('Private','Hidden','Future')"),[]);
+        assert.deepEqual((await query("SELECT column_name FROM information_schema.columns WHERE table_name='ticket_type_labels' ORDER BY ordinal_position")).map(r=>r.column_name),['id','name','category']);
+        await assert.rejects(query('SELECT unlock_code FROM ticket_type_labels'),/does not exist/);
+        await assert.rejects(query("UPDATE ticket_type_labels SET name='bad'"),/permission denied/);
+      }
+      await login(null,'anon');
+      await assert.rejects(query('SELECT * FROM ticket_type_labels'),/permission denied/);
+      await db.exec('RESET ROLE; DELETE FROM event_co_organizers WHERE event_id=31; DELETE FROM event_invites WHERE event_id=31; DELETE FROM tickets WHERE event_id=31;');
+      for(const actor of ['private-editor','invitee','holder']) {
+        await login(actor);
+        assert.deepEqual(await query('SELECT event_id FROM ticket_types_public WHERE event_id=31'),[]);
+      }
     });
     await t.test('trusted checkout inventory writes still work with a buyer JWT', async () => {
       await login('buyer'); await query('SELECT maintain_inventory()');

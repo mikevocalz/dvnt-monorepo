@@ -8,7 +8,7 @@ This is a source and regression-test contract, not evidence that a production ro
 - Owner and accepted admin: manage staff except admin grants/revocations; revoke promo codes; manage promoters; view event analytics; change follow-up settings.
 - Owner only: admin grants/revocations, refunds, event cancellation (including resumed refund sweeps), deletion, duplication, payouts and ownership controls.
 - Accepted scanner: scanning/door tools and the server's redacted roster only.
-- Pending, removed, unrelated, signed-out and unknown roles: no management capability. Public ticket browsing uses an explicit safe projection without unlock codes.
+- Pending, removed, unrelated, signed-out and unknown roles: no management capability. Public ticket browsing uses an explicit active-only safe projection without unlock codes and preserves private, hidden and future-event visibility. Transfer/check-in history uses a separate authenticated name/category-only projection so retired tiers remain labeled without becoming purchasable.
 
 Server authorization and row policies remain authoritative on each mutation. Client gates prevent misleading controls and stale/cross-account data, rather than granting permissions themselves. Fresh checks precede sensitive client actions. Editors cancel stale work when their account/session/event changes.
 
@@ -20,7 +20,7 @@ Native and web editors both support existing add-on catalog editing. Catalog loa
 
 ## Continuous verification
 
-`test:cohost-editing` runs the SQL permission suites, executed Edge handlers, API/save helpers, and mounted web/native editor, promo, organizer, staff, promoter and analytics cases. The cohost workflow runs for every pull request, master/main push and manual dispatch. The release regression gate also executes the aggregate; its manifest verifies the tests exist and run in CI.
+`test:cohost-editing` runs the SQL permission suites, executed Edge handlers, API/save helpers, and mounted web/native editor, promo, organizer, staff, promoter and analytics cases. The cohost workflow runs for every pull request, master/main push and manual dispatch. The release regression gate also executes the aggregate; its manifest verifies the tests exist and run in CI. Caller regressions also exercise native/web discovery prices, watch capacity, historical label reads and foreground catalog refresh after base-table lockdown.
 
 SQL tests use disposable PostgreSQL with the relevant real schema/migration sources and fixture identities. Edge tests execute the real handler with mocked authentication/database transports. Mounted native cases render React Native source through DOM adapters. This is not device-runtime or production-account verification. GitHub required-check/branch-protection settings are not changed by this PR.
 

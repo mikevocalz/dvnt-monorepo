@@ -299,6 +299,10 @@ export function useTicketTypes(eventId: string) {
   return useQuery({
     queryKey: [...qk.tickets.types(eventId), "active-v2"],
     queryFn: () => ticketsApi.getTicketTypes(eventId),
+    // Buyers cannot subscribe to secret-bearing base rows after RLS lockdown.
+    // Poll only the mounted foreground catalog so edits/capacity stay fresh.
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     enabled: !!eventId,

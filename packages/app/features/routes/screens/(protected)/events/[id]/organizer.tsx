@@ -136,7 +136,9 @@ function EventOrganizerScreenContent() {
   const handleDownloadForOffline = useCallback(async () => {
     setIsDownloading(true);
     try {
-      await assertPermission();
+      // This API checks accepted scanner/staff access and revokes stale offline
+      // evidence on authoritative denial. Do not short-circuit that contract
+      // with the dashboard's stricter editor-only UI gate.
       const tokens = await ticketsApi.downloadOfflineTokens(eventId);
       if (tokens.length > 0) {
         showToast(
@@ -153,13 +155,12 @@ function EventOrganizerScreenContent() {
     } finally {
       setIsDownloading(false);
     }
-  }, [eventId, offlineStore, showToast, assertPermission]);
+  }, [eventId, offlineStore, showToast]);
 
   const handleSyncPendingScans = useCallback(async () => {
     if (pendingScans.length === 0) return;
     setIsSyncing(true);
     try {
-      await assertPermission();
       const result = await ticketsApi.syncOfflineScans(pendingScans);
       if (result.synced.length > 0) {
         offlineStore.removePendingScans(eventId, result.synced);
@@ -183,7 +184,7 @@ function EventOrganizerScreenContent() {
     } finally {
       setIsSyncing(false);
     }
-  }, [pendingScans, eventId, offlineStore, showToast, assertPermission]);
+  }, [pendingScans, eventId, offlineStore, showToast]);
 
   const loadTickets = async () => {
     if (!mayManage) return;

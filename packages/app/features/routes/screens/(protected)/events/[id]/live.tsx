@@ -145,7 +145,7 @@ export default function EventLiveScreen() {
         const sinceIso = new Date(Date.now() - 60 * 60_000).toISOString();
         const { data: scans } = await supabase
           .from("tickets")
-          .select("id, ticket_type_id, category, checked_in_at, qr_token, ticket_types(name, category)")
+          .select("id, ticket_type_id, category, checked_in_at, qr_token, ticket_types:ticket_type_labels(name, category)")
           .eq("event_id", eventId)
           .eq("status", "scanned")
           .gte("checked_in_at", sinceIso)
@@ -231,7 +231,7 @@ export default function EventLiveScreen() {
             let ticketType: { category?: string | null; name?: string } | null = null;
             if (next.ticket_type_id) {
               try {
-                const { data, error } = await supabase.from("ticket_types")
+                const { data, error } = await supabase.from("ticket_type_labels")
                   .select("name, category").eq("id", next.ticket_type_id).maybeSingle();
                 if (cancelled || error) return;
                 ticketType = data;
