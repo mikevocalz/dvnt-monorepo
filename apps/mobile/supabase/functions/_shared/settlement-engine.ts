@@ -1,3 +1,5 @@
+import { readRecipientProof, verifyRecipientFundingMode } from "./settlement-recipient.ts";
+export { verifyRecipient } from "./settlement-recipient.ts";
 import { auditFundingTransactions, fundingSourceProof } from "./settlement-funding.ts";
 /** Settlement engine: all provider I/O is injected for isolated testing.
  * No automatic retries on provider writes. Database reservations survive errors.
@@ -66,17 +68,6 @@ export function verifySettlementSource(order:any,intent:any,charge:any,session?:
   throw new Error('Source funds unavailable or fees exceed retained amount');
  }
  return {charge:charge.id,pi:intent.id,currency:frozen.currency,gross,tax};
-}
-export function verifyRecipient(account:any,destination:string,allocation?:any) {
- if(account?.id!==destination||account.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status!=='active') {
-  throw new Error('Recipient transfer capability is not active');
- }
- if(allocation) {
-  const owner=account.metadata?.dvnt_host_id||account.metadata?.dvnt_user_id;
-  const matches=allocation.role==='organizer' ? owner===allocation.recipient_id :
-   allocation.recipient_user_id!=null ? owner===allocation.recipient_user_id : account.metadata?.dvnt_promoter_id===allocation.recipient_id;
-  if(!matches)throw new Error('Recipient account ownership does not match frozen identity');
- }
 }
 /** A database reserve is bookkeeping, not segregated provider funds. This
  * initial runtime only supports an independently verified manual platform
@@ -229,7 +220,7 @@ export async function processSettlementOrder(db:SettlementDatabase,provider:Sett
     }
    }
    if(!destination)throw new Error('Recipient onboarding incomplete');
-   verifyRecipient(await provider.get(`/v2/core/accounts/${encodeURIComponent(destination)}?include[0]=configuration.recipient`),destination,a);
+   const recipientProof=await readRecipientProof(provider,destination,a,source.currency);
    // Reverify source immediately before each reservation; a prior recipient's
    // transfer never authorizes paying a now-refunded/disputed charge.
    const currentIntent=await provider.get(`/v1/payment_intents/${encodeURIComponent(source.pi)}?expand[]=latest_charge`);
@@ -239,10 +230,11 @@ export async function processSettlementOrder(db:SettlementDatabase,provider:Sett
    const sent=await auditSourceTransfers(provider,currentCharge,order.order_id,latest.allocations);
    if(sent.has(a.id))throw new Error('Allocation already funded; reconciliation required');
    // Platform context: no connected-account header. Account v1 settings remain
-   // supported for existing platforms; recipient capability checks use v2.
+   // supported for existing platforms; recipient proof remains independently gated.
    const account=await provider.get('/v1/account');
    verifyPlatformPayoutPolicy(account);
    const checkpoint=await settlementRpc(db,'settlement_balance_checkpoint',{});
+   verifyRecipientFundingMode(recipientProof,checkpoint.funding_policy?.livemode);
    if(account.id!==checkpoint.funding_policy?.platform_account)throw Error('Funding platform account mismatch');
    const before=await provider.get('/v1/balance');
    const transactions=await auditFundingTransactions(provider,checkpoint.funding_policy);

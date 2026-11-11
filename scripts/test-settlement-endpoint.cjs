@@ -10,7 +10,7 @@ function endpoint(db,provider,env={},extra={}){
  let handler;const headers=[];let creates=0;
  const code=readFileSync(resolve(root,'apps/mobile/supabase/functions/settlements-process/index.ts'),'utf8').replace(/^import[\s\S]*?from [^;]+;\n/gm,'');
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{
-  exports:{},withSentry:(_name,fn)=>fn,withHeartbeat:(_name,fn)=>fn(),...engine,...recovery,...cleanup,performance,...extra,Response,Request,URLSearchParams,AbortSignal,
+  exports:{},withSentry:(_name,fn)=>fn,withHeartbeat:(_name,fn)=>fn(),...engine,...recovery,...cleanup,...require('./fixtures/settlement/recipient.cjs'),performance,...extra,Response,Request,URLSearchParams,AbortSignal,
   Deno:{env:{get:k=>({SETTLEMENT_RUN_BUDGET_MS:'120000',SETTLEMENT_WORKER_SECRET:'fixture-worker-secret',STRIPE_SECRET_KEY:'fixture-provider-secret',SUPABASE_URL:'https://fixture.invalid',SUPABASE_SERVICE_ROLE_KEY:'fixture-service',...env})[k]},serve:fn=>handler=fn},
   createClient:()=>{creates++;return db},fetch:async(url,options)=>{headers.push(options.headers);const path=url.replace('https://api.stripe.com','');try{
    const value=options.method==='POST'?await provider.post(path,Object.fromEntries(new URLSearchParams(options.body)),options.headers['Idempotency-Key']):await provider.get(path,options.headers['Stripe-Account']);
