@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { URL } from 'node:url';
 import { readEffectiveProfilePrivacy, isProfilePrivacyUnavailable } from './effective-profile-privacy.ts';
 
 for (const value of [true, false]) test(`effective privacy accepts server boolean ${value}`, async () => {
