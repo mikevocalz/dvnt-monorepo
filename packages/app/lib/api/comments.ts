@@ -151,7 +151,7 @@ export const commentsApi = {
   async likeComment(
     commentId: string,
     isLiked: boolean,
-  ): Promise<{ liked: boolean; likes: number }> {
+  ): Promise<{ liked: boolean; likes: number; countHidden?: boolean }> {
     try {
       console.log("[Comments] likeComment:", commentId, "isLiked:", isLiked);
 
@@ -161,7 +161,7 @@ export const commentsApi = {
 
       const { data, error } = await supabase.functions.invoke<{
         ok: boolean;
-        data?: { liked: boolean; likesCount: number };
+        data?: { liked: boolean; likesCount: number; countHidden?: boolean };
       }>("toggle-comment-like", {
         body: { commentId: commentIdInt, like: !isLiked },
         headers: { Authorization: `Bearer ${token}` },
@@ -178,6 +178,7 @@ export const commentsApi = {
       return {
         liked: data.data.liked,
         likes: data.data.likesCount ?? 0,
+        ...(data.data.countHidden ? { countHidden: true } : {}),
       };
     } catch (error) {
       console.error("[Comments] likeComment error:", error);

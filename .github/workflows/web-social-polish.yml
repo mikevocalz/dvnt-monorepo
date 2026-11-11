@@ -15,6 +15,12 @@ on:
       - "packages/app/lib/hooks/usePostLikeState.ts"
       - "packages/app/lib/hooks/use-posts.ts"
       - "packages/app/lib/hooks/use-comments.ts"
+      - "packages/app/lib/hooks/use-comment-like-state.ts"
+      - "apps/mobile/lib/hooks/use-comment-like-state.ts"
+      - "packages/app/lib/api/comments.ts"
+      - "apps/mobile/lib/api/comments.ts"
+      - "apps/mobile/supabase/functions/toggle-comment-like/**"
+      - "scripts/test-comment-like-privacy.cjs"
       - "packages/app/lib/query/patch.ts"
       - "packages/ui/src/social/**"
       - "packages/ui/package.json"
@@ -70,6 +76,7 @@ jobs:
           node scripts/test-web-post-likes-dom.cjs
           node scripts/test-post-social-actions.cjs
           node scripts/test-post-like-state.cjs
+          node --test apps/mobile/supabase/functions/toggle-comment-like/index.test.cjs scripts/test-comment-like-privacy.cjs
           node scripts/test-post-comment-counts.cjs
           node scripts/test-native-engagement-counts.cjs
           node --test packages/app/lib/posts/engagement-counts.test.ts packages/ui/src/social/engagement-counts.test.ts
