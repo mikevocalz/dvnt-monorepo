@@ -42,7 +42,7 @@ jobs:
         with:
           deno-version: v2.x
       - name: Check actual Edge Function types
-        run: deno check --no-config apps/mobile/supabase/functions/protected-photo-preview/index.ts
+        run: deno check --no-config apps/mobile/supabase/functions/protected-photo-preview/index.ts apps/mobile/supabase/functions/post-media-lease/index.ts
       - name: Real Deno image codecs and allocation bounds
         run: deno test --no-config apps/mobile/supabase/functions/_shared/protected-photo-preview.test.ts
 
@@ -86,7 +86,7 @@ jobs:
         run: >-
           npm install --prefix "$RUNNER_TEMP/weekly" --ignore-scripts --no-audit --no-fund --no-save
           imagescript@3.20.2 typescript@5.9.3 esbuild@0.25.12 react@19.2.3 react-dom@19.2.3
-          zustand@5.0.14 @tanstack/react-query@5.90.16 happy-dom@20.0.11
+          zustand@5.0.14 @tanstack/react-query@5.90.16 happy-dom@20.0.11 jsdom@26.1.0
           @electric-sql/pglite@0.3.14
       - name: Settings, event, location and navigation regressions
         env:
@@ -106,11 +106,18 @@ jobs:
           node --test packages/app/lib/activity/event-activity.test.ts packages/app/lib/posts/text-post-layout.test.ts
           node scripts/test-weekly-event-visibility-sql.cjs
           node scripts/test-weekly-post-follow-sql.cjs
+          node scripts/test-protected-media-catalogue.cjs
+          node scripts/test-protected-post-engagement.cjs
           node scripts/test-weekly-post-share-metadata.cjs
           node scripts/test-private-follow-requests-sql.cjs
+          node scripts/test-profile-effective-privacy-sql.cjs
+          node scripts/test-profile-effective-privacy-api.cjs
+          node --test packages/app/lib/profile/effective-profile-privacy.test.ts
           node scripts/test-spicy-follow-server.cjs
           node scripts/test-protected-photo-preview.cjs
+          node --test scripts/test-post-media-delivery.cjs scripts/test-post-media-delivery-sql.cjs scripts/test-post-media-lease-client.cjs scripts/test-post-media-secondary.cjs scripts/test-handoff-upload-lease.cjs
           node scripts/test-follow-hook.cjs
+          node scripts/test-post-bootstrap-revocation.cjs
           node scripts/test-follow-requests-dom.cjs
           node scripts/test-private-profile-presentation.cjs
           node scripts/test-private-social-graph-sql.cjs

@@ -1,3 +1,4 @@
+import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delivery";
 import type { Post } from "../types";
 import type { SharedPostContext } from "../stores/chat-store";
 import { isVideoKind } from "../media/types";
@@ -13,7 +14,7 @@ export function sharedPostContext(post: Post): SharedPostContext {
       post.kind === "text"
         ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
         : post.caption,
-    mediaUrl: post.media?.[0]?.url,
+    mediaUrl: protectedPostMediaEnabled() ? undefined : post.media?.[0]?.url,
     mediaType: post.media?.[0]?.type,
   };
 }

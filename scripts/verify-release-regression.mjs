@@ -32,6 +32,7 @@
  */
 import { readFile, access } from "node:fs/promises";
 import path from "node:path";
+import { scriptReferencesTarget } from "./release-test-targets.mjs";
 
 const MANIFEST = "docs/workstreams/release-regression-manifest.json";
 const CONTRACT = "docs/workstreams/17-release-regression-gate.md";
@@ -81,10 +82,10 @@ async function main() {
   }
   const allWorkflowText = [...workflows.values()].join("\n");
 
-  /** npm scripts whose command text mentions `needle`. */
-  const scriptsMatching = (needle) =>
+  /** npm scripts whose concrete file target or glob includes this test. */
+  const scriptsMatching = (target) =>
     Object.entries(scripts)
-      .filter(([, cmd]) => cmd.includes(needle))
+      .filter(([, cmd]) => scriptReferencesTarget(cmd, target))
       .map(([name]) => name);
 
   /** Is this npm script run by any workflow, directly or via pnpm/npm run? */
@@ -150,11 +151,8 @@ async function main() {
       continue;
     }
 
-    const runners = scriptsMatching(s.automation) ;
-    const dirRunners = runners.length
-      ? runners
-      : scriptsMatching(path.dirname(s.automation));
-    if (dirRunners.length === 0) {
+    const runners = scriptsMatching(s.automation);
+    if (runners.length === 0) {
       fail(
         "target-unreachable",
         `${s.automation}`,
@@ -163,12 +161,12 @@ async function main() {
       );
       continue;
     }
-    const inCI = dirRunners.filter(scriptRunByCI);
+    const inCI = runners.filter(scriptRunByCI);
     if (inCI.length === 0) {
       fail(
         "target-not-in-ci",
         `${s.automation}`,
-        `Reached by npm script(s) ${dirRunners.join(", ")}, but no workflow runs any of them. ` +
+        `Reached by npm script(s) ${runners.join(", ")}, but no workflow runs any of them. ` +
           `Add one as a run: step in ${GATE_WORKFLOW}.`,
       );
       continue;

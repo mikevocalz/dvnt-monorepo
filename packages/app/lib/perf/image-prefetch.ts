@@ -1,3 +1,4 @@
+import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delivery";
 import { isSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
  * Image Prefetch — Warm image caches for off-screen content
@@ -40,6 +41,9 @@ function sanitizeUrls(urls: unknown[]): string[] {
   for (const u of urls) {
     if (typeof u !== "string") continue;
     const trimmed = u.trim();
+    // No raw post capabilities are warmed offscreen. Signed media loads only
+    // through visible lease owners, which can retire it on access changes.
+    if (protectedPostMediaEnabled() && /\/(?:post|posts)[-\/]/i.test(trimmed)) continue;
     if (trimmed.length === 0) continue;
     if (
       !trimmed.startsWith("https://") &&
@@ -168,6 +172,7 @@ export function prefetchImagesRN(urls: string[]) {
 export function extractFeedImageUrls(
   posts: { isNSFW?: boolean; isSpicyLocked?: boolean; spicyAccessViewerId?: string | null; media?: { url: string; type: string }[] }[],
 ): string[] {
+  if (protectedPostMediaEnabled()) return []; // visible media acquires its own fresh lease
   const urls: string[] = [];
 
   for (const post of posts) {

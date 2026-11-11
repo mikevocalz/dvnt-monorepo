@@ -12,6 +12,8 @@ const fixtures={
  'solito/navigation':`import {router,useRoute} from 'count-fixture';export const useParams=()=>useRoute();export const useRouter=()=>router;`,
  'expo-router':`import {router,useRoute} from 'count-fixture';export const useLocalSearchParams=()=>useRoute();export const useRouter=()=>router;export const useFocusEffect=()=>{};`,
  '@dvnt/app/lib/api/tickets':`import {state} from 'count-fixture';export const tickets={getEventTickets:async id=>{state.calls.push(id);const rows=state.rows,fail=state.fail;if(state.defer)await new Promise(resolve=>state.releases.push(resolve));if(fail)throw Error('Synthetic later-page failure');return rows;}};export const ticketsApi={};`,
+ '@dvnt/app/lib/hooks/use-event-role':`const refetch=async()=>({isSuccess:true,data:'owner'});export const useEventRole=()=>({role:'owner',hasResolved:true,isPending:false,isPaused:false,isError:false,refetch});`,
+ '@dvnt/app/lib/stores/auth-store':`const auth={user:{id:'count-owner'},isAuthenticated:true};export const useAuthStore=Object.assign(selector=>selector(auth),{getState:()=>auth});`,
  '@dvnt/app/lib/api/organizer':`export const organizerApi={refundTicket:()=>{throw Error('No mutations in count test');}};`,
  '@dvnt/app/lib/api/event-drafts':`export const eventDraftsApi={duplicateEvent:()=>{throw Error('No mutations in count test');}};`,
  '@dvnt/app/lib/stores/ui-store':`import {state} from 'count-fixture';const ui={showToast:(...x)=>state.toasts.push(x)};export const useUIStore=selector=>selector(ui);`,

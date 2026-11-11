@@ -1,0 +1,32 @@
+name: Post privacy release integration
+on:
+  # These boundaries compose across helpers and clients; do not path-filter them.
+  pull_request:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integrated-privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned isolated fixture tools
+        run: >-
+          npm install --prefix "$RUNNER_TEMP/privacy-tests" --ignore-scripts --no-audit --no-fund --no-save
+          typescript@5.9.3 esbuild@0.25.12 @electric-sql/pglite@0.3.14
+          react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @tanstack/react-query@5.90.16
+          happy-dom@20.0.11 jsdom@26.1.0 imagescript@3.20.2 lucide-react@1.30.0 zod@3.25.76
+      - name: Combined authorization, cache retirement and disabled media-delivery regressions
+        run: NODE_PATH="$RUNNER_TEMP/privacy-tests/node_modules" npm run test:privacy-release
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Fail-closed verified admission
+        run: npm run test:verified-admission-edge
+        env:
+          DENO_NO_PACKAGE_JSON: '1'

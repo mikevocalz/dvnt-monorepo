@@ -13,6 +13,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
+import { capturePostReadOwner } from "@dvnt/app/lib/posts/post-read-owner";
 import { usersApi } from "@dvnt/app/lib/api/users";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { invalidateProfileCompletion } from "@dvnt/app/lib/profile/profile-completion-invalidation";
@@ -70,6 +71,7 @@ type UpdateProfileInput = {
 };
 
 type UpdateProfileContext = {
+  isCurrent?: () => boolean;
   userId?: string;
   previousAuthUser?: AppUser;
   optimisticUser?: AppUser;
@@ -441,8 +443,11 @@ export function useUpdateProfile() {
       return result;
     },
     onMutate: async (variables) => {
+      const isCurrent = capturePostReadOwner(queryClient);
       const userId = authUser?.id;
       if (!userId || !authUser) return {};
+      const currentUser = useAuthStore.getState().user;
+      if (currentUser?.id !== authUser.id || currentUser?.authId !== authUser.authId) return {};
 
       console.log("[useUpdateProfile] Optimistic update starting");
 
@@ -473,6 +478,8 @@ export function useUpdateProfile() {
         queryClient.cancelQueries({ queryKey: ["posts"] }),
         queryClient.cancelQueries({ queryKey: ["stories"] }),
       ]);
+
+      if (!isCurrent()) return { isCurrent };
 
       const previousAuthUser = { ...authUser };
       const previousProfile = queryClient.getQueryData<ProfileData>(
@@ -534,6 +541,7 @@ export function useUpdateProfile() {
       patchCurrentUserEverywhere(queryClient, authUser, optimisticUser);
 
       return <UpdateProfileContext>{
+        isCurrent,
         previousAuthUser,
         optimisticUser,
         previousProfile,
@@ -550,6 +558,7 @@ export function useUpdateProfile() {
       };
     },
     onError: (error, variables, context) => {
+      if (!context?.isCurrent?.()) return;
       console.error("[useUpdateProfile] Error, rolling back:", error);
 
       if (context?.previousAuthUser) {
@@ -611,6 +620,7 @@ export function useUpdateProfile() {
       );
     },
     onSuccess: (result, variables, context) => {
+      if (!context?.isCurrent?.()) return;
       const baseUser =
         context?.optimisticUser || useAuthStore.getState().user || authUser;
       if (!baseUser) return;

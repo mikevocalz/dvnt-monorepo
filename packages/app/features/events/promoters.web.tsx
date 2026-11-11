@@ -5,7 +5,7 @@
  *
  * Law 1 (data is sacred): identical data flow to the native screen —
  * `promotersApi.list(eventId)` via TanStack Query keyed
- * `["event-promoters", eventId]`; add / update / remove mutations
+ * `["event-promoters", eventId, viewerId]`; add / update / remove mutations
  * through the same `manage-promoters` edge fn wrappers. Money comes
  * straight off the ledger (integer cents) — display-format only, no
  * client re-math. Distinct from boosts (promote-event-sheet /
@@ -21,7 +21,7 @@
  * bps; past orders keep their locked bps.
  */
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
 import { useParams, useRouter } from "solito/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -58,6 +58,7 @@ import {
   promoterInviteEmailFieldError,
 } from "@dvnt/app/lib/events/promoter-code";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { toast } from "sonner";
 import { UserPicker } from "./ui/user-picker.web";
 import { Dialog } from "@dvnt/ui";
@@ -318,6 +319,8 @@ export function EventPromotersScreen() {
 
   const queryClient = useQueryClient();
   const showToast = useUIStore((s) => s.showToast);
+  const viewerId = useAuthStore((state) => state.user?.id);
+  const authenticated = useAuthStore((state) => state.isAuthenticated);
 
   const addOpen = usePromotersUIStore((s) => s.addOpen);
   const pickerQuery = usePromotersUIStore((s) => s.pickerQuery);
@@ -355,30 +358,50 @@ export function EventPromotersScreen() {
   const resetAdd = usePromotersUIStore((s) => s.resetAdd);
 
   const libraryQuery = useQuery({
-    queryKey: ["promoter-library"],
+    queryKey: ["promoter-library", viewerId],
     queryFn: () => promotersApi.library(),
+    enabled: authenticated && !!viewerId,
     staleTime: 30_000,
   });
 
   const promotersQuery = useQuery({
-    queryKey: ["event-promoters", eventId],
+    queryKey: ["event-promoters", eventId, viewerId],
     queryFn: () => promotersApi.list(eventId),
-    enabled: Number.isFinite(eventId) && eventId > 0,
+    enabled: authenticated && !!viewerId && Number.isSafeInteger(eventId) && eventId > 0,
     staleTime: 15_000,
   });
 
   const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["event-promoters", eventId] });
+    queryClient.invalidateQueries({ queryKey: ["event-promoters", eventId, viewerId] });
+
+  const assertPermission = async (promoterId?: string) => {
+    const before = useAuthStore.getState();
+    if (!viewerId || !Number.isSafeInteger(eventId) || eventId <= 0 ||
+        !before.isAuthenticated || before.user?.id !== viewerId) {
+      throw new Error("Your event access changed. Reopen promoters before trying again.");
+    }
+    const fresh = await promotersQuery.refetch();
+    const current = useAuthStore.getState();
+    const role = fresh.data?.callerRole;
+    if (!current.isAuthenticated || current.user?.id !== viewerId || !fresh.isSuccess ||
+        fresh.fetchStatus === "paused" || (role !== "owner" && role !== "admin") ||
+        (promoterId && !fresh.data?.promoters.some((promoter) => promoter.id === promoterId))) {
+      throw new Error("Your event access changed. Reopen promoters before trying again.");
+    }
+  };
 
   const addMutation = useMutation({
-    mutationFn: (input: {
+    mutationFn: async (input: {
       username?: string;
       displayName?: string;
       customerDiscountBps: number;
       promoterCommissionBps: number;
       code?: string;
       inviteEmail?: string;
-    }) => promotersApi.add({ eventId, ...input, saveToLibrary: true }),
+    }) => {
+      await assertPermission();
+      return promotersApi.add({ eventId, ...input, saveToLibrary: true });
+    },
     onSuccess: (promoter) => {
       // Secondary confirmation — the event_promoters row + the
       // notification are the record; the toast is the "done" flash.
@@ -387,7 +410,7 @@ export function EventPromotersScreen() {
       });
       resetAdd();
       invalidate();
-      queryClient.invalidateQueries({ queryKey: ["promoter-library"] });
+      queryClient.invalidateQueries({ queryKey: ["promoter-library", viewerId] });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (err: any) => {
@@ -406,12 +429,15 @@ export function EventPromotersScreen() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (input: {
+    mutationFn: async (input: {
       promoterId: string;
       customerDiscountBps?: number;
       promoterCommissionBps?: number;
       status?: "active" | "paused";
-    }) => promotersApi.update(input),
+    }) => {
+      await assertPermission(input.promoterId);
+      return promotersApi.update(input);
+    },
     onSuccess: (_data, input) => {
       setEditTarget(null);
       if (
@@ -436,7 +462,10 @@ export function EventPromotersScreen() {
   });
 
   const removeMutation = useMutation({
-    mutationFn: (promoterId: string) => promotersApi.remove(promoterId),
+    mutationFn: async (promoterId: string) => {
+      await assertPermission(promoterId);
+      return promotersApi.remove(promoterId);
+    },
     onSuccess: () => {
       showToast("success", "Promoter removed", "Their ledger history is kept.");
       setRemoveTarget(null);
@@ -448,9 +477,16 @@ export function EventPromotersScreen() {
     },
   });
 
-  const promoters = promotersQuery.data?.promoters || [];
-  const callerRole = promotersQuery.data?.callerRole || null;
+  const verified = authenticated && !!viewerId && Number.isSafeInteger(eventId) && eventId > 0 && promotersQuery.isSuccess && promotersQuery.fetchStatus !== "paused";
+  const promoters = verified ? promotersQuery.data?.promoters || [] : [];
+  const callerRole = verified ? promotersQuery.data?.callerRole || null : null;
   const canManage = callerRole === "owner" || callerRole === "admin";
+
+  useEffect(() => {
+    resetAdd();
+    setEditTarget(null);
+    setRemoveTarget(null);
+  }, [viewerId, eventId, authenticated, canManage, resetAdd, setEditTarget, setRemoveTarget]);
 
   const items = useMemo(() => promoters, [promoters]);
 
@@ -548,6 +584,16 @@ export function EventPromotersScreen() {
       promoterCommissionBps,
     });
   };
+
+  if (!canManage) return (
+    <div className="min-h-[100dvh] bg-[#06070d] p-6 text-white">
+      <button onClick={() => router.back()}>Back</button>
+      <p role="status">{authenticated && promotersQuery.isPending && promotersQuery.fetchStatus !== "paused"
+        ? "Checking promoter access…" : promotersQuery.isError || promotersQuery.fetchStatus === "paused"
+        ? "Could not verify promoter access. Try again." : "You don't have permission to manage promoters for this event."}</p>
+      {(promotersQuery.isError || promotersQuery.fetchStatus === "paused") && <button onClick={() => void promotersQuery.refetch()}>Retry</button>}
+    </div>
+  );
 
   return (
     <div className="min-h-[100dvh] bg-[#06070d] text-white">

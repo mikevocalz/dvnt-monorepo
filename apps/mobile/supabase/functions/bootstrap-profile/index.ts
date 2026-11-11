@@ -155,7 +155,12 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const results = await Promise.all(queries);
+    // The public presentation flag must use the same two privacy sources as
+    // post_relationship_access, even for legacy settings-only private accounts.
+    const [results, privacyResult] = await Promise.all([
+      Promise.all(queries),
+      supabase.rpc("profile_is_private", { p_user_id: profileUserId }),
+    ]);
 
     const profileResult = results[0];
     const postsResult = results[1];
@@ -166,6 +171,13 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Profile not found" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (privacyResult.error || typeof privacyResult.data !== "boolean") {
+      return new Response(JSON.stringify({ error: "Profile privacy unavailable" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json", "Cache-Control": "private, no-store" },
       });
     }
 
@@ -221,7 +233,7 @@ Deno.serve(async (req: Request) => {
         followingCount: p.following_count || 0,
         postsCount: p.posts_count || 0,
         verified: p.verified || false,
-        isPrivate: p.is_private === true,
+        isPrivate: privacyResult.data,
         viewerIsFollowing: viewerFollowsResult?.data ? true : false,
         viewerIsFollowedBy: followsViewerResult?.data ? true : false,
       },

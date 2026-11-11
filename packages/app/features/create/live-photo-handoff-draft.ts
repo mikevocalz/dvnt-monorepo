@@ -88,7 +88,7 @@ export function addHandoffAssets(draft: HandoffDraft, assets: HandoffAsset[], ow
       id: `handoff-${handoffId}-${index}`, uri: asset.url, originalUri: asset.url,
       pairedVideoUri: asset.livePhotoVideoUrl, type: 'image', kind: 'livePhoto',
       mimeType: asset.mimeType, width: asset.width ?? undefined, height: asset.height ?? undefined,
-      handoffUpload: { ownerId, type: 'image', url: asset.url, livePhotoVideoUrl: asset.livePhotoVideoUrl, mimeType: asset.mimeType },
+      handoffUpload: { photoId: asset.photoId, motionId: asset.motionId, ownerId, type: 'image', url: asset.url, livePhotoVideoUrl: asset.livePhotoVideoUrl, mimeType: asset.mimeType },
     };
   });
   const ids = new Set(draft.selectedMedia.map(media => media.id));

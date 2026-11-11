@@ -28,6 +28,7 @@ import { slugify } from "@dvnt/app/lib/slug";
 
 import { FollowStatusRefresh } from "@dvnt/app/components/feed/follow-status-refresh";
 import { useFollowRequestStatus } from "@dvnt/app/lib/hooks/use-follow-requests";
+import { isProfilePrivacyUnavailable } from "@dvnt/app/lib/profile/effective-profile-privacy";
 import { privateProfilePresentation } from "@dvnt/app/lib/profile/private-profile";
 import { PrivateProfileNotice } from "./private-profile-notice.web";
 import { useWindowScrollRestoration } from "@dvnt/app/lib/hooks/use-scroll-restoration.web";
@@ -107,7 +108,7 @@ export function UserProfileScreen() {
   const isOwnProfile = currentUser?.username === safeUsername;
 
   // Canonical user read by username (matches native useUser).
-  const { data: userData, isLoading, isError } = useUser(safeUsername || "");
+  const { data: userData, isLoading, error: profileError, refetch: retryProfile } = useUser(safeUsername || "");
   const userId = (userData as any)?.id;
 
   // Profile posts (parallel with the user query, no waterfall).
@@ -249,6 +250,20 @@ export function UserProfileScreen() {
       `/feed/profile/following?userId=${userId}&username=${encodeURIComponent(safeUsername || "")}`,
     );
   };
+
+  // React Query retains the previous profile after a failed refetch. Never
+  // render a stale Public presentation when effective privacy is unavailable.
+  if (isProfilePrivacyUnavailable(profileError)) {
+    return (
+      <div className="min-h-[100dvh] bg-[#06070d] text-white">
+        <Header onBack={() => router.back()} onMenu={() => {}} title="Profile" />
+        <div role="alert" className="p-8 text-center">
+          <p>Could not verify profile privacy.</p>
+          <button onClick={() => void retryProfile()} className="mt-4 text-[#3FDCFF]">Try Again</button>
+        </div>
+      </div>
+    );
+  }
 
   if (!safeUsername) {
     return (

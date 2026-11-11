@@ -28,6 +28,10 @@ const { build } = require('esbuild');
     export const camera = create(() => ({ result: null, clear: () => {} }));
   `;
   const mocks = {
+    // This import/publication suite keeps signed delivery disabled. Actual
+    // owner-lease behavior is covered by test-handoff-upload-lease.cjs.
+    '@dvnt/app/lib/media/handoff-upload-lease': `export const withLeasedHandoffScan=async(media,_signal,scan)=>scan(media);`,
+    '@dvnt/app/lib/media/use-handoff-upload-lease': `export const useHandoffUploadLease=asset=>asset;`,
     // This suite isolates import, publication and auth-return behavior.
     './nudity-scan.web': `export const scanPostMedia=async()=>({flagged:false,incomplete:false});`,
     './native-live-photo-handoff.web': `export const NativeLivePhotoHandoff = () => null;`,

@@ -18,6 +18,7 @@ export function PostMediaCarousel({
   const openAt = useLightboxStore((s) => s.openAt);
   const multiple = media.length > 1;
   const items = media.map((m) => ({
+    ...m,
     type: m.type,
     url: m.url,
     poster: resolveWebPostMedia(m).posterUrl,
@@ -38,7 +39,7 @@ export function PostMediaCarousel({
       >
         {media.map((medium, i) => (
           <PostMediaSlide
-            key={`${i}:${medium.url}:${medium.livePhotoVideoUrl ?? ""}`}
+            key={medium.postId ? `${medium.postId}:${medium.order ?? i}` : `${i}:${medium.url}:${medium.livePhotoVideoUrl ?? ""}`}
             medium={medium}
             caption={caption}
             multiple={multiple}

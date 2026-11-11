@@ -1,3 +1,4 @@
+import { resetFollowAccessCaches } from "@dvnt/app/lib/hooks/reset-follow-access-caches";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
@@ -17,7 +18,8 @@ interface LikeState {
 }
 
 interface MutationContext {
-  previousState?: LikeState;
+  isCurrent?: () => boolean;
+  previousState?: LikeState | null;
   previousQueries?: Array<[readonly unknown[], Comment[] | undefined]>;
   previousThreadQueries?: Array<[readonly unknown[], CommentThread | undefined]>;
 }
@@ -99,16 +101,12 @@ export function useCommentLikeState(
 
   const existingCache = queryClient.getQueryData<LikeState>(likeKey);
 
-  const { data: likeState } = useQuery<LikeState>({
+  const { data: likeState } = useQuery<LikeState | null>({
     queryKey: likeKey,
-    queryFn: async () =>
-      existingCache || {
-        hasLiked: initialHasLiked,
-        likesCount: initialLikesCount,
-      },
-    initialData: existingCache || {
-      hasLiked: initialHasLiked,
-      likesCount: initialLikesCount,
+    queryFn: async () => queryClient.getQueryData<LikeState | null>(likeKey) ??
+      (queryClient.getQueryData(likeKey) === null ? null : { hasLiked: initialHasLiked, likesCount: initialLikesCount }),
+    initialData: existingCache === null ? null : existingCache || {
+      hasLiked: initialHasLiked, likesCount: initialLikesCount,
     },
     enabled: !!viewerId && !!commentId,
     staleTime: Infinity,
@@ -117,15 +115,19 @@ export function useCommentLikeState(
   const mutation = useMutation({
     mutationKey: ["commentLike", commentId, viewerId],
     mutationFn: async ({ isLiked }: { isLiked: boolean }) => {
-      if (!viewerId) {
+      const owner = useAuthStore.getState().user;
+      if (!viewerId || owner?.id !== viewerId) {
         throw new Error("Must be logged in to like comments");
       }
-      return commentsApiClient.likeComment(commentId, isLiked);
+      return commentsApiClient.likeComment(commentId, isLiked, () => useAuthStore.getState().user === owner);
     },
     onMutate: async ({ isLiked }) => {
-      if (!viewerId) return {};
+      const owner = useAuthStore.getState().user;
+      const isCurrent = () => useAuthStore.getState().user === owner && owner?.id === viewerId;
+      if (!viewerId || !isCurrent() || queryClient.getQueryData(likeKey) === null) return {};
 
       await queryClient.cancelQueries({ queryKey: likeKey });
+      if (!isCurrent()) return {};
       const previousState = queryClient.getQueryData<LikeState>(likeKey);
       const newState: LikeState = {
         hasLiked: !isLiked,
@@ -170,13 +172,14 @@ export function useCommentLikeState(
       );
 
       return {
+        isCurrent,
         previousState,
         previousQueries,
         previousThreadQueries,
       } as MutationContext;
     },
     onError: (err, _variables, context) => {
-      if (!viewerId) return;
+      if (!context?.isCurrent?.()) return;
       const showToast = useUIStore.getState().showToast;
       showToast(
         "error",
@@ -207,8 +210,13 @@ export function useCommentLikeState(
         }
       }
     },
-    onSuccess: (data) => {
-      if (!viewerId) return;
+    onSuccess: (data, _variables, context) => {
+      if (!context?.isCurrent?.()) return;
+      if (data.countHidden) {
+        queryClient.setQueryData(likeKey, null);
+        void resetFollowAccessCaches(queryClient, true, context.isCurrent);
+        return;
+      }
       const successState: LikeState = {
         hasLiked: data.liked,
         likesCount: data.likes,
@@ -249,23 +257,23 @@ export function useCommentLikeState(
   });
 
   const toggle = useCallback(() => {
-    if (!likeState || mutation.isPending || !viewerId) return;
+    if (queryClient.getQueryData(likeKey) === null || !likeState || mutation.isPending || !viewerId) return;
     mutation.mutate({ isLiked: likeState.hasLiked });
   }, [likeState?.hasLiked, mutation, viewerId]);
 
   const like = useCallback(() => {
-    if (mutation.isPending || !viewerId) return;
+    if (queryClient.getQueryData(likeKey) === null || mutation.isPending || !viewerId) return;
     mutation.mutate({ isLiked: false });
   }, [mutation, viewerId]);
 
   const unlike = useCallback(() => {
-    if (mutation.isPending || !viewerId) return;
+    if (queryClient.getQueryData(likeKey) === null || mutation.isPending || !viewerId) return;
     mutation.mutate({ isLiked: true });
   }, [mutation, viewerId]);
 
   return {
-    hasLiked: likeState?.hasLiked ?? initialHasLiked,
-    likesCount: likeState?.likesCount ?? initialLikesCount,
+    hasLiked: likeState === null ? false : likeState?.hasLiked ?? initialHasLiked,
+    likesCount: likeState === null ? 0 : likeState?.likesCount ?? initialLikesCount,
     toggle,
     like,
     unlike,

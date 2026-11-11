@@ -1,3 +1,4 @@
+import { resetFollowAccessCaches } from "@dvnt/app/lib/hooks/reset-follow-access-caches";
 /**
  * Centralized Post Like State Hook
  *
@@ -119,15 +120,15 @@ export function usePostLikeState(
 
   // Query for like state - use cached data or seed with initial values
   // NOTE: We use cache-first approach to prevent crashes from missing backend endpoints
-  const { data: likeState } = useQuery<LikeState>({
+  const { data: likeState } = useQuery<LikeState | null>({
     queryKey: likeStateQueryKey,
     queryFn: async () => {
       // Return cached value or initial values - no server fetch to prevent crashes
       const cached = queryClient.getQueryData<LikeState>(likeStateQueryKey);
-      return cached || { hasLiked: initialHasLiked, likes: initialLikesCount };
+      return cached === null ? null : cached || { hasLiked: initialHasLiked, likes: initialLikesCount };
     },
     // CRITICAL: Use existing cache if available, otherwise use initial props
-    initialData: existingCache || {
+    initialData: existingCache === null ? null : existingCache || {
       hasLiked: initialHasLiked,
       likes: initialLikesCount,
     },
@@ -208,6 +209,10 @@ export function usePostLikeState(
     },
     onSuccess: (data, operation) => {
       if (!operation.isCurrent()) return;
+      if (data.countHidden) {
+        void resetFollowAccessCaches(queryClient, true, operation.isCurrent);
+        return;
+      }
       // hasLiked belongs to this viewer. Never copy it into other accounts.
       queryClient.setQueryData<LikeState>(likeStateQueryKey, { hasLiked: data.liked, likes: data.likes });
       updatePostLikeEverywhere(queryClient, normalizedPostId, data.liked, data.likes);
@@ -218,7 +223,8 @@ export function usePostLikeState(
   });
 
   const requestLike = useCallback((requested?: "like" | "unlike") => {
-    if (!normalizedPostId || !viewerId || useAuthStore.getState().user?.id !== viewerId) return;
+    if (!normalizedPostId || !viewerId || useAuthStore.getState().user?.id !== viewerId ||
+      queryClient.getQueryData(likeStateQueryKey) === null) return;
     let pending = pendingLikes.get(queryClient);
     if (!pending) { pending = new Set(); pendingLikes.set(queryClient, pending); }
     const lockKey = JSON.stringify([viewerId, normalizedPostId]);
@@ -248,9 +254,11 @@ export function usePostLikeState(
   // CRITICAL: Prioritize cached data over initial props
   // This ensures likes sync correctly on back navigation
   const finalHasLiked =
-    likeState?.hasLiked ?? existingCache?.hasLiked ?? initialHasLiked;
+    likeState === null || existingCache === null ? false :
+      likeState?.hasLiked ?? existingCache?.hasLiked ?? initialHasLiked;
   const finalLikesCount =
-    likeState?.likes ?? existingCache?.likes ?? initialLikesCount;
+    likeState === null || existingCache === null ? 0 :
+      likeState?.likes ?? existingCache?.likes ?? initialLikesCount;
 
   return {
     hasLiked: finalHasLiked,

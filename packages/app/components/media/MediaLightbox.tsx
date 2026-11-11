@@ -1,3 +1,4 @@
+import { usePostMediaLease } from "@dvnt/app/lib/media/use-post-media-lease";
 /**
  * MediaLightbox — fullscreen image viewer, drop-in for @nandorojo/galeria.
  *
@@ -58,6 +59,9 @@ import { useFeedPlaybackEnabled } from "../feed/feed-inline-video";
 import type { MediaKind } from "@dvnt/app/lib/media/types";
 
 type LightboxMedia = {
+  postId?: string;
+  order?: number;
+  expiresAt?: number;
   type?: "image" | "gif" | "livePhoto" | string;
   url: string;
   livePhotoVideoUrl?: string;
@@ -93,13 +97,17 @@ interface LightboxProps {
 const SNAP_POINTS = ["100%"] as const;
 
 function LightboxProvider({ urls, media, children, onOpenChange }: LightboxProps) {
-  const items: LightboxMedia[] = useMemo(() => {
+  const snapshotItems: LightboxMedia[] = useMemo(() => {
     if (media && media.length) return media;
     return (urls ?? [])
       .filter((u): u is string => typeof u === "string" && u.length > 0)
       .map((url) => ({ type: "image" as const, url }));
   }, [urls, media]);
 
+  const leasedItems = usePostMediaLease(snapshotItems[0]?.postId, snapshotItems);
+  const items = snapshotItems[0]?.postId
+    ? snapshotItems.flatMap(item => leasedItems.filter(fresh => fresh.order === item.order && fresh.type === item.type))
+    : snapshotItems;
   const sheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [openIndex, setOpenIndex] = useState(0);

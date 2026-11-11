@@ -6,6 +6,9 @@ import { MediaLightbox } from "./MediaLightbox";
 import type { MediaKind } from "@dvnt/app/lib/media/types";
 
 export type PostCarouselMedia = {
+  postId?: string;
+  order?: number;
+  expiresAt?: number;
   type?: string;
   url?: string;
   thumbnail?: string;
@@ -115,7 +118,7 @@ export const PostMediaCarousel = memo(function PostMediaCarousel({
       >
         {media.map((medium, index) => (
           <MediaSlide
-            key={`${index}:${medium.url ?? ""}`}
+            key={medium.postId ? `${medium.postId}:${medium.order ?? index}` : `${index}:${medium.url ?? ""}`}
             medium={medium}
             galeriaIndex={lightboxIndices.get(index) ?? -1}
             width={width}

@@ -1,3 +1,5 @@
+"use client";
+import { usePostPreviewLease } from "@dvnt/app/lib/media/use-post-preview-lease";
 /**
  * Location detail — WEB variant of native
  * `app/(protected)/location/[placeId].tsx`.
@@ -11,7 +13,6 @@
  * TanStack Virtual (masonry lanes). State = Zustand (no useState). Styling = raw
  * semantic tags + Tailwind only. bg #06070d, accent cyan #3FDCFF.
  */
-"use client";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 
@@ -110,12 +111,13 @@ function coverFor(post: Post): string {
 }
 
 
-function LocationPostGate({ post, height, children }: { post: Post; height: number; children: ReactNode }) {
+function LocationPostGate({ post, height, children }: { post: Post; height: number; children: (cover: string | undefined) => ReactNode }) {
+  const cover = usePostPreviewLease(post.id, coverFor(post));
   // Same per-post boundary as native: account changes and revoked access also
   // erase detached media overlays before protected content can paint again.
   return useSpicyPostLocked(post)
     ? <SpicyFollowGate author={post.author} height={height} />
-    : <>{children}</>;
+    : <>{children(cover)}</>;
 }
 
 export function LocationDetailScreen() {
@@ -356,7 +358,7 @@ export function LocationDetailScreen() {
             {items.map((item) => {
               const post = posts[item.index];
               if (!post) return null;
-              const cover = coverFor(post);
+
               const isVideo = isVideoKind(post.media?.[0]?.type);
               const isCarousel =
                 post.hasMultipleImages || (post.media?.length ?? 0) > 1;
@@ -374,7 +376,7 @@ export function LocationDetailScreen() {
                     paddingBottom: GAP,
                   }}
                 >
-                  <LocationPostGate post={post} height={cellHeight(post)}>
+                  <LocationPostGate post={post} height={cellHeight(post)}>{(cover) => (
                   <div
                     onClick={() => openPost(post)}
                     role="button"
@@ -406,7 +408,7 @@ export function LocationDetailScreen() {
                       </span>
                     ) : null}
                   </div>
-                  </LocationPostGate>
+                  )}</LocationPostGate>
                 </div>
               );
             })}

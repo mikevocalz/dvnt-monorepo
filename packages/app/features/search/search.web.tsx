@@ -1,4 +1,6 @@
 "use client";
+import { usePostMediaLease } from "@dvnt/app/lib/media/use-post-media-lease";
+import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delivery";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 
@@ -99,6 +101,8 @@ function PostTile(props: { post: Post; big?: boolean }) {
 }
 function UnlockedPostTile({ post, big = false }: { post: Post; big?: boolean }) {
   const router = useRouter();
+  const leasedMedia = usePostMediaLease(post.id, post.media || []);
+  post = { ...post, media: leasedMedia, thumbnail: protectedPostMediaEnabled() ? leasedMedia[0]?.thumbnail : post.thumbnail };
   const media = post.media?.[0];
   const isVideo = isVideoKind(post.type) || isVideoKind(media?.type);
   const isCarousel = post.hasMultipleImages || (post.media?.length ?? 0) > 1;

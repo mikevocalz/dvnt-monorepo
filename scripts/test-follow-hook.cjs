@@ -29,6 +29,8 @@ function harness(kind = 'follow') {
     new Function('require', 'exports', source)(name => {
       if (name === 'react') return { useSyncExternalStore: (_subscribe, get) => get() };
       if (name.includes('revoke-post-overlays')) return { resetPostAccessOverlays: () => lifecycle.push('overlays-cleared') };
+      if (name.includes('post-access-generation')) return load(path.resolve(__dirname, '../packages/app/lib/posts/post-access-generation.ts'));
+      if (name.includes('post-media-lease-events')) return load(path.resolve(__dirname, '../packages/app/lib/media/post-media-lease-events.ts'));
       if (name.includes('reset-follow-access-caches')) return load(path.resolve(__dirname, '../packages/app/lib/hooks/reset-follow-access-caches.ts'));
       if (name.endsWith('session-lifecycle')) return load(path.resolve(__dirname, '../packages/app/lib/auth/session-lifecycle.ts'));
       if (name.endsWith('follow-identity')) return load(path.resolve(__dirname, '../packages/app/lib/auth/follow-identity.ts'));
@@ -58,7 +60,7 @@ function harness(kind = 'follow') {
   };
   render();
   return {
-    client, toast, calls, lifecycle, render,
+    client, toast, calls, lifecycle, render, load,
     get options() { return options; }, get hook() { return hook; }, get callbackOptions() { return callbackOptions; },
     variables: (input, callbacks) => (kind === 'follow' ? hook : hook.mutation).mutate(input, callbacks),
     reset: load(path.resolve(__dirname, '../packages/app/lib/hooks/reset-follow-access-caches.ts')).resetFollowAccessCaches,
@@ -104,7 +106,7 @@ test('unfollow immediately clears payload and stale account result cannot mutate
 test('all protected payload families and detached overlays clear before cancellation awaits', async () => {
  const h=harness(); const keys=[
   ['posts','detail',1],['profilePosts','author'],['profileTaggedPosts','author'],
-  ['postTags',1],['search','posts','query'],['search','v2','discover'],
+  ['postLikers',1,'a'],['postTags',1],['search','posts','query'],['search','v2','discover'],
   ['search','v2','results','query'],['comments','post',1],['comments','thread',2],
   ['bookmarks','posts','a'],['activities','a'],['likedPosts','a'],['notifications','a'],
   ['users','followers','private-owner'],['users','following','private-owner'],
@@ -116,9 +118,11 @@ test('all protected payload families and detached overlays clear before cancella
   for(const key of keys)h.client.setQueryData(key,{secret:'protected media or identity'});
   h.client.setQueryData(['events','public'],{title:'Keep unrelated event cache'});
   h.client.setQueryData(['users','profile','public-owner'],{username:'Keep public header'});
+  h.client.setQueryData(['likeState','a','1'],{hasLiked:true,likes:77});
   const pending=h.reset(h.client);
   assert.equal(h.lifecycle[0],'overlays-cleared');
   for(const key of keys)assert.equal(h.client.getQueryData(key),undefined,JSON.stringify(key)+' must clear synchronously');
+  assert.equal(h.client.getQueryData(['likeState','a','1']),null,'cache-only engagement uses a tombstone');
   assert.equal(invalidated.length,0,'no refetch before cancellation settles');
   assert.equal(h.client.getQueryData(['events','public']).title,'Keep unrelated event cache');
   assert.equal(h.client.getQueryData(['users','profile','public-owner']).username,'Keep public header');
@@ -248,3 +252,34 @@ for (const kind of ['follow', 'requests']) {
     } finally { h.client.clear(); }
   });
 }
+
+// Integration guard: every privacy branch contributes to this same boundary.
+test('combined privacy reset retires reads, leases, overlays and both cache-only like states synchronously', async () => {
+ const h = harness();
+ const generation = h.load(path.resolve(__dirname, '../packages/app/lib/posts/post-access-generation.ts'));
+ const media = h.load(path.resolve(__dirname, '../packages/app/lib/media/post-media-lease-events.ts'));
+ const currentRead = generation.capturePostAccessGeneration(h.client);
+ let mediaRetired = false;
+ const unsubscribe = media.onPostMediaLeaseRetirement(() => { mediaRetired = true; assert.equal(currentRead(), false); });
+ const releases = [], invalidated = [];
+ h.client.cancelQueries = () => new Promise(resolve => releases.push(resolve));
+ h.client.invalidateQueries = async ({queryKey}) => invalidated.push(queryKey[0]);
+ try {
+  h.client.setQueryData(['likeState', 'a', '1'], {hasLiked: true, likes: 77});
+  h.client.setQueryData(['commentLikeState', 'a', '9'], {hasLiked: true, likesCount: 12});
+  h.client.setQueryData(['postLikers', '1', 'a'], ['protected-identity']);
+  const pending = h.reset(h.client);
+  assert.equal(currentRead(), false);
+  assert.equal(mediaRetired, true);
+  assert.equal(h.lifecycle[0], 'overlays-cleared');
+  assert.equal(h.client.getQueryData(['likeState', 'a', '1']), null);
+  assert.equal(h.client.getQueryData(['commentLikeState', 'a', '9']), null);
+  assert.equal(h.client.getQueryData(['postLikers', '1', 'a']), undefined);
+  assert.equal(invalidated.length, 0);
+  releases.splice(0).forEach(resolve => resolve());
+  await pending;
+  assert.ok(invalidated.includes('postLikers'));
+  assert.ok(!invalidated.includes('likeState'));
+  assert.ok(!invalidated.includes('commentLikeState'));
+ } finally { unsubscribe(); releases.splice(0).forEach(resolve => resolve()); h.client.clear(); }
+});
