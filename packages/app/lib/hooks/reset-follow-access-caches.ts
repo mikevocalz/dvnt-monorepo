@@ -12,16 +12,18 @@ export async function resetFollowAccessCaches(
   resetPostAccessOverlays();
   const prefixes: readonly (readonly string[])[] = [
     ...["posts", "profilePosts", "profileTaggedPosts", "postTags", "search",
-      "comments", "bookmarks", "activities", "likedPosts", "notifications"].map(key => [key]),
+      "postLikers", "comments", "bookmarks", "activities", "likedPosts", "notifications"].map(key => [key]),
     // Follow lists can contain identities visible only to accepted followers.
     ["users", "followers"], ["users", "following"],
   ];
-  const cancellations = prefixes.map(prefix => client.cancelQueries({ queryKey: prefix }, { revert: false }));
+  // Like-state queries are cache-only: refetching them would reseed stale props.
+  const clearPrefixes = [...prefixes, ["likeState"]];
+  const cancellations = clearPrefixes.map(prefix => client.cancelQueries({ queryKey: prefix }, { revert: false }));
   const clear = () => {
-    for (const prefix of prefixes) {
+    for (const prefix of clearPrefixes) {
       for (const query of client.getQueryCache().findAll({ queryKey: prefix })) {
         // invalidate alone preserves the old authorized media while refetching.
-        query.setState({ data: undefined, dataUpdatedAt: 0, error: null, status: "pending" });
+        query.setState({ data: prefix[0] === "likeState" ? null : undefined, dataUpdatedAt: 0, error: null, status: "pending" });
       }
     }
   };

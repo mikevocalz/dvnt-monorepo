@@ -1,3 +1,4 @@
+import { resetFollowAccessCaches } from "@dvnt/app/lib/hooks/reset-follow-access-caches";
 import {
   useQuery,
   useMutation,
@@ -244,9 +245,10 @@ export function useLikePost() {
       pendingLikeMutations.add(postId);
 
       try {
+        const owner = useAuthStore.getState().user;
         const result = await postsApi.likePost(postId, isLiked);
         if (__DEV__) console.log(`[useLikePost] Server response:`, result);
-        return result;
+        return { ...result, isCurrent: () => useAuthStore.getState().user === owner };
       } finally {
         // Always clean up the pending state
         pendingLikeMutations.delete(postId);
@@ -265,6 +267,10 @@ export function useLikePost() {
     },
     onSuccess: (data, variables) => {
       const { postId } = variables;
+      if (data.countHidden) {
+        void resetFollowAccessCaches(queryClient, true, data.isCurrent);
+        return;
+      }
 
       // CRITICAL: Update Zustand store with SERVER state
       import("@/lib/stores/post-store").then(({ usePostStore }) => {
