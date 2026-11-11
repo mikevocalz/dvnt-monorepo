@@ -106,6 +106,7 @@ jobs:
           node --test packages/app/lib/activity/event-activity.test.ts packages/app/lib/posts/text-post-layout.test.ts
           node scripts/test-weekly-event-visibility-sql.cjs
           node scripts/test-weekly-post-follow-sql.cjs
+          node scripts/test-protected-post-engagement.cjs
           node scripts/test-weekly-post-share-metadata.cjs
           node scripts/test-private-follow-requests-sql.cjs
           node scripts/test-spicy-follow-server.cjs
