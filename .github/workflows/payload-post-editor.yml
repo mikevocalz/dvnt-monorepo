@@ -20,7 +20,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install dependencies with clean retry for pnpm linker failures
+        run: |
+          set -euo pipefail
+          if ! pnpm install --frozen-lockfile --ignore-scripts; then
+            echo "::warning::pnpm install failed; clean retry on disposable runner."
+            rm -rf node_modules
+            pnpm install --frozen-lockfile --ignore-scripts --force
+          fi
       - name: Typecheck editor and registration contracts
         run: >-
           pnpm exec tsc --noEmit --target ESNext --module ESNext --moduleResolution bundler
