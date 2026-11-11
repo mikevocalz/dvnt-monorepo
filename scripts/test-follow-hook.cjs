@@ -29,6 +29,7 @@ function harness(kind = 'follow') {
     new Function('require', 'exports', source)(name => {
       if (name === 'react') return { useSyncExternalStore: (_subscribe, get) => get() };
       if (name.includes('revoke-post-overlays')) return { resetPostAccessOverlays: () => lifecycle.push('overlays-cleared') };
+      if (name.includes('post-access-generation')) return load(path.resolve(__dirname, '../packages/app/lib/posts/post-access-generation.ts'));
       if (name.includes('reset-follow-access-caches')) return load(path.resolve(__dirname, '../packages/app/lib/hooks/reset-follow-access-caches.ts'));
       if (name.endsWith('session-lifecycle')) return load(path.resolve(__dirname, '../packages/app/lib/auth/session-lifecycle.ts'));
       if (name.endsWith('follow-identity')) return load(path.resolve(__dirname, '../packages/app/lib/auth/follow-identity.ts'));

@@ -111,6 +111,7 @@ jobs:
           node scripts/test-spicy-follow-server.cjs
           node scripts/test-protected-photo-preview.cjs
           node scripts/test-follow-hook.cjs
+          node scripts/test-post-bootstrap-revocation.cjs
           node scripts/test-follow-requests-dom.cjs
           node scripts/test-private-profile-presentation.cjs
           node scripts/test-private-social-graph-sql.cjs

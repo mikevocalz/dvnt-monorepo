@@ -25,6 +25,7 @@ import {
 } from "@dvnt/app/lib/query/patch";
 import { postKeys, profileKeys, activityKeys } from "@dvnt/app/lib/query-keys";
 export { postKeys };
+import { capturePostReadOwner } from "@dvnt/app/lib/posts/post-read-owner";
 import { captureServerLikeSync } from "@dvnt/app/lib/posts/like-state-sync";
 
 // Only server reads, not tile mounts, can prove that a snapshot is fresh.
@@ -447,9 +448,14 @@ export function useCreatePost() {
   return useMutation({
     mutationFn: postsApi.createPost,
     onMutate: async (newPostData) => {
+      const ownerIsCurrent = capturePostReadOwner(queryClient);
+      const currentUser = useAuthStore.getState().user;
+      const isCurrent = () => ownerIsCurrent() &&
+        currentUser?.id === user?.id && currentUser?.authId === user?.authId;
       // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: postKeys.all });
 
+      if (!isCurrent()) return { isCurrent };
       const optimisticId = `temp-${newPostData.operationId || Date.now()}`;
 
       const optimisticTextPresentation =
@@ -651,7 +657,7 @@ export function useCreatePost() {
         );
       }
 
-      return { optimisticId };
+      return { optimisticId, isCurrent };
     },
     onError: (_err, _variables, context) => {
       if (!context?.optimisticId) return;
@@ -665,6 +671,7 @@ export function useCreatePost() {
       queryClient.setQueriesData<Post[]>({ queryKey: ["profilePosts"] }, (old) => old ? remove(old) : old);
     },
     onSuccess: (newPost, _variables, context) => {
+      if (!context?.isCurrent()) return;
       // A response from the previous account must not populate the new account feed.
       const currentViewer = useAuthStore.getState().user;
       if (![currentViewer?.id, currentViewer?.authId].some((id) => id && (id === user?.id || id === user?.authId))) return;
@@ -746,7 +753,9 @@ export function useUpdatePost() {
       postId: string;
       updates: { content?: string; location?: string };
     }) => postsApi.updatePost(postId, updates),
-    onSuccess: (updatedPost, { postId }) => {
+    onMutate: () => ({ isCurrent: capturePostReadOwner(queryClient) }),
+    onSuccess: (updatedPost, { postId }, context) => {
+      if (!context?.isCurrent()) return;
       // Update the specific post in cache
       if (updatedPost) {
         queryClient.setQueryData<Post>(postKeys.detail(postId), updatedPost);
@@ -765,6 +774,7 @@ export function useDeletePost() {
   return useMutation({
     mutationFn: postsApi.deletePost,
     onMutate: async (deletedPostId) => {
+      const isCurrent = capturePostReadOwner(queryClient);
       const idStr = String(deletedPostId);
       const deletedPost = findCachedPostSnapshot(queryClient, idStr);
       const authUser = useAuthStore.getState().user;
@@ -785,6 +795,9 @@ export function useDeletePost() {
         queryClient.cancelQueries({ queryKey: ["users", "username"] }),
         queryClient.cancelQueries({ queryKey: ["auth-user"] }),
       ]);
+
+      // Cancellation may yield to a revocation or account transition.
+      if (!isCurrent()) return { isCurrent };
 
       const previousInfinite = queryClient.getQueryData(
         postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
@@ -821,6 +834,7 @@ export function useDeletePost() {
       }
 
       return {
+        isCurrent,
         previousInfinite,
         previousFeed,
         previousDetail,
@@ -833,6 +847,8 @@ export function useDeletePost() {
       };
     },
     onError: (_err, deletedPostId, context) => {
+      // Never resurrect snapshots captured under a retired access/session owner.
+      if (!context?.isCurrent()) return;
       if (context?.previousInfinite) {
         queryClient.setQueryData(
           postKeys.feedInfinite(useAppStore.getState().nsfwEnabled),
@@ -868,6 +884,7 @@ export function useDeletePost() {
       }
     },
     onSuccess: (_result, deletedPostId, context) => {
+      if (!context?.isCurrent()) return;
       // The count was decremented optimistically. Refresh again now that the
       // write is committed, even if that count did not change a second time.
       invalidateProfileCompletion(context?.previousAuthUser);

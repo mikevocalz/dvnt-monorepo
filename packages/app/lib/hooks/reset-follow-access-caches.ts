@@ -1,3 +1,4 @@
+import { advancePostAccessGeneration } from "@dvnt/app/lib/posts/post-access-generation";
 import type { QueryClient } from "@tanstack/react-query";
 import { resetPostAccessOverlays } from "@dvnt/app/lib/posts/revoke-post-overlays";
 
@@ -8,6 +9,8 @@ export async function resetFollowAccessCaches(
   isCurrent: () => boolean = () => true,
 ) {
   if (!isCurrent()) return;
+  // Retire unmanaged reads synchronously, before cancellation can yield.
+  advancePostAccessGeneration(client);
   // Detached lightboxes and share sheets must disappear in the same frame.
   resetPostAccessOverlays();
   const prefixes: readonly (readonly string[])[] = [

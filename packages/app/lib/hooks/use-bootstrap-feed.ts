@@ -1,3 +1,4 @@
+import { capturePostReadOwner } from "@dvnt/app/lib/posts/post-read-owner";
 /**
  * Bootstrap Feed Hook
  *
@@ -169,6 +170,7 @@ export function useBootstrapFeed() {
   const nsfwEnabled = useAppStore((s) => s.nsfwEnabled);
   const hasRun = useRef(false);
   const isBootstrapping = useRef(false);
+  const requestSequence = useRef(0);
   const [bootstrapState, setBootstrapState] = useState<{
     key: string;
     status: "idle" | "bootstrapping" | "ready";
@@ -187,6 +189,7 @@ export function useBootstrapFeed() {
 
   useEffect(() => {
     if (bootstrapState.key !== bootstrapKey) {
+      requestSequence.current++;
       hasRun.current = false;
       isBootstrapping.current = false;
       setBootstrapState({
@@ -237,13 +240,24 @@ export function useBootstrapFeed() {
 
     // Capture both viewer and mode; a late accelerator must not seed a newer session.
     const requestAuthId = useAuthStore.getState().user?.authId;
+    const requestId = ++requestSequence.current;
+    const accessIsCurrent = capturePostReadOwner(queryClient);
+    const requestIsLatest = () => requestId === requestSequence.current &&
+      useAuthStore.getState().user?.id === userId &&
+      useAuthStore.getState().user?.authId === requestAuthId &&
+      useAppStore.getState().nsfwEnabled === nsfwEnabled;
     // Fire bootstrap request
     console.log("[BootstrapFeed] No cached data, running bootstrap");
     bootstrapApi
       .feed({ userId, includeNSFW: nsfwEnabled })
       .then((data) => {
+        if (!requestIsLatest()) return;
         isBootstrapping.current = false;
-        if (useAuthStore.getState().user?.id !== userId || useAuthStore.getState().user?.authId !== requestAuthId || useAppStore.getState().nsfwEnabled !== nsfwEnabled) return;
+        // Let ordinary queries recover, but never hydrate a revoked response.
+        if (!accessIsCurrent()) {
+          setBootstrapState({ key: bootstrapKey, status: "ready" });
+          return;
+        }
 
         if (!data) {
           console.warn(
@@ -258,6 +272,7 @@ export function useBootstrapFeed() {
         setBootstrapState({ key: bootstrapKey, status: "ready" });
       })
       .catch((error) => {
+        if (!requestIsLatest()) return;
         isBootstrapping.current = false;
         setBootstrapState({ key: bootstrapKey, status: "ready" });
         console.error("[BootstrapFeed] Bootstrap error:", error);
