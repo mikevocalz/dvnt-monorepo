@@ -1,0 +1,36 @@
+name: Promoter payout journey
+on:
+  pull_request:
+    paths:
+      - 'packages/app/lib/payments/promoter-payout-status*'
+      - 'packages/app/lib/hooks/use-promoter-payout*'
+      - 'packages/app/lib/api/promoters.ts'
+      - 'packages/app/features/events/promoter-self.web.tsx'
+      - 'packages/app/features/routes/screens/(protected)/events/[id]/promoter.tsx'
+      - 'apps/mobile/supabase/functions/promoter-self/**'
+      - 'apps/mobile/supabase/functions/_shared/promoter-payout-summary*'
+      - 'scripts/test-promoter-payout-ui.cjs'
+      - '.github/workflows/promoter-payout-journey.yml'
+permissions:
+  contents: read
+jobs:
+  payout-journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test tools
+        run: npm install --prefix "$RUNNER_TEMP/payout-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.25.12 happy-dom@20.0.11 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 @tanstack/react-query@5.90.16
+      - name: Financial summary and Connect regressions
+        env:
+          NODE_PATH: ${{ runner.temp }}/payout-tests/node_modules
+        run: node --test apps/mobile/supabase/functions/promoter-self/index.test.cjs apps/mobile/supabase/functions/promoter-connect/index.test.cjs apps/mobile/supabase/functions/_shared/read-all-rows.test.cjs packages/app/lib/payments/promoter-payout-status.test.ts
+      - name: Web and native payout flow regressions
+        env:
+          NODE_PATH: ${{ runner.temp }}/payout-tests/node_modules
+        run: node scripts/test-promoter-payout-ui.cjs

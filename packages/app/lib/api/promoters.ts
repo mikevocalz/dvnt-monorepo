@@ -13,6 +13,15 @@
 
 import { invokeEdge } from "./invoke-edge";
 import { canonicalPromoterEventLink } from "../events/promoter-share";
+import type { PromoterConnectStatus } from "../payments/promoter-payout-status";
+
+export interface PromoterPayoutSummary {
+  settledCents: number;
+  unsettledCents: number;
+  heldCents: number;
+  hasRecordedTransfer: boolean;
+  status: "no_earnings" | "pending" | "held" | "settled";
+}
 
 export type PromoterStatus = "invited" | "active" | "paused" | "removed";
 
@@ -321,6 +330,7 @@ export const promotersApi = {
       promoterCommissionBps: number;
       attributedOrders: number;
       earnedCents: number;
+      payout?: PromoterPayoutSummary | null;
       connect: {
         stripeAccountId: string | null;
         chargesEnabled: boolean;
@@ -340,6 +350,7 @@ export const promotersApi = {
         promoterCommissionBps: number;
         attributedOrders: number;
         earnedCents: number;
+        payout?: PromoterPayoutSummary | null;
         connect: {
           stripeAccountId: string | null;
           chargesEnabled: boolean;
@@ -369,16 +380,7 @@ export const promotersApi = {
   },
 
   /** Poll Connect onboarding status for the current user's promoter account. */
-  async connectStatus(eventId: number): Promise<{
-    connected: boolean;
-    chargesEnabled?: boolean;
-    payoutsEnabled?: boolean;
-    detailsSubmitted?: boolean;
-    currentlyDue?: string[];
-    pendingVerification?: string[];
-    pastDue?: string[];
-    disabledReason?: string | null;
-  }> {
+  async connectStatus(eventId: number): Promise<PromoterConnectStatus> {
     const { data, error } = await invokeEdge<{
       connected: boolean;
       charges_enabled?: boolean;
@@ -388,12 +390,15 @@ export const promotersApi = {
       pending_verification?: string[];
       past_due?: string[];
       disabled_reason?: string | null;
+      capabilities?: { transfers?: string };
       error?: string;
     }>("promoter-connect", { action: "status", event_id: eventId });
     if (error) throw new Error(error.message);
     if (data?.error) throw new Error(data.error);
+    if (!data || typeof data.connected !== "boolean") throw new Error("Could not check payout setup");
     return {
-      connected: data?.connected ?? false,
+      connected: data.connected,
+      transfersEnabled: data.capabilities?.transfers === "active",
       chargesEnabled: data?.charges_enabled,
       payoutsEnabled: data?.payouts_enabled,
       detailsSubmitted: data?.details_submitted,
