@@ -159,6 +159,9 @@ function clientAdapters() {
   return { name: 'live-photo-isolation', setup(build) {
     build.onResolve({ filter: /./ }, args => {
       const name = args.path;
+      // This playback roundtrip covers delivery disabled; enabled authorization
+      // and lease expiry have separate production-hook regression suites.
+      if (/(?:use-post-media-lease|use-post-preview-lease|use-handoff-upload-lease)$/.test(name)) return { path: 'lease-disabled', namespace: 'fixture' };
       if (name === '@dvnt/app/lib/stores/auth-store') return { path: 'auth-store', namespace: 'fixture' };
       if (name === 'expo-file-system/legacy') return { path: 'native-files', namespace: 'fixture' };
       if (name === 'react-native') return { path: 'platform', namespace: 'fixture' };
@@ -171,6 +174,7 @@ function clientAdapters() {
       }
     });
     build.onLoad({ filter: /./, namespace: 'fixture' }, args => ({ resolveDir: root, contents: {
+      'lease-disabled': 'export const useHandoffUploadLease=asset=>asset; export const usePostMediaLease=(_id,media)=>media; export const useLeasedPost=post=>post; export const usePostPreviewLease=(_id,fallback)=>fallback; export const usePostGridLease=tile=>tile;',
       'auth-store': 'import {create} from "zustand"; export const useAuthStore=create(()=>({user:{id:"1",authId:"fixture-owner"}}));',
       'native-files': 'export const cacheDirectory = null;',
       platform: 'export const Platform = { OS: "web" };',
