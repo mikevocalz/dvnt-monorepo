@@ -2,6 +2,12 @@
 -- reads on ticket_types. Never expose unlock codes through the public catalog.
 BEGIN;
 
+DO $$ BEGIN
+  IF to_regclass('public.ticket_type_labels') IS NULL THEN
+    RAISE EXCEPTION 'Apply the additive ticket_catalog_safe_labels prerequisite before catalog lockdown';
+  END IF;
+END $$;
+
 -- Keep the frozen projection created by 20260806200000: do not dynamically
 -- expose subsequently added columns. A definer view is required here: an
 -- invoker view inherits manager-only RLS and would hide the catalog from buyers.
@@ -28,15 +34,6 @@ REVOKE ALL ON public.ticket_types_public FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.ticket_types_public TO anon, authenticated, service_role;
 COMMENT ON VIEW public.ticket_types_public IS
   'Read-only buyer catalog with a frozen projection excluding unlock_code. Owner-executed security-barrier view preserves public catalog reads; full base rows require event management permission.';
-
--- Historical transfers/check-ins still need a retired tier's label. Expose
--- only these non-secret fields, never resurrect retired buyer inventory. The
--- id preserves PostgREST's FK inference for aliased ticket relation joins.
-CREATE OR REPLACE VIEW public.ticket_type_labels WITH (security_invoker=false, security_barrier=true) AS
-  SELECT id, name, category FROM public.ticket_types WHERE public.can_view_event(event_id);
-ALTER VIEW public.ticket_type_labels OWNER TO postgres;
-REVOKE ALL ON public.ticket_type_labels FROM PUBLIC, anon, authenticated;
-GRANT SELECT ON public.ticket_type_labels TO authenticated, service_role;
 
 ALTER TABLE public.ticket_types ENABLE ROW LEVEL SECURITY;
 REVOKE SELECT ON public.ticket_types FROM PUBLIC, anon;

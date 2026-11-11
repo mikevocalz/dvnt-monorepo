@@ -59,6 +59,18 @@ test('public catalog stays readable while secret-bearing base rows require accep
     await db.exec(read('20260806200000_ticket_types_public_view.sql'));
     await db.exec(read('20260806400000_ticket_addons_host_write_policies.sql'));
     await db.exec(read('20261111120000_accepted_cohost_event_editing.sql'));
+    // Additive schema first: old clients continue reading base rows while new
+    // clients gain the safe history relation. Lockdown is a later release step.
+    const prerequisite = read('20261111052229_ticket_catalog_safe_labels.sql');
+    await db.exec(prerequisite); await db.exec(prerequisite);
+    await t.test('additive labels coexist with both legacy and updated buyer clients', async () => {
+      await login('buyer');
+      assert.equal((await query('SELECT name FROM ticket_types')).length,2);
+      assert.equal((await query('SELECT name FROM ticket_types_public')).length,2);
+      assert.equal((await query('SELECT name FROM ticket_type_labels')).length,2);
+      await assert.rejects(query('SELECT unlock_code FROM ticket_type_labels'),/does not exist/);
+      await db.exec('RESET ROLE');
+    });
     const migration = read('20261111121000_ticket_catalog_private_management.sql');
     await db.exec(migration); await db.exec(migration);
     await db.exec('ALTER TABLE ticket_types ADD COLUMN future_secret text');

@@ -64,11 +64,15 @@ older than the already-applied migration, and the restrictive ticket-read bounda
 must wait for compatible buyers. Execute only reviewed migrations at the intended
 phase, with bounded lock/statement timeouts and schema/history verification.
 
-1. **Freeze the exact integrated commit and passing checks.** Resolve the private
-   event-view predicate and all remaining base-table buyer/scanner joins. Verify
+1. **Freeze the exact integrated commit and passing checks.** The private
+   event-view predicate and remaining buyer/scanner joins are corrected in #279;
+   independently verify the final SQL and PostgREST relation behavior. Verify
    no payout/settlement changes are present. Verify rollback targets and prior
    deployed function/client versions.
 2. **Apply prerequisite schema before its consumers.**
+   - `20261111052229_ticket_catalog_safe_labels.sql`: additive safe historical-tier
+     labels for new transfer/live/scanner clients. It leaves legacy buyer reads
+     unchanged and must precede the client release and restrictive cutover.
    - `20261111020731_profile_effective_privacy.sql`: required before
      `bootstrap-profile` and updated profile readers. A missing RPC intentionally
      makes profiles unavailable instead of guessing Public.
@@ -96,10 +100,12 @@ phase, with bounded lock/statement timeouts and schema/history verification.
    cutover; web deployment alone does not update installed native apps.
 5. **Only then restrict ticket base reads.** Apply
    `20261111121000_ticket_catalog_private_management.sql` after its corrected view
-   predicate and client-compatibility gates pass. This depends on `can_edit_event`
+   predicate and client-compatibility gates pass. This depends on `can_edit_event` and the additive label view
    from step 2. Verify private/hidden/future event tiers are denied to outsiders,
    public buyers retain the frozen safe fields, manager reads retain unlock codes,
-   and scanner/attendee/history displays still work. Do not reopen the secret-bearing
+   and scanner/attendee/history displays still work. Exercise actual PostgREST
+   joins to `ticket_type_labels`, including nested transfer joins and schema-cache
+   reload; SQL and source fixtures alone do not prove relationship inference. Do not reopen the secret-bearing
    base table to keep an old client working.
 6. **Smoke and observe the coordinated release.** Use synthetic owner/admin/editor,
    scanner/pending/removed/unrelated and public buyer accounts. Verify content,
