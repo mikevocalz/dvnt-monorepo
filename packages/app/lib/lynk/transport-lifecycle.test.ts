@@ -127,6 +127,7 @@ class Player {
   props: any;
   closed = false;
   broadcast = new WatchBroadcast();
+  audio = { out: { context: new Signal(undefined) } };
   video = { source: { out: { config: new Signal(undefined) } }, out: { frame: new Signal(undefined) } };
   constructor(props: any) {
     assert.ok(props.origin instanceof Signal);
@@ -233,6 +234,28 @@ test("late joining viewer discovers already-published paths and closes both deco
   await Promise.resolve();
   assert.equal(resources.players[0].closed, true);
   assert.equal(resources.watches[0].closed, true);
+  h.unmount();
+});
+
+test("admitted host gets a receiver without exact discovery and never fakes live video", () => {
+  reset();
+  resources.initialPaths.push("lynk/room", "lynk/room/", "lynk/other/stranger");
+  const h = new Hooks();
+  let peers = ["host", "../other/stranger", "host", "", "anon-2"];
+  const render = () => useLynkViewer("room", undefined, peers);
+  let view = h.render(render);
+  assert.deepEqual(view.publishers.map((p: any) => p.peerId), ["anon-2", "host"]);
+  assert.ok(view.publishers.every((p: any) => p.announced === false && !p.videoAvailable));
+  assert.notEqual(view.state, "live", "roster membership is not media readiness");
+  view.attachCanvas("lynk/room/host", {});
+  const player = resources.players.at(-1);
+  player.video.source.out.config.set({ codec: "avc1" });
+  player.video.out.frame.set({ timestamp: 1 });
+  view = h.flush();
+  assert.equal(view.publishers.find((p: any) => p.peerId === "host").videoAvailable, true);
+  peers = [];
+  h.render(render);
+  assert.equal(player.closed, true, "removing admitted roster member releases its receiver");
   h.unmount();
 });
 

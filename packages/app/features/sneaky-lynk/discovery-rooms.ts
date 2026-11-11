@@ -1,4 +1,4 @@
-import { bindDiscoveryRoom, discoveryRoomState } from "./discovery-room-state";
+import { bindDiscoveryRoom, discoveryRoomState, hasDiscoveryResumeOwnership } from "./discovery-room-state";
 import type { LynkRecord } from "./stores/lynk-history-store";
 import type { SneakyRoom } from "./types";
 
@@ -8,7 +8,14 @@ export function selectDiscoveryRooms(
 ): LynkRecord[] {
   if (!isCurrent()) return [];
   const seen = new Set(remote.map((room) => room.id));
-  const rooms: LynkRecord[] = remote.map((room) => bindDiscoveryRoom(room, isCurrent)).filter((room) => {
+  const rooms: LynkRecord[] = remote.map((room) => {
+    // Bind the stable source object so clock-rollback expiry stays latched across
+    // renders. bindDiscoveryRoom returns a copy; never mutate the query snapshot.
+    const bound = bindDiscoveryRoom(room, isCurrent);
+    // Never let an old account's owner flag grant host UI to another identity.
+    bound.resumeAllowed = hasDiscoveryResumeOwnership(room, selfIds);
+    return bound;
+  }).filter((room) => {
     const state = discoveryRoomState(room);
     return state.live || room.status === "ended" || room.availability === "ended" || room.isOwner === true || room.isInvited === true;
   });
