@@ -9,7 +9,6 @@ import { RoundedMapMarker } from "./rounded-map-marker.web";
 import { useRouter } from "solito/navigation";
 import { useEventsLocationStore } from "@dvnt/app/lib/stores/events-location-store";
 import { savedMapArea } from "./member-map-area";
-import { MapSharingConsent } from "../map-sharing-consent";
 import { LocationControls } from "@dvnt/app/features/settings/ui/LocationControls";
 import { useLocationSettings, useMemberMapPresence, useNearbyMembers } from "@dvnt/app/lib/hooks/use-member-map";
 import { mapAvatarUrl, mapMemberInitials, mapMemberProfilePath, visibleMapMembers, type MapMember } from "./member-map-render-policy";
@@ -31,7 +30,9 @@ export default function MemberMap(props: UnifiedMapProps = {}) {
 function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOpenEvent }: UnifiedMapProps) {
   const status = useApiLoadingStatus();
   const ready = status === APILoadingStatus.LOADED;
-  const { sharing, enabled } = useLocationSettings();
+  const location = useLocationSettings();
+  const { sharing, enabled } = location;
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const savedCity = useEventsLocationStore((state) => state.activeCity);
   const savedArea = savedMapArea(savedCity);
   const presence = useMemberMapPresence(ready);
@@ -62,13 +63,6 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
   return (
     <section aria-label="Events and people map" className="p-4 space-y-4">
       {!ready ? <p role={failed ? 'alert' : 'status'}>{failed ? 'Google Maps could not load. Sharing cannot be enabled here. You can still turn existing sharing off below.' : 'Loading nearby map…'}</p> : null}
-      {presence.error ? <p role="alert">{presence.error}</p> : null}
-      {nearby.isError ? (
-        <div role="alert"><p>Nearby people could not be refreshed. Locations have been hidden.</p><button className="min-h-11 px-4 rounded-xl bg-white/10" onClick={() => void nearby.refetch()}>Retry nearby people</button></div>
-      ) : null}
-      {ready && sharing && !center && !nearby.isError && !presence.error ? <p role="status">{presence.isUpdating || nearby.isPending ? 'Updating your approximate location…' : 'A fresh location is needed to show nearby people.'}</p> : null}
-      {ready && !ownArea && !presence.error ? <p role="status">{savedArea ? `Showing your saved area: ${savedArea.label}. This is not a current device location.` : 'Showing public event locations, not events near you. Your location has not been established on this map.'}</p> : null}
-      {ready && enabled ? <button type="button" disabled={presence.isUpdating} onClick={() => void presence.requestLocation()} className="min-h-11 rounded-xl border border-white/30 px-4 disabled:opacity-50">{presence.isUpdating ? "Updating location…" : "Update my location"}</button> : null}
       {!ready ? <LocationControls allowSharing={false} /> : null}
       {ready ? (
         <>
@@ -79,14 +73,29 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
               <ClusteredMembers members={members} selfId={nearby.data?.self?.id} initialZoom={mapZoom} onOpen={open} />
             </Map>
           </div>
-          <p className="text-sm text-white/65">Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</p>
-          <MapSharingConsent active={ready} />
-          <p role="status" className="text-sm text-white/60">{members.length ? `${members.length} ${members.length === 1 ? 'avatar' : 'avatars'} sharing an approximate area` : sharing ? 'Your avatar will appear when a fresh permitted location is available.' : 'Turn on avatar sharing to show yourself and nearby members.'}</p>
-          <h2 className="text-lg font-semibold">Near You</h2>
-          <p className="text-sm text-white/60">{freshArea ? 'Public events within about 25 miles of your approximate area.' : 'Allow device location to find events near you. A saved city is not your current location.'}</p>
+          <div className="flex flex-wrap items-start gap-3">
+            {sharing ? <button type="button" disabled={location.busy} onClick={() => void location.setSharing(false)} className="min-h-11 rounded-xl border border-white/30 px-4 disabled:opacity-50">Stop sharing</button> : null}
+            <details className="min-w-0 flex-1" onToggle={event => setSettingsOpen(event.currentTarget.open)}>
+              <summary className="min-h-11 cursor-pointer rounded-xl px-3 py-3 text-sm text-white/70">Map settings</summary>
+              {settingsOpen ? <div className="space-y-3 pt-3">
+                <p className="text-sm text-white/65">Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</p>
+                {presence.error ? <p role="alert">{presence.error}</p> : null}
+                {nearby.isError ? (
+                  <div role="alert"><p>Nearby people could not be refreshed. Locations have been hidden.</p><button className="min-h-11 px-4 rounded-xl bg-white/10" onClick={() => void nearby.refetch()}>Retry nearby people</button></div>
+                ) : null}
+                {ready && sharing && !center && !nearby.isError && !presence.error ? <p role="status">{presence.isUpdating || nearby.isPending ? 'Updating your approximate location…' : 'A fresh location is needed to show nearby people.'}</p> : null}
+                {ready && !ownArea && !presence.error ? <p role="status">{savedArea ? `Showing your saved area: ${savedArea.label}. This is not a current device location.` : 'Showing public event locations, not events near you. Your location has not been established on this map.'}</p> : null}
+                {ready && enabled ? <button type="button" disabled={presence.isUpdating} onClick={() => void presence.requestLocation()} className="min-h-11 rounded-xl border border-white/30 px-4 disabled:opacity-50">{presence.isUpdating ? "Updating location…" : "Update my location"}</button> : null}
+                <LocationControls allowSharing={ready} />
+              </div> : null}
+            </details>
+          </div>
+          {location.error && !settingsOpen ? <div role="alert"><p>{location.error}</p><button type="button" onClick={() => void location.refresh()} className="min-h-11 underline">Reload settings</button></div> : null}
+          {freshArea ? <h2 className="text-lg font-semibold">Near You</h2> : null}
+          {freshArea ? <p className="text-sm text-white/60">Public events within about 25 miles of your approximate area.</p> : null}
           {freshArea && nearEvents.length === 0 ? <p role="status">No public events within about 25 miles in the current event list.</p> : null}
           <ul aria-label="Events near you" className="space-y-2">{nearEvents.map(pin => <li key={pin.id}><button type="button" className="min-h-11 w-full rounded-xl border border-white/15 p-3 text-left" onClick={() => { onSelectEvent?.(pin.id); onOpenEvent?.(pin.id); }}>{pin.title}</button></li>)}</ul>
-          <h3 className="font-semibold">People near you</h3>
+          {sharing ? <h3 className="font-semibold">People near you</h3> : null}
           {sharing && nearMembers.length === 0 ? <p role="status" className="text-sm text-white/60">No other members are sharing a fresh approximate location nearby.</p> : null}
           <ul aria-label="Nearby members" className="grid sm:grid-cols-2 gap-2">
             {nearMembers.map((member) => (

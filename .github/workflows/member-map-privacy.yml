@@ -55,6 +55,7 @@ jobs:
         run: |
           status=0
           node --test scripts/test-member-map-config.cjs || status=1
+          node scripts/test-member-map-minimal-dom.cjs || status=1
           node scripts/test-member-map-renderer.cjs || status=1
           node scripts/test-native-map-icon.cjs || status=1
           node scripts/test-unified-native-map.cjs || status=1
