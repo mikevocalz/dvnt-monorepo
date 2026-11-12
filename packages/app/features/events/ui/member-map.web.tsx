@@ -75,7 +75,7 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
           </div>
           <div className="flex flex-wrap items-start gap-3">
             {sharing ? <button type="button" disabled={location.busy} onClick={() => void location.setSharing(false)} className="min-h-11 rounded-xl border border-white/30 px-4 disabled:opacity-50">Stop sharing</button> : null}
-            <details className="min-w-0 flex-1" onToggle={event => setSettingsOpen(event.currentTarget.open)}>
+            <details className="min-w-0 flex-1" open={settingsOpen} onToggle={event => setSettingsOpen(event.currentTarget.open)}>
               <summary className="min-h-11 cursor-pointer rounded-xl px-3 py-3 text-sm text-white/70">Map settings</summary>
               {settingsOpen ? <div className="space-y-3 pt-3">
                 <p className="text-sm text-white/65">Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</p>
@@ -90,7 +90,7 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
               </div> : null}
             </details>
           </div>
-          {location.error && !settingsOpen ? <div role="alert"><p>{location.error}</p><button type="button" onClick={() => void location.refresh()} className="min-h-11 underline">Reload settings</button></div> : null}
+          {location.error && !settingsOpen ? <div role="alert"><p>{location.error}</p>{location.needsLocationStop ? <button type="button" disabled={location.busy} onClick={() => void location.setOverall(false)} className="min-h-11 underline mr-4">Turn all location off</button> : null}<button type="button" onClick={() => void location.refresh()} className="min-h-11 underline">Reload settings</button></div> : null}
           {freshArea ? <h2 className="text-lg font-semibold">Near You</h2> : null}
           {freshArea ? <p className="text-sm text-white/60">Public events within about 25 miles of your approximate area.</p> : null}
           {freshArea && nearEvents.length === 0 ? <p role="status">No public events within about 25 miles in the current event list.</p> : null}
