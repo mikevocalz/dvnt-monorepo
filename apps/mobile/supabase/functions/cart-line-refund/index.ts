@@ -1,3 +1,4 @@
+import { executeSettlementRefund } from "../_shared/settlement-recovery.ts";
 /**
  * cart-line-refund Edge Function
  *
@@ -73,15 +74,17 @@ function parseBody(input: unknown): ParsedBody | null {
 }
 
 async function stripeRefund(
+  db: any,
   params: Record<string, string>,
   idempotencyKey: string,
 ): Promise<any> {
+  return executeSettlementRefund(db, params, idempotencyKey, async (params, refundKey) => {
   const res = await fetch("https://api.stripe.com/v1/refunds", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       "Content-Type": "application/x-www-form-urlencoded",
-      "Idempotency-Key": idempotencyKey,
+      ...(refundKey ? { "Idempotency-Key": refundKey } : {}),
     },
     body: new URLSearchParams(params).toString(),
   });
@@ -90,6 +93,7 @@ async function stripeRefund(
     throw new Error(data.error?.message || "Stripe refund failed");
   }
   return data;
+  });
 }
 
 async function notifyReleasedInventory(
@@ -312,7 +316,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const refund = await stripeRefund(
+    const refund = await stripeRefund(supabase,
       {
         payment_intent: cartRow.stripe_pi_id,
         amount: String(refundAmountCents),

@@ -45,6 +45,14 @@ function mapOrderRow(row: any): any {
   return {
     id: row.id,
     status: row.status,
+    // Only offers the authenticated review route. A local status is never
+    // proof of cancellation or permission for a new payment.
+    canReviewCheckoutReplacement:
+      Deno.env.get("CHECKOUT_REPLACEMENT_ENABLED") === "true" &&
+      Deno.env.get("TICKET_SEPARATE_CHARGES_ENABLED") === "true" &&
+      row.charge_model === "separate_charges_and_transfers" &&
+      row.type === "event_ticket" && row.paid_at == null &&
+      ["created", "payment_pending", "payment_failed", "canceled", "cancelled", "failed"].includes(row.status),
     checkoutFailureReason: row.status === "payment_failed"
       ? (row.checkout_failure_reason ?? null)
       : null,

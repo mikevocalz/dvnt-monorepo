@@ -71,6 +71,8 @@ function IssuedAddonRow({ addon }: { addon: IssuedAddon }) {
         <Text style={styles.ticketSubtitle} numberOfLines={1}>
           {addon.status === "refunded"
             ? "Refunded"
+            : addon.status === "redeemed" ? "Redeemed"
+            : addon.usable !== true ? `Order history · ${addon.status}`
             : addon.is_redeemable
               ? "Show its code at the door. Find it on your ticket."
               : "Pick up / fulfillment at the event"}
@@ -84,8 +86,10 @@ function IssuedAddonRow({ addon }: { addon: IssuedAddon }) {
 function IssuedTicketRow({
   ticket,
   onPress,
+  available,
 }: {
   ticket: MixedTicket;
+  available: boolean;
   onPress: (ticket: MixedTicket) => void;
 }) {
   const isCoatCheck = ticket.category === "coat_check";
@@ -93,7 +97,8 @@ function IssuedTicketRow({
 
   return (
     <Pressable
-      onPress={() => onPress(ticket)}
+      disabled={!available}
+      onPress={() => { if (available) onPress(ticket); }}
       accessibilityRole="button"
       style={[styles.ticketRow, isCoatCheck && styles.coatCheckRow]}
     >
@@ -111,7 +116,7 @@ function IssuedTicketRow({
         {isCoatCheck ? (
           <Shirt size={18} color="#94A3B8" />
         ) : (
-          <QrCode size={18} color="#94A3B8" />
+          available ? <QrCode size={18} color="#94A3B8" /> : <Info size={18} color="#94A3B8" />
         )}
       </View>
       <ChevronRight size={18} color="#64748B" />
@@ -148,6 +153,7 @@ export default function CheckoutSuccessScreen() {
         status: query.state.data?.cart?.status as CartStatus | undefined,
         tickets: query.state.data?.tickets,
         addons: query.state.data?.addons,
+        fulfillment: query.state.data?.fulfillment,
         isLoading: !query.state.data,
         isError: query.state.status === "error",
         elapsedMs: Date.now() - startedAt.current,
@@ -160,11 +166,13 @@ export default function CheckoutSuccessScreen() {
     status: statusQuery.data?.cart?.status as CartStatus | undefined,
     tickets: statusQuery.data?.tickets,
     addons: statusQuery.data?.addons,
-    isLoading: statusQuery.isLoading,
+    fulfillment: statusQuery.data?.fulfillment,
+    isLoading: statusQuery.isLoading || statusQuery.isFetching || statusQuery.dataUpdatedAt < startedAt.current,
     isError: statusQuery.isError,
     elapsedMs,
   });
   const copy = checkoutCopy(outcome);
+  const credentialsCurrent = !statusQuery.isError && !statusQuery.isFetching && statusQuery.dataUpdatedAt >= startedAt.current;
 
   // Tick only while an answer is still pending, so the grace window can expire
   // on a screen nobody is touching.
@@ -178,8 +186,11 @@ export default function CheckoutSuccessScreen() {
   }, [outcome]);
 
   useEffect(() => {
-    if (!statusQuery.data?.completed) return;
-    markCompleted();
+    if (!credentialsCurrent || !statusQuery.data?.completed) return;
+    // An old return URL must never complete a newer active cart.
+    if (useCartStore.getState().cart?.cartId === effectiveCartId) {
+      markCompleted();
+    }
     // Every ticket surface is now wrong: My Tickets, the event's own "you're
     // going" state and the per-event pass list all still describe a cart that
     // had not been paid for. One invalidate of the `tickets` root covers them.
@@ -189,7 +200,7 @@ export default function CheckoutSuccessScreen() {
     // seeded an event-keyed cache with whichever of the member's passes the
     // server happened to return first, which is the bug cfbf8cb removed.
     queryClient.invalidateQueries({ queryKey: qk.tickets.all() });
-  }, [markCompleted, queryClient, statusQuery.data?.completed]);
+  }, [credentialsCurrent, effectiveCartId, storeCart?.cartId, markCompleted, queryClient, statusQuery.data?.completed]);
 
   const tickets = statusQuery.data?.tickets ?? [];
   const addons = statusQuery.data?.addons ?? [];
@@ -206,7 +217,7 @@ export default function CheckoutSuccessScreen() {
   );
 
   const handleAddToCalendar = useCallback(() => {
-    const ticket = tickets.find((item) => item.event_date) || tickets[0];
+    const ticket = credentialsCurrent ? tickets.find((item) => item.usable === true && item.status === "active" && item.event_date) : undefined;
     if (!ticket) return;
 
     AppTrace.trace("CART", "checkout_success_calendar_pressed", {
@@ -232,12 +243,12 @@ export default function CheckoutSuccessScreen() {
               : "Calendar support is not available";
       toast.error(message);
     });
-  }, [effectiveCartId, tickets]);
+  }, [credentialsCurrent, effectiveCartId, tickets]);
 
   // Optional, and only for a first admission purchase to a public event. Null
   // the rest of the time, including whenever the event's visibility cannot be
   // confirmed. Nothing is posted from here — accepting fills the composer.
-  const firstPost = useFirstPostOffer(effectiveCartId, tickets);
+  const firstPost = useFirstPostOffer(outcome.kind === "issued" ? effectiveCartId : "", outcome.kind === "issued" ? tickets : []);
 
   const handleMakeFirstPost = useCallback(async () => {
     if (!firstPost.draft) return;
@@ -259,9 +270,9 @@ export default function CheckoutSuccessScreen() {
 
   const renderTicket = useCallback(
     ({ item }: LegendListRenderItemProps<MixedTicket>) => (
-      <IssuedTicketRow ticket={item} onPress={handleTicketPress} />
+      <IssuedTicketRow ticket={item} available={credentialsCurrent && item.usable === true && item.status === "active"} onPress={handleTicketPress} />
     ),
-    [handleTicketPress],
+    [credentialsCurrent, handleTicketPress],
   );
 
   const firstPostCard = firstPost.draft ? (
@@ -298,7 +309,7 @@ export default function CheckoutSuccessScreen() {
       <View style={styles.addonSection}>
         <Text style={styles.addonHeading}>Add-ons</Text>
         {addons.map((addon) => (
-          <IssuedAddonRow key={addon.id} addon={addon} />
+          <IssuedAddonRow key={addon.id} addon={credentialsCurrent ? addon : {...addon, usable: false}} />
         ))}
       </View>
     ) : null;
@@ -364,13 +375,22 @@ export default function CheckoutSuccessScreen() {
         />
       )}
 
+      {(outcome.kind === "history" || outcome.kind === "partial") && statusQuery.data?.lineItems?.length ? (
+        <View style={styles.listContent}><Text style={styles.addonHeading}>Original order</Text>
+          {statusQuery.data.lineItems.map(line => <Text key={line.id} style={styles.ticketSubtitle}>{line.tierName} × {line.quantity}</Text>)}
+        </View>
+      ) : null}
+      {outcome.kind !== "issued" && tickets.length > 0 ? (
+        <Pressable accessibilityRole="button" accessibilityLabel="Check again" onPress={() => statusQuery.refetch()} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Check again</Text></Pressable>
+      ) : null}
+
       <View
         style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}
       >
         {/* The calendar entry reads the event date off a ticket. An add-on-only
             order has none, and a button that silently does nothing is worse
             than no button. */}
-        {tickets.length > 0 ? (
+        {credentialsCurrent && tickets.some(ticket => ticket.usable === true && ticket.status === "active") ? (
           <Pressable
             onPress={handleAddToCalendar}
             accessibilityRole="button"

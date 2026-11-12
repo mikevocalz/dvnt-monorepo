@@ -1,4 +1,6 @@
 "use client";
+import { settlementSummaryLines } from "@dvnt/app/lib/payments/settlement-status";
+
 
 /**
  * Event Analytics — Organizer Dashboard — WEB port of native
@@ -382,6 +384,9 @@ export function EventAnalyticsScreen() {
       {Header}
 
       <main className="mx-auto w-full max-w-2xl px-4 pb-12">
+<section className="my-4 rounded-2xl border border-white/10 p-4"><h2 className="font-semibold">Settlement status</h2>
+          {settlementSummaryLines(data.settlement, "organizer").map((line, i) => <p key={i} className="mt-1 text-sm text-white/60">{line}</p>)}
+          <p className="mt-2 text-xs text-white/40">Amounts are gross transfers; bank totals may be reduced by fees or adjustments.</p></section>
         {/* ── Top-line stats ── */}
         <div className="mt-4 flex gap-3">
           <StatCard

@@ -2,7 +2,7 @@
   "name": "@dvnt/observability",
   "version": "1.0.0",
   "private": true,
-  "description": "DVNT Sentry observability layer — shared utilities, redaction, flow instrumentation",
+  "description": "DVNT Sentry observability layer \u2014 shared utilities, redaction, flow instrumentation",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
@@ -21,7 +21,8 @@
     "./types": "./src/types.ts",
     "./init/expo": "./src/init/expo.ts",
     "./init/web": "./src/init/web.ts",
-    "./dashboard": "./src/dashboard/types.ts"
+    "./dashboard": "./src/dashboard/types.ts",
+    "./recovery-privacy": "./src/recovery-privacy.ts"
   },
   "dependencies": {},
   "peerDependencies": {

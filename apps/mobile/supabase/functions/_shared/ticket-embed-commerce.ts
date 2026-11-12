@@ -3,6 +3,7 @@ import { computeFeesWithMode, MIN_TIER_PRICE_CENTS } from './fee-calculator.ts';
 import { isUnpublished } from './event-access.ts';
 import { salesCutoffAt } from './sales-cutoff.ts';
 import { validateAndApplyPromoterCode } from './apply-promoter-code.ts';
+import { legacyEventCheckoutAllowed, LEGACY_EVENT_CHECKOUT_PAUSED } from './legacy-event-checkout-route.ts';
 import { consumeDbRateLimit } from './db-rate-limit.ts';
 
 export const EMBED_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
@@ -188,6 +189,12 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
           tiers:tiers.filter((t:any)=>publicTier(t,now())).map((t:any)=>({id:t.id,name:t.name,priceCents:t.price_cents,
             maxQuantity:Math.min(10,t.max_per_user || 10),available:t.quantity_total==null ? null:Math.max(0,t.quantity_total-(t.quantity_sold || 0))})),
           siteOrigin:deps.siteOrigin});
+      }
+      // Status/cancellation remain recoverable; no new session or payable
+      // capability can be created/resumed through this unsupported cutover rail.
+      if(['quote','checkout','resume'].includes(action) &&
+         !(await legacyEventCheckoutAllowed(db,attempt?.quote?.eventId ?? event?.id))) {
+        throw new EmbedError(LEGACY_EVENT_CHECKOUT_PAUSED.code,LEGACY_EVENT_CHECKOUT_PAUSED.error);
       }
       if(action==='quote' || action==='checkout') {
         const buyer=parseEmbedBuyer(body), requestHash=await embedHash(JSON.stringify({buyer,quoteHash:body.quoteHash ?? null}));

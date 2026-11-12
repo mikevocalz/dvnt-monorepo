@@ -1,3 +1,4 @@
+import { prepareSettlementCheckout, settlementStripeParams, settlementProviderObject, finalizeSettlementCheckout, SettlementCheckoutError } from "../_shared/settlement-checkout.ts";
 import { canAccessEvent } from "../_shared/event-access.ts";
 /**
  * Ticket Checkout Edge Function
@@ -76,12 +77,14 @@ if (!STRIPE_SECRET_KEY) {
 async function stripeRequest(
   endpoint: string,
   body: Record<string, string>,
+  idempotencyKey?: string,
 ): Promise<any> {
   const res = await fetch(`https://api.stripe.com/v1${endpoint}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       "Content-Type": "application/x-www-form-urlencoded",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: new URLSearchParams(body).toString(),
   });
@@ -642,7 +645,47 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
     );
 
     // Create Stripe Checkout Session: two transparent line items
-    const params: Record<string, string> = {
+    const orderSnapshot = {
+      currency: currency,
+      user_id: isGuest ? null : user_id,
+      guest_email: isGuest ? trimmedGuestEmail : null,
+      type: "event_ticket",
+      status: "payment_pending",
+      quantity,
+      subtotal_cents: fees.subtotal,
+      platform_fee_cents: fees.dvnt_total_fee,
+      total_cents: fees.customer_charge_amount,
+      buyer_pct_fee_cents: fees.buyer_pct_fee,
+      buyer_per_ticket_fee_cents: fees.buyer_per_ticket_fee,
+      buyer_fee_cents: fees.buyer_fee,
+      org_pct_fee_cents: fees.org_pct_fee,
+      org_per_ticket_fee_cents: fees.org_per_ticket_fee,
+      organizer_fee_cents: fees.organizer_fee,
+      dvnt_total_fee_cents: fees.dvnt_total_fee,
+      fee_policy_version: fees.fee_policy_version,
+      event_id: parseInt(event_id),
+      ...(promoResult
+        ? {
+            promo_code_id: promoResult.promo_code_id,
+            discount_cents: discountCents,
+          }
+        : {}),
+      ...(promoterResult
+        ? {
+            promoter_policy_version: "v2_eligible_subtotal_after_discount",
+            promoter_original_amount_cents: rawSubtotal,
+            promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+            promoter_discount_amount_cents: promoterResult.discount_cents,
+            promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+            promoter_code: promoterResult.code,
+            promoter_commission_bps: promoterResult.promoter_commission_bps,
+            promoter_commission_amount_cents: promoterResult.commission_cents,
+          }
+        : {}),
+    };
+    const settlement = await prepareSettlementCheckout(supabase, { rail: "ticket-checkout", order: orderSnapshot, selection: { ticket_type_id: ticket_type_id } }, idemKey);
+
+    let params: Record<string, string> = {
       mode: "payment",
       "payment_method_types[0]": "card",
       ...(asyncSettlement
@@ -678,9 +721,11 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       // Destination charge: DVNT keeps application_fee_amount, rest goes to organizer
       "payment_intent_data[application_fee_amount]":
         fees.application_fee_amount.toString(),
+      "payment_intent_data[metadata][charge_model]": "destination_charge",
       "payment_intent_data[transfer_data][destination]":
         organizer.stripe_account_id,
       // Fee metadata for webhook reconciliation
+      "metadata[charge_model]": "destination_charge",
       "metadata[type]": "event_ticket",
       "metadata[event_id]": event_id.toString(),
       "metadata[ticket_type_id]": ticket_type_id,
@@ -721,7 +766,13 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       cancel_url: `${APP_SCHEME}://tickets/cancel?eventId=${event_id}`,
     };
 
-    const session = await stripeRequest("/checkout/sessions", params);
+    params = settlementStripeParams(settlement, params, true);
+    const session = await settlementProviderObject(supabase, settlement, params, true,
+      (key) => stripeRequest("/checkout/sessions", params, key));
+    await finalizeSettlementCheckout(supabase, settlement, {
+      checkoutSessionId: session.id,
+      paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : null,
+    });
 
     // ── Create inventory hold (prevents overselling) ──────────────
     // For guests we still need an "owner" key — use the email so a
@@ -760,44 +811,14 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
     // stripe-webhook increments usage inside checkout.session.completed after payment is confirmed.
 
     // ── Create order row in payment_pending state (fee components stored) ──
-    await supabase.from("orders").insert({
-      user_id: isGuest ? null : user_id,
-      guest_email: isGuest ? trimmedGuestEmail : null,
-      type: "event_ticket",
-      status: "payment_pending",
-      quantity,
-      subtotal_cents: fees.subtotal,
-      platform_fee_cents: fees.dvnt_total_fee,
-      total_cents: fees.customer_charge_amount,
-      buyer_pct_fee_cents: fees.buyer_pct_fee,
-      buyer_per_ticket_fee_cents: fees.buyer_per_ticket_fee,
-      buyer_fee_cents: fees.buyer_fee,
-      org_pct_fee_cents: fees.org_pct_fee,
-      org_per_ticket_fee_cents: fees.org_per_ticket_fee,
-      organizer_fee_cents: fees.organizer_fee,
-      dvnt_total_fee_cents: fees.dvnt_total_fee,
-      fee_policy_version: fees.fee_policy_version,
-      event_id: parseInt(event_id),
-      stripe_checkout_session_id: session.id,
-      ...(promoResult
-        ? {
-            promo_code_id: promoResult.promo_code_id,
-            discount_cents: discountCents,
-          }
-        : {}),
-      ...(promoterResult
-        ? {
-            promoter_policy_version: "v2_eligible_subtotal_after_discount",
-            promoter_original_amount_cents: rawSubtotal,
-            promoter_customer_discount_bps: promoterResult.customer_discount_bps,
-            promoter_discount_amount_cents: promoterResult.discount_cents,
-            promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
-            promoter_code: promoterResult.code,
-            promoter_commission_bps: promoterResult.promoter_commission_bps,
-            promoter_commission_amount_cents: promoterResult.commission_cents,
-          }
-        : {}),
+    const { error: orderError } = settlement ? { error: null } : await supabase.from("orders").insert({
+      ...orderSnapshot, charge_model: "destination_charge", stripe_checkout_session_id: session.id,
     });
+    if (orderError) {
+      console.error("[ticket-checkout] order insert failed", orderError);
+      throw new Error("Could not save checkout order");
+    }
+
 
     // Made by the webhook once payment lands, never for an abandoned session.
     if (isGuest && profileFields) {
@@ -809,6 +830,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
   } catch (err: any) {
+    if (err instanceof SettlementCheckoutError) return new Response(JSON.stringify({ error: err.message }), { status: err.status, headers: { "Content-Type": "application/json" } });
     console.error("[ticket-checkout] Error:", err);
     return new Response(
       JSON.stringify({ error: "Checkout failed — please try again." }),

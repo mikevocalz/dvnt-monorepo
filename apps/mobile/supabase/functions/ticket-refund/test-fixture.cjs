@@ -29,7 +29,7 @@ function load(db, options = {}) {
     vm.runInNewContext(source, {
       exports, Response, Request, URLSearchParams, console: { log() {}, warn() {}, error() {} },
       Deno: { env: { get: name => name === 'STRIPE_SECRET_KEY' && options.noStripe ? '' : 'test' }, serve: fn => { handler = fn; } },
-      fetch: async (url, init) => { stripe.push({ url, body: new URLSearchParams(init.body) }); return Response.json({ id: 're_test' }); },
+      fetch: async (url, init) => { const body=new URLSearchParams(init.body);stripe.push({ url, body, headers:init.headers });return Response.json({ id: 're_test',payment_intent:body.get('payment_intent'),amount:Number(body.get('amount')),status:'succeeded',metadata:{settlement_refund_intent_id:body.get('metadata[settlement_refund_intent_id]')} }); },
       require: name => name.includes('supabase-js') ? { createClient: () => db }
         : deps[path.basename(name)] || compile(path.resolve(path.dirname(file), name)),
     });

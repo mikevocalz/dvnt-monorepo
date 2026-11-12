@@ -68,6 +68,7 @@ function harness(options={}) {
     return query;
   },async rpc(name,args){
     log.push(`rpc:${name}`);
+    if(name==='settlement_checkout_route')return Object.hasOwn(faults,'checkoutRoute')?faults.checkoutRoute:{data:{ok:true,charge_model:'destination_charge'}};
     if(name==='check_rate_limit')return {data:!faults.limited,error:null};
     if(name==='record_rate_limit')return {data:null,error:null};
     if(faults[name])return {data:null,error:{message:faults[name]}};
@@ -352,3 +353,6 @@ test('delayed tier is absent from descriptor and cannot quote before exact openi
   assert.equal((await h.call('describe')).body.tiers.length,1);
   assert.equal((await h.call('quote',buyer)).status,200);
 });
+
+for(const route of [{data:{ok:true,charge_model:'separate_charges_and_transfers'}},{data:null,error:{code:'PGRST202'}},{data:{ok:false,charge_model:'destination_charge'}},{data:{ok:true,charge_model:'unknown'}}])test('cutover or unavailable route blocks embedded quote/new checkout before any write: '+JSON.stringify(route),async()=>{const h=harness({faults:{checkoutRoute:route}});assert.equal((await h.call('quote',buyer)).status,409);const r=await h.call('checkout',{...buyer,...h.identity,quoteHash:'fixture'});assert.equal(r.status,409);assert.equal(h.tables.orders.length,0);assert.equal(h.sessions.size,0);});
+test('cutover blocks embedded resume creation and payable secret while retaining read-only status',async()=>{const h=harness({faults:{lostResponse:true}});await h.open();assert.equal(h.sessions.size,1);const before=h.log.filter(x=>x.startsWith('stripe:')).length;h.faults.checkoutRoute={data:{ok:true,charge_model:'separate_charges_and_transfers'}};assert.equal((await h.call('resume',h.identity)).status,409);assert.equal(h.log.filter(x=>x.startsWith('stripe:')).length,before);const status=await h.call('status',h.identity);assert.equal(status.status,200);assert.equal(h.sessions.size,1);});

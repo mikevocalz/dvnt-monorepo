@@ -612,3 +612,20 @@ verify_jwt = false
 # Better Auth verified internally; every lease rechecks the current post gate.
 [functions.post-media-lease]
 verify_jwt = false
+
+# Internal worker authenticates SETTLEMENT_WORKER_SECRET itself. No schedule installed.
+[functions.settlements-process]
+verify_jwt = false
+
+# Draft operator-only endpoint: verifies the Better Auth session and a private
+# payment-operator allowlist itself. EXTERNAL_PROMOTER_RECORDING_ENABLED defaults off.
+[functions.record-external-promoter-payment]
+verify_jwt = false
+
+# Default-off order-scoped recovery and explicit replacement. Each verifies
+# Better Auth or its own hashed, single-use guest recovery capability.
+[functions.checkout-recovery]
+verify_jwt = false
+
+[functions.checkout-replacement]
+verify_jwt = false

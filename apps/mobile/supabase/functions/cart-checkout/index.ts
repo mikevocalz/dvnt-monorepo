@@ -1,3 +1,4 @@
+import { prepareSettlementCheckout, settlementStripeParams, settlementProviderObject, finalizeSettlementCheckout, SettlementCheckoutError } from "../_shared/settlement-checkout.ts";
 import { canAccessEvent } from "../_shared/event-access.ts";
 /**
  * cart-checkout Edge Function
@@ -382,6 +383,16 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
       return errorResponse("Organizer has not completed payment setup", 400);
     }
 
+    if (Deno.env.get("TICKET_SEPARATE_CHARGES_ENABLED") !== "true") {
+      // A retry may fill a legacy NULL, but must never relabel a different rail.
+      const { data: existingOrder, error: existingOrderError } = await supabase
+        .from("orders").select("charge_model").eq("cart_id", cartId).maybeSingle();
+      if (existingOrderError) return errorResponse("Could not load checkout order", 500);
+      if (existingOrder?.charge_model != null && existingOrder.charge_model !== "destination_charge") {
+        return errorResponse("Checkout charge model does not match this payment rail", 409);
+      }
+    }
+
     const customerId = await getOrCreateCustomer(supabase, authId);
     const stripeIdempotencyKey = `cart_pi_${cart.idempotency_key}`;
 
@@ -408,7 +419,47 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
       currency,
     );
 
-    const piBody: Record<string, string> = {
+    const orderSnapshot = {
+      currency: currency,
+      cart_id: cartId,
+      user_id: authId,
+      type: "event_ticket",
+      status: "payment_pending",
+      quantity,
+      subtotal_cents: fees.subtotal,
+      platform_fee_cents: fees.dvnt_total_fee,
+      total_cents: fees.customer_charge_amount,
+      buyer_pct_fee_cents: fees.buyer_pct_fee,
+      buyer_per_ticket_fee_cents: fees.buyer_per_ticket_fee,
+      buyer_fee_cents: fees.buyer_fee,
+      org_pct_fee_cents: fees.org_pct_fee,
+      org_per_ticket_fee_cents: fees.org_per_ticket_fee,
+      organizer_fee_cents: fees.organizer_fee,
+      dvnt_total_fee_cents: fees.dvnt_total_fee,
+      fee_policy_version: fees.fee_policy_version,
+      event_id: cart.event_id,
+      ...(promoResult
+        ? {
+            promo_code_id: promoResult.promo_code_id,
+            discount_cents: discountCents,
+          }
+        : {}),
+      ...(promoterResult
+        ? {
+            promoter_policy_version: "v2_eligible_subtotal_after_discount",
+            promoter_original_amount_cents: admissionSubtotalCents,
+            promoter_customer_discount_bps: promoterResult.customer_discount_bps,
+            promoter_discount_amount_cents: promoterResult.discount_cents,
+            promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
+            promoter_code: promoterResult.code,
+            promoter_commission_bps: promoterResult.promoter_commission_bps,
+            promoter_commission_amount_cents: promoterResult.commission_cents,
+          }
+        : {}),
+    };
+    const settlement = await prepareSettlementCheckout(supabase, { rail: "cart-checkout", order: orderSnapshot, selection: { lines: lineItems.map((line: any) => ({ id: line.id, tier_id: line.tier_id ?? null, addon_id: line.addon_id ?? null, variant_id: line.variant_id ?? null, quantity: line.quantity, unit_price_cents: line.unit_price_cents })).sort((a: any, b: any) => String(a.id).localeCompare(String(b.id))) } }, cart.idempotency_key);
+
+    let piBody: Record<string, string> = {
       amount: fees.customer_charge_amount.toString(),
       currency,
       customer: customerId,
@@ -420,6 +471,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
         : { "automatic_payment_methods[enabled]": "true" }),
       "transfer_data[destination]": organizer.stripe_account_id,
       application_fee_amount: fees.application_fee_amount.toString(),
+      "metadata[charge_model]": "destination_charge",
       "metadata[type]": "cart_checkout",
       "metadata[cart_id]": cartId,
       "metadata[event_id]": String(cart.event_id),
@@ -443,9 +495,10 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
       piBody["metadata[dvnt_promoter_code]"] = promoterCode;
     }
 
-    const pi = await stripeRequest("/payment_intents", piBody, {
-      idempotencyKey: stripeIdempotencyKey,
-    });
+    piBody = settlementStripeParams(settlement, piBody, false);
+    const pi = await settlementProviderObject(supabase, settlement, piBody, false,
+      (key) => stripeRequest("/payment_intents", piBody, { idempotencyKey: key || stripeIdempotencyKey }));
+    await finalizeSettlementCheckout(supabase, settlement, { paymentIntentId: pi.id });
 
     // Count the redemption once, on the first checkout transition (the cart is
     // still "holding"); retries arrive as "paying" and must not double-count.
@@ -481,45 +534,8 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
       return errorResponse("Could not save checkout state", 500);
     }
 
-    const { error: orderError } = await supabase.from("orders").upsert(
-      {
-        cart_id: cartId,
-        user_id: authId,
-        type: "event_ticket",
-        status: "payment_pending",
-        quantity,
-        subtotal_cents: fees.subtotal,
-        platform_fee_cents: fees.dvnt_total_fee,
-        total_cents: fees.customer_charge_amount,
-        buyer_pct_fee_cents: fees.buyer_pct_fee,
-        buyer_per_ticket_fee_cents: fees.buyer_per_ticket_fee,
-        buyer_fee_cents: fees.buyer_fee,
-        org_pct_fee_cents: fees.org_pct_fee,
-        org_per_ticket_fee_cents: fees.org_per_ticket_fee,
-        organizer_fee_cents: fees.organizer_fee,
-        dvnt_total_fee_cents: fees.dvnt_total_fee,
-        fee_policy_version: fees.fee_policy_version,
-        event_id: cart.event_id,
-        stripe_payment_intent_id: pi.id,
-        ...(promoResult
-          ? {
-              promo_code_id: promoResult.promo_code_id,
-              discount_cents: discountCents,
-            }
-          : {}),
-        ...(promoterResult
-          ? {
-              promoter_policy_version: "v2_eligible_subtotal_after_discount",
-              promoter_original_amount_cents: admissionSubtotalCents,
-              promoter_customer_discount_bps: promoterResult.customer_discount_bps,
-              promoter_discount_amount_cents: promoterResult.discount_cents,
-              promoter_discounted_amount_cents: promoterResult.discounted_amount_cents,
-              promoter_code: promoterResult.code,
-              promoter_commission_bps: promoterResult.promoter_commission_bps,
-              promoter_commission_amount_cents: promoterResult.commission_cents,
-            }
-          : {}),
-      },
+    const { error: orderError } = settlement ? { error: null } : await supabase.from("orders").upsert(
+      { ...orderSnapshot, charge_model: "destination_charge", stripe_payment_intent_id: pi.id },
       { onConflict: "cart_id" },
     );
 
@@ -553,6 +569,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
       },
     });
   } catch (err) {
+    if (err instanceof SettlementCheckoutError) return errorResponse(err.message, err.status);
     console.error("[cart-checkout] unexpected", err);
     return errorResponse(
       err instanceof Error ? err.message : "Internal error",

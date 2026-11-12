@@ -1,3 +1,4 @@
+import { executeSettlementRefund } from "../_shared/settlement-recovery.ts";
 /**
  * Delete Account Edge Function
  *
@@ -62,17 +63,21 @@ async function stripePost(
 }
 
 async function stripeRefund(
+  db: any,
   body: Record<string, string>,
 ): Promise<{ id?: string; status?: string; error?: any }> {
+  return executeSettlementRefund(db, body, undefined, async (body, refundKey) => {
   const res = await fetch("https://api.stripe.com/v1/refunds", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       "Content-Type": "application/x-www-form-urlencoded",
+      ...(refundKey ? { "Idempotency-Key": refundKey } : {}),
     },
     body: new URLSearchParams(body).toString(),
   });
   return res.json();
+  });
 }
 
 async function stripeGet(endpoint: string): Promise<any> {
@@ -240,7 +245,7 @@ Deno.serve(async (req: Request) => {
           .filter((t) => t.stripe_payment_intent_id === paymentIntentId)
           .map((t) => String(t.id));
         try {
-          const refund = await stripeRefund({
+          const refund = await stripeRefund(supabase, {
             payment_intent: paymentIntentId,
             refund_application_fee: "true",
             reverse_transfer: "true",

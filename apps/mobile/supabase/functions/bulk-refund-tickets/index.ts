@@ -1,3 +1,4 @@
+import { executeSettlementRefund } from "../_shared/settlement-recovery.ts";
 /**
  * bulk-refund-tickets Edge Function
  *
@@ -55,21 +56,24 @@ function errResp(message: string, status: number, req: Request) {
 }
 
 async function stripeRefund(
+  db: any,
   body: Record<string, string>,
   idempotencyKey: string,
 ): Promise<{ id?: string; status?: string; error?: any }> {
+  return executeSettlementRefund(db, body, idempotencyKey, async (body, refundKey) => {
   const res = await fetch("https://api.stripe.com/v1/refunds", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       "Content-Type": "application/x-www-form-urlencoded",
-      "Idempotency-Key": idempotencyKey,
+      ...(refundKey ? { "Idempotency-Key": refundKey } : {}),
     },
     body: new URLSearchParams(body).toString(),
   });
   const data = await res.json();
   if (!res.ok) return { error: data };
   return data;
+  });
 }
 
 Deno.serve(withSentry("bulk-refund-tickets", async (req: Request) => {
@@ -194,7 +198,7 @@ Deno.serve(withSentry("bulk-refund-tickets", async (req: Request) => {
       }
 
       if (amount > 0 && pi) {
-        const result = await stripeRefund(
+        const result = await stripeRefund(supabase,
           {
             payment_intent: pi,
             amount: String(amount),

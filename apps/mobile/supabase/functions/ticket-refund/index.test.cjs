@@ -111,3 +111,21 @@ for(const [label,override] of [
  const f=fixture({...override,ticket:{purchase_amount_cents:2500,stripe_payment_intent_id:'pi_paid',...override.ticket}});
  assert.equal((await f.invoke({ticket_id:ID})).status,409);assert.equal(f.stripe.length,0);assert.equal(f.writes.length,0);
 });
+
+test('separate-charge paid refund holds the actual order before POST and omits destination reversal flags', async () => {
+  const f=fixture({ticket:{purchase_amount_cents:2500,stripe_payment_intent_id:'pi_paid'},
+    order:{charge_model:'separate_charges_and_transfers',stripe_payment_intent_id:'pi_paid'},rpcResult:{ok:true,claimed:true,id:'fixture-intent'}});
+  const r=await f.invoke({ticket_id:ID});assert.equal(r.status,200,await r.text());
+  assert.equal(f.rpcs[0].name,'settlement_refund_outflow_begin');assert.equal(f.rpcs[1].name,'settlement_refund_outflow_observe');
+  assert.equal(f.stripe[0].headers['Idempotency-Key'],'dvnt:refund:v1:fixture-intent');
+  assert.equal(f.stripe.length,1);assert.equal(f.stripe[0].body.has('reverse_transfer'),false);
+  assert.equal(f.stripe[0].body.has('refund_application_fee'),false);
+  assert.equal(f.stripe[0].body.get('metadata[settlement_order_id]'),f.tables.orders[0].id);
+});
+
+test('failed separate-charge refund interlock makes no provider call or ticket mutation', async () => {
+  const f=fixture({ticket:{purchase_amount_cents:2500,stripe_payment_intent_id:'pi_paid'},
+    order:{charge_model:'separate_charges_and_transfers',stripe_payment_intent_id:'pi_paid'},rpcError:{message:'settlement hold unavailable'}});
+  assert.equal((await f.invoke({ticket_id:ID})).status,500);assert.equal(f.stripe.length,0);
+  assert.equal(f.tables.tickets[0].status,'active');assert.equal(f.writes.length,0);
+});

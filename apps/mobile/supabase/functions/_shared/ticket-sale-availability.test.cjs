@@ -66,6 +66,11 @@ function checkout(rail, patch = {}, options = {}) {
     },
     rpc: async (name, args) => {
       ops.push({ action: "rpc", name, args });
+      if (name === "settlement_checkout_route") {
+        assert.equal(args.p_event_id, 42);
+        return { data: { ok: true, charge_model: "destination_charge" }, error: null };
+      }
+      if (name === "lookup_settlement_checkout") return { data: { exists: false }, error: null };
       if (name === "free_ticket_checkout_atomic") {
         if (options.freeError) return { data: null, error: options.freeError };
         if (options.freeResult) return { data: options.freeResult, error: null };
@@ -106,7 +111,7 @@ function checkout(rail, patch = {}, options = {}) {
   };
   const realHelpers = new Set([
     "checkout-replay.ts", "tier-sale-availability.ts", "tier-visibility.ts", "sales-cutoff.ts",
-    "fee-calculator.ts", "async-settlement.ts", "checkout-line-items.ts",
+    "fee-calculator.ts", "async-settlement.ts", "checkout-line-items.ts", "settlement-checkout.ts",
   ]);
   let handler;
   const context = {

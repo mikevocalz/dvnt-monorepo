@@ -20,7 +20,7 @@ export async function describeFunctionError(
           if (detail && typeof detail === "object" && typeof detail.message === "string") {
             return { message: detail.message, status, ...(typeof detail.code === "string" ? { code: detail.code } : {}) };
           }
-          if (typeof detail === "string" && detail) return { message: detail, status };
+          if (typeof detail === "string" && detail) return { message: detail, status, ...(typeof parsed.code === "string" ? { code: parsed.code } : {}) };
         } catch {
           // not JSON — fall through to the raw body
         }
