@@ -1,0 +1,48 @@
+name: External receipt guard
+on:
+  pull_request:
+    paths:
+      - 'docs/payments/drafts/external-receipt-guard.sql'
+      - 'apps/mobile/supabase/migrations/*external*guard*'
+      - 'apps/mobile/supabase/functions/record-external-promoter-payment/**'
+      - 'apps/mobile/supabase/functions/report-external-promoter-payment/**'
+      - 'apps/mobile/supabase/functions/external-promoter-payment-status/**'
+      - 'apps/mobile/supabase/functions/_shared/external-payment-session.ts'
+      - 'scripts/test-external-receipt-endpoints.cjs'
+      - 'docs/payments/external-receipt-guard-rollout.md'
+      - 'apps/mobile/supabase/functions/payouts-release/**'
+      - 'scripts/test-external-receipt-guard*'
+      - 'scripts/fixtures/external-receipt-guard/**'
+      - '.github/workflows/external-receipt-guard.yml'
+permissions:
+  contents: read
+jobs:
+  offline-and-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test dependencies
+        run: npm install --prefix /tmp/external-receipt-test --no-package-lock --ignore-scripts @electric-sql/pglite@0.3.14 typescript@5.9.3
+      - name: Offline SQL and endpoint regressions
+        env:
+          NODE_PATH: /tmp/external-receipt-test/node_modules
+        run: node --test --test-concurrency=1 scripts/test-external-receipt-guard*.cjs scripts/test-external-receipt-endpoints.cjs
+      - name: Refuse unsafe database targets before SQL
+        run: python3 scripts/test-external-receipt-guard-target-safety.py
+      - name: Start disposable PostgreSQL 17
+        run: |
+          set -euo pipefail
+          sudo systemctl stop postgresql
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17
+          sudo pg_conftool 17 main set port 5432
+          sudo pg_ctlcluster 17 main start
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -d postgres -c "DO \$\$ BEGIN IF current_setting('server_version_num')::int NOT BETWEEN 170000 AND 179999 THEN RAISE EXCEPTION 'Expected disposable PostgreSQL 17'; END IF; END \$\$;"
+      - name: Native cross-process locking and restrictive privileges
+        run: python3 scripts/test-external-receipt-guard-concurrency.py --disposable-ci-postgres
