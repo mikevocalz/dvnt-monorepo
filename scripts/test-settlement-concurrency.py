@@ -54,7 +54,7 @@ class Database:
             self.sql((ROOT / "scripts/fixtures/settlement/external-schema.sql").read_text())
             source_schema = subprocess.check_output(['node','-e',"process.stdout.write(require('./scripts/fixtures/settlement/replacement-source-schema.cjs').sourceSchemaSql())"],cwd=ROOT,text=True,timeout=20)
             self.sql(source_schema)
-            self.sql((ROOT / "apps/mobile/supabase/migrations/20261111040111_settlement_runtime_v1.sql").read_text())
+            self.sql((ROOT / "docs/payments/drafts/settlement-runtime-pristine.sql").read_text())
             self.sql((ROOT / "scripts/fixtures/settlement/approved-policy.sql").read_text())
             self.sql("INSERT INTO dvnt_settlement.funding_policy VALUES(true,'acct_platform_fixture',false,0,'synthetic native fixture'); UPDATE dvnt_settlement.controls SET checkout_enabled=true,transfers_enabled=true,release_delay_seconds=86400; INSERT INTO dvnt_settlement.currency_reserves VALUES('usd',0,'synthetic fixture only'); UPDATE event_promoters SET stripe_account_id='acct_promoter';")
             return self

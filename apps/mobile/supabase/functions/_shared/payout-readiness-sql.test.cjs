@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { PGlite } = require('@electric-sql/pglite');
-const migration = fs.readFileSync(path.join(__dirname, '../../migrations/20261111010000_payout_readiness_observability.sql'), 'utf8');
+const migration = fs.readFileSync(path.join(__dirname, '../../../../../docs/payments/drafts/payout-readiness-observability.sql'), 'utf8');
 const schema = `
 CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
 CREATE TABLE events(id integer PRIMARY KEY, payout_status text DEFAULT 'pending', payout_release_at timestamptz, end_date timestamptz);

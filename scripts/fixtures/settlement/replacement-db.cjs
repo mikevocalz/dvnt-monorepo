@@ -8,7 +8,7 @@ async function fixture({rail='create-payment-intent',guest=false,cart=false,addo
  const db=new PGlite();
  for(const p of ['scripts/fixtures/settlement/schema.sql','scripts/fixtures/settlement/external-schema.sql'])await db.exec(read(p));
  await db.exec(sourceSchemaSql());
- await db.exec(read('apps/mobile/supabase/migrations/20261111040111_settlement_runtime_v1.sql'));
+ await db.exec(read('docs/payments/drafts/settlement-runtime-pristine.sql'));
  await db.exec(read('scripts/fixtures/settlement/approved-policy.sql'));
  await db.exec("INSERT INTO public.ticket_types(id,event_id,price_cents,quantity_total) VALUES('00000000-0000-4000-8000-000000000010',1,10000,20);\nUPDATE public.events SET status='active',end_date=clock_timestamp()+interval '10 days',start_date=clock_timestamp()+interval '9 days',payout_release_at=NULL;\n");
  await db.exec("INSERT INTO dvnt_settlement.funding_policy VALUES(true,'acct_fixture',false,0,'synthetic replacement'); INSERT INTO dvnt_settlement.currency_reserves VALUES('usd',0,'synthetic replacement'); UPDATE dvnt_settlement.controls SET checkout_enabled=true,checkout_replacement_enabled=true,guest_checkout_recovery_enabled=true");

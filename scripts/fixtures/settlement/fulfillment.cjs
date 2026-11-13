@@ -11,7 +11,7 @@ async function setup({rail='create-payment-intent',quantity=1,capacity=100,cartA
  if(defaultGrants)await pg.exec('ALTER DEFAULT PRIVILEGES GRANT EXECUTE ON FUNCTIONS TO anon,authenticated,service_role; ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES TO anon,authenticated,service_role;');
  await pg.exec(sourceSql());
  const gate=read('docs/payments/drafts/settlement-fulfillment.sql');
- let artifact=read('apps/mobile/supabase/migrations/20261111040111_settlement_runtime_v1.sql');
+ let artifact=read('docs/payments/drafts/settlement-runtime-pristine.sql');
  // Test-only legacy simulation can omit the gate, including after its source
  // is added to the generated artifact. No production path can disable it.
  if(!installGate)artifact=artifact.replace(gate.trim().replace(/^BEGIN;\s*$/m,'').replace(/^COMMIT;\s*$/m,''),'');
