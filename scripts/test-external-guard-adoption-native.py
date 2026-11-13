@@ -54,7 +54,8 @@ class Database(base.Database):
             self.sql("ALTER TABLE events ADD CONSTRAINT events_payout_status_check CHECK(payout_status IN ('pending','on_hold','released','disabled'));")
             self.sql('CREATE TABLE public.session(id text PRIMARY KEY,\"userId\" text NOT NULL,\"expiresAt\" timestamptz NOT NULL,\"updatedAt\" timestamptz)')
             self.sql(GUARD)
-            self.sql("CREATE SCHEMA supabase_migrations;CREATE TABLE supabase_migrations.schema_migrations(version text PRIMARY KEY);INSERT INTO supabase_migrations.schema_migrations VALUES('20261113074114')")
+            self.sql("CREATE SCHEMA supabase_migrations;CREATE TABLE supabase_migrations.schema_migrations(version text PRIMARY KEY,name text,statements text[])")
+            self.sql("INSERT INTO supabase_migrations.schema_migrations VALUES('20261113142940','external_receipt_guard',ARRAY["+base.literal(GUARD)+"]::text[])")
             if self.seed:
                 self.sql("ALTER TABLE orders ALTER COLUMN charge_model SET DEFAULT 'destination_charge'")
                 self.sql((ROOT/'scripts/fixtures/external-guard-adoption/seed.sql').read_text())
@@ -228,6 +229,17 @@ def original_runtime_rejected_atomically():
             assert 'quarantined' in db.sql("SELECT public.settlement_claim_legacy_event(1)", ok=False)
 
 
+def actual_guard_history_content_mismatch_rejected():
+    for mutation in ("UPDATE supabase_migrations.schema_migrations SET name='unrelated'", "UPDATE supabase_migrations.schema_migrations SET statements=ARRAY['select 1']", "UPDATE supabase_migrations.schema_migrations SET statements=statements||ARRAY['select 1']"):
+        with Database(seed=True, record=True) as db:
+            before = db.snapshot()
+            db.sql(mutation)
+            error = db.sql(ADOPTION, ok=False)
+            assert 'migration history mismatch' in error, error
+            assert db.snapshot() == before
+            assert db.sql("SELECT to_regclass('dvnt_settlement.controls') IS NULL") == 't'
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--disposable-ci-postgres', action='store_true')
@@ -267,7 +279,8 @@ def main():
              receipt_commit_precedes_adoption, adoption_commit_rejects_waiting_record,
              report_precedes_promoter_reserve, reserve_precedes_report_and_remains_reconcilable,
              report_precedes_host_reserve, pending_quarantine_and_scopes_survive,
-             source_event_change_while_waiting_fails_closed, original_runtime_rejected_atomically)
+             source_event_change_while_waiting_fails_closed, original_runtime_rejected_atomically,
+             actual_guard_history_content_mismatch_rejected)
     for test in tests:
         test()
         print('PASS', test.__name__, flush=True)

@@ -6,9 +6,11 @@ SET LOCAL search_path=public,pg_catalog;
 SET LOCAL lock_timeout=5000;
 DO $history$ BEGIN
  IF to_regclass('supabase_migrations.schema_migrations') IS NULL THEN RAISE EXCEPTION 'reviewed Supabase migration history required'; END IF;
- IF NOT EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version='20261113074114')
- OR EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version IN ('20261111010000','20261111040111','20261113074433'))
- OR EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version>'20261113074433')
+ IF NOT EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version='20261113142940')
+ OR EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version IN ('20261111010000','20261111040111','20261113143039'))
+ OR EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version>'20261113143039')
+ OR (SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name='external_receipt_guard')<>1
+ OR NOT EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version='20261113142940' AND name='external_receipt_guard' AND array_lower(statements,1)=1 AND array_upper(statements,1)=1 AND cardinality(statements)=1 AND octet_length(statements[1])=45609 AND encode(sha256(convert_to(statements[1],'UTF8')),'hex')='ac4a30d0f827f675e9803ab1c02f64d29a8875c65492dd7b0f5b01582e6f02db')
  THEN RAISE EXCEPTION 'external guard adoption migration history mismatch'; END IF;
 END $history$;
 -- Exact reviewed standalone guard contract. Unknown objects/code/ACLs fail closed.

@@ -4,6 +4,10 @@ on:
     paths:
       - 'scripts/*external-guard-adoption*'
       - 'scripts/fixtures/external-guard-adoption/**'
+      - 'scripts/test-external-receipt-endpoints.cjs'
+      - 'apps/mobile/supabase/functions/*external-promoter-payment*/**'
+      - 'apps/mobile/supabase/functions/_shared/external-payment-session.ts'
+      - 'apps/mobile/supabase/config.toml'
       - 'scripts/fixtures/settlement/**'
       - 'docs/payments/drafts/settlement-external-adoption*'
       - 'apps/mobile/supabase/migrations/*external*guard*'
@@ -24,13 +28,13 @@ jobs:
         with:
           node-version: '24'
       - name: Isolated offline SQL test dependency
-        run: npm install --prefix "$RUNNER_TEMP/adoption-tests" --ignore-scripts --no-audit --no-fund @electric-sql/pglite@0.3.14
+        run: npm install --prefix "$RUNNER_TEMP/adoption-tests" --ignore-scripts --no-audit --no-fund @electric-sql/pglite@0.3.14 typescript@5.9.3
       - name: Exact assembly and PGlite behavior (not native lock proof)
         env:
           NODE_PATH: ${{ runner.temp }}/adoption-tests/node_modules
         run: |
           node scripts/build-external-guard-adoption.cjs --check
-          node --test --test-concurrency=1 scripts/test-external-guard-adoption.cjs
+          node --test --test-concurrency=1 scripts/test-external-guard-adoption.cjs scripts/test-external-receipt-endpoints.cjs
       - name: Refuse unsafe database targets before SQL
         run: python3 scripts/test-external-guard-adoption-target-safety.py
       - name: Start network-isolated disposable PostgreSQL17

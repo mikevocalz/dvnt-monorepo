@@ -629,3 +629,9 @@ verify_jwt = false
 
 [functions.checkout-replacement]
 verify_jwt = false
+
+[functions.report-external-promoter-payment]
+verify_jwt = false
+
+[functions.external-promoter-payment-status]
+verify_jwt = false

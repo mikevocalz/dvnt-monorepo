@@ -143,18 +143,34 @@ CREATE TRIGGER external_event_runtime_delivery BEFORE INSERT OR UPDATE ON dvnt_s
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA dvnt_settlement FROM PUBLIC,anon,authenticated,service_role;
 `;
 }
-async function buildAdoption(guardSql){
- const expected=await expectedCatalog(guardSql);
- let runtime=fs.readFileSync(path.join(root,'docs/payments/drafts/settlement-runtime-pristine.sql'),'utf8');
- const contract=JSON.parse(fs.readFileSync(path.join(root,'scripts/fixtures/external-guard-adoption/contract.json'),'utf8'));
+function validateBuildContract(contract,guardSql){
+ const crypto=require('node:crypto');
+ if(!contract || crypto.createHash('sha256').update(guardSql).digest('hex')!==contract.guard_sql_sha256)throw Error('Reviewed guard SQL digest mismatch');
+ for(const [key,suffix] of [['guard_migration','external_receipt_guard'],['adoption_migration','external_guard_runtime_adoption']]){
+  if(typeof contract[key]!=='string'||!new RegExp('^apps/mobile/supabase/migrations/[0-9]{14}_'+suffix+'\\.sql$').test(contract[key]))throw Error('Invalid exact migration path: '+key);
+ }
+ if(!Array.isArray(contract.retired_unapplied_versions)||JSON.stringify(contract.retired_unapplied_versions)!==JSON.stringify(['20261111010000','20261111040111']))throw Error('Retired migration exclusions cannot change');
+ const h=contract.guard_history;
+ if(!h || (h.name!=='external_receipt_guard'||h.statement_count!==1||h.sql_bytes!==Buffer.byteLength(guardSql,'utf8')||h.sql_sha256!==contract.guard_sql_sha256))throw Error('Exact applied guard content evidence mismatch');
  const guardVersion=path.basename(contract.guard_migration).split('_')[0];
  const adoptionVersion=path.basename(contract.adoption_migration).split('_')[0];
  if(adoptionVersion<=guardVersion)throw Error('Adoption must be chronologically later than standalone guard');
+ return {guardVersion,adoptionVersion};
+}
+async function buildAdoption(guardSql,buildContract){
+ const expected=await expectedCatalog(guardSql);
+ let runtime=fs.readFileSync(path.join(root,'docs/payments/drafts/settlement-runtime-pristine.sql'),'utf8');
+ const contract=buildContract??JSON.parse(fs.readFileSync(path.join(root,'scripts/fixtures/external-guard-adoption/contract.json'),'utf8'));
+ const {guardVersion,adoptionVersion}=validateBuildContract(contract,guardSql);
+ const h=contract.guard_history;
+ const appliedContent=h?`
+ OR (SELECT count(*) FROM supabase_migrations.schema_migrations WHERE name=${quote(h.name)})<>1
+ OR NOT EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version=${quote(guardVersion)} AND name=${quote(h.name)} AND array_lower(statements,1)=1 AND array_upper(statements,1)=1 AND cardinality(statements)=1 AND octet_length(statements[1])=${h.sql_bytes} AND encode(sha256(convert_to(statements[1],'UTF8')),'hex')=${quote(h.sql_sha256)})`:'';
  const historyGuard=`DO $history$ BEGIN
  IF to_regclass('supabase_migrations.schema_migrations') IS NULL THEN RAISE EXCEPTION 'reviewed Supabase migration history required'; END IF;
  IF NOT EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version=${quote(guardVersion)})
  OR EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version IN (${[...contract.retired_unapplied_versions,adoptionVersion].map(quote).join(',')}))
- OR EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version>${quote(adoptionVersion)})
+ OR EXISTS(SELECT 1 FROM supabase_migrations.schema_migrations WHERE version>${quote(adoptionVersion)})${appliedContent}
  THEN RAISE EXCEPTION 'external guard adoption migration history mismatch'; END IF;
 END $history$;\n`;
  const fullExternal=fs.readFileSync(path.join(root,'docs/payments/drafts/settlement-external.sql'),'utf8');
@@ -184,4 +200,4 @@ END $history$;\n`;
  runtime=replaceOnce(runtime,"\nNOTIFY pgrst, 'reload schema';\nCOMMIT;",fs.readFileSync(path.join(root,'docs/payments/drafts/payout-readiness-observability.sql'),'utf8')+'\n'+adoptionOverrides(guardSql,fullExternal)+'\n'+fs.readFileSync(path.join(root,'docs/payments/drafts/settlement-external-adoption-wrappers.sql'),'utf8')+'\n'+restoreTriggers+'\n'+restoreAcl+"\nNOTIFY pgrst, 'reload schema';\nCOMMIT;");
  return '-- FUTURE ADOPTION DRAFT: not standalone guard deployment; no financial execution.\n'+runtime;
 }
-module.exports={...module.exports,functionDefinition,replaceOnce,adoptionOverrides,buildAdoption,identityProof};
+module.exports={...module.exports,functionDefinition,replaceOnce,adoptionOverrides,buildAdoption,validateBuildContract,identityProof};
