@@ -1760,23 +1760,12 @@ Deno.serve(withSentry("stripe-webhook", async (req: Request) => {
             }
 
             if (activeDisputeCount === 0) {
-              // No more active disputes — release hold
-              const { data: heldEvent } = await supabase
-                .from("events")
-                .select("payout_status")
-                .eq("id", disputeTicket.event_id)
-                .single();
-
-              if (heldEvent?.payout_status === "on_hold") {
-                await supabase
-                  .from("events")
-                  .update({ payout_status: "pending" })
-                  .eq("id", disputeTicket.event_id);
-
-                console.log(
-                  `[stripe-webhook] Payout hold released for event ${disputeTicket.event_id}`,
-                );
-              }
+              // on_hold also represents an active payout claim or an uncertain
+              // transfer. A late/duplicate dispute webhook must never requeue it.
+              // Reconcile payout intents/Stripe first; generic hold release is unsafe.
+              console.log(
+                `[stripe-webhook] Disputes resolved for event ${disputeTicket.event_id}; payout reconciliation required`,
+              );
             }
 
             // Notify host + co-hosts
