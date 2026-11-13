@@ -1,15 +1,14 @@
 -- Narrow external-receipt guard. Default off; no scheduler or financial execution.
 -- Requires reviewed production drain, schema compatibility and explicit rollout approval.
 BEGIN;
-CREATE SCHEMA IF NOT EXISTS dvnt_settlement;
-REVOKE ALL ON SCHEMA dvnt_settlement FROM PUBLIC,anon,authenticated;
-GRANT USAGE ON SCHEMA dvnt_settlement TO service_role;
--- Installation alongside a settlement runtime requires the explicit adoption path.
 DO $$ BEGIN
- IF to_regclass('dvnt_settlement.controls') IS NOT NULL THEN
-  RAISE EXCEPTION 'use reviewed runtime adoption; standalone receipt guard only';
+ IF to_regnamespace('dvnt_settlement') IS NOT NULL THEN
+  RAISE EXCEPTION 'existing settlement namespace requires reviewed adoption';
  END IF;
 END $$;
+CREATE SCHEMA dvnt_settlement;
+REVOKE ALL ON SCHEMA dvnt_settlement FROM PUBLIC,anon,authenticated;
+GRANT USAGE ON SCHEMA dvnt_settlement TO service_role;
 CREATE TABLE dvnt_settlement.external_recording_controls (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  enabled boolean NOT NULL DEFAULT false,
@@ -359,6 +358,7 @@ BEGIN
  AND l.entry_type='earning' AND l.amount_cents>0 AND l.currency=p_currency AND o.currency=p_currency
  AND o.status='paid' AND o.type='event_ticket' AND l.paid_out_at IS NULL AND l.stripe_transfer_id IS NULL AND l.payout_status IN ('pending','held')
  AND NOT EXISTS(SELECT 1 FROM public.promoter_ledger_entries reversal WHERE reversal.order_id=o.id AND reversal.entry_type='reversal')
+ AND (o.promoter_id IS NULL OR o.promoter_id=p_promoter_id)
  AND o.promoter_commission_amount_cents=l.amount_cents
  AND pa.locked_promoter_commission_amount_cents=l.amount_cents
  AND NOT EXISTS(SELECT 1 FROM dvnt_settlement.external_reported_recovery_reviews r WHERE r.order_id=o.id)

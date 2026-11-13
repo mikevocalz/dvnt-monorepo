@@ -278,10 +278,10 @@ def reversal_both_orderings():
 
 
 def attribution_both_orderings():
-    with Database() as db:
+    with Database(quarantine=False) as db:
         oid,lid=db.source()
         first=db.holding('UPDATE promoter_attributions SET locked_promoter_commission_amount_cents=999 WHERE order_id='+literal(oid))
-        error=db.competing(first,db.record(lid),ok=False)
+        error=db.competing(first,db.report()+db.record(lid),ok=False)
         assert 'eligibility mismatch' in error,error
     with Database() as db:
         oid,lid=db.source()
@@ -379,6 +379,36 @@ def session_expiry_and_revocation_roll_back():
         assert db.sql('SELECT count(*) FROM dvnt_settlement.external_promoter_payments')=='0'
 
 
+def late_unique_wait_expiry_rolls_back():
+    # Trusted fixture owner stages a different-event receipt outside the operator
+    # RPC's global-control mutex. This proves final expiry checks even when a
+    # later unique-index wait succeeds only because the competitor rolls back.
+    with Database(review_seconds=5) as db:
+        _,lid=db.source()
+        other_promoter,other_binding,other_order,other_ledger=[str(uuid.uuid4()) for _ in range(4)]
+        db.sql("INSERT INTO events(id,host_id,payout_status) VALUES(2,'other-host','on_hold'); INSERT INTO event_promoters(id,event_id,user_id) VALUES("+literal(other_promoter)+",2,'other-recipient'); INSERT INTO dvnt_settlement.external_recipients(id,promoter_id,provider,beneficiary_reference,recipient_user_id,verified_by) VALUES("+literal(other_binding)+","+literal(other_promoter)+",'fixture_provider','other-beneficiary','other-recipient','fixture-operator'); INSERT INTO orders(id,event_id,status,type,currency,promoter_commission_amount_cents) VALUES("+literal(other_order)+",2,'paid','event_ticket','usd',1000); INSERT INTO promoter_ledger_entries(id,promoter_id,event_id,order_id,entry_type,amount_cents) VALUES("+literal(other_ledger)+","+literal(other_promoter)+",2,"+literal(other_order)+",'earning',1000);")
+        db.sql("INSERT INTO public.session(id,\"userId\",\"expiresAt\",\"updatedAt\") VALUES('fixture-session','fixture-operator',clock_timestamp()+interval '1 hour',clock_timestamp())")
+        staged="INSERT INTO dvnt_settlement.external_promoter_payments(request_key,event_id,promoter_id,recipient_binding_id,recipient_user_id,actor_id,provider,transaction_reference,receipt_sha256,receipt_reference,evidence_status,attestation,paid_at,amount_cents,currency,ledger_entry_ids) VALUES("+literal(str(uuid.uuid4()))+",2,"+literal(other_promoter)+","+literal(other_binding)+",'other-recipient','fixture-operator','fixture_provider','fixture-transaction',"+literal('a'*64)+",'fixture-vault/other/version-1','completed','{\"independently_checked_completed_final\":true,\"receipt_retained\":true,\"recipient_and_details_match\":true}','2026-01-01',1000,'usd',ARRAY["+literal(other_ledger)+"]::uuid[]);"
+        first=db.holding(staged)
+        second=Session(db)
+        sql=db.record(lid).replace('public.settlement_record_external_promoter_payment(',"public.settlement_record_external_promoter_payment_session(p_session_id=>'fixture-session',")
+        try:
+            second.send(sql)
+            blocked(db,second,first)
+            # Different event/source and recipient: the held receipt uniqueness
+            # constraint is the shared resource, not the early event/control lock.
+            while db.sql("SELECT clock_timestamp()>=max(expires_at) FROM dvnt_settlement.external_event_reviews WHERE event_id=1")!='t':
+                time.sleep(.05)
+            first.send('ROLLBACK;');first.close()
+            error=second.result(ok=False)
+            assert 'expired' in error or 'reconciliation' in error or 'authorization' in error,error
+            assert db.sql('SELECT count(*) FROM dvnt_settlement.external_promoter_payments')=='0'
+            assert db.sql('SELECT count(*) FROM promoter_ledger_entries WHERE paid_out_at IS NOT NULL')=='0'
+            assert db.sql('SELECT count(*) FROM dvnt_settlement.external_event_exclusions')=='0'
+        finally:
+            second.abort();first.abort()
+
+
 def report_first_mutations_cannot_escape():
     mutations=(
         lambda oid,lid: 'UPDATE orders SET event_id=2 WHERE id='+literal(oid),
@@ -460,7 +490,7 @@ def main():
             del os.environ[key]
     roles='DO $$ BEGIN '+ ' '.join("IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='"+r+"') THEN CREATE ROLE "+r+"; END IF;" for r in ('anon','authenticated','service_role'))+' END $$;'
     subprocess.run(PREFIX+['psql','-X','-v','ON_ERROR_STOP=1','-h','/var/run/postgresql','-d','postgres'],input=roles,text=True,check=True,timeout=20)
-    for scenario in (replay_and_overlap,receipt_reuse,payout_both_orderings,hold_clear_and_legacy_claim,refund_both_orderings,reversal_both_orderings,attribution_both_orderings,disable_while_waiting_control,expired_review_after_actual_wait,ledger_reparent_while_source_waits,report_first_mutations_cannot_escape,session_expiry_and_revocation_roll_back,acl_and_immutable_boundaries,live_constraint_not_relaxed):
+    for scenario in (replay_and_overlap,receipt_reuse,payout_both_orderings,hold_clear_and_legacy_claim,refund_both_orderings,reversal_both_orderings,attribution_both_orderings,disable_while_waiting_control,expired_review_after_actual_wait,ledger_reparent_while_source_waits,report_first_mutations_cannot_escape,session_expiry_and_revocation_roll_back,late_unique_wait_expiry_rolls_back,acl_and_immutable_boundaries,live_constraint_not_relaxed):
         scenario()
         print('PASS '+scenario.__name__,flush=True)
 

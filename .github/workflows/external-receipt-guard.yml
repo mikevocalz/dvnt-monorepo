@@ -9,6 +9,8 @@ on:
       - 'apps/mobile/supabase/functions/external-promoter-payment-status/**'
       - 'apps/mobile/supabase/functions/_shared/external-payment-session.ts'
       - 'scripts/test-external-receipt-endpoints.cjs'
+      - 'scripts/verify-issuance-invariants.mjs'
+      - 'scripts/verify-issuance-invariants.test.cjs'
       - 'docs/payments/external-receipt-guard-rollout.md'
       - 'apps/mobile/supabase/functions/payouts-release/**'
       - 'apps/mobile/supabase/config.toml'
@@ -33,7 +35,7 @@ jobs:
       - name: Offline SQL and endpoint regressions
         env:
           NODE_PATH: /tmp/external-receipt-test/node_modules
-        run: node --test --test-concurrency=1 scripts/test-external-receipt-guard*.cjs scripts/test-external-receipt-endpoints.cjs
+        run: node --test --test-concurrency=1 scripts/test-external-receipt-guard*.cjs scripts/test-external-receipt-endpoints.cjs scripts/verify-issuance-invariants.test.cjs
       - name: Refuse unsafe database targets before SQL
         run: python3 scripts/test-external-receipt-guard-target-safety.py
       - name: Start network-isolated disposable PostgreSQL 17
