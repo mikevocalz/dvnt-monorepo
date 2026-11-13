@@ -112,6 +112,16 @@ remains explicit work before claiming an end-to-end user experience.
    entry is not proof no manual/in-flight execution exists.
 3. Install verified guard SQL, revised claimant and approved endpoints, keeping
    all controls/flags disabled. Verify restrictive ACLs and immutable metadata.
+   Confirm PostgREST's schema/readonly introspection resolves the exact new
+   session-bound RPC signatures; SQL installation alone is not API readiness.
+   If the cache is stale, use only the separately approved deployment procedure
+   to reload it and recheck. Do not enable recording to work around missing RPCs.
+   Send an authenticated negative endpoint probe with no operator scope/default
+   gates off: it must reject (the default-off handler returns 503 before the
+   auth/scope path) and perform no provider call or bookkeeping write. That
+   response alone does not prove the auth/scope path or RPC cache works; retain
+   separate schema-resolution evidence and staging permission tests. Never
+   fabricate a real user's session or provision scope merely to pass a probe.
 4. Separately authorize scoped real operator provisioning and reporting gate;
    report the specified event/promoter using its actual session. Verify durable
    quarantine and that no earning has been falsely marked paid.

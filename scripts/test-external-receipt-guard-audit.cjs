@@ -162,3 +162,20 @@ test('independent audit: pre-install payout uncertainty cannot be erased after r
     assert.equal((await db.query('SELECT count(*)::int AS n FROM payouts WHERE event_id=1')).rows[0].n,1);
   } finally { await db.close(); }
 });
+
+test('independent audit: NULL legacy source promoter needs exact attribution; contradictory identity fails closed', async () => {
+  for (const contradictory of [false,true]) {
+    const db=await fixture({beforeReport: contradictory
+      ? "INSERT INTO event_promoters(id,event_id,user_id) VALUES('00000000-0000-4000-8000-000000000099',1,'other-recipient'); UPDATE orders SET promoter_id='00000000-0000-4000-8000-000000000099'"
+      : 'UPDATE orders SET promoter_id=NULL'});
+    try {
+      if (contradictory) {
+        await assert.rejects(rpc(db,'settlement_record_external_promoter_payment',recordArgs()),/eligibility/);
+        assert.equal((await db.query('SELECT count(*)::int AS n FROM dvnt_settlement.external_promoter_payments')).rows[0].n,0);
+        assert.equal((await db.query('SELECT paid_out_at FROM promoter_ledger_entries')).rows[0].paid_out_at,null);
+      } else {
+        assert.equal((await rpc(db,'settlement_record_external_promoter_payment',recordArgs())).recorded,true);
+      }
+    } finally { await db.close(); }
+  }
+});
