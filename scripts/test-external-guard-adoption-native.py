@@ -213,6 +213,21 @@ def source_event_change_while_waiting_fails_closed():
         assert 'source event changed while locking' in error, error
 
 
+def original_runtime_rejected_atomically():
+    for recorded in (False, True):
+        with Database(seed=True, record=recorded) as db:
+            before = db.snapshot()
+            expression = re.search(r'SELECT (jsonb_build_object[\s\S]+?) INTO actual;', ADOPTION).group(1)
+            catalog = db.sql('SELECT '+expression)
+            error = db.sql((ROOT/'docs/payments/drafts/settlement-runtime-pristine.sql').read_text(), ok=False)
+            assert 'already exists' in error, error
+            assert db.snapshot() == before
+            assert db.sql('SELECT '+expression) == catalog
+            assert db.sql("SELECT to_regclass('dvnt_settlement.controls') IS NULL") == 't'
+            db.sql("UPDATE events SET payout_status='pending' WHERE id=1")
+            assert 'quarantined' in db.sql("SELECT public.settlement_claim_legacy_event(1)", ok=False)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--disposable-ci-postgres', action='store_true')
@@ -252,7 +267,7 @@ def main():
              receipt_commit_precedes_adoption, adoption_commit_rejects_waiting_record,
              report_precedes_promoter_reserve, reserve_precedes_report_and_remains_reconcilable,
              report_precedes_host_reserve, pending_quarantine_and_scopes_survive,
-             source_event_change_while_waiting_fails_closed)
+             source_event_change_while_waiting_fails_closed, original_runtime_rejected_atomically)
     for test in tests:
         test()
         print('PASS', test.__name__, flush=True)
