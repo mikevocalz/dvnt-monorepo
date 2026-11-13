@@ -15,3 +15,5 @@ UPDATE dvnt_settlement.external_recording_controls SET enabled=true,reporting_en
 INSERT INTO dvnt_settlement.external_event_reviews(event_id,reviewed_by,reviewed_at,expires_at,proof_sha256,attestation) VALUES(1,'fixture-operator',clock_timestamp(),clock_timestamp()+interval '10 minutes',repeat('b',64),'{"workers_drained":true,"stripe_destinations_reconciled":true,"unknown_outcomes_absent":true,"source_refunds_disputes_reviewed":true}');
 
 SELECT public.settlement_report_external_payment('fixture-operator',1,'00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000041','fixture-report');
+
+INSERT INTO public.session(id,"userId","expiresAt","updatedAt") VALUES('fixture-session-row','fixture-operator',clock_timestamp()+interval '1 hour',clock_timestamp());

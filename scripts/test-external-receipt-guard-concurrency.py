@@ -12,7 +12,8 @@ import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-PREFIX = ["sudo", "-u", "postgres"]
+CONTAINER = "dvnt-external-receipt-ci"
+PREFIX = ["docker", "--context", "default", "exec", "-i", "--user", "postgres", CONTAINER]
 PROMOTER = "00000000-0000-4000-8000-000000000002"
 BINDING = "00000000-0000-4000-8000-000000000003"
 def literal(value):
@@ -349,6 +350,35 @@ def ledger_reparent_while_source_waits():
             second.abort(); first.abort()
 
 
+def session_expiry_and_revocation_roll_back():
+    with Database() as db:
+        oid,lid=db.source()
+        db.sql("INSERT INTO public.session(id,\"userId\",\"expiresAt\",\"updatedAt\") VALUES('fixture-session','fixture-operator',clock_timestamp()+interval '5 seconds',clock_timestamp())")
+        sql=db.record(lid).replace('public.settlement_record_external_promoter_payment(',"public.settlement_record_external_promoter_payment_session(p_session_id=>'fixture-session',")
+        first=db.holding('SELECT 1 FROM orders WHERE id='+literal(oid)+' FOR UPDATE;')
+        second=Session(db)
+        try:
+            second.send(sql)
+            blocked(db,second,first)
+            while db.sql("SELECT clock_timestamp()>=\"expiresAt\" FROM public.session WHERE id='fixture-session'")!='t':
+                time.sleep(.05)
+            db.finish(first)
+            error=second.result(ok=False)
+            assert 'session required' in error,error
+            assert db.sql('SELECT count(*) FROM dvnt_settlement.external_promoter_payments')=='0'
+            assert db.sql('SELECT count(*) FROM promoter_ledger_entries WHERE paid_out_at IS NOT NULL')=='0'
+        finally:
+            second.abort();first.abort()
+    with Database() as db:
+        _,lid=db.source()
+        db.sql("INSERT INTO public.session(id,\"userId\",\"expiresAt\",\"updatedAt\") VALUES('fixture-session','fixture-operator',clock_timestamp()+interval '1 hour',clock_timestamp())")
+        sql=db.record(lid).replace('public.settlement_record_external_promoter_payment(',"public.settlement_record_external_promoter_payment_session(p_session_id=>'fixture-session',")
+        first=db.holding("DELETE FROM public.session WHERE id='fixture-session'")
+        error=db.competing(first,sql,ok=False)
+        assert 'session required' in error,error
+        assert db.sql('SELECT count(*) FROM dvnt_settlement.external_promoter_payments')=='0'
+
+
 def report_first_mutations_cannot_escape():
     mutations=(
         lambda oid,lid: 'UPDATE orders SET event_id=2 WHERE id='+literal(oid),
@@ -405,15 +435,32 @@ def main():
         parser.error('Requires an explicitly selected disposable GitHub-hosted Actions runner.')
     # Reject caller-supplied connection routing before creating a database or running SQL.
     # Every connection below is fixed to the runner's Unix socket, never a URL/host.
-    forbidden=('DATABASE_URL','SUPABASE_DB_URL','POSTGRES_URL','PGHOST','PGHOSTADDR','PGPORT','PGDATABASE','PGSERVICE','PGSERVICEFILE')
+    forbidden=('DATABASE_URL','SUPABASE_DB_URL','POSTGRES_URL','PGHOST','PGHOSTADDR','PGPORT','PGDATABASE','PGSERVICE','PGSERVICEFILE','DOCKER_HOST','DOCKER_CONTEXT','DOCKER_TLS_VERIFY','DOCKER_CERT_PATH')
     if any(os.getenv(key) for key in forbidden):
         parser.error('External database targets are forbidden; disposable local CI socket only.')
+    # The workflow creates this one official, network-isolated, ephemeral container.
+    # Inspect before ANY database command; no supplied target or host mount is accepted.
+    inspected=subprocess.run(['docker','--context','default','inspect',CONTAINER],text=True,capture_output=True,check=True,timeout=15)
+    configs=json.loads(inspected.stdout)
+    if len(configs)!=1:
+        parser.error('Expected exactly one disposable PostgreSQL container.')
+    config=configs[0]
+    mounts=config.get('Mounts') or []
+    if (config.get('Config',{}).get('Image')!='postgres:17'
+        or config.get('Config',{}).get('Labels',{}).get('com.dvnt.test-purpose')!='external-receipt-guard-ci'
+        or config.get('HostConfig',{}).get('NetworkMode')!='none'
+        or config.get('HostConfig',{}).get('Privileged')
+        or config.get('HostConfig',{}).get('Binds')
+        or config.get('HostConfig',{}).get('Mounts')
+        or not config.get('State',{}).get('Running')
+        or any(m.get('Type')!='volume' or len(m.get('Name',''))!=64 for m in mounts)):
+        parser.error('Refusing a non-isolated or non-disposable PostgreSQL target.')
     for key in list(os.environ):
         if key.startswith('PG'):
             del os.environ[key]
     roles='DO $$ BEGIN '+ ' '.join("IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='"+r+"') THEN CREATE ROLE "+r+"; END IF;" for r in ('anon','authenticated','service_role'))+' END $$;'
     subprocess.run(PREFIX+['psql','-X','-v','ON_ERROR_STOP=1','-h','/var/run/postgresql','-d','postgres'],input=roles,text=True,check=True,timeout=20)
-    for scenario in (replay_and_overlap,receipt_reuse,payout_both_orderings,hold_clear_and_legacy_claim,refund_both_orderings,reversal_both_orderings,attribution_both_orderings,disable_while_waiting_control,expired_review_after_actual_wait,ledger_reparent_while_source_waits,report_first_mutations_cannot_escape,acl_and_immutable_boundaries,live_constraint_not_relaxed):
+    for scenario in (replay_and_overlap,receipt_reuse,payout_both_orderings,hold_clear_and_legacy_claim,refund_both_orderings,reversal_both_orderings,attribution_both_orderings,disable_while_waiting_control,expired_review_after_actual_wait,ledger_reparent_while_source_waits,report_first_mutations_cannot_escape,session_expiry_and_revocation_roll_back,acl_and_immutable_boundaries,live_constraint_not_relaxed):
         scenario()
         print('PASS '+scenario.__name__,flush=True)
 

@@ -125,6 +125,14 @@ CREATE TABLE dvnt_settlement.legacy_execution_claims (
  created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE dvnt_settlement.external_reported_recovery_reviews (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ order_id uuid NOT NULL REFERENCES dvnt_settlement.external_reported_rows(order_id),
+ reason text NOT NULL CHECK(reason IN ('refund','dispute','manual','cancellation','ledger_reversal')),
+ source_reference text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(order_id,reason,source_reference)
+);
 CREATE TABLE dvnt_settlement.external_recovery_reviews (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
  settlement_id uuid NOT NULL REFERENCES dvnt_settlement.external_promoter_payments(id),
@@ -139,10 +147,10 @@ CREATE FUNCTION dvnt_settlement.reject_external_change() RETURNS trigger
 LANGUAGE plpgsql SET search_path='' AS $$
 BEGIN RAISE EXCEPTION 'external settlement evidence is immutable'; END $$;
 DO $$ DECLARE t text; BEGIN
- FOREACH t IN ARRAY ARRAY['external_reported_rows','external_event_quarantines','external_event_reviews','external_recipients','external_promoter_payments','external_promoter_rows','external_event_exclusions','legacy_execution_claims','external_recovery_reviews'] LOOP
+ FOREACH t IN ARRAY ARRAY['external_reported_recovery_reviews','external_reported_rows','external_event_quarantines','external_event_reviews','external_recipients','external_promoter_payments','external_promoter_rows','external_event_exclusions','legacy_execution_claims','external_recovery_reviews'] LOOP
   EXECUTE format('CREATE TRIGGER immutable_external BEFORE UPDATE OR DELETE ON dvnt_settlement.%I FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.reject_external_change()',t);
  END LOOP;
- FOREACH t IN ARRAY ARRAY['external_reported_rows','external_operator_scopes','external_event_quarantines','external_recording_controls','external_event_reviews','external_operators','external_recipients','external_promoter_payments','external_promoter_rows','external_event_exclusions','legacy_execution_claims','external_recovery_reviews'] LOOP
+ FOREACH t IN ARRAY ARRAY['external_reported_recovery_reviews','external_reported_rows','external_operator_scopes','external_event_quarantines','external_recording_controls','external_event_reviews','external_operators','external_recipients','external_promoter_payments','external_promoter_rows','external_event_exclusions','legacy_execution_claims','external_recovery_reviews'] LOOP
   EXECUTE format('ALTER TABLE dvnt_settlement.%I ENABLE ROW LEVEL SECURITY',t);
   EXECUTE format('REVOKE ALL ON dvnt_settlement.%I FROM PUBLIC,anon,authenticated,service_role',t);
  END LOOP;
@@ -188,7 +196,21 @@ GRANT EXECUTE ON FUNCTION public.settlement_claim_legacy_event(int) TO service_r
 CREATE FUNCTION dvnt_settlement.guard_legacy_payout() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
- PERFORM 1 FROM public.events WHERE id=NEW.event_id FOR UPDATE;
+ IF TG_OP='DELETE' THEN
+  PERFORM 1 FROM public.events WHERE id=OLD.event_id FOR UPDATE;
+  IF EXISTS(SELECT 1 FROM dvnt_settlement.external_event_exclusions WHERE event_id=OLD.event_id)
+  OR EXISTS(SELECT 1 FROM dvnt_settlement.external_event_quarantines WHERE event_id=OLD.event_id)
+  THEN RAISE EXCEPTION 'external quarantine preserves legacy payout history'; END IF;
+  RETURN OLD;
+ END IF;
+ IF TG_OP='UPDATE' THEN
+  PERFORM 1 FROM public.events WHERE id IN(OLD.event_id,NEW.event_id) ORDER BY id FOR UPDATE;
+  IF EXISTS(SELECT 1 FROM dvnt_settlement.external_event_exclusions WHERE event_id=OLD.event_id)
+  OR EXISTS(SELECT 1 FROM dvnt_settlement.external_event_quarantines WHERE event_id=OLD.event_id)
+  THEN RAISE EXCEPTION 'external quarantine preserves legacy payout history'; END IF;
+ ELSE
+  PERFORM 1 FROM public.events WHERE id=NEW.event_id FOR UPDATE;
+ END IF;
  IF EXISTS(SELECT 1 FROM dvnt_settlement.external_event_exclusions WHERE event_id=NEW.event_id)
  OR EXISTS(SELECT 1 FROM dvnt_settlement.external_event_quarantines WHERE event_id=NEW.event_id) THEN
   RAISE EXCEPTION 'external settlement excludes legacy payout';
@@ -196,7 +218,7 @@ BEGIN
  INSERT INTO dvnt_settlement.legacy_execution_claims(event_id) VALUES(NEW.event_id) ON CONFLICT DO NOTHING;
  RETURN NEW;
 END $$;
-CREATE TRIGGER external_legacy_payout BEFORE INSERT OR UPDATE ON public.payouts
+CREATE TRIGGER external_legacy_payout BEFORE INSERT OR UPDATE OR DELETE ON public.payouts
  FOR EACH ROW EXECUTE FUNCTION dvnt_settlement.guard_legacy_payout();
 
 -- The settlement stamp can never be erased or converted into a Stripe transfer.
@@ -295,6 +317,12 @@ BEGIN
     p_transaction_reference,p_receipt_sha256,p_receipt_reference,p_evidence_status,p_paid_at,p_attestation)
   THEN RAISE EXCEPTION 'external payment replay mismatch'; END IF;
   IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.external_recipients WHERE id=existing.recipient_binding_id AND beneficiary_reference=p_receipt_beneficiary_reference) THEN RAISE EXCEPTION 'recipient binding mismatch'; END IF;
+  PERFORM 1 FROM dvnt_settlement.external_recording_controls WHERE singleton FOR SHARE;
+  PERFORM 1 FROM dvnt_settlement.external_operator_scopes WHERE actor_id=p_actor AND event_id=p_event_id AND promoter_id=p_promoter_id FOR SHARE;
+  PERFORM 1 FROM dvnt_settlement.external_operators WHERE actor_id=p_actor AND enabled FOR SHARE;
+  IF NOT FOUND OR NOT EXISTS(SELECT 1 FROM dvnt_settlement.external_recording_controls WHERE singleton AND enabled)
+  OR NOT EXISTS(SELECT 1 FROM dvnt_settlement.external_operator_scopes WHERE actor_id=p_actor AND event_id=p_event_id AND promoter_id=p_promoter_id AND may_record AND expires_at>clock_timestamp())
+  THEN RAISE EXCEPTION 'recording replay permission expired'; END IF;
   RETURN jsonb_build_object('id',existing.id,'recorded',true,'status','paid_externally','replayed',true);
  END IF;
  SELECT * INTO STRICT e FROM public.events WHERE id=p_event_id FOR UPDATE;
@@ -333,6 +361,7 @@ BEGIN
  AND NOT EXISTS(SELECT 1 FROM public.promoter_ledger_entries reversal WHERE reversal.order_id=o.id AND reversal.entry_type='reversal')
  AND o.promoter_commission_amount_cents=l.amount_cents
  AND pa.locked_promoter_commission_amount_cents=l.amount_cents
+ AND NOT EXISTS(SELECT 1 FROM dvnt_settlement.external_reported_recovery_reviews r WHERE r.order_id=o.id)
  AND NOT EXISTS(SELECT 1 FROM dvnt_settlement.external_promoter_rows x WHERE x.order_id=o.id);
  IF row_count<>cardinality(ids) OR total<>p_amount_cents THEN RAISE EXCEPTION 'ledger scope count, amount, recipient, currency or eligibility mismatch'; END IF;
  PERFORM 1 FROM dvnt_settlement.external_operator_scopes WHERE actor_id=p_actor AND event_id=p_event_id
@@ -360,6 +389,9 @@ BEGIN
  GET DIAGNOSTICS row_count=ROW_COUNT;
  IF row_count<>cardinality(ids) THEN RAISE EXCEPTION 'external settlement stamp count mismatch'; END IF;
 -- No settlement runtime exists here; adoption must import receipts before enabling its gates.
+ IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.external_operator_scopes WHERE actor_id=p_actor AND event_id=p_event_id AND promoter_id=p_promoter_id AND may_record AND expires_at>clock_timestamp())
+ OR NOT EXISTS(SELECT 1 FROM dvnt_settlement.external_event_reviews WHERE event_id=p_event_id AND reviewed_by=p_actor AND reviewed_at<=clock_timestamp() AND expires_at>clock_timestamp())
+ THEN RAISE EXCEPTION 'recording permission or review expired before commit'; END IF;
  RETURN jsonb_build_object('id',sid,'recorded',true,'status','paid_externally','replayed',false);
 END $$;
 
@@ -400,6 +432,10 @@ BEGIN
   INSERT INTO dvnt_settlement.external_reported_rows(ledger_entry_id,order_id,event_id,promoter_id,recipient_user_id,amount_cents,currency)
   SELECT id,order_id,event_id,promoter_id,promoter.user_id,amount_cents,currency FROM public.promoter_ledger_entries WHERE id=ANY(ids);
  END IF;
+ INSERT INTO dvnt_settlement.legacy_execution_claims(event_id)
+ SELECT p_event_id WHERE EXISTS(SELECT 1 FROM public.payouts WHERE event_id=p_event_id) ON CONFLICT DO NOTHING;
+ IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.external_operator_scopes WHERE actor_id=p_actor AND event_id=p_event_id AND promoter_id=p_promoter_id AND may_report AND expires_at>clock_timestamp())
+ THEN RAISE EXCEPTION 'reporting permission expired before commit'; END IF;
  RETURN jsonb_build_object('quarantined',true,'payment_verified',false,'replayed',existing.event_id IS NOT NULL,
   'in_flight_review_required',EXISTS(SELECT 1 FROM dvnt_settlement.legacy_execution_claims WHERE event_id=p_event_id)
   OR EXISTS(SELECT 1 FROM public.payouts WHERE event_id=p_event_id)
@@ -476,6 +512,9 @@ BEGIN
  ELSE
   oid:=NEW.order_id; why:=NEW.reason; ref:='hold:'||NEW.external_event_id;
  END IF;
+ INSERT INTO dvnt_settlement.external_reported_recovery_reviews(order_id,reason,source_reference)
+ SELECT oid,why,ref FROM dvnt_settlement.external_reported_rows x WHERE x.order_id=oid
+ ON CONFLICT(order_id,reason,source_reference) DO NOTHING;
  INSERT INTO dvnt_settlement.external_recovery_reviews(settlement_id,order_id,reason,source_reference)
  SELECT x.settlement_id,oid,why,ref FROM dvnt_settlement.external_promoter_rows x WHERE x.order_id=oid
  ON CONFLICT(order_id,reason,source_reference) DO NOTHING;
@@ -514,4 +553,58 @@ GRANT EXECUTE ON FUNCTION public.settlement_external_operator_allowed(text) TO s
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA dvnt_settlement FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.settlement_record_external_promoter_payment(text,uuid,int,uuid,uuid,uuid[],bigint,text,text,text,text,text,text,timestamptz,text,jsonb) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.settlement_record_external_promoter_payment(text,uuid,int,uuid,uuid,uuid[],bigint,text,text,text,text,text,text,timestamptz,text,jsonb) TO service_role;
+
+-- Server-derived opaque session row ID only; NEVER a token or body-supplied actor.
+-- These bookkeeping functions have no external side effects: post-call expiry
+-- failure rolls back every underlying stamp/quarantine atomically.
+CREATE FUNCTION dvnt_settlement.assert_external_session(p_session_id text,p_actor text) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ PERFORM 1 FROM public.session WHERE id=p_session_id AND "userId"=p_actor AND "expiresAt">clock_timestamp() FOR SHARE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'valid actor session required'; END IF;
+END $$;
+REVOKE ALL ON FUNCTION dvnt_settlement.assert_external_session(text,text) FROM PUBLIC,anon,authenticated,service_role;
+CREATE FUNCTION public.settlement_record_external_promoter_payment_session(p_session_id text,
+ p_actor text, p_request_key uuid, p_event_id int, p_promoter_id uuid,
+ p_recipient_binding_id uuid, p_ledger_entry_ids uuid[], p_amount_cents bigint,
+ p_currency text, p_provider text, p_transaction_reference text,
+ p_receipt_sha256 text, p_receipt_reference text, p_evidence_status text,
+ p_paid_at timestamptz, p_receipt_beneficiary_reference text, p_attestation jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE result jsonb;
+BEGIN
+ PERFORM dvnt_settlement.assert_external_session(p_session_id,p_actor);
+ result:=public.settlement_record_external_promoter_payment(p_actor,p_request_key,p_event_id,p_promoter_id,p_recipient_binding_id,p_ledger_entry_ids,p_amount_cents,p_currency,p_provider,p_transaction_reference,p_receipt_sha256,p_receipt_reference,p_evidence_status,p_paid_at,p_receipt_beneficiary_reference,p_attestation);
+ PERFORM dvnt_settlement.assert_external_session(p_session_id,p_actor);
+ RETURN result;
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_record_external_promoter_payment(text,uuid,int,uuid,uuid,uuid[],bigint,text,text,text,text,text,text,timestamptz,text,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.settlement_record_external_promoter_payment_session(text,text,uuid,int,uuid,uuid,uuid[],bigint,text,text,text,text,text,text,timestamptz,text,jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.settlement_record_external_promoter_payment_session(text,text,uuid,int,uuid,uuid,uuid[],bigint,text,text,text,text,text,text,timestamptz,text,jsonb) TO service_role;
+CREATE FUNCTION public.settlement_report_external_payment_session(p_session_id text,p_actor text,p_event_id int,p_promoter_id uuid,p_request_key uuid,p_report_reference text) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE result jsonb;
+BEGIN
+ PERFORM dvnt_settlement.assert_external_session(p_session_id,p_actor);
+ result:=public.settlement_report_external_payment(p_actor,p_event_id,p_promoter_id,p_request_key,p_report_reference);
+ PERFORM dvnt_settlement.assert_external_session(p_session_id,p_actor);
+ RETURN result;
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_report_external_payment(text,int,uuid,uuid,text) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.settlement_report_external_payment_session(text,text,int,uuid,uuid,text) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.settlement_report_external_payment_session(text,text,int,uuid,uuid,text) TO service_role;
+CREATE FUNCTION public.settlement_external_actor_status_session(p_session_id text,p_actor text,p_event_id int) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE result jsonb;
+BEGIN
+ PERFORM dvnt_settlement.assert_external_session(p_session_id,p_actor);
+ result:=public.settlement_external_actor_status(p_actor,p_event_id);
+ PERFORM dvnt_settlement.assert_external_session(p_session_id,p_actor);
+ RETURN result;
+END $$;
+REVOKE ALL ON FUNCTION public.settlement_external_actor_status(text,int) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.settlement_external_actor_status_session(text,text,int) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.settlement_external_actor_status_session(text,text,int) TO service_role;
+
 COMMIT;

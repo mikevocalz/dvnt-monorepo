@@ -18,3 +18,5 @@ INSERT INTO organizer_accounts VALUES('fixture-host','acct_host');
 INSERT INTO event_promoters VALUES('00000000-0000-4000-8000-000000000002',1,NULL,NULL,'FIXTURE','active',1000,0,1000);
 
 ALTER TABLE events ADD CONSTRAINT events_payout_status_check CHECK(payout_status IN ('pending','on_hold','released','disabled'));
+
+CREATE TABLE public.session(id text PRIMARY KEY,"userId" text NOT NULL,"expiresAt" timestamptz NOT NULL,"createdAt" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" timestamptz NOT NULL);

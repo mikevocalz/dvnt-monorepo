@@ -37,3 +37,19 @@ test('two promoters on one event keep distinct reports/receipts; provider eviden
  assert.doesNotMatch(JSON.stringify(one),/fixture-transaction|beneficiary|sha256|receipt_reference/);
  const stranger=await rpc(db,'settlement_external_actor_status',{p_actor:'stranger',p_event_id:1});assert.equal(stranger.payments.length,0);assert.equal(stranger.reported_pending_review,false);
  }finally{await db.close();}});
+test('session wrappers require bound unexpired row; service cannot bypass core; no raw token argument',async()=>{const db=await fixture();try{
+ const sessionRecord=changes=>rpc(db,'settlement_record_external_promoter_payment_session',{p_session_id:'fixture-session-row',...args(),...changes});
+ for(const change of [{p_session_id:null},{p_session_id:'missing'},{p_actor:'different-user'}])await assert.rejects(sessionRecord(change),/valid actor session/);
+ await db.exec(`update public.session set "expiresAt"=clock_timestamp()-interval '1 second'`);await assert.rejects(sessionRecord({}),/valid actor session/);
+ await db.exec(`update public.session set "expiresAt"=clock_timestamp()+interval '1 hour';set role service_role`);
+ await assert.rejects(record(db),/permission denied/);const done=await sessionRecord({});assert.equal(done.recorded,true);await db.exec('reset role');
+ await db.exec(`delete from public.session`);await assert.rejects(sessionRecord({}),/valid actor session/);
+ }finally{await db.close();}});
+test('reported refund/dispute history is immutable even if order returns paid; no silent receipt upgrade',async()=>{const db=await fixture();try{
+ await db.exec("update orders set status='disputed';update orders set status='paid'");
+ assert.equal(await scalar(db,'select count(*)::int v from dvnt_settlement.external_reported_recovery_reviews'),1);
+ await assert.rejects(record(db),/eligibility mismatch/);await assert.rejects(db.exec('delete from dvnt_settlement.external_reported_recovery_reviews'),/immutable/);
+ assert.equal(await scalar(db,'select paid_out_at v from promoter_ledger_entries'),null);
+ }finally{await db.close();}});
+test('permission revocation blocks exact receipt replay as well as new records',async()=>{const db=await fixture();try{await record(db);await db.exec('update dvnt_settlement.external_operator_scopes set may_record=false');await assert.rejects(record(db),/replay permission/);}finally{await db.close();}});
+test('CLI-created migration exactly matches reviewed guard SQL',()=>{assert.equal(fs.readFileSync(path.join(root,'apps/mobile/supabase/migrations/20261113074114_external_receipt_guard.sql'),'utf8'),fs.readFileSync(path.join(root,'docs/payments/drafts/external-receipt-guard.sql'),'utf8'));});

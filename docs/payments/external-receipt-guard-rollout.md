@@ -1,7 +1,7 @@
 # Narrow external-payment guard: review candidate, not activated
 
 This branch adds no checkout routing, scheduler or provider-money operation.
-The SQL candidate is `docs/payments/drafts/external-receipt-guard.sql`. No live
+The reviewed source is `docs/payments/drafts/external-receipt-guard.sql`; its identical CLI-created migration is `apps/mobile/supabase/migrations/20261113074114_external_receipt_guard.sql`. No live
 migration or operation is implied by publication. Never apply it to fill a test
 gap. #290's offline checklist remains a separate planning aid.
 
@@ -39,11 +39,19 @@ recording or global payout administration.
 
 Endpoints derive actor identity exclusively from a valid, non-expired DVNT
 session, then verify private operator authorization and exact scoped DB rights.
-They reject caller-supplied actor fields, bound streamed bodies, redact errors
+They reject caller-supplied actor fields, bound streamed bodies by bytes and a five-second total deadline, redact errors
 and never log receipt contents. A Supabase read connector is NOT a DVNT operator
 session. Do not invent a user session, impersonate an owner by calling the RPC
 with their actor ID, or presume current connector access authorizes provisioned
-financial administration. A separately approved administrator/service invocation
+financial administration. User endpoints pass only the server-derived opaque
+session row ID into session-bound wrappers. These lock/recheck the actual
+session actor/expiry before and after bookkeeping; expiry after a database wait
+rolls back all changes. Raw record/report/status RPCs are not executable by the
+service role. No bearer/session token is passed into these RPCs or logs.
+The three handlers have explicit `verify_jwt=false` gateway config because DVNT
+uses Better Auth opaque sessions, NOT because authentication is optional; their
+strict custom session boundary remains mandatory. This scoped deployment
+configuration is part of any later approval. A separately approved administrator/service invocation
 must have its actual audited identity and authorization, not a fabricated user.
 
 Before recording, a separately reviewed administrator must establish the actual
@@ -110,7 +118,7 @@ remains explicit work before claiming an end-to-end user experience.
 5. Only after receipt/evidence review, authorize the exact bookkeeping action,
    correct recipient binding, fresh review and limited recording gate. Verify
    atomic canonical receipt/stamps/exclusion, replay and remaining obligations.
-6. Keep later refunds/disputes/reversals in manual external-recovery review.
+6. Keep later refunds/disputes/reversals in manual external-recovery review, including append-only reported-scope incidents before any completed receipt. Returning an order to paid does not erase that provenance or authorize recording.
    This implementation cannot reverse a Cash App payment through Stripe.
 
 No payment, cancellation of top-ups, new payout schedule, broad permissions or

@@ -23,9 +23,10 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return reply({ error: "not_configured" }, 503);
   try {
     const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-    const actor = await verifyExternalPaymentSession(db, req);
-    if (!actor) return reply({ error: "unauthorized" }, 401);
-    const permission = await db.rpc("settlement_external_operator_allowed", { p_actor: actor });
+    const session = await verifyExternalPaymentSession(db, req);
+    const actor = session?.actor;
+    if (!actor || !session) return reply({ error: "unauthorized" }, 401);
+    const permission = await db.rpc("settlement_external_operator_allowed", { p_actor: actor, p_session_id: session.id });
     if (permission.error || permission.data !== true) return reply({ error: "forbidden" }, 403);
     // No receipt body/PII uploads. Bounded structured reference + explicit manual
     // attestation only. A hash proves integrity, not that a provider paid anyone.
@@ -42,9 +43,9 @@ Deno.serve(async (req: Request) => {
       || !input.ledger_entry_ids.every((v: unknown) => typeof v === "string" && uuid.test(v))) {
       return reply({ error: "invalid_request" }, 400);
     }
-    const args: Record<string, unknown> = { p_actor: actor };
+    const args: Record<string, unknown> = { p_actor: actor, p_session_id: session.id };
     for (const field of fields) args[`p_${field}`] = input[field];
-    const result = await db.rpc("settlement_record_external_promoter_payment", args);
+    const result = await db.rpc("settlement_record_external_promoter_payment_session", args);
     if (result.error || result.data?.recorded !== true) return reply({ error: "recording_rejected_review_required" }, 409);
     return reply(result.data);
   } catch {
