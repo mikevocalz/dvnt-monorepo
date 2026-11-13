@@ -1,8 +1,8 @@
 # Narrow external-payment guard: review candidate, not activated
 
 This branch adds no checkout routing, scheduler or provider-money operation.
-The reviewed source is `docs/payments/drafts/external-receipt-guard.sql`; its identical CLI-created migration is `apps/mobile/supabase/migrations/20261113074114_external_receipt_guard.sql`. No live
-migration or operation is implied by publication. Never apply it to fill a test
+The reviewed source is `docs/payments/drafts/external-receipt-guard.sql`; its identical history-synchronized migration is `apps/mobile/supabase/migrations/20261113142940_external_receipt_guard.sql`. The originally CLI-created artifact was synchronized to the supported connector’s actual applied version on 2026-11-13. Stored history contains one byte-identical 45,609-byte SQL statement, SHA-256 `ac4a30d0f827f675e9803ab1c02f64d29a8875c65492dd7b0f5b01582e6f02db`; no history was rewritten. Schema installation alone does not enable reporting, recording, operator rights or payout execution. No further live
+operation is implied by publication. Never apply it to fill a test
 gap. #290's offline checklist remains a separate planning aid.
 
 ## Two distinct actions

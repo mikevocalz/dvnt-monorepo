@@ -26,7 +26,7 @@ Deno.serve(async (req: Request) => {
     const session = await verifyExternalPaymentSession(db, req);
     const actor = session?.actor;
     if (!actor || !session) return reply({ error: "unauthorized" }, 401);
-    const permission = await db.rpc("settlement_external_operator_allowed", { p_actor: actor, p_session_id: session.id });
+    const permission = await db.rpc("settlement_external_operator_allowed", { p_actor: actor });
     if (permission.error || permission.data !== true) return reply({ error: "forbidden" }, 403);
     // No receipt body/PII uploads. Bounded structured reference + explicit manual
     // attestation only. A hash proves integrity, not that a provider paid anyone.
