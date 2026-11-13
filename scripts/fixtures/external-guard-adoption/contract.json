@@ -1,0 +1,10 @@
+{
+  "guard_commit": "ccb2422de8992af6118e8927bf0604eb11ce7d80",
+  "runtime_commit": "ac68e186864b22bc7786454d14ece6730caa8641",
+  "guard_migration": "apps/mobile/supabase/migrations/20261113074114_external_receipt_guard.sql",
+  "adoption_migration": "apps/mobile/supabase/migrations/20261113074433_external_guard_runtime_adoption.sql",
+  "retired_unapplied_versions": [
+    "20261111010000",
+    "20261111040111"
+  ]
+}

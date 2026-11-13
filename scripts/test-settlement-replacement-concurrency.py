@@ -32,7 +32,7 @@ class Database(base.Database):
             self.sql((ROOT / 'scripts/fixtures/settlement/external-schema.sql').read_text())
             source_schema = subprocess.check_output(['node','-e',"process.stdout.write(require('./scripts/fixtures/settlement/replacement-source-schema.cjs').sourceSchemaSql())"],cwd=ROOT,text=True,timeout=20)
             self.sql(source_schema)
-            self.sql((ROOT / 'apps/mobile/supabase/migrations/20261111040111_settlement_runtime_v1.sql').read_text())
+            self.sql((ROOT / 'docs/payments/drafts/settlement-runtime-pristine.sql').read_text())
             self.sql((ROOT / 'scripts/fixtures/settlement/approved-policy.sql').read_text())
             self.sql("INSERT INTO dvnt_settlement.funding_policy VALUES(true,'acct_fixture',false,0,'synthetic race fixture'); INSERT INTO dvnt_settlement.currency_reserves VALUES('usd',0,'synthetic race fixture'); UPDATE dvnt_settlement.controls SET checkout_enabled=true,checkout_replacement_enabled=true,guest_checkout_recovery_enabled=true,replacement_cleanup_enabled=true; UPDATE events SET status='active',end_date=clock_timestamp()+interval '10 days',start_date=clock_timestamp()+interval '9 days',payout_release_at=NULL; INSERT INTO ticket_types(id,event_id,price_cents,quantity_total) VALUES('"+TIER+"',1,10000,20)")
             return self

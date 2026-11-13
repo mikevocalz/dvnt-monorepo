@@ -12,7 +12,7 @@ async function setup({link=true,onboard=true,defaultGrants=false,issue=true,inst
  if(defaultGrants)await pg.exec('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon,authenticated,service_role; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon,authenticated,service_role');
  await pg.exec(readFileSync(resolve(root,'scripts/fixtures/settlement/external-schema.sql'),'utf8'));
  await pg.exec(sourceSchemaSql());
- let artifact=readFileSync(resolve(root,'apps/mobile/supabase/migrations/20261111040111_settlement_runtime_v1.sql'),'utf8');
+ let artifact=readFileSync(resolve(root,'docs/payments/drafts/settlement-runtime-pristine.sql'),'utf8');
  // Historical scheduler fixtures alone seed old liabilities before installing
  // the final gate. Ordinary engine/endpoint cases run the unmodified artifact.
  if(!installGate){const gate=readFileSync(resolve(root,'docs/payments/drafts/settlement-fulfillment.sql'),'utf8');artifact=artifact.replace(gate.trim().replace(/^BEGIN;\s*$/m,'').replace(/^COMMIT;\s*$/m,''),'');}

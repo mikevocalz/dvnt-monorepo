@@ -104,7 +104,7 @@ test('final generated artifact installs real issuer wrappers with financial gate
  const {PGlite}=require('@electric-sql/pglite');const {sourceSql}=require('./fixtures/settlement/fulfillment.cjs');const pg=new PGlite();
  try{
   for(const p of ['schema.sql','external-schema.sql'])await pg.exec(read('scripts/fixtures/settlement/'+p));
-  await pg.exec(sourceSql());let artifact=read('apps/mobile/supabase/migrations/20261111040111_settlement_runtime_v1.sql');
+  await pg.exec(sourceSql());let artifact=read('docs/payments/drafts/settlement-runtime-pristine.sql');
   assert.ok(artifact.includes('-- SOURCE: docs/payments/drafts/settlement-fulfillment.sql'));
   await pg.exec(artifact);const controls=(await pg.query('SELECT checkout_enabled,transfers_enabled,recovery_enabled FROM dvnt_settlement.controls')).rows[0];assert.deepEqual(controls,{checkout_enabled:false,transfers_enabled:false,recovery_enabled:false});assert.equal((await pg.query('SELECT count(*)::int n FROM dvnt_settlement.fulfillments')).rows[0].n,0);
   for(const role of ['anon','authenticated','service_role'])assert.deepEqual((await pg.query("SELECT p.oid::regprocedure::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='dvnt_settlement' AND has_function_privilege($1,p.oid,'EXECUTE')",[role])).rows,[]);

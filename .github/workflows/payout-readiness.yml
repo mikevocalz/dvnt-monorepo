@@ -4,14 +4,14 @@ on:
     paths:
       - 'apps/mobile/supabase/functions/_shared/payout-readiness*'
       - 'apps/mobile/supabase/functions/db-health/**'
-      - 'apps/mobile/supabase/migrations/20261111010000_payout_readiness_observability.sql'
+      - 'docs/payments/drafts/payout-readiness-observability.sql'
       - '.github/workflows/payout-readiness.yml'
   push:
     branches: [master]
     paths:
       - 'apps/mobile/supabase/functions/_shared/payout-readiness*'
       - 'apps/mobile/supabase/functions/db-health/**'
-      - 'apps/mobile/supabase/migrations/20261111010000_payout_readiness_observability.sql'
+      - 'docs/payments/drafts/payout-readiness-observability.sql'
       - '.github/workflows/payout-readiness.yml'
 permissions:
   contents: read
