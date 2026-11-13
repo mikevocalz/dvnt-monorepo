@@ -10,6 +10,8 @@
 4. **Do not deploy original #286 directly after the narrow guard. Do not use indiscriminate `--include-all` or edit applied migration history.** Read-only production history on November13 showed neither retired version applied; that is not proof for every environment or for a future rollout. Revalidate the actual target history, schema and complete pending-migration plan immediately before an approved installation. If either retired version is recorded, a runtime already exists, or the target is not the exact reviewed guard schema, this installer fails closed. That environment needs its own reviewed upgrade plan.
 5. If subsequent production migrations make this still-unapplied draft timestamp out of order, regenerate a new later CLI migration and update/retest this explicit contract before proposing rollout. Never bypass chronological checks to force an old draft into a newer database.
 
+A negative test executes the exact original #286 artifact against both pending-only and completed-receipt guard fixtures. It fails inside its transaction; explicit rollback preserves the original catalog, ACLs, receipts and legacy claim exclusion. This is evidence about the original complete transactional artifact, not permission to run extracted fragments. Release safety still relies on retiring those executable files and enforcing the approved history/catalog preflight.
+
 The artifact requires the standalone guard's canonical migration-history entry. The prerequisite file here is byte-identical to the pinned guard source. `scripts/fixtures/external-guard-adoption/contract.json` records both source commits and the exact paths. The pinned fixture is an immutable test/compiler input, not a second database ledger.
 
 ## Preservation and safety properties

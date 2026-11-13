@@ -61,6 +61,18 @@ class Database(base.Database):
             if self.record:
                 self.sql(record_sql())
             if self.adopt:
+                # Print synthetic catalog differences, never relax comparison.
+                expression = re.search(r'SELECT (jsonb_build_object[\s\S]+?) INTO actual;', ADOPTION).group(1)
+                expected_text = re.search(r"IF actual IS DISTINCT FROM '((?:[^']|'')*)'::jsonb THEN", ADOPTION).group(1).replace("''", "'")
+                actual = json.loads(self.sql('SELECT '+expression))
+                expected = json.loads(expected_text)
+                if actual != expected:
+                    def differences(a, b, path='catalog'):
+                        if type(a) != type(b): return [(path, str(a)[:200], str(b)[:200])]
+                        if isinstance(a, dict): return sum((differences(a.get(k), b.get(k), path+'.'+k) for k in sorted(set(a)|set(b))), [])
+                        if isinstance(a, list): return [(path+'.length',len(a),len(b))] if len(a)!=len(b) else sum((differences(x,y,path+'['+str(i)+']') for i,(x,y) in enumerate(zip(a,b))), [])
+                        return [] if a==b else [(path,str(a)[:200],str(b)[:200])]
+                    print('Synthetic catalog mismatch:', json.dumps(differences(expected,actual)[:12]), flush=True)
                 self.sql(ADOPTION)
             return self
         except BaseException:

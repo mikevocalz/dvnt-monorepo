@@ -113,3 +113,5 @@ test('CLI-generated chronological artifact is reproducible, retires both unappli
  assert.equal((adoption.match(/^BEGIN;$/gm)||[]).length,1);assert.equal((adoption.match(/^COMMIT;$/gm)||[]).length,1);
  assert.doesNotMatch(adoption,/cron\.(?:schedule|unschedule)\s*\(|net\.http_/i);
 });
+
+test('original pre-adoption runtime fails atomically on populated narrow guard without weakening claims or ACLs',async()=>{for(const record of [false,true]){const db=await fixture({seed:true,record});try{const before=await evidence(db);const catalog=await scalar(db,'select '+catalogExpression(publicFunctionNames(guard))+' v');await assert.rejects(db.exec(read('docs/payments/drafts/settlement-runtime-pristine.sql')),/already exists/);await db.exec('rollback');await noRuntime(db);assert.deepEqual(await evidence(db),before);assert.deepEqual(await scalar(db,'select '+catalogExpression(publicFunctionNames(guard))+' v'),catalog);await db.exec("update events set payout_status='pending' where id=1");await assert.rejects(rpc(db,'settlement_claim_legacy_event',{p_event_id:1}),/excluded|quarantin/);}finally{await db.close();}}});
