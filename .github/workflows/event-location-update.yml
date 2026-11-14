@@ -1,0 +1,21 @@
+name: Event location edit regression
+on:
+  pull_request:
+    paths:
+      - 'packages/app/lib/events/event-location-update*'
+      - 'packages/app/lib/api/events.ts'
+      - 'packages/app/lib/hooks/use-events.ts'
+      - '.github/workflows/event-location-update.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - run: node --test packages/app/lib/events/event-location-update.test.ts packages/app/lib/events/event-type.test.ts packages/app/lib/events/event-cache.test.ts
