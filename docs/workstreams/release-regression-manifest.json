@@ -10,6 +10,12 @@
   },
   "criticalScenarios": [
     {
+      "id": "web-scanner-camera-release",
+      "owner": "tickets",
+      "kind": "test",
+      "automation": "scripts/test-web-scanner-power.cjs"
+    },
+    {
       "id": "age-under-18",
       "owner": "identity",
       "kind": "test",
