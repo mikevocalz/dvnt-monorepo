@@ -97,3 +97,21 @@ test('session consent requires current sign-in and binds settings RPC to verifie
  assert.equal(h.calls[0].args.p_session_id,'current-session');
  assert.equal(h.calls[0].args.p_user_id,'signed-in-viewer');
 });
+test('account-wide consent is explicit and still bound to initiating authenticated session',async()=>{
+ const base={action:'updateSettings',expectedRevision:1,locationEnabled:true,eventsMapEnabled:true,consentVersion:'events-map-account-v3'};
+ const stale=harness();assert.equal((await stale.call(base)).status,409);assert.equal(stale.calls.length,0);
+ const h=harness();assert.equal((await h.call({...base,expectedSessionId:'current-session'})).status,200);
+ assert.equal(h.calls[0].name,'member_map_update_account');assert.equal(h.calls[0].args.p_session_id,'current-session');
+});
+test('account-wide publication requires fresh session proof, never routes through legacy publisher',async()=>{
+ const base={action:'publish',revision:2,latitude:40,longitude:-74,observedAt:new Date().toISOString()};
+ const h=harness({presence:{consent_version:'events-map-account-v3'}});
+ assert.equal((await h.call(base)).status,409);
+ assert.equal((await h.call({...base,expectedSessionId:'current-session'})).status,200);
+ assert.equal(h.calls.at(-1).name,'member_map_publish_account');assert.equal(h.calls.at(-1).args.p_session_id,'current-session');
+});
+test('signout detaches current session without requiring admission or rate limiting',async()=>{
+ const h=harness({blocked:true,rateError:true});
+ assert.equal((await h.call({action:'detachSession'})).status,200);assert.equal(h.rates.length,0);
+ assert.equal(h.calls[0].name,'member_map_detach_session');assert.equal(h.calls[0].args.p_session_id,'current-session');
+});

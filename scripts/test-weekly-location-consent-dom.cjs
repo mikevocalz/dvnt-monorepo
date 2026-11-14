@@ -23,7 +23,8 @@ const { build } = require('esbuild');
     await wait(()=>!!dialog());
     assert.equal(win.document.querySelectorAll('[role=dialog]').length,1);
     assert.equal(win.fixture.shares,0,'expired grants get an invitation, not silent renewal');
-    assert.match(dialog().textContent,/this sign-in/);
+    assert.match(dialog().textContent,/across devices and future sign-ins until you turn sharing off/);
+    assert.match(dialog().textContent,/Each device still needs its own location permission/);
     button('Not now').click();
     await wait(()=>!dialog());
     win.fixture.mounted=false;tick();await wait(()=>!button('Show my avatar'));
@@ -39,6 +40,6 @@ const { build } = require('esbuild');
     win.fixture.location.settings={...win.fixture.location.settings,sessionKey:'new-signin'};
     tick();await wait(()=>!!dialog());
     assert.equal(win.fixture.shares,1,'same-account new sign-in asks again without sharing silently');
-    console.log('PASS: mounted native disclosure renews only by explicit action, preserves cooldown, cancels on inactivity, isolates accounts, and keeps session-bound disclosure');
+    console.log('PASS: mounted native disclosure renews only by explicit action, preserves cooldown, cancels on inactivity, isolates accounts, and discloses account-wide scope without silently upgrading expired grants');
   } finally {win.fixture.unmount?.();await win.happyDOM.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

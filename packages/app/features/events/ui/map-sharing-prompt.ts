@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { mmkvStorage } from "@dvnt/app/lib/mmkv-zustand";
 import { useLocationSettings, useMapSharingConsent } from "@dvnt/app/lib/hooks/use-member-map";
 
-export const MAP_SHARING_DISCLOSURE = "Your avatar, profile name and approximate location (about 1 km) will be visible to eligible nearby DVNT members for this sign-in, until you sign out or this sign-in expires. Only foreground updates are used. Your pin disappears after 15 minutes without a fresh location. If you sign out while offline, the last pin may remain for up to 15 minutes. You can stop sharing anytime. This also turns on DVNT device location; device permission alone never makes you visible. This does not enable precise distance sharing.";
+export const MAP_SHARING_DISCLOSURE = "Your avatar, profile name and approximate location (about 1 km) will be visible to eligible nearby DVNT members. This choice follows your account across devices and future sign-ins until you turn sharing off. Each device still needs its own location permission. Only foreground updates are used. Your pin disappears after 15 minutes without a fresh location. Signing out stops updates from that device, but does not turn off your account preference; offline sign-out can leave its last pin visible for up to 15 minutes. Stop sharing turns it off across your account. This also turns on DVNT device location and does not enable precise distance sharing.";
 // Negative preference only, keyed by the server-verified non-secret session ID.
 // A new sign-in gets a new invitation; token refresh is not a new agreement.
 const dismissed = new Set<string>();
@@ -26,7 +26,7 @@ export function useMapSharingPrompt(owner: string, active: boolean, autoPrompt =
   };
   useEffect(() => {
     if (!autoPrompt || !available || !promptKey || attempted.current === promptKey) return;
-    if (location.sharing && location.settings?.consentVersion !== "events-map-v1") { attempted.current = promptKey; return; }
+    if (location.sharing) { attempted.current = promptKey; return; }
     let current = true;
     void (async () => {
       try {

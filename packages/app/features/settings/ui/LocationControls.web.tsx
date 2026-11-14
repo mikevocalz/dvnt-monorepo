@@ -1,4 +1,5 @@
 "use client";
+import { MAP_SHARING_DISCLOSURE } from "@dvnt/app/features/events/ui/map-sharing-prompt";
 import { useMapSharingNavigation } from "@dvnt/app/features/events/ui/use-map-sharing-navigation.web";
 import { getGoogleMapsPublicKey } from "@dvnt/ui/google-maps-public-config";
 import { useEffect, useState } from "react";
@@ -23,13 +24,14 @@ export function LocationControls({ allowSharing = Boolean(getGoogleMapsPublicKey
       <button type="button" role="switch" aria-label="Use device location" aria-checked={location.enabled} disabled={unavailable} onClick={() => void location.setOverall(!location.enabled)} className="min-h-11 shrink-0 rounded-xl border border-white/20 px-4 disabled:opacity-40">{location.enabled ? "On" : "Off"}</button>
     </div>
     <div className="flex items-center justify-between gap-4 border-t border-white/10 py-3">
-      <div><p className="font-semibold">Show my avatar on Events map</p><p className="text-sm text-white/60">Share your approximate area with eligible nearby members for this sign-in. This does not show your exact position or say which event you attend.</p></div>
+      <div><p className="font-semibold">Show my avatar on Events map</p><p className="text-sm text-white/60">Share your approximate area with eligible nearby members across your account until you turn it off. This does not show your exact position or say which event you attend.</p></div>
       <button type="button" role="switch" aria-label="Show my avatar on Events map" aria-checked={location.sharing} disabled={unavailable || (!location.sharing && (!location.enabled || !allowSharing))} onClick={() => { if (location.sharing) void location.setSharing(false); else setConfirm(true); }} className="min-h-11 shrink-0 rounded-xl border border-white/20 px-4 disabled:opacity-40">{location.sharing ? "On" : "Off"}</button>
     </div>
     {confirm && location.enabled && allowSharing ? <div role="group" aria-label="Confirm map sharing" className="rounded-xl border border-[#379ED8]/50 p-3">
-      <p className="text-sm">Your avatar, profile name and approximate area (about 1 km) will be visible to eligible nearby members. Only foreground updates are used. Sharing stops when you sign out or this sign-in expires. Your pin disappears if your location is over 15 minutes old; offline sign-out can leave the last pin visible for up to 15 minutes. This does not enable precise distance sharing. You can turn it off here anytime. Device/browser permission is separate.</p>
-      <div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={unavailable} onClick={() => void share()} className="min-h-11 rounded-xl bg-[#379ED8] px-4 font-semibold text-black">Share my approximate area for this sign-in</button><button type="button" onClick={dismiss} className="min-h-11 rounded-xl border border-white/20 px-4">Cancel</button></div>
+      <p className="text-sm">{MAP_SHARING_DISCLOSURE}</p>
+      <div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={unavailable} onClick={() => void share()} className="min-h-11 rounded-xl bg-[#379ED8] px-4 font-semibold text-black">Share across my devices</button><button type="button" onClick={dismiss} className="min-h-11 rounded-xl border border-white/20 px-4">Cancel</button></div>
     </div> : null}
+    {location.sharing && location.settings?.consentVersion === "events-map-account-v3" ? <p className="mt-2 text-sm text-white/60">Avatar sharing is enabled across your account until you turn it off. Each device still needs location permission. Open the Events map and tap Update my location if your avatar is missing.</p> : null}
     {location.sharing && location.settings?.shareUntil ? <p className="mt-2 text-sm text-white/60">Avatar sharing is enabled until {new Date(location.settings.shareUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. This preference does not confirm a current device location. Open the Events map and tap Update my location if your avatar is missing. Fresh locations update while the map is open.</p> : null}
     {consent.error ? <p role="alert" className="mt-3 text-sm text-amber-300">{consent.error}</p> : null}
     {consent.busy ? <p role="status">Waiting for location permission and a fresh location…</p> : null}
