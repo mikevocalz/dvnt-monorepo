@@ -21,7 +21,7 @@
  *  • callbacks are read through refs — no stale closure over the first render
  */
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { createStore, useStore } from "zustand";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { prepareQrEngine, type QrEngine } from "./qr/qr-engine.web";
@@ -48,6 +48,8 @@ export interface QrScannerProps {
   onError?: (message: string) => void;
   /** Stop after the first hit. Default true. */
   oneShot?: boolean;
+  /** Release camera and wake lock when not in camera mode. Default true. */
+  active?: boolean;
   /** Stop decoding (e.g. while a result card is showing). Camera stays live. */
   paused?: boolean;
   /** Keep the screen awake while mounted. Default true. */
@@ -110,9 +112,16 @@ function useScreenWakeLock(active: boolean) {
     const acquire = async () => {
       if (disposed || document.visibilityState !== "visible") return;
       try {
-        sentinel = await (navigator as unknown as {
+        const acquired = await (navigator as unknown as {
           wakeLock: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> };
         }).wakeLock.request("screen");
+        // A request may resolve after switching to the guest list/unmounting.
+        if (disposed || document.visibilityState !== "visible") {
+          await acquired.release();
+        } else {
+          await sentinel?.release().catch(() => {});
+          sentinel = acquired;
+        }
       } catch {
         // Low-power mode / unsupported in this context — scanning still works.
       }
@@ -127,10 +136,29 @@ function useScreenWakeLock(active: boolean) {
   }, [active]);
 }
 
+function subscribeVisibility(notify: () => void) {
+  document.addEventListener("visibilitychange", notify);
+  window.addEventListener("pageshow", notify);
+  return () => {
+    document.removeEventListener("visibilitychange", notify);
+    window.removeEventListener("pageshow", notify);
+  };
+}
+
 export function QrScanner(props: QrScannerProps) {
+  const visible = useSyncExternalStore(
+    subscribeVisibility,
+    () => document.visibilityState !== "hidden",
+    () => false,
+  );
   // Read once per mount, before any other hook: the engine cannot change
   // without a navigation, so the two branches never swap hook order.
   const useLegacy = useMemo(legacyEngineRequested, []);
+  // CSS hiding / stopping decoding does not release the camera hardware.
+  // Unmount either engine while inactive or backgrounded, then reacquire on return.
+  if (props.active === false || !visible) {
+    return <div data-qr-engine="off" className="aspect-square w-full rounded-2xl bg-black" />;
+  }
   if (useLegacy) {
     return (
       <LegacyQrScanner
