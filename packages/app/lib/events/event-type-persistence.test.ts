@@ -1,3 +1,4 @@
+import { eventLocationUpdate } from "./event-location-update.ts";
 import { canShowEventAttendees } from "./event-attendee-visibility.ts";
 import { storedEventType, eventTypeUpdate } from "./event-type.ts";
 import { URL } from "node:url";
@@ -43,7 +44,7 @@ function fixture() {
       return q;
     },
   };
-  const context: any = {storedEventType,eventTypeUpdate,canShowEventAttendees,exports:{},console:{log(){},error(){},warn(){}},require:()=>({ensureSupabaseJwt:async()=>bridgeReady}),DB,supabase,
+  const context: any = {eventLocationUpdate,storedEventType,eventTypeUpdate,canShowEventAttendees,exports:{},console:{log(){},error(){},warn(){}},require:()=>({ensureSupabaseJwt:async()=>bridgeReady}),DB,supabase,
     getSessionLifecycle:()=>({ready:true,epoch}),getBridgeRequestEpoch:()=>String(epoch),getCurrentUserAuthId:async()=>authId,getAuthIdFromStore:()=>authId,getCurrentUserIdSync:()=>1,
     formatEventDate:()=>({}),resolveEventImage:()=>null,resolveFlyerVideoUrl:()=>null,parseJsonbArray:()=>[],
     endsBeforeStart:()=>false,publishAtError:()=>null,filterPubliclyListableEvents:(rows: any)=>rows,enrichEventsWithTierPrices:async(rows: any)=>rows,

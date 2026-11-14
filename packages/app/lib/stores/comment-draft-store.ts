@@ -7,7 +7,7 @@ import type { CommentAttachment } from "../types/index";
  * draft + optional reply target is sufficient.
  */
 interface CommentDraftState {
-  /** The composer is hidden until the user taps the comment button / a Reply. */
+  /** Whether a draft is active. Inline surfaces may show an unfocused input while false. */
   open: boolean;
   context: string | null;
   revision: number;

@@ -366,7 +366,8 @@ function UnlockedPostDetailScreen() {
             </p>
           )}
         </section>
-        <WebCommentComposer postId={id} hideWhenClosed />
+        {/* The input is discoverable immediately; focus/keyboard stays user-initiated. */}
+        <WebCommentComposer postId={id} alwaysVisible />
       </div>
       <Lightbox />
 
