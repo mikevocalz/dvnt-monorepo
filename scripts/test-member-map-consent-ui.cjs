@@ -23,7 +23,7 @@ async function bundle(native) {
  const page=await browser.newPage({viewport:{width:393,height:852}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  async function reset(extra={}){await page.goto('about:blank');await page.setContent('<div id="root"></div>');await page.evaluate(extra=>{window.fixture={owner:'synthetic-a',active:true,mounted:true,version:0,storage:{},shares:0,cancels:0,stops:[],overall:[],result:false,error:null,location:{loading:false,busy:false,error:null,needsLocationStop:false,sharing:false,settings:{sessionKey:'session-a',sessionExpiresAt:'2099-01-01T00:00:00Z',locationEnabled:false,eventsMapEnabled:false,revision:0,shareUntil:null}},...extra};},extra);await page.addScriptTag({content:outputs[Number(native)].outputFiles[0].text});}
  await reset();await page.getByRole('dialog').waitFor();assert.equal(await page.getByRole('dialog').count(),1,'entry and map mount only one visible dialog');assert.equal(await page.evaluate(()=>window.fixture.shares),0,'opening disclosure never requests location');
- assert.match(await page.getByRole('dialog').innerText(),/about 1 km/);assert.match(await page.getByRole('dialog').innerText(),/eligible nearby DVNT members for this sign-in/);assert.match(await page.getByRole('dialog').innerText(),/15 minutes/);
+ assert.match(await page.getByRole('dialog').innerText(),/about 1 km/);assert.match(await page.getByRole('dialog').innerText(),/eligible nearby DVNT members/);assert.match(await page.getByRole('dialog').innerText(),/15 minutes/);
  if(!native)assert.equal(await page.getByRole('button',{name:'Not now',exact:true}).evaluate(e=>document.activeElement===e),true,'focus starts on safe dismissal');
  await page.getByRole('button',{name:'Not now',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});assert.equal(await page.evaluate(()=>window.fixture.shares),0);
  await page.evaluate(()=>{window.fixture.mounted=false;window.fixture.version++;dispatchEvent(new Event('fixturechange'));});await page.waitForTimeout(20);
@@ -56,6 +56,24 @@ async function bundle(native) {
  await page.getByRole('button',{name:'Share my location',exact:true}).click();
  assert.equal(await page.evaluate(()=>window.fixture.openedMap),undefined,'failed or denied permission does not open map');
  }
+ // Unknown settings must not falsely claim the owner has not consented.
+ if(!native){
+ await reset({entry:false,location:{loading:true,busy:false,error:null,needsLocationStop:false,sharing:false,settings:null}});
+ await page.getByText('Checking your saved sharing preference…',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Show my avatar',exact:true}).count(),0,'loading is not an opt-out');
+ await page.evaluate(()=>{window.fixture.location={loading:false,busy:false,error:null,needsLocationStop:false,sharing:true,settings:{sessionKey:'session-a',sessionExpiresAt:'2099-01-01T00:00:00Z',locationEnabled:true,eventsMapEnabled:true,consentVersion:'events-map-account-v3',revision:4,shareUntil:'2099-01-01T00:00:00Z'}};window.fixture.version++;dispatchEvent(new Event('fixturechange'));});
+ await page.getByRole('button',{name:'Stop sharing',exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Show my avatar',exact:true}).count(),0,'restored current-session consent never offers duplicate opt-in');
+ assert.equal(await page.evaluate(()=>window.fixture.shares),0);
+ await reset({entry:false});
+ await page.getByText(/Show your avatar across devices and future sign-ins/).waitFor();
+ assert.equal(await page.evaluate(()=>window.fixture.shares),0,'explanation cannot silently transfer consent');
+ }
+ // Legacy sharing is never silently widened. An explicit upgrade opens disclosure.
+ await reset({entry:false,location:{loading:false,busy:false,error:null,needsLocationStop:false,sharing:true,settings:{sessionKey:'session-a',sessionExpiresAt:'2099-01-01T00:00:00Z',locationEnabled:true,eventsMapEnabled:true,consentVersion:'events-map-session-v2',revision:4,shareUntil:'2099-01-01T00:00:00Z'}}});
+ await page.getByRole('button',{name:'Use across devices',exact:true}).click();
+ await page.getByRole('dialog').waitFor();
+ assert.equal(await page.evaluate(()=>window.fixture.shares),0,'scope change waits for explicit disclosure confirmation');
  // Ineligible/error state fails closed; successful existing sharing never re-prompts.
  await reset({map:false,location:{loading:false,busy:false,error:null,needsLocationStop:false,sharing:true,settings:{sessionKey:'session-a',sessionExpiresAt:'2099-01-01T00:00:00Z',locationEnabled:true,eventsMapEnabled:true,revision:4,shareUntil:new Date(Date.now()+3600000).toISOString()}}});await page.waitForTimeout(50);assert.equal(await page.getByRole('dialog').isVisible().catch(()=>false),false);assert.equal(await page.evaluate(()=>window.fixture.shares),0);
  if(!native){await reset();await page.getByRole('dialog').waitFor();assert.equal(await page.evaluate(()=>{const ids=[...document.querySelectorAll('[id]')].map(e=>e.id);return ids.length===new Set(ids).size}),true,'entry/map dialog labels have unique IDs');}

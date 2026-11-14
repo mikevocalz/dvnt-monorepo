@@ -5,10 +5,12 @@ export interface LocationAccessSnapshot {
   revision: number;
   shareUntil: string | null;
   consentVersion?: string | null;
+  sessionExpiresAt?: string | null;
 }
 export function mapGrantActive(settings: LocationAccessSnapshot | null, now: number): boolean {
   return !!settings && settings.locationEnabled === true && settings.eventsMapEnabled === true &&
-    typeof settings.shareUntil === "string" && Number.isFinite(Date.parse(settings.shareUntil)) && Date.parse(settings.shareUntil) > now;
+    ((settings.consentVersion === "events-map-account-v3" && typeof settings.sessionExpiresAt === "string" && Date.parse(settings.sessionExpiresAt) > now) ||
+      (settings.consentVersion !== "events-map-account-v3" && typeof settings.shareUntil === "string" && Number.isFinite(Date.parse(settings.shareUntil)) && Date.parse(settings.shareUntil) > now));
 }
 /** Stable ~1km latitude grid; only this coarse coordinate leaves the device for the people map. */
 export function coarseMapPoint(latitude: number, longitude: number) {

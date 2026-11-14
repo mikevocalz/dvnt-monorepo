@@ -6,7 +6,7 @@ import { memberMapApi } from "../api/member-map";
 import { memberProximityApi } from "../api/member-proximity";
 
 /** Before credentials are invalidated, stop local writers and attempt server
- * withdrawal. Offline withdrawal remains a durable negative intent; sign-out
+ * session detachment. Account-wide consent is not withdrawn by sign-out; sign-out
  * still proceeds, and server session deletion / point expiry bound visibility. */
 export async function revokeLocationOnSignOut() {
   const owner = useAuthStore.getState().user?.authId;
@@ -14,7 +14,7 @@ export async function revokeLocationOnSignOut() {
   useExactDistanceStore.getState().beginWithdrawal(owner);
   const access = useLocationAccessStore.getState();
   access.selectOwner(owner);
-  useLocationAccessStore.getState().stop("Stopping location for sign-out.", true);
+  useLocationAccessStore.getState().stop("Stopping location for sign-out.");
   const generation = useLocationAccessStore.getState().generation;
   useEventsLocationStore.setState({ deviceLat: null, deviceLng: null, deviceObservation: null, locationMode: "city",
     preciseProximityGrant: false, preciseProximityOwnerAuthId: null, cityVisibility: null });
@@ -23,7 +23,7 @@ export async function revokeLocationOnSignOut() {
     await Promise.race([
       (async () => {
         const [settings] = await Promise.all([
-          memberMapApi.revoke(owner, "overall"),
+          memberMapApi.detachSession(owner),
           memberProximityApi.revokeExact(owner),
         ]);
         if (useAuthStore.getState().user?.authId === owner) {
@@ -34,6 +34,7 @@ export async function revokeLocationOnSignOut() {
       new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Offline withdrawal")), 3000); }),
     ]);
   } catch {
-    // Do not erase the pending withdrawal or retry with another user's token.
+    // Session deletion and the 15-minute presence lease bound offline visibility.
+    // Never turn a sign-out into an account-wide opt-out or retry as another user.
   } finally { if (timer) clearTimeout(timer); }
 }

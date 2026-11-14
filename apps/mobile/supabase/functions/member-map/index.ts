@@ -23,14 +23,14 @@ Deno.serve(async(req: Request) => {
   const body=await req.json().catch(()=>null);
   if(!body||typeof body!=="object"||Array.isArray(body)) return json({ok:false,error:"Invalid request"},400);
   const action=body.action;
-  if(!["settings","updateSettings","publish","nearby","revoke"].includes(action))
+  if(!["settings","updateSettings","publish","nearby","revoke","detachSession"].includes(action))
     return json({ok:false,error:"Unknown action"},400);
   const userId=session.userId;
   // Bind async token acquisition to the account that initiated the UI action.
   if(typeof body.expectedAuthId!=="string" || body.expectedAuthId!==userId)
     return json({ok:false,error:"Your account changed. Refresh and retry.",code:"account_changed"},409);
   // Stopping sharing never requires admission or a working rate limiter.
-  const stopping=action==="revoke" || (action==="updateSettings" && body.eventsMapEnabled===false);
+  const stopping=action==="detachSession" || action==="revoke" || (action==="updateSettings" && body.eventsMapEnabled===false);
   if(!stopping && action!=="settings") {
     const admission=await resolveVerifiedAdmission(db,userId);
     if(admission.state==="blocked") return json({ok:false,error:admission.message||"Verify your account first",code:admission.reason},403);
@@ -42,6 +42,7 @@ Deno.serve(async(req: Request) => {
   }
   let name:string, args:Record<string,unknown>={p_user_id:userId};
   if(action==="settings") { name="member_map_session_settings"; args={...args,p_session_id:session.sessionId}; }
+  else if(action==="detachSession") { name="member_map_detach_session"; args={...args,p_session_id:session.sessionId}; }
   else if(action==="revoke") {
     if(body.scope!=null && body.scope!=="overall" && body.scope!=="events") return json({ok:false,error:"Invalid revoke scope"},400);
     name="member_map_revoke"; args={...args,p_disable_overall:body.scope==="overall"};
@@ -52,13 +53,13 @@ Deno.serve(async(req: Request) => {
       return json({ok:false,error:"Valid settings and revision required"},400);
     if(body.shareDurationHours!==undefined && body.shareDurationHours!==1 && body.shareDurationHours!==4)
       return json({ok:false,error:"Map sharing duration must be 1 or 4 hours"},400);
-    if(body.consentVersion==="events-map-session-v2" && body.expectedSessionId!==session.sessionId)
+    if((body.consentVersion==="events-map-session-v2" || body.consentVersion==="events-map-account-v3") && body.expectedSessionId!==session.sessionId)
       return json({ok:false,error:"Your sign-in changed. Reopen the location agreement.",code:"session_changed"},409);
     // Older builds confirmed one hour; only new explicit opt-ins request four.
-    name=body.consentVersion==="events-map-session-v2"?"member_map_update_session":body.shareDurationHours===4?"member_map_update_settings_four_hours":"member_map_update_settings";
+    name=body.consentVersion==="events-map-account-v3"?"member_map_update_account":body.consentVersion==="events-map-session-v2"?"member_map_update_session":body.shareDurationHours===4?"member_map_update_settings_four_hours":"member_map_update_settings";
     args={...args,p_expected_revision:body.expectedRevision,p_location_enabled:body.locationEnabled,
       p_events_map_enabled:body.eventsMapEnabled,p_consent_version:typeof body.consentVersion==="string"?body.consentVersion:null};
-    if(name==="member_map_update_session") args.p_session_id=session.sessionId;
+    if(name==="member_map_update_session" || name==="member_map_update_account") args.p_session_id=session.sessionId;
   } else {
     if(typeof body.latitude!=="number"||!Number.isFinite(body.latitude)||Math.abs(body.latitude)>85||
        typeof body.longitude!=="number"||!Number.isFinite(body.longitude)||Math.abs(body.longitude)>180||
@@ -81,10 +82,12 @@ Deno.serve(async(req: Request) => {
     const grant=await db.from("member_map_settings").select("consent_version,consent_session_id").eq("user_id",userId).maybeSingle();
     if(grant.error) return json({ok:false,error:"Map sharing is unavailable"},503);
     const sessionBound=grant.data?.consent_version==="events-map-session-v2";
+    const accountBound=grant.data?.consent_version==="events-map-account-v3";
+    if(accountBound && body.expectedSessionId!==session.sessionId) return json({ok:false,error:"Your sign-in changed. Refresh the map.",code:"session_changed"},409);
     if(sessionBound && (grant.data.consent_session_id!==session.sessionId || body.expectedSessionId!==session.sessionId)) return json({ok:false,error:"Allow map sharing for this sign-in first"},403);
-    name=sessionBound?"member_map_publish_session":"member_map_publish";
+    name=accountBound?"member_map_publish_account":sessionBound?"member_map_publish_session":"member_map_publish";
     args={...args,p_revision:body.revision,p_latitude:body.latitude,p_longitude:body.longitude,p_observed_at:body.observedAt};
-    if(sessionBound) args.p_session_id=session.sessionId;
+    if(sessionBound || accountBound) args.p_session_id=session.sessionId;
   }
   const {data,error}=await db.rpc(name,args);
   if(error) {

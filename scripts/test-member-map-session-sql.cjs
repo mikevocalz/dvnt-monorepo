@@ -12,7 +12,7 @@ async function fixture(fn) {
   await db.exec("ALTER TABLE users ADD COLUMN created_at timestamptz DEFAULT now()");
   const legacy=fs.readFileSync(path.join(root,'apps/mobile/supabase/migrations/20261011203000_legacy_adult_access.sql'),'utf8');
   await db.exec(legacy.slice(0,legacy.indexOf('CREATE OR REPLACE FUNCTION public.viewer_is_verified_adult'))+'COMMIT;');
-  for(const file of ['20261024164346_member_map_explicit_consent.sql','20261029041500_member_map_legacy_approval.sql','20261029051500_member_map_self_avatar.sql','20261029205205_member_map_four_hour_sharing.sql','20261109050000_member_map_session_consent.sql']) await db.exec(fs.readFileSync(path.join(root,'apps/mobile/supabase/migrations',file),'utf8'));
+  for(const file of ['20261024164346_member_map_explicit_consent.sql','20261029041500_member_map_legacy_approval.sql','20261029051500_member_map_self_avatar.sql','20261029205205_member_map_four_hour_sharing.sql','20261109050000_member_map_session_consent.sql','20261114162937_member_map_account_consent.sql']) await db.exec(fs.readFileSync(path.join(root,'apps/mobile/supabase/migrations',file),'utf8'));
   await db.exec(`INSERT INTO session VALUES ('viewer-signin','viewer',now()+interval '2 days'),('viewer-other','viewer',now()+interval '3 days'),('near-signin','near',now()+interval '2 days');`);
   await fn(db);
  }finally{await db.close();}
