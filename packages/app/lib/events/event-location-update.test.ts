@@ -1,3 +1,4 @@
+import { URL } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -5,7 +6,7 @@ import { eventLocationUpdate } from "./event-location-update.ts";
 
 const original = { location: "BJ Roosters", location_name: "BJ Roosters", location_address: "Old street", location_lat: 33.8, location_lng: -84.3 };
 test("web venue edit replaces old name/address/pin in the persisted row", () => {
-  const row = { ...original, ...eventLocationUpdate({ location: " Underground Atlanta " }, original.location) };
+  const row: Record<string, string | number | null> = { ...original, ...eventLocationUpdate({ location: " Underground Atlanta " }, original.location) };
   assert.deepEqual(row, { location: "Underground Atlanta", location_name: null, location_address: null, location_lat: null, location_lng: null });
   // The detail screen's fallback now resolves the new location for its map.
   assert.equal(row.location_name || row.location, "Underground Atlanta");
