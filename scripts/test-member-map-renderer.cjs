@@ -17,7 +17,7 @@ const mocks = {
   '@dvnt/app/lib/api/event-map': `export const eventMapApi={getLocations:async()=>[]};`,
   'solito/navigation': `export const useRouter=()=>({push:p=>window.fixture.route=p});`,
   '@dvnt/app/features/settings/ui/LocationControls': `import React from 'react';export const LocationControls=({allowSharing})=>React.createElement('button',{'aria-label':'Synthetic sharing toggle',onClick:()=>{window.fixture.sharing=false;window.renderFixture()},disabled:!allowSharing},'Stop sharing');`,
-  '@dvnt/app/lib/hooks/use-member-map': `export const useLocationSettings=()=>({sharing:window.fixture.sharing,enabled:window.fixture.enabled!==false});export const useMemberMapPresence=active=>{window.fixture.presenceActive=active;return{area:window.fixture.area,error:null,isUpdating:false,refresh:async()=>{window.fixture.refreshes++},requestLocation:async()=>{window.fixture.refreshes++}}};export const useNearbyMembers=active=>{window.fixture.nearbyActive=active;return {data:window.fixture.data,isPending:false,isError:window.fixture.error,refetch:()=>{window.fixture.retries++}}};`,
+  '@dvnt/app/lib/hooks/use-member-map': `export const useLocationSettings=()=>({sharing:window.fixture.sharing,enabled:window.fixture.enabled!==false,busy:false,setSharing:async value=>{window.fixture.sharing=value;window.renderFixture()}});export const useMemberMapPresence=active=>{window.fixture.presenceActive=active;return{area:window.fixture.area,error:window.fixture.presenceError||null,isUpdating:false,refresh:async()=>{window.fixture.refreshes++},requestLocation:async()=>{window.fixture.refreshes++}}};export const useNearbyMembers=active=>{window.fixture.nearbyActive=active;return {data:window.fixture.data,isPending:false,isError:window.fixture.error,refetch:()=>{window.fixture.retries++}}};`,
 };
 async function bundle(key, native = false, expoKey = '') {
   const platformMocks = native ? {
@@ -48,9 +48,9 @@ async function bundle(key, native = false, expoKey = '') {
   await page.goto(url);await page.getByRole('button',{name:'Night Owl — approximate area'}).waitFor();
   assert.equal(await page.getByRole('button',{name:'Night Owl — approximate area'}).getAttribute('data-lat'),'40.71');
   assert.equal(await page.locator('[data-testid="google-map"]').count(),1,'one map holds events and avatars');
-  assert.ok(await page.locator('[data-testid="google-map"]').evaluate(map=>Boolean(map.compareDocumentPosition(document.querySelector('[aria-label="Synthetic sharing toggle"]'))&Node.DOCUMENT_POSITION_FOLLOWING)),'location sharing controls follow the map in document and keyboard order');
+  assert.ok(await page.locator('[data-testid="google-map"]').evaluate(map=>Boolean(map.compareDocumentPosition(document.querySelector('summary'))&Node.DOCUMENT_POSITION_FOLLOWING)),'location sharing controls follow the map in document and keyboard order');
   const firstMapBounds=await page.locator('[data-testid="google-map"]').boundingBox();
-  const sharingBounds=await page.getByRole('button',{name:'Synthetic sharing toggle'}).boundingBox();
+  const sharingBounds=await page.getByRole('button',{name:'Stop sharing',exact:true}).boundingBox();
   assert.ok(sharingBounds.y>=firstMapBounds.y+firstMapBounds.height,'location sharing section is visually below the map');
   await page.getByRole('button',{name:'You — approximate area'}).waitFor();
   // Multiple consenting members remain available independently, including a
@@ -66,7 +66,20 @@ async function bundle(key, native = false, expoKey = '') {
   await page.evaluate(()=>{window.fixture.selectedEventId='event-1';window.renderFixture()});
   await page.waitForFunction(()=>window.fixture.camera.lat===40.72);
   assert.equal(await page.getByRole('button',{name:'Show my area',exact:true}).count(),0);
-  assert.equal(await page.getByRole('button',{name:'Update my location',exact:true}).count(),1);
+  assert.equal(await page.getByRole('button',{name:'Update my location',exact:true}).count(),0,'no second location prompt on map open');
+  assert.equal(await page.getByRole('button',{name:'Show my avatar',exact:true}).count(),0,'entry consent is not repeated');
+  assert.equal(await page.getByText('Turn on avatar sharing to show yourself and nearby members.').count(),0);
+  await page.evaluate(()=>{window.fixture.presenceError='Your device location needs confirmation';window.renderFixture()});
+  assert.equal(await page.getByText('Your device location needs confirmation',{exact:true}).count(),0,'passive recovery warning does not cover map');
+  await page.getByText('Map settings',{exact:true}).click();
+  await page.getByText('Your device location needs confirmation',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Update my location',exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.fixture.refreshes),1,'manual permission recovery remains reachable');
+  await page.getByText('Map settings',{exact:true}).click();
+  await page.getByRole('button',{name:'Update my location',exact:true}).waitFor({state:'detached'});
+  await page.getByText('Map settings',{exact:true}).click();
+  await page.getByRole('button',{name:'Update my location',exact:true}).waitFor();
+  await page.evaluate(()=>{window.fixture.presenceError=null;window.renderFixture()});
   await page.evaluate(()=>{window.fixture.selectedEventId=null;window.renderFixture()});
   await page.waitForFunction(()=>window.fixture.camera.lat===40.7);
   await page.evaluate(()=>{window.fixture.savedCity={id:17,name:'Saved City',state:'NY',lat:42,lng:-75};window.fixture.data={members:[],self:null,center:null,expiresAt:null};window.renderFixture()});
@@ -106,7 +119,7 @@ async function bundle(key, native = false, expoKey = '') {
   await page.getByRole('button',{name:'Night Owl — approximate area'}).click();
   assert.equal(await page.evaluate(()=>window.fixture.route),'/profile/night%20owl');
   await page.evaluate(()=>{window.fixture.selectedEventId=null;window.renderFixture()});
-  await page.getByRole('button',{name:'Synthetic sharing toggle'}).click();
+  await page.getByRole('button',{name:'Stop sharing',exact:true}).click();
   assert.equal(await page.locator('[data-testid="google-map"]').count(),1,'off keeps public event map');
   assert.equal(await page.getByRole('button',{name:'You — approximate area'}).count(),0,'off removes self');
   await page.waitForFunction(()=>window.fixture.zoom===3);
@@ -191,7 +204,7 @@ async function bundle(key, native = false, expoKey = '') {
   await chooser.waitFor({state:'detached'});
   await page.evaluate(()=>window.setFixtureZoom(12));
   await page.getByRole('button',{name:clusterName(2),exact:true}).click();
-  await page.getByRole('button',{name:'Synthetic sharing toggle'}).click();
+  await page.getByRole('button',{name:'Stop sharing',exact:true}).click();
   assert.equal(await page.getByRole('button',{name:/people in this area, including you/}).count(),0,'opt-out removes cluster');
   assert.equal(await chooser.count(),0,'opt-out removes open member chooser');
   assert.equal(await page.getByRole('button',{name:'Event: Synthetic Party',exact:true}).count(),1);
