@@ -48,7 +48,9 @@ jobs:
       - name: Session lifecycle DOM regression
         env:
           NODE_PATH: ${{ runner.temp }}/member-map/node_modules
-        run: node scripts/test-member-map-session-dom.cjs
+        run: |
+          node scripts/test-member-map-session-dom.cjs
+          node --test scripts/test-member-map-signout.cjs
       - name: Import-aware map parity regression
         run: node --test scripts/test-member-map-parity.cjs scripts/test-member-map-entry.cjs
       - name: Install browser engines

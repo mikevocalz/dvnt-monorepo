@@ -15,19 +15,20 @@ export async function revokeLocationOnSignOut() {
   const access = useLocationAccessStore.getState();
   access.selectOwner(owner);
   useLocationAccessStore.getState().stop("Stopping location for sign-out.");
-  const generation = useLocationAccessStore.getState().generation;
   useEventsLocationStore.setState({ deviceLat: null, deviceLng: null, deviceObservation: null, locationMode: "city",
     preciseProximityGrant: false, preciseProximityOwnerAuthId: null, cityVisibility: null });
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
       (async () => {
-        const [settings] = await Promise.all([
+        await Promise.all([
           memberMapApi.detachSession(owner),
           memberProximityApi.revokeExact(owner),
         ]);
         if (useAuthStore.getState().user?.authId === owner) {
-          useLocationAccessStore.getState().accept(owner, settings, false, generation);
+          // Keep local writers stopped until authentication completes sign-out.
+          // The detached response still contains an active account preference;
+          // accepting it here could restart publishing before credentials clear.
           useExactDistanceStore.getState().confirmWithdrawal(owner);
         }
       })(),
