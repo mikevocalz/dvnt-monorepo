@@ -6,7 +6,7 @@ import {
 
 interface ToggleLikeResponse {
   ok: boolean;
-  data?: { liked: boolean; likesCount: number };
+  data?: { liked: boolean; likesCount: number; countHidden?: boolean };
   error?: { code: string; message: string };
 }
 
@@ -68,7 +68,7 @@ export const likesApi = {
    * Like/unlike via the battle-tested toggle-like endpoint.
    * The DB trigger now maintains likes_count automatically.
    */
-  async toggleLike(postId: string, isCurrent?: () => boolean): Promise<{ liked: boolean; likes: number }> {
+  async toggleLike(postId: string, isCurrent?: () => boolean): Promise<{ liked: boolean; likes: number; countHidden?: boolean }> {
     try {
       if (__DEV__) console.log("[Likes] toggleLike:", postId);
       if (isCurrent && !isCurrent()) throw new Error("Session changed while liking post");
@@ -95,7 +95,9 @@ export const likesApi = {
       }
 
       if (__DEV__) console.log("[Likes] toggleLike result:", data.data);
-      return { liked: data.data.liked, likes: data.data.likesCount };
+      return { liked: data.data.liked, likes: data.data.likesCount,
+        ...(data.data.countHidden === true ? { countHidden: true } : {}),
+      };
     } catch (error) {
       console.error("[Likes] toggleLike error:", error);
       throw error;
@@ -105,14 +107,14 @@ export const likesApi = {
   /**
    * Like a post (calls toggleLike)
    */
-  async likePost(postId: string, isCurrent?: () => boolean): Promise<{ liked: boolean; likes: number }> {
+  async likePost(postId: string, isCurrent?: () => boolean): Promise<{ liked: boolean; likes: number; countHidden?: boolean }> {
     return this.toggleLike(postId, isCurrent);
   },
 
   /**
    * Unlike a post (calls toggleLike)
    */
-  async unlikePost(postId: string, isCurrent?: () => boolean): Promise<{ liked: boolean; likes: number }> {
+  async unlikePost(postId: string, isCurrent?: () => boolean): Promise<{ liked: boolean; likes: number; countHidden?: boolean }> {
     return this.toggleLike(postId, isCurrent);
   },
 

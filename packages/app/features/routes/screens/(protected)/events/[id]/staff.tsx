@@ -9,7 +9,7 @@
  * invite-co-organizer edge function deployed earlier this session.
  */
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -31,6 +31,7 @@ import {
   type CoOrgRole,
 } from "@dvnt/app/lib/api/privileged";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
@@ -43,7 +44,7 @@ const ROLE_OPTIONS: { value: CoOrgRole; label: string; description: string }[] =
   {
     value: "editor",
     label: "Manager",
-    description: "Scanner + full roster + refunds + analytics.",
+    description: "Scanner + full roster + event and ticket editing.",
   },
   {
     value: "admin",
@@ -91,21 +92,44 @@ export default function EventStaffScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const showToast = useUIStore((s) => s.showToast);
+  const viewerId = useAuthStore((state) => state.user?.id);
+  const authenticated = useAuthStore((state) => state.isAuthenticated);
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [usernameInput, setUsernameInput] = useState("");
   const [roleInput, setRoleInput] = useState<CoOrgRole>("scanner");
 
   const staffQuery = useQuery({
-    queryKey: ["event-staff", eventId],
+    queryKey: ["event-staff", eventId, viewerId],
     queryFn: () => getEventStaff(eventId),
-    enabled: Number.isFinite(eventId) && eventId > 0,
+    enabled: authenticated && Number.isSafeInteger(eventId) && eventId > 0,
     staleTime: 5_000,
   });
 
+  useEffect(() => {
+    setInviteOpen(false);
+    setUsernameInput("");
+    setRoleInput("scanner");
+  }, [viewerId, eventId, authenticated]);
+
+  const assertPermission = async (grantRole?: CoOrgRole, inviteId?: string) => {
+    const fresh = await staffQuery.refetch();
+    const current = useAuthStore.getState();
+    const role = fresh.data?.callerRole;
+    if (!current.isAuthenticated || current.user?.id !== viewerId || !fresh.isSuccess || fresh.fetchStatus === "paused" ||
+        (role !== "owner" && role !== "admin")) throw new Error("Not authorized to manage event staff");
+    const target = inviteId ? fresh.data?.staff.find((entry) => entry.inviteId === inviteId) : undefined;
+    if ((grantRole === "admin" && role !== "owner") ||
+        (inviteId && (!target || target.role === "owner" || (target.role === "admin" && role !== "owner")))) {
+      throw new Error("Only the event owner can manage co-host access");
+    }
+  };
+
   const inviteMutation = useMutation({
-    mutationFn: ({ username, role }: { username: string; role: CoOrgRole }) =>
-      inviteCoOrganizer(eventId, username, role),
+    mutationFn: async ({ username, role }: { username: string; role: CoOrgRole }) => {
+      await assertPermission(role);
+      return inviteCoOrganizer(eventId, username, role);
+    },
     onSuccess: (res) => {
       if ((res as any)?.error) {
         showToast("error", "Invite failed", String((res as any).error));
@@ -118,7 +142,8 @@ export default function EventStaffScreen() {
       );
       setUsernameInput("");
       setInviteOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["event-staff", eventId] });
+      queryClient.invalidateQueries({ queryKey: ["event-staff", eventId, viewerId] });
+      queryClient.invalidateQueries({ queryKey: ["event-role"] });
     },
     onError: (err: any) => {
       showToast(
@@ -130,10 +155,14 @@ export default function EventStaffScreen() {
   });
 
   const revokeMutation = useMutation({
-    mutationFn: (inviteId: string) => revokeCoOrganizer(inviteId),
+    mutationFn: async (inviteId: string) => {
+      await assertPermission(undefined, inviteId);
+      return revokeCoOrganizer(inviteId);
+    },
     onSuccess: () => {
       showToast("success", "Staff removed", "");
-      queryClient.invalidateQueries({ queryKey: ["event-staff", eventId] });
+      queryClient.invalidateQueries({ queryKey: ["event-staff", eventId, viewerId] });
+      queryClient.invalidateQueries({ queryKey: ["event-role"] });
     },
     onError: (err: any) => {
       showToast(
@@ -144,8 +173,8 @@ export default function EventStaffScreen() {
     },
   });
 
-  const staff = staffQuery.data?.staff || [];
-  const callerRole = staffQuery.data?.callerRole || null;
+  const staff = authenticated && staffQuery.isSuccess && staffQuery.fetchStatus !== "paused" ? staffQuery.data?.staff || [] : [];
+  const callerRole = authenticated && staffQuery.isSuccess && staffQuery.fetchStatus !== "paused" ? staffQuery.data?.callerRole || null : null;
   const canManage = callerRole === "owner" || callerRole === "admin";
 
   const grouped = useMemo(() => {
@@ -251,13 +280,14 @@ export default function EventStaffScreen() {
         </View>
       )}
 
-      {staffQuery.isLoading ? (
+      {!authenticated ? <Text style={styles.dim}>Sign in to manage event staff.</Text> : (staffQuery.isLoading || staffQuery.isPending) && staffQuery.fetchStatus !== "paused" ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator color="rgba(255,255,255,0.4)" />
         </View>
-      ) : staffQuery.isError ? (
+      ) : staffQuery.isError || staffQuery.fetchStatus === "paused" ? (
         <View style={styles.loadingWrap}>
-          <Text style={styles.dim}>Couldn't load staff. Pull to retry.</Text>
+          <Text style={styles.dim}>Couldn't verify staff access.</Text>
+          <Pressable onPress={() => void staffQuery.refetch()}><Text style={styles.dim}>Retry</Text></Pressable>
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: 48 }}>
@@ -268,7 +298,7 @@ export default function EventStaffScreen() {
                 <StaffRow
                   key={s.inviteId ?? s.authId}
                   staff={s}
-                  canManage={canManage && s.role !== "owner"}
+                  canManage={canManage && s.role !== "owner" && (callerRole === "owner" || s.role !== "admin")}
                   onRevoke={() =>
                     s.inviteId && revokeMutation.mutate(s.inviteId)
                   }
@@ -350,6 +380,7 @@ function StaffRow({
       </View>
       {canManage ? (
         <Pressable
+          accessibilityLabel={`Remove ${name}`}
           onPress={onRevoke}
           hitSlop={12}
           style={styles.removeBtn}

@@ -304,20 +304,18 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
 
     for (const event of events) {
       try {
-        // ── Atomic CAS: claim this event for payout ──────────
-        const { data: claimed, error: claimError } = await supabase
-          .from("events")
-          .update({ payout_status: "processing" })
-          .eq("id", event.id)
-          .eq("payout_status", "pending")
-          .select("id")
-          .single();
+        // Receipt-aware atomic claim. Missing schema, exclusion, or unsupported
+        // legacy processing semantics fails closed BEFORE any Stripe request.
+        // This patch does not add processing to the deployed status constraint.
+        const { data: claimed, error: claimError } = await supabase.rpc(
+          "settlement_claim_legacy_event", { p_event_id: event.id },
+        );
 
-        if (claimError || !claimed) {
+        if (claimError || claimed?.claimed !== true) {
           results.push({
             event_id: event.id,
             status: "skipped",
-            reason: "already_claimed",
+            reason: "claim_not_authorized",
           });
           continue;
         }

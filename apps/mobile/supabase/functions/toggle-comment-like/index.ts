@@ -6,10 +6,12 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
+import { projectVisiblePosts } from "../_shared/post-access.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
+  "Cache-Control": "private, no-store",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -96,7 +98,8 @@ Deno.serve(async (req) => {
     }
 
     const { commentId, like: desiredLike } = body;
-    if (!commentId || typeof commentId !== "number") {
+    if (!Number.isSafeInteger(commentId) || commentId <= 0 ||
+        (desiredLike !== undefined && typeof desiredLike !== "boolean")) {
       return errorResponse(
         "validation_error",
         "commentId is required and must be a number",
@@ -115,103 +118,49 @@ Deno.serve(async (req) => {
 
     const userId = userData.id;
 
-    const { data: existing } = await supabaseAdmin
-      .from("comment_likes")
-      .select("user_id")
-      .eq("comment_id", commentId)
-      .eq("user_id", userId)
-      .single();
-
-    const currentlyLiked = !!existing;
-
-    if (typeof desiredLike === "boolean" && desiredLike === currentlyLiked) {
-      const { data: commentData } = await supabaseAdmin
-        .from("comments")
-        .select("likes_count")
-        .eq("id", commentId)
-        .single();
-      const likesCount = commentData?.likes_count ?? 0;
-      const updatedAt = new Date().toISOString();
-      console.log(`[Edge:toggle-comment-like] ${correlationId} idempotent commentId=${commentId} userId=${userId} liked=${currentlyLiked} count=${likesCount}`);
-      return jsonResponse({
-        ok: true,
-        data: {
-          commentId: String(commentId),
-          likeCount: likesCount,
-          viewerHasLiked: currentlyLiked,
-          updatedAt,
-          liked: currentlyLiked,
-          likesCount,
-        },
+    // Fetch only parent metadata and the total. Never infer an event from an
+    // unrelated event_comments row with the same integer ID.
+    const visibleComment = async () => {
+      const { data: comment, error } = await supabaseAdmin.from("comments")
+        .select("id, post_id, likes_count").eq("id", commentId).maybeSingle();
+      if (error || !comment || !Number.isSafeInteger(Number(comment.post_id)) || Number(comment.post_id) <= 0) return null;
+      const parent = await supabaseAdmin.from("posts")
+        .select("id, author_id, visibility, is_nsfw").eq("id", comment.post_id).maybeSingle();
+      if (parent.error || !parent.data) return null;
+      const visible = await projectVisiblePosts(supabaseAdmin, [parent.data], {
+        authId: authUserId, userId: Number(userId),
       });
-    }
-
-    if (currentlyLiked) {
-      const { error: delErr } = await supabaseAdmin
-        .from("comment_likes")
-        .delete()
-        .eq("comment_id", commentId)
-        .eq("user_id", userId);
-
-      if (delErr) {
-        console.error(`[Edge:toggle-comment-like] ${correlationId} delete_error:`, delErr);
-        return errorResponse("internal_error", "Failed to unlike");
-      }
-    } else {
-      const { error: insertErr } = await supabaseAdmin
-        .from("comment_likes")
-        .insert({ comment_id: commentId, user_id: userId });
-
-      if (insertErr) {
-        if (insertErr.code === "23505") {
-          const { data: c } = await supabaseAdmin
-            .from("comments")
-            .select("likes_count")
-            .eq("id", commentId)
-            .single();
-          const likesCount = c?.likes_count ?? 0;
-          const updatedAt = new Date().toISOString();
-          console.log(`[Edge:toggle-comment-like] ${correlationId} idempotent_duplicate commentId=${commentId} count=${likesCount}`);
-          return jsonResponse({
-            ok: true,
-            data: {
-              commentId: String(commentId),
-              likeCount: likesCount,
-              viewerHasLiked: true,
-              updatedAt,
-              liked: true,
-              likesCount,
-            },
-          });
-        }
-        console.error(`[Edge:toggle-comment-like] ${correlationId} insert_error:`, insertErr);
-        return errorResponse("internal_error", "Failed to like");
+      return visible.length ? comment : null;
+    };
+    const { data: existing, error: lookupError } = await supabaseAdmin
+      .from("comment_likes").select("user_id")
+      .eq("comment_id", commentId).eq("user_id", userId).maybeSingle();
+    if (lookupError) return errorResponse("internal_error", "Could not verify like");
+    const currentlyLiked = !!existing;
+    const liked = desiredLike ?? !currentlyLiked;
+    // Only the caller's existing like may be removed after access is lost.
+    if (liked && !await visibleComment()) return errorResponse("not_found", "Comment not found");
+    if (liked !== currentlyLiked) {
+      if (!liked) {
+        const { error } = await supabaseAdmin.from("comment_likes").delete()
+          .eq("comment_id", commentId).eq("user_id", userId);
+        if (error) return errorResponse("internal_error", "Failed to unlike");
+      } else {
+        const { error } = await supabaseAdmin.from("comment_likes")
+          .insert({ comment_id: commentId, user_id: userId });
+        if (error && error.code !== "23505") return errorResponse("internal_error", "Failed to like");
       }
     }
+    // Recheck fresh parent/relationship state after writes, including duplicate
+    // and idempotent paths. Zero is a redaction sentinel, not an observed total.
+    const comment = await visibleComment();
+    const likesCount = comment?.likes_count ?? 0;
+    return jsonResponse({ ok: true, data: {
+      commentId: String(commentId), likeCount: likesCount, likesCount,
+      viewerHasLiked: liked, liked, updatedAt: new Date().toISOString(),
+      ...(!comment ? { countHidden: true } : {}),
+    }});
 
-    const { data: commentData } = await supabaseAdmin
-      .from("comments")
-      .select("likes_count")
-      .eq("id", commentId)
-      .single();
-
-    const likesCount = commentData?.likes_count ?? 0;
-    const liked = !currentlyLiked;
-    const updatedAt = new Date().toISOString();
-
-    console.log(`[Edge:toggle-comment-like] ${correlationId} success commentId=${commentId} userId=${userId} action=${currentlyLiked ? "unlike" : "like"} count=${likesCount}`);
-
-    return jsonResponse({
-      ok: true,
-      data: {
-        commentId: String(commentId),
-        likeCount: likesCount,
-        viewerHasLiked: liked,
-        updatedAt,
-        liked,
-        likesCount,
-      },
-    });
   } catch (err) {
     console.error(`[Edge:toggle-comment-like] ${correlationId} unexpected_error:`, err);
     return errorResponse("internal_error", "An unexpected error occurred");

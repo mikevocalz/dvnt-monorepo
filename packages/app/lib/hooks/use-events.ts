@@ -337,8 +337,14 @@ function buildEventCachePatch(updates: any): Record<string, unknown> {
   if (updates.description !== undefined)
     patch.description = updates.description;
   if (updates.location !== undefined) patch.location = updates.location;
-  if (updates.locationName !== undefined)
+  if (updates.locationName !== undefined) {
     patch.location_name = updates.locationName;
+    patch.locationName = updates.locationName;
+  }
+  if (updates.locationAddress !== undefined) {
+    patch.location_address = updates.locationAddress;
+    patch.locationAddress = updates.locationAddress || updates.location || undefined;
+  }
   if (updates.locationLat !== undefined) {
     patch.location_lat = updates.locationLat;
     patch.locationLat = updates.locationLat;
@@ -501,6 +507,7 @@ export function useUpdateEvent() {
             description: r.description,
             location: r.location,
             locationName: r.location_name,
+            locationAddress: r.location_address,
             locationLat: r.location_lat,
             locationLng: r.location_lng,
             price: r.price,

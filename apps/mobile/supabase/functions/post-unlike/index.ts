@@ -4,6 +4,7 @@
  * Returns authoritative { postId, liked, likesCount, viewerHasLiked }.
  */
 
+import { readVisiblePostForEngagement } from "../_shared/post-engagement-access.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
@@ -13,6 +14,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Cache-Control": "private, no-store",
 };
 
 interface ApiResponse<T = unknown> {
@@ -80,7 +82,7 @@ Deno.serve(async (req) => {
     }
 
     const { postId } = body;
-    if (!postId || typeof postId !== "number") {
+    if (!Number.isSafeInteger(postId) || postId <= 0) {
       return errorResponse("validation_error", "postId is required and must be a number", 400);
     }
 
@@ -103,14 +105,12 @@ Deno.serve(async (req) => {
       return errorResponse("internal_error", "Failed to unlike post");
     }
 
-    // Read authoritative count (trigger-maintained)
-    const { data: postData } = await supabaseAdmin
-      .from("posts")
-      .select("likes_count")
-      .eq("id", postId)
-      .single();
-
-    const likesCount = postData?.likes_count ?? 0;
+    // Removing the caller's own like remains allowed after access revocation.
+    // The numeric zero is a redaction sentinel for legacy clients, never the
+    // inaccessible post's real total; countHidden makes that distinction explicit.
+    const visiblePost = await readVisiblePostForEngagement(supabaseAdmin, postId, { authId: authUserId, userId });
+    const likesCount = visiblePost?.likes_count ?? 0;
+    const countHidden = !visiblePost;
 
     // Remove like notification (fire-and-forget)
     try {
@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
     console.log(`[Edge:post-unlike] OK: liked=false likesCount=${likesCount}`);
     return jsonResponse({
       ok: true,
-      data: { postId, liked: false, likesCount, viewerHasLiked: false },
+      data: { postId, liked: false, likesCount, countHidden, viewerHasLiked: false },
     });
   } catch (err) {
     console.error("[Edge:post-unlike] Unexpected error:", err);

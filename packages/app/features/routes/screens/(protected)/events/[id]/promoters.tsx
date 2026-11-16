@@ -8,12 +8,12 @@
  * by promo codes), pause/resume, remove, and read ledger-backed stats
  * (attributed orders · gross · earned). Same data flow as
  * promoters.web.tsx: promotersApi via TanStack Query keyed
- * ["event-promoters", eventId]; money is integer cents straight off
+ * ["event-promoters", eventId, viewerId]; money is integer cents straight off
  * the ledger — display formatting only. Distinct from boosts
  * (promote-event-sheet) everywhere.
  */
 
-import React from "react";
+import React, { useEffect } from "react";
 import {
   View,
   Text,
@@ -58,6 +58,7 @@ import {
   promoterInviteEmailFieldError,
 } from "@dvnt/app/lib/events/promoter-code";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
 const ACCENT = "#8A40CF"; // promoter violet
@@ -144,6 +145,8 @@ export default function EventPromotersScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const showToast = useUIStore((s) => s.showToast);
+  const viewerId = useAuthStore((state) => state.user?.id);
+  const authenticated = useAuthStore((state) => state.isAuthenticated);
 
   const addOpen = usePromotersUIStore((s) => s.addOpen);
   const addMode = usePromotersUIStore((s) => s.addMode);
@@ -168,24 +171,43 @@ export default function EventPromotersScreen() {
   const resetAdd = usePromotersUIStore((s) => s.resetAdd);
 
   const promotersQuery = useQuery({
-    queryKey: ["event-promoters", eventId],
+    queryKey: ["event-promoters", eventId, viewerId],
     queryFn: () => promotersApi.list(eventId),
-    enabled: Number.isFinite(eventId) && eventId > 0,
+    enabled: authenticated && !!viewerId && Number.isSafeInteger(eventId) && eventId > 0,
     staleTime: 15_000,
   });
 
   const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["event-promoters", eventId] });
+    queryClient.invalidateQueries({ queryKey: ["event-promoters", eventId, viewerId] });
+
+  const assertPermission = async (promoterId?: string) => {
+    const before = useAuthStore.getState();
+    if (!viewerId || !Number.isSafeInteger(eventId) || eventId <= 0 ||
+        !before.isAuthenticated || before.user?.id !== viewerId) {
+      throw new Error("Your event access changed. Reopen promoters before trying again.");
+    }
+    const fresh = await promotersQuery.refetch();
+    const current = useAuthStore.getState();
+    const role = fresh.data?.callerRole;
+    if (!current.isAuthenticated || current.user?.id !== viewerId || !fresh.isSuccess ||
+        fresh.fetchStatus === "paused" || (role !== "owner" && role !== "admin") ||
+        (promoterId && !fresh.data?.promoters.some((promoter) => promoter.id === promoterId))) {
+      throw new Error("Your event access changed. Reopen promoters before trying again.");
+    }
+  };
 
   const addMutation = useMutation({
-    mutationFn: (input: {
+    mutationFn: async (input: {
       username?: string;
       displayName?: string;
       customerDiscountBps: number;
       promoterCommissionBps: number;
       code?: string;
       inviteEmail?: string;
-    }) => promotersApi.add({ eventId, ...input }),
+    }) => {
+      await assertPermission();
+      return promotersApi.add({ eventId, ...input });
+    },
     onSuccess: (promoter) => {
       showToast(
         "success",
@@ -211,11 +233,14 @@ export default function EventPromotersScreen() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (input: {
+    mutationFn: async (input: {
       promoterId: string;
       status?: "active" | "paused";
       revShareBps?: number;
-    }) => promotersApi.update(input),
+    }) => {
+      await assertPermission(input.promoterId);
+      return promotersApi.update(input);
+    },
     onSuccess: () => invalidate(),
     onError: (err: any) => {
       showToast("error", "Update failed", err?.message || "Try again.");
@@ -223,7 +248,10 @@ export default function EventPromotersScreen() {
   });
 
   const removeMutation = useMutation({
-    mutationFn: (promoterId: string) => promotersApi.remove(promoterId),
+    mutationFn: async (promoterId: string) => {
+      await assertPermission(promoterId);
+      return promotersApi.remove(promoterId);
+    },
     onSuccess: () => {
       showToast("success", "Promoter removed", "Ledger history is kept.");
       invalidate();
@@ -233,9 +261,14 @@ export default function EventPromotersScreen() {
     },
   });
 
-  const promoters = promotersQuery.data?.promoters || [];
-  const callerRole = promotersQuery.data?.callerRole || null;
+  const verified = authenticated && !!viewerId && Number.isSafeInteger(eventId) && eventId > 0 && promotersQuery.isSuccess && promotersQuery.fetchStatus !== "paused";
+  const promoters = verified ? promotersQuery.data?.promoters || [] : [];
+  const callerRole = verified ? promotersQuery.data?.callerRole || null : null;
   const canManage = callerRole === "owner" || callerRole === "admin";
+
+  useEffect(() => {
+    resetAdd();
+  }, [viewerId, eventId, authenticated, canManage, resetAdd]);
 
   const eventQuery = useEvent(eventId > 0 ? String(eventId) : "");
 
@@ -304,13 +337,24 @@ export default function EventPromotersScreen() {
     }
   };
 
+  if (!canManage) return (
+    <SafeAreaView style={{ flex: 1, padding: 24, backgroundColor: "#06070d" }}>
+      <DetailBackButton />
+      <Text style={{ color: "#fff" }}>{authenticated && promotersQuery.isPending && promotersQuery.fetchStatus !== "paused"
+        ? "Checking promoter access…" : promotersQuery.isError || promotersQuery.fetchStatus === "paused"
+        ? "Could not verify promoter access. Try again." : "You don't have permission to manage promoters for this event."}</Text>
+      {(promotersQuery.isError || promotersQuery.fetchStatus === "paused") && <Pressable onPress={() => void promotersQuery.refetch()}><Text style={{ color: "#fff" }}>Retry</Text></Pressable>}
+    </SafeAreaView>
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
         <DetailBackButton />
         <Text style={styles.headerTitle}>Promoters</Text>
         {canManage ? (
-          <Pressable onPress={toggleAdd} hitSlop={12} style={styles.headerAction}>
+          <Pressable accessibilityLabel="Add promoter"
+            onPress={toggleAdd} hitSlop={12} style={styles.headerAction}>
             <UserPlus size={20} color="#fff" />
           </Pressable>
         ) : (
@@ -572,6 +616,7 @@ export default function EventPromotersScreen() {
                     {canManage && (
                       <>
                         <Pressable
+                          accessibilityLabel={paused ? `Resume ${p.displayName}` : `Pause ${p.displayName}`}
                           onPress={() =>
                             updateMutation.mutate({
                               promoterId: p.id,
@@ -588,6 +633,7 @@ export default function EventPromotersScreen() {
                           )}
                         </Pressable>
                         <Pressable
+                          accessibilityLabel={`Remove ${p.displayName}`}
                           onPress={() => removeMutation.mutate(p.id)}
                           hitSlop={8}
                           style={styles.actionBtn}

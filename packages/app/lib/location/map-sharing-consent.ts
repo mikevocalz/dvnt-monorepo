@@ -35,7 +35,7 @@ export async function commitMapConsent(deps: {
   const fresh = await deps.settings();
   assertCurrent();
   // Polling/repeated clicks must never extend an existing sharing session.
-  if (mapGrantActive(fresh, Date.now()) && fresh.consentVersion !== "events-map-v1") throw new Error("You already have an active sharing session. Reload the map to see it.");
+  if (mapGrantActive(fresh, Date.now()) && fresh.consentVersion === "events-map-account-v3") throw new Error("You already have an active sharing session. Reload the map to see it.");
   freshConsentPoint(deps.point);
   let attempted = false;
   let owned: LocationAccessSnapshot | null = null;

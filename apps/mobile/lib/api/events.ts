@@ -119,7 +119,7 @@ async function enrichEventsWithTierPrices<
   if (eventIds.length === 0) return events;
 
   const { data, error } = await supabase
-    .from("ticket_types")
+    .from("ticket_types_public")
     .select("event_id, price_cents, is_active")
     .in("event_id", eventIds)
     .eq("is_active", true);

@@ -11,17 +11,20 @@ import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useCommentDraftStore } from "@dvnt/app/lib/stores/comment-draft-store";
 
 /** In-flow on every web surface: never obscure the comment being replied to. */
-export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = false }: {
+export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = false, alwaysVisible = false }: {
   postId: string;
   parentCommentId?: string;
   hideWhenClosed?: boolean;
+  /** Show the input immediately, without focusing it or opening the keyboard. */
+  alwaysVisible?: boolean;
 }) {
   const { open, text, attachment, setAttachment, replyTo, setText, setReplyTo, openComposer, reset, bindContext } = useCommentDraftStore();
   const usePicker = useMemo(() => create<{ open: boolean }>(() => ({ open: false })), []);
   const pickerOpen = usePicker(s => s.open);
   const gifButtonRef = useRef<HTMLButtonElement>(null);
   const closePicker = () => { usePicker.setState({ open: false }); requestAnimationFrame(() => gifButtonRef.current?.focus({ preventScroll: true })); };
-  useEffect(() => { usePicker.setState({ open: false }); }, [open, postId, parentCommentId]);
+  useEffect(() => { if (!open) usePicker.setState({ open: false }); }, [open]);
+  useEffect(() => { usePicker.setState({ open: false }); }, [postId, parentCommentId]);
   const user = useAuthStore((s) => s.user);
   const mutation = useCreateComment();
   const guardVerified = useVerifiedGate();
@@ -77,6 +80,7 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
     const target = returnFocus.current;
     requestAnimationFrame(() => {
       if (target?.isConnected) target.focus({ preventScroll: true });
+      else if (alwaysVisible) composerRef.current?.focus({ preventScroll: true });
       else triggerRef.current?.focus({ preventScroll: true });
     });
   };
@@ -106,15 +110,16 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
   };
 
   const bottomPadding = "calc(env(safe-area-inset-bottom, 0px) + 16px + var(--dvnt-tabbar-clearance, 0px) + var(--comment-keyboard-clearance, 0px))";
-  if (!open && hideWhenClosed) return <div aria-hidden="true" style={{ height: bottomPadding }} />;
+  if (!open && hideWhenClosed && !alwaysVisible) return <div aria-hidden="true" style={{ height: bottomPadding }} />;
   return (
     <section
       ref={composerRef}
+      tabIndex={-1}
       aria-label="Comment composer"
       className="relative mx-auto w-full max-w-2xl shrink-0 px-3 pt-3"
       style={{ paddingBottom: bottomPadding }}
     >
-      {!open ? (
+      {!open && !alwaysVisible ? (
         <button ref={triggerRef} type="button" onClick={() => openComposer()} className="w-full rounded-2xl border border-white/12 bg-[#0b0d16] px-4 py-3 text-left text-base text-white/55">
           {label}…
         </button>
@@ -124,14 +129,15 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
             <span className="min-w-0 break-words">{replyTo ? `Replying to @${replyTo.username}` : label}</span>
             <div className="flex shrink-0 items-center gap-3">
               {replyTo && <button type="button" disabled={mutation.isPending} onClick={() => setReplyTo(null)} className="min-h-11 min-w-11 rounded-lg px-1 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">Cancel reply</button>}
-              <button type="button" disabled={mutation.isPending} onClick={close} aria-label="Close composer" className="min-h-11 min-w-11 rounded-lg px-1 font-medium focus-visible:outline focus-visible:outline-2 disabled:opacity-40">Close</button>
+              {open && <button type="button" disabled={mutation.isPending} onClick={close} aria-label="Close composer" className="min-h-11 min-w-11 rounded-lg px-1 font-medium focus-visible:outline focus-visible:outline-2 disabled:opacity-40">Close</button>}
             </div>
           </div>
           {attachment && <div className="px-3"><CommentGif attachment={attachment} preview /><button type="button" disabled={mutation.isPending} onClick={() => setAttachment(null)} className="min-h-11 min-w-11 rounded-lg px-2 text-sm text-white/65 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">Remove GIF</button></div>}
           <div className="flex items-end gap-2 px-3 py-3">
             <textarea
               ref={inputRef} rows={2} value={text} disabled={mutation.isPending}
-              onChange={(event) => setText(event.target.value)}
+              onFocus={() => { if (!open) openComposer(); }}
+              onChange={(event) => { if (!open) openComposer(); setText(event.target.value); }}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (event.key === "Escape") { event.preventDefault(); close(); }
@@ -142,7 +148,7 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
               className="min-w-0 flex-1 resize-y bg-transparent text-base text-white outline-none placeholder:text-white/40 disabled:opacity-60"
               style={{ minHeight: 48, maxHeight: 160 }}
             />
-            <button ref={gifButtonRef} type="button" aria-label="Add GIF" aria-expanded={pickerOpen} disabled={mutation.isPending} onClick={() => usePicker.setState({ open: !pickerOpen })} className="h-11 min-w-11 shrink-0 rounded-lg px-2 text-sm font-bold text-white/65 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">GIF</button>
+            <button ref={gifButtonRef} type="button" aria-label="Add GIF" aria-expanded={pickerOpen} disabled={mutation.isPending} onClick={() => { if (!open) openComposer(); usePicker.setState({ open: !pickerOpen }); }} className="h-11 min-w-11 shrink-0 rounded-lg px-2 text-sm font-bold text-white/65 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">GIF</button>
             <button type="submit" disabled={(!text.trim() && !attachment) || mutation.isPending} aria-label={parentCommentId || replyTo ? "Post reply" : "Post comment"} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[#3FDCFF] focus-visible:outline focus-visible:outline-2 disabled:opacity-35">
               <Send size={20} />
             </button>

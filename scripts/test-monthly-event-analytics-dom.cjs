@@ -6,10 +6,11 @@ const deps=(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean);
 const resolve=n=>require.resolve(n,{paths:[ROOT,...deps]});
 const {build}=require(resolve('esbuild'));
 const fixtures={
- 'analytics-fixture':`import {create} from 'zustand';export const useRoute=create(()=>({id:'17'}));export const useActor=create(()=>({user:{id:'fixture-a'}}));export const state={payload:null,error:null,calls:[],defer:false,releases:[]};export const router={push(){},back(){}};`,
+ 'analytics-fixture':`import {create} from 'zustand';export const useRoute=create(()=>({id:'17'}));export const useActor=create(()=>({user:{id:'fixture-a'},isAuthenticated:true}));export const state={payload:null,error:null,calls:[],defer:false,releases:[]};export const router={push(){},back(){}};`,
  'solito/navigation':`import {router,useRoute} from 'analytics-fixture';export const useParams=()=>useRoute();export const useRouter=()=>router;`,
  'expo-router':`import {router,useRoute} from 'analytics-fixture';export const useLocalSearchParams=()=>useRoute();export const useRouter=()=>router;`,
  '@dvnt/app/lib/stores/auth-store':`export {useActor as useAuthStore} from 'analytics-fixture';`,
+ '@dvnt/app/lib/hooks/use-event-role':`export const useEventRole=()=>({role:'owner',hasResolved:true,isPending:false,isPaused:false,isError:false,refetch:async()=>({isSuccess:true,data:'owner',fetchStatus:'idle'})});`,
  '@dvnt/app/lib/api/promoters':`export const promotersApi={leaderboard:async()=>[]};`,
  '@dvnt/app/lib/stores/ui-store':`export const useUIStore=s=>s({showToast(){}});`,
  '@dvnt/app/lib/hooks':`export const useColorScheme=()=>({colors:{background:'#000',card:'#111',foreground:'#fff',mutedForeground:'#aaa',primary:'#0cf',border:'#333'}});`,

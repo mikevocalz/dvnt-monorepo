@@ -65,6 +65,11 @@ function load(file, extra = "", overrides = {}) {
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name === "react") return React;
     if (name === "react-native") return native;
+    // Existing lock-boundary suite runs with delivery rollout disabled; the
+    // enabled lease lifecycle is exercised by test-post-media-lease-client.
+    if (name.endsWith("use-post-preview-lease")) return {usePostGridLease: tile => tile, usePostPreviewLease: (_id, fallback) => fallback};
+    if (name.endsWith("use-post-media-lease")) return {useLeasedPost: post => post, usePostMediaLease: (_id, fallback) => fallback};
+    if (name.endsWith("post-media-delivery")) return {protectedPostMediaEnabled: () => false};
     if (name.includes("auth-store")) return { useAuthStore: auth };
     if (name.endsWith("follow-identity"))
       return {

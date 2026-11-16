@@ -1,3 +1,4 @@
+import { usePostMediaLease } from "@dvnt/app/lib/media/use-post-media-lease";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 import { MemberDistanceBadge } from "./member-distance-badge";
@@ -412,7 +413,7 @@ function FeedPostVideo({
 function FeedPostComponent({
   id,
   author,
-  media,
+  media: rawMedia,
   kind,
   textTheme,
   caption,
@@ -428,6 +429,7 @@ function FeedPostComponent({
   guestMode = false,
   onGuestGate,
 }: FeedPostProps) {
+  const media = usePostMediaLease(id, rawMedia);
   const router = useRouter();
   const { colors } = useColorScheme();
   const queryClient = useQueryClient();

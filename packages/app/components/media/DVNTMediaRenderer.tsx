@@ -42,7 +42,7 @@ interface DVNTMediaRendererProps {
 }
 
 function withCacheBuster(url: string | undefined, version: string | number | undefined): string | undefined {
-  if (!url || version == null) return url;
+  if (!url || version == null || /[?&](?:token|expires)=/.test(url)) return url;
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}v=${encodeURIComponent(String(version))}`;
 }
@@ -117,11 +117,11 @@ export function DVNTMediaRenderer({
   }
 
   if (kind === "video") {
-    const thumbUri = withCacheBuster(item.thumbnail ?? item.url, item.updatedAt);
+    const thumbUri = withCacheBuster(item.thumbnail, item.updatedAt);
     return (
       <View style={containerStyle}>
-        {videoSlot ?? (
-          // Fallback: show thumbnail if no video slot provided
+        {videoSlot ?? (thumbUri ? (
+          // No video URL fallback: image decoders cannot render original video.
           <Image
             source={{ uri: thumbUri }}
             style={{ width: "100%", height: "100%" } as ImageStyle}
@@ -129,7 +129,7 @@ export function DVNTMediaRenderer({
             cachePolicy="memory-disk"
             accessibilityLabel={accessibilityLabel}
           />
-        )}
+        ) : <View style={{ width: "100%", height: "100%" }} />)}
       </View>
     );
   }

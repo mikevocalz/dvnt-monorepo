@@ -9,7 +9,7 @@ import { watchNotificationFields } from "../_shared/watch-notification.ts";
  *   summary?: string,  // optional one-line human summary; we synthesize one if absent
  * }
  *
- * Host-only. Pushes a "material change" notification to every active
+ * Host or accepted editor/admin. Pushes a "material change" notification to every active
  * ticket holder + every "going" RSVP for the event. Body is the diff
  * the host just saved (date / venue / age restriction) — the kind of
  * change that affects an attendee's plan and historically created
@@ -119,7 +119,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: "no material changes" }, 400, req);
     }
 
-    // Verify ownership
+    // Verify event content-edit permission, never merely staff membership.
     const { data: event } = await supabase
       .from("events")
       .select("id, host_id, title, start_date, location_name, location, status")
@@ -127,7 +127,16 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
     if (!event) return json({ error: "Event not found" }, 404, req);
     if (String(event.host_id) !== String(authId)) {
-      return json({ error: "Not your event" }, 403, req);
+      const { data: cohost, error: cohostError } = await supabase
+        .from("event_co_organizers")
+        .select("id")
+        .eq("event_id", eventId)
+        .eq("user_id", authId)
+        .eq("accepted", true)
+        .in("role", ["admin", "editor"])
+        .maybeSingle();
+      if (cohostError) return json({ error: "Could not verify event access" }, 500, req);
+      if (!cohost) return json({ error: "Not authorized to edit this event" }, 403, req);
     }
     if (event.status === "cancelled") {
       return json({ ok: true, skipped: "cancelled" }, 200, req);

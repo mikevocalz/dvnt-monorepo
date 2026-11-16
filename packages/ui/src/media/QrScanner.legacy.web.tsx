@@ -46,13 +46,20 @@ export function LegacyQrScanner({ onScan, onError, oneShot = true }: LegacyQrSca
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 240, height: 240 } },
         (decoded) => {
-          if (oneShot && doneRef.current) return;
+          if (cancelled || (oneShot && doneRef.current)) return;
           doneRef.current = true;
           onScan(decoded);
         },
         (err) => onError?.(err),
       )
-      .catch((e) => onError?.(String(e?.message ?? e)));
+      .then(async () => {
+        // Permission may resolve after the user leaves camera mode.
+        if (cancelled) {
+          await scanner.stop();
+          scanner.clear();
+        }
+      })
+      .catch((e) => { if (!cancelled) onError?.(String(e?.message ?? e)); });
 
     return () => {
       cancelled = true;
@@ -62,7 +69,7 @@ export function LegacyQrScanner({ onScan, onError, oneShot = true }: LegacyQrSca
           .then(() => s.clear())
           .catch(() => {});
       }
-      void cancelled;
+
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

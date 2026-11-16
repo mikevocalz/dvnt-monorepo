@@ -1,3 +1,5 @@
+import { usePostMediaLease } from "../media/use-post-media-lease";
+import { protectedPostMediaEnabled } from "../media/post-media-delivery";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { storiesApi } from "../api/stories";
 import { useAuthStore } from "../stores/auth-store";
@@ -10,6 +12,8 @@ export function useSharedStoryPlayback(
   open: boolean,
   visitKey: string,
 ) {
+  const protectedPost = protectedPostMediaEnabled() && segment?.sharedSource?.type === "post";
+  const leasedMedia = usePostMediaLease(open && protectedPost ? segment?.sharedSource?.id : undefined, [] as Array<{url:string;type:string}>);
   const viewerId = useAuthStore((state) => state.user?.id);
   const authId = useAuthStore((state) => state.user?.authId);
   const epoch = useRef(0);
@@ -129,7 +133,12 @@ export function useSharedStoryPlayback(
       isCurrent,
       revoke,
     };
-  return result.segment
-    ? { status: "ready" as const, segment: result.segment, isCurrent, revoke }
+  if (protectedPost && result.segment && !result.segment.isSourceCard && !leasedMedia[0])
+    return {status: "unavailable" as const, segment: undefined, isCurrent: () => false, revoke};
+  const playbackSegment = protectedPost && result.segment && !result.segment.isSourceCard
+    ? {...result.segment, url: leasedMedia[0]!.url, type: (leasedMedia[0]?.type === "video" || leasedMedia[0]?.type === "animated_video" ? "video" : "image") as "video" | "image"}
+    : result.segment;
+  return playbackSegment
+    ? { status: "ready" as const, segment: playbackSegment, isCurrent, revoke }
     : { status: "unavailable" as const, segment: undefined, isCurrent, revoke };
 }

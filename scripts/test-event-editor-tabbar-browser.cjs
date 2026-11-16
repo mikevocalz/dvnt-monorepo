@@ -30,6 +30,7 @@ const mocks = {
   '@dvnt/app/lib/stores/auth-store': `const state={user:{id:'fixture-owner',username:'member'},isAuthenticated:true,_hasHydrated:true}; export const useAuthStore=selector=>selector(state); useAuthStore.getState=()=>state; useAuthStore.subscribe=()=>()=>{};`,
   '@dvnt/app/lib/stores/ui-store': `export const useUIStore=selector=>selector({showToast:()=>{}});`,
   '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage={getItem:()=>null,setItem:()=>{},removeItem:()=>{}};`,
+  '@dvnt/app/lib/hooks/use-event-role': `export const useEventRole=()=>({role:'owner',hasResolved:true,isPending:false,isPaused:false,isError:false,refetch:async()=>{}});`,
   '@dvnt/app/lib/hooks/use-events': `const event={id:'fixture-event',hostId:'fixture-owner',title:'Fixture edit event',startDate:'2026-12-31T20:00:00Z',event_tz:'America/New_York',location:'Test venue',category:'party',price:0,visibility:'public'}; export const useEvent=()=>({data:event,isLoading:false}); export const useCreateEvent=()=>({isPending:false,mutateAsync:async()=>{throw Error('publishing forbidden in layout test')}}); export const useUpdateEvent=useCreateEvent;`,
   '@dvnt/app/lib/hooks/use-verified-gate': `export const useVerifiedGate=()=>(action)=>{window.editorFixture.guards=(window.editorFixture.guards||[]).concat(action)};`,
   '@dvnt/app/lib/hooks/use-places-autocomplete': `export const usePlacesAutocomplete=()=>({predictions:[],isLoading:false,onChangeText:()=>{},onSelectPrediction:()=>{}});`,

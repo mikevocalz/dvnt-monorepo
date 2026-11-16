@@ -9,6 +9,7 @@ import {
   canViewPayouts,
   eventRoleLabel,
   isEventStaff,
+  normalizeEventRole,
   type EventRole,
 } from "./event-role.ts";
 
@@ -75,4 +76,14 @@ test("roles are named for what they actually are", () => {
   assert.equal(eventRoleLabel("scanner"), "Door staff");
   assert.equal(eventRoleLabel("owner"), "Host");
   assert.equal(eventRoleLabel(null), "");
+});
+
+
+test("unknown and corrupt runtime roles never acquire a capability", () => {
+  for (const role of [undefined, "viewer", "superadmin", "constructor", {}, [], 0, false]) {
+    assert.equal(normalizeEventRole(role), null);
+    for (const cap of [canScanTickets, canEditEvent, canViewFullRoster, canManageStaff, canViewPayouts, canDeleteEvent, isEventStaff]) {
+      assert.equal(cap(role as EventRole), false, cap.name);
+    }
+  }
 });

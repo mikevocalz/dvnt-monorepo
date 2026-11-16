@@ -77,7 +77,7 @@ export async function loadWatchEventEnvelope(viewerId: string, accountGen: strin
     const batch = ids.slice(offset, offset + 100);
     const [eventPage, tierPage] = await Promise.all([
       supabase.from("events").select("id,title,start_date,end_date,event_tz,cover_image_url,flyer_image_url,video_poster_url,location,location_name,location_lat,location_lng,is_online,status,ticketing_enabled,host_id").in("id", batch),
-      allEventRelations(() => supabase.from("ticket_types").select("id,event_id,quantity_total,quantity_sold,sale_start,sale_end,tier_visibility").in("event_id", batch).order("id")),
+      allEventRelations(() => supabase.from("ticket_types_public").select("id,event_id,quantity_total,quantity_sold,sale_start,sale_end,tier_visibility").in("event_id", batch).order("id")),
     ]);
     if (eventPage.error) throw eventPage.error;
     if (tierPage.error) throw tierPage.error;

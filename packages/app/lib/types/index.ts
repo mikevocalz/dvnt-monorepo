@@ -42,6 +42,9 @@ export type TextPostSlide = {
 };
 
 export type PostMediaItem = {
+  order?: number;
+  postId?: string;
+  expiresAt?: number;
   type: MediaKind;
   url: string;
   thumbnail?: string;

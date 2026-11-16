@@ -1,3 +1,4 @@
+import { capturePostReadOwner } from "@dvnt/app/lib/posts/post-read-owner";
 /**
  * Bootstrap Profile Hook
  *
@@ -125,6 +126,7 @@ async function hydrateBootstrapProfileTextPosts(
   queryClient: ReturnType<typeof useQueryClient>,
   userId: string,
   posts: BootstrapProfileResponse["posts"],
+  accessIsCurrent: () => boolean,
 ) {
   const textPostIds = posts
     .filter((post) => post.kind === "text")
@@ -143,7 +145,7 @@ async function hydrateBootstrapProfileTextPosts(
     hydratedPosts.set(result.value.id, result.value);
   }
 
-  if (hydratedPosts.size === 0) return;
+  if (hydratedPosts.size === 0 || !accessIsCurrent()) return;
 
   hydratedPosts.forEach((post, postId) => {
     queryClient.setQueryData(postKeys.detail(postId), post);
@@ -197,10 +199,13 @@ export function useBootstrapProfile() {
     }
 
     const requestAuthId = useAuthStore.getState().user?.authId;
+    const ownerIsCurrent = capturePostReadOwner(queryClient);
+    const accessIsCurrent = () => ownerIsCurrent() &&
+      useAppStore.getState().nsfwEnabled === nsfwEnabled;
     bootstrapApi.profile({ userId, includeNSFW: nsfwEnabled }).then((data) => {
-      if (!data || useAuthStore.getState().user?.id !== userId || useAuthStore.getState().user?.authId !== requestAuthId || useAppStore.getState().nsfwEnabled !== nsfwEnabled) return;
+      if (!data || !accessIsCurrent() || useAuthStore.getState().user?.id !== userId || useAuthStore.getState().user?.authId !== requestAuthId || useAppStore.getState().nsfwEnabled !== nsfwEnabled) return;
       hydrateFromProfileBootstrap(queryClient, userId, data);
-      void hydrateBootstrapProfileTextPosts(queryClient, userId, data.posts);
+      void hydrateBootstrapProfileTextPosts(queryClient, userId, data.posts, accessIsCurrent);
       trace.markUsable();
     });
   }, [enabled, userId, nsfwEnabled, queryClient, trace]);

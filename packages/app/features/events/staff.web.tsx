@@ -9,7 +9,7 @@
  * `inviteCoOrganizer(eventId, username, role)`; remove/revoke via
  * `revokeCoOrganizer(inviteId)` — the EXACT privileged wrappers native imports
  * from `@dvnt/app/lib/api/privileged`. Toasts mirror native through
- * `useUIStore.showToast`. Same query key `["event-staff", eventId]`, same
+ * `useUIStore.showToast`. Same query key `["event-staff", eventId, viewerId]`, same
  * accepted/pending grouping, same canManage gating, same role color map via
  * `tierAccent`.
  *
@@ -22,7 +22,7 @@
  * and the remove confirmation.
  */
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
 import { useParams, useRouter } from "solito/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -45,6 +45,7 @@ import {
 } from "@dvnt/app/lib/api/privileged";
 import { UserPicker } from "./ui/user-picker.web";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { DoorModeTabs } from "./door-mode-tabs.web";
 import { tierAccent } from "@dvnt/app/lib/theme/tier-colors";
 import { Dialog } from "@dvnt/ui";
@@ -58,7 +59,7 @@ const ROLE_OPTIONS: { value: CoOrgRole; label: string; description: string }[] =
   {
     value: "editor",
     label: "Manager",
-    description: "Scanner + full roster + refunds + analytics.",
+    description: "Scanner + full roster + event and ticket editing.",
   },
   {
     value: "admin",
@@ -209,6 +210,8 @@ export function EventStaffScreen() {
 
   const queryClient = useQueryClient();
   const showToast = useUIStore((s) => s.showToast);
+  const viewerId = useAuthStore((state) => state.user?.id);
+  const authenticated = useAuthStore((state) => state.isAuthenticated);
 
   const inviteOpen = useStaffUIStore((s) => s.inviteOpen);
   const pickerQuery = useStaffUIStore((s) => s.pickerQuery);
@@ -224,15 +227,34 @@ export function EventStaffScreen() {
   const reset = useStaffUIStore((s) => s.reset);
 
   const staffQuery = useQuery({
-    queryKey: ["event-staff", eventId],
+    queryKey: ["event-staff", eventId, viewerId],
     queryFn: () => getEventStaff(eventId),
-    enabled: Number.isFinite(eventId) && eventId > 0,
+    enabled: authenticated && Number.isSafeInteger(eventId) && eventId > 0,
     staleTime: 5_000,
   });
 
+  useEffect(() => {
+    reset();
+  }, [viewerId, eventId, authenticated, reset]);
+
+  const assertPermission = async (grantRole?: CoOrgRole, inviteId?: string) => {
+    const fresh = await staffQuery.refetch();
+    const current = useAuthStore.getState();
+    const role = fresh.data?.callerRole;
+    if (!current.isAuthenticated || current.user?.id !== viewerId || !fresh.isSuccess || fresh.fetchStatus === "paused" ||
+        (role !== "owner" && role !== "admin")) throw new Error("Not authorized to manage event staff");
+    const target = inviteId ? fresh.data?.staff.find((entry) => entry.inviteId === inviteId) : undefined;
+    if ((grantRole === "admin" && role !== "owner") ||
+        (inviteId && (!target || target.role === "owner" || (target.role === "admin" && role !== "owner")))) {
+      throw new Error("Only the event owner can manage co-host access");
+    }
+  };
+
   const addMutation = useMutation({
-    mutationFn: ({ username, role }: { username: string; role: CoOrgRole }) =>
-      addCoOrganizer(eventId, username, role),
+    mutationFn: async ({ username, role }: { username: string; role: CoOrgRole }) => {
+      await assertPermission(role);
+      return addCoOrganizer(eventId, username, role);
+    },
     onSuccess: (res, vars) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ((res as any)?.error) {
@@ -247,7 +269,8 @@ export function EventStaffScreen() {
         description: "They've been notified.",
       });
       reset();
-      queryClient.invalidateQueries({ queryKey: ["event-staff", eventId] });
+      queryClient.invalidateQueries({ queryKey: ["event-staff", eventId, viewerId] });
+      queryClient.invalidateQueries({ queryKey: ["event-role"] });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (err: any) => {
@@ -256,11 +279,15 @@ export function EventStaffScreen() {
   });
 
   const revokeMutation = useMutation({
-    mutationFn: (inviteId: string) => revokeCoOrganizer(inviteId),
+    mutationFn: async (inviteId: string) => {
+      await assertPermission(undefined, inviteId);
+      return revokeCoOrganizer(inviteId);
+    },
     onSuccess: () => {
       showToast("success", "Staff removed", "");
       setRemoveTarget(null);
-      queryClient.invalidateQueries({ queryKey: ["event-staff", eventId] });
+      queryClient.invalidateQueries({ queryKey: ["event-staff", eventId, viewerId] });
+      queryClient.invalidateQueries({ queryKey: ["event-role"] });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (err: any) => {
@@ -268,8 +295,8 @@ export function EventStaffScreen() {
     },
   });
 
-  const staff = staffQuery.data?.staff || [];
-  const callerRole = staffQuery.data?.callerRole || null;
+  const staff = authenticated && staffQuery.isSuccess && staffQuery.fetchStatus !== "paused" ? staffQuery.data?.staff || [] : [];
+  const callerRole = authenticated && staffQuery.isSuccess && staffQuery.fetchStatus !== "paused" ? staffQuery.data?.callerRole || null : null;
   const canManage = callerRole === "owner" || callerRole === "admin";
 
   const grouped = useMemo(() => {
@@ -364,15 +391,16 @@ export function EventStaffScreen() {
         )}
       </div>
 
-      {staffQuery.isLoading ? (
+      {!authenticated ? <p className="p-6 text-white">Sign in to manage event staff.</p> : (staffQuery.isLoading || staffQuery.isPending) && staffQuery.fetchStatus !== "paused" ? (
         <div className="flex flex-col items-center justify-center py-24">
           <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-[#3FDCFF] animate-spin" />
           <p className="mt-4 text-sm text-white/60">Loading staff…</p>
         </div>
-      ) : staffQuery.isError ? (
+      ) : staffQuery.isError || staffQuery.fetchStatus === "paused" ? (
         <main className="mx-auto w-full max-w-2xl px-8 py-24">
           <p className="text-center text-sm text-white/40">
-            Couldn&apos;t load staff. Refresh to retry.
+            Couldn&apos;t verify staff access.
+            <button onClick={() => void staffQuery.refetch()}>Retry</button>
           </p>
         </main>
       ) : (
@@ -536,7 +564,7 @@ export function EventStaffScreen() {
 
       {/* Remove confirmation — kit Dialog. */}
       <Dialog
-        open={!!removeTarget}
+        open={!!removeTarget && canManage}
         onClose={() => {
           if (!revokeMutation.isPending) setRemoveTarget(null);
         }}

@@ -11,7 +11,7 @@ import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
 import { useEventLynkHost } from "@dvnt/app/lib/hooks/use-event-lynk-host";
 import { canHostEventLynk } from "@dvnt/app/lib/events/event-lynk";
 import { promotersApi } from "@dvnt/app/lib/api/promoters";
-import { canScanTickets, canViewFullRoster } from "@dvnt/app/lib/events/event-role";
+import { canEditEvent, canScanTickets, canViewFullRoster } from "@dvnt/app/lib/events/event-role";
 /**
  * Event detail — WEB (@dvnt/app/features/events/event-detail). URL /events/{slug}.
  * Resolves the slug to an event id from the list, then loads the FULL event via
@@ -789,6 +789,7 @@ export function EventDetailScreen() {
   const { role: doorRole } = useEventRole(eventId);
   const mayScan = canScanTickets(doorRole);
   const mayManage = isHost || canViewFullRoster(doorRole);
+  const mayEdit = canEditEvent(doorRole);
 
   // Event Lynk waiting room. Host = owner or accepted admin/editor
   // co-organizer, the server's rule; the server re-checks on every call.
@@ -1284,7 +1285,7 @@ export function EventDetailScreen() {
                     }}
                   />
                 ) : null}
-                {isHost ? (
+                {mayEdit ? (
                   <MenuItem
                     Icon={Pencil}
                     label="Edit event"

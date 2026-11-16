@@ -1,4 +1,5 @@
 "use client";
+import { useHandoffUploadLease } from "@dvnt/app/lib/media/use-handoff-upload-lease";
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ImageIcon, ImagePlus, Trash2 } from "lucide-react";
@@ -80,6 +81,15 @@ function LivePreview({ media, motionURI, label }: { media: MediaAsset; motionURI
     <video src={motionURI} poster={poster.url ?? undefined} controls muted loop playsInline preload="metadata"
       aria-label={label} className="h-full w-full object-cover" />
   </>;
+}
+
+function MediaPreview({media,index,name}:{media:MediaAsset;index:number;name:string}) {
+  const preview=useHandoffUploadLease(media);
+  if(!preview)return <div role="img" aria-label="Upload preview unavailable" className="h-full w-full bg-[#161616]" />;
+  const motionURI=preview.kind === "livePhoto" ? preview.pairedVideoUri : preview.type === "video" ? preview.uri : undefined;
+  return preview.kind === "livePhoto" && motionURI ? <LivePreview media={preview} motionURI={motionURI} label={`Live Photo ${index+1} motion preview`} /> :
+    motionURI ? <video src={motionURI} controls muted loop playsInline preload="metadata" aria-label={`Video ${index+1} motion preview`} className="h-full w-full object-cover" /> :
+    <StillPreview src={preview.uri} mime={preview.mimeType} name={name} />;
 }
 
 /** One file entry for ordinary media and user-associated Live Photo originals. */
@@ -213,14 +223,10 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     {selectedMedia.length ? <div className="mt-4 grid gap-4" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
       {selectedMedia.map((media, index) => {
         const paired = (media as BrowserPairedMedia).browserPair;
-        const motionURI = media.kind === "livePhoto" ? media.pairedVideoUri : media.type === "video" ? media.uri : undefined;
         const name = media.fileName || `photo ${index + 1}`;
         return <div key={media.id} className="min-w-0 overflow-hidden rounded-2xl bg-[#111]" data-browser-media-id={media.id} data-browser-media-kind={media.kind}>
           <div className="relative aspect-[4/5]">
-            {media.kind === "livePhoto" && motionURI ? <LivePreview media={media} motionURI={motionURI} label={`Live Photo ${index + 1} motion preview`} /> :
-              motionURI ? <video src={motionURI} controls muted loop playsInline preload="metadata"
-                aria-label={`Video ${index + 1} motion preview`} className="h-full w-full object-cover" /> :
-              <StillPreview src={media.uri} mime={media.mimeType} name={name} />}
+            <MediaPreview media={media} index={index} name={name} />
             <div className="absolute left-2 right-2 top-2 flex items-center justify-between gap-2">
               <button type="button" onClick={() => remove(media.id)} disabled={disabled} aria-label={`Remove ${name}`} className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-500/90 text-white disabled:opacity-30"><Trash2 size={14} /></button>
               {media.kind === "livePhoto" ? <span className="pointer-events-none rounded-md bg-black/70 px-2 py-1 text-[10px] font-semibold">LIVE</span> : null}

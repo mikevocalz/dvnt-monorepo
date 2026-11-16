@@ -28,6 +28,7 @@ load('apps/mobile/supabase/functions/protected-photo-preview/index.ts',name=>{
  if(name.includes('supabase-js'))return {createClient:()=>db};
  if(name.includes('imagescript'))return {Image:FakeImage};
  if(name.includes('verify-session'))return {verifySession:async()=>auth};
+ if(name.includes('post-media-lease'))return {signPostMediaUrl:async(url)=>url};
  if(name.includes('post-access'))return {projectVisiblePosts:async()=>locked?[{isSpicyLocked:true}]:[]};
  if(name.includes('rate-limit'))return {checkRateLimit:()=>({allowed:rateAllowed})};
  if(name.includes('protected-photo-preview'))return utils;

@@ -3,46 +3,64 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
+const path = require('node:path');
 
-function harness({ count = 650, actor = 'viewer', failCount = false, failPage = false, visibility = 'public', ownerId = 1, viewerId = 2, missingPost = false, failPost = false } = {}) {
-  let handler;
+function harness({ count = 650, actor = 'viewer', failCount = false, failPage = false, visibility = 'public', ownerId = 1, viewerId = 2, missingPost = false, failPost = false, privateProfile = false, following = false, blocked = false, spicy = false, minor = false, denied = false, failAccess = false, failViewer = false, failAdmission = false, revokeDuringPage = false } = {}) {
+  let handler, revoked = false;
   const calls = [];
   const rows = Array.from({ length: count }, (_, index) => ({
     user_id: count - index, created_at: '2026-10-20T12:00:00.123456+00:00',
     user: { username: `user${count - index}`, first_name: 'Member', avatar: { url: 'https://example.com/avatar.jpg' } },
   }));
-  const client = { from(table) {
+  const client = {
+    async rpc(name, args) {
+      assert.equal(name, 'post_relationship_access');
+      assert.equal(args.p_viewer, viewerId);
+      return {data: failAccess ? null : [{author_id: ownerId, is_private: privateProfile, is_following: following && !revoked, is_blocked: blocked, enforcement_ready: true}], error: failAccess ? {message:'access unavailable'} : null};
+    },
+    from(table) {
     calls.push({ table });
     const state = { table, limit: count, cursor: null, head: false };
     const query = {
       select(columns, options) { state.head = !!options?.head; calls.push({ select: columns, options }); return query; },
       eq(column, value) { calls.push({ eq: [column, value] }); return query; },
+      gt() {return query;},
       order(column, options) { calls.push({ order: [column, options] }); return query; },
       limit(value) { state.limit = value; return query; },
       or(value) { state.cursor = value; calls.push({ cursor: value }); return query; },
       update() { throw new Error('A likes read must never write to the database'); },
       maybeSingle() {
-        if (table === 'posts') return Promise.resolve({ data: missingPost ? null : { author_id: ownerId, visibility }, error: failPost ? { message: 'denied' } : null });
-        if (table === 'users') return Promise.resolve({ data: viewerId ? { id: viewerId } : null, error: null });
+        if (table === 'posts') return Promise.resolve({ data: missingPost ? null : { id:42, author_id: ownerId, visibility, is_nsfw:spicy }, error: failPost ? { message: 'denied' } : null });
+        if (table === 'users') return Promise.resolve({ data: viewerId ? { id: viewerId } : null, error: failViewer ? {message:'viewer unavailable'} : null });
+        if (table === 'verified_admission_policy') return Promise.resolve({data:{denylist:denied ? [actor] : []},error:failAdmission ? {message:'policy unavailable'} : null});
         throw new Error(`Unexpected single-row query: ${table}`);
       },
       then(resolve, reject) {
+        if (table === 'identity_verifications') return Promise.resolve({data:minor ? [{user_id:actor}] : [],error:null}).then(resolve,reject);
         if (state.head) return Promise.resolve({ count, error: failCount ? { message: 'count unavailable' } : null }).then(resolve, reject);
+        if (revokeDuringPage) revoked = true;
         const before = state.cursor ? Number(state.cursor.match(/user_id\.lt\.(\d+)/)[1]) : Infinity;
         return Promise.resolve({ data: rows.filter(row => row.user_id < before).slice(0, state.limit), error: failPage ? { message: 'page unavailable' } : null }).then(resolve, reject);
       },
     };
     return query;
   }};
-  const source = ts.transpileModule(fs.readFileSync(`${__dirname}/index.ts`, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }}).outputText;
-  vm.runInNewContext(source, {
-    exports: {}, Response, console: { error() {}, log() {} },
-    Deno: { env: { get: () => 'test' }, serve: fn => { handler = fn; } },
-    require: name => name.includes('supabase-js') ? { createClient: () => client } : { verifySession: async () => actor },
-  });
+  function load(file) {
+    const exp={};
+    const source=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+    vm.runInNewContext(source, {
+      exports: exp, Response, console: { error() {}, log() {}, warn() {} },
+      Deno: { env: { get: () => 'test' }, serve: fn => { handler = fn; } },
+      require: name => name.includes('supabase-js') ? { createClient: () => client }
+        : name.endsWith('verify-session.ts') ? { verifySession: async () => actor }
+        : load(path.resolve(path.dirname(file),name)),
+    });
+    return exp;
+  }
+  load(`${__dirname}/index.ts`);
   return { calls, async read(body) {
     const response = await handler(new Request('https://test/get-post-likers', { method: 'POST', body: JSON.stringify(body) }));
-    return { status: response.status, body: await response.json() };
+    return { status: response.status, body: await response.json(), cacheControl:response.headers.get('cache-control') };
   }};
 }
 
@@ -114,5 +132,46 @@ test('private and followers-only posts are readable only by their owner', async 
     assert.equal((await h.read({ postId: 42 })).status, 404);
     assert.ok(!h.calls.some(call => call.table === 'likes'));
   }
-  assert.equal((await harness({ visibility: null }).read({ postId: 42 })).status, 200);
+  assert.equal((await harness({ visibility: null }).read({ postId: 42 })).status, 404);
+});
+
+for (const [name, options] of [
+  ['pending private follower', {privateProfile:true,spicy:true}],
+  ['private safe post outsider', {privateProfile:true}],
+  ['public Spicy nonfollower', {spicy:true}],
+  ['blocked private approved follower', {privateProfile:true,following:true,blocked:true,spicy:true}],
+  ['blocked public safe viewer', {blocked:true}],
+  ['underage approved follower', {privateProfile:true,following:true,minor:true,spicy:true}],
+  ['operator-denied approved follower', {privateProfile:true,following:true,denied:true,spicy:true}],
+  ['unavailable privacy RPC', {failAccess:true}],
+  ['unavailable viewer', {failViewer:true}],
+  ['missing viewer', {viewerId:null}],
+  ['unavailable admission', {spicy:true,following:true,failAdmission:true}],
+]) test(`${name} cannot read protected engagement metadata`, async () => {
+  const h=harness(options);
+  const response=await h.read({postId:42,viewerId:1,userId:1,following:true});
+  assert.equal(response.status,404);
+  assert.deepEqual(response.body,{error:'Post not found'});
+  assert.ok(!h.calls.some(call=>call.table==='likes'),'no count, identities or cursor queried');
+  assert.equal(response.cacheControl,'private, no-store');
+});
+for (const [name, options] of [
+  ['private approved follower', {privateProfile:true,following:true,spicy:true}],
+  ['public Spicy follower', {following:true,spicy:true}],
+  ['private owner', {privateProfile:true,spicy:true,viewerId:1}],
+  ['public safe nonfollower', {}],
+]) test(`${name} retains bounded engagement access`, async () => {
+  const h=harness(options);
+  const response=await h.read({postId:42,limit:3});
+  assert.equal(response.status,200);
+  assert.equal(response.body.likers.length,3);
+  assert.equal(response.body.likesCount,650);
+  assert.equal(response.cacheControl,'private, no-store');
+});
+
+test('revocation during page reads redacts names, count and pagination', async () => {
+  const h = harness({privateProfile:true,following:true,revokeDuringPage:true});
+  const r = await h.read({postId:42,limit:2});
+  assert.equal(r.status,404);
+  assert.deepEqual(r.body,{error:'Post not found'});
 });

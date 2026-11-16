@@ -13,10 +13,11 @@ function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: bo
   return <View accessibilityLabel="Map sharing" style={promptOnly ? undefined : { borderWidth: 1, borderColor: '#ffffff30', borderRadius: 12, padding: 16, gap: 12 }}>
     {!promptOnly ? <>
       {flow.location.sharing ? <>
-      <Text style={{ color: '#ddd' }}>Avatar sharing is enabled for this sign-in, until {new Date(flow.location.settings!.shareUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. This is your sharing preference, not confirmation of a current location. Your avatar appears only while a fresh permitted location is available.</Text>
+      <Text style={{ color: '#ddd' }}>{flow.location.settings?.consentVersion === "events-map-account-v3" ? "Avatar sharing is enabled across your account until you turn it off" : "Your previous sign-in-only sharing choice is still active"}. This is your sharing preference, not confirmation of a current location. Your avatar appears only while a fresh permitted location is available.</Text>
+      {flow.location.settings?.consentVersion !== "events-map-account-v3" ? <Pressable accessibilityRole="button" disabled={!flow.available || busy} onPress={flow.show}><Text>Use across devices</Text></Pressable> : null}
       <Pressable accessibilityRole="button" disabled={flow.location.busy} onPress={flow.stop} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: '#3FDCFF' }}>Stop sharing</Text></Pressable>
     </> : <>
-      <Text style={{ color: '#ddd' }}>Show your avatar for this sign-in. Sharing stops when you sign out or your sign-in expires. Sharing is optional.</Text>
+      <Text style={{ color: '#ddd' }}>Show your avatar across devices and future sign-ins until you turn sharing off. Each device still needs location permission.</Text>
       <Pressable accessibilityRole="button" disabled={!flow.available || busy} onPress={flow.show} style={{ minHeight: 44, justifyContent: 'center', opacity: !flow.available || busy ? 0.4 : 1 }}><Text style={{ color: '#3FDCFF' }}>Show my avatar</Text></Pressable>
     </>}
     {flow.success && flow.location.sharing ? <Text accessibilityLiveRegion="polite" style={{ color: '#ddd' }}>Your approximate location was shared. Your avatar will appear as the map refreshes.</Text> : null}

@@ -171,7 +171,7 @@ export function usePublishPost() {
       })),
       uploaded: isText ? [] : draft.selectedMedia.map((media) => {
         if (!media.handoffUpload) return null;
-        const { ownerId: uploadedOwner, ...uploaded } = media.handoffUpload;
+        const { ownerId: uploadedOwner, photoId: _photoId, motionId: _motionId, ...uploaded } = media.handoffUpload;
         if (uploadedOwner !== String(ownerId)) throw new Error("This Live Photo belongs to another account. Select it again.");
         return uploaded;
       }),

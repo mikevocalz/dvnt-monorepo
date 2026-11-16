@@ -1,3 +1,4 @@
+import { useLeasedPost } from "@dvnt/app/lib/media/use-post-media-lease";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 import { MemberDistanceBadge } from "@dvnt/app/components/feed/member-distance-badge";
@@ -480,12 +481,13 @@ function MasonryCell(props: { post: Post; fallbackHeight: number }) {
   return useSpicyPostLocked(props.post) ? <SpicyFollowGate postId={props.post.id} presentation="feed" author={props.post.author} height={props.fallbackHeight} /> : <UnlockedMasonryCell {...props} />;
 }
 function UnlockedMasonryCell({
-  post,
+  post: rawPost,
   fallbackHeight,
 }: {
   post: Post;
   fallbackHeight: number;
 }) {
+  const post = useLeasedPost(rawPost)!;
   const router = useRouter();
   const media = post.media?.[0];
   const isVideo = media?.type === "video";

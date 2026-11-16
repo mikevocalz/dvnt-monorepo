@@ -828,7 +828,7 @@ export const postsApi = {
   async likePost(
     postId: string,
     isLiked: boolean,
-  ): Promise<{ liked: boolean; likes: number }> {
+  ): Promise<{ liked: boolean; likes: number; countHidden?: boolean }> {
     // Import dynamically to avoid circular dependency
     const { likesApi } = await import("./likes");
     return likesApi.toggleLike(postId);

@@ -1,4 +1,5 @@
 "use client";
+import { usePostMediaLease } from "@dvnt/app/lib/media/use-post-media-lease";
 import "@dvnt/app/lib/posts/revoke-post-overlays";
 
 import { useEffect, useSyncExternalStore } from "react";
@@ -25,7 +26,11 @@ const serverMounted = () => false;
  */
 export function Lightbox() {
   const open = useLightboxStore((s) => s.open);
-  const items = useLightboxStore((s) => s.items);
+  const snapshotItems = useLightboxStore((s) => s.items);
+  const leasedItems = usePostMediaLease(snapshotItems[0]?.postId, snapshotItems);
+  const items = snapshotItems[0]?.postId
+    ? snapshotItems.flatMap(item => leasedItems.filter(fresh => fresh.order === item.order && fresh.type === item.type))
+    : snapshotItems;
   const index = useLightboxStore((s) => s.index);
   const close = useLightboxStore((s) => s.close);
   const next = useLightboxStore((s) => s.next);
@@ -53,7 +58,7 @@ export function Lightbox() {
   if (!mounted || !open || items.length === 0) return null;
   const item = items[Math.min(index, items.length - 1)];
   if (!item) return null;
-  const { videoUrl, posterUrl } = resolveWebPostMedia({ ...item, thumbnail: item.poster });
+  const { videoUrl, posterUrl } = resolveWebPostMedia({ ...item, thumbnail: (item as any).thumbnail ?? item.poster });
   const multi = items.length > 1;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 

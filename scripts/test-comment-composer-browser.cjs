@@ -11,6 +11,7 @@ const {build} = require('esbuild');
 const {compile} = require('tailwindcss');
 const {chromium,webkit} = require('playwright');
 const root = path.resolve(__dirname, '..');
+assert.match(fs.readFileSync(path.join(root,'packages/app/features/post/post-detail.web.tsx'),'utf8'), /<WebCommentComposer postId=\{id\} alwaysVisible \/>/, 'post details must expose the composer without a bubble click');
 const dir = process.env.COMMENT_EVIDENCE_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'dvnt-comments-'));
 fs.mkdirSync(dir,{recursive:true});
 
@@ -298,7 +299,7 @@ async function checkMobileGifQuality(page, width) {
  const client=new QueryClient({defaultOptions:{mutations:{retry:false}}}); const root=createRoot(document.getElementById('root'));
  window.fixtureGif={provider:'klipy',id:'saved',url:'https://static.klipy.com/saved.gif',previewUrl:'https://static.klipy.com/saved.gif',width:160,height:120,title:'Saved wave'};window.gifRequests=[];window.calls=[];window.draft=useCommentDraftStore;window.cleanup=()=>{root.unmount();client.clear()};
  const comment={id:'17',username:'deviantevents',text:'🔥🔥🔥',timeAgo:'12h',replies:[]};
- window.mount=(parentCommentId,hideWhenClosed=false)=>root.render(<React.StrictMode><QueryClientProvider client={client}><main style={{maxWidth:600,margin:'auto'}}><div style={{height:380,background:'#12141d'}}>Post media fixture</div><button id="comment-trigger" onClick={()=>useCommentDraftStore.getState().openComposer()}>Comment</button><div id="comment-card"><ThreadedComment comment={comment} postId="fixture-post" onReply={(username,commentId)=>useCommentDraftStore.getState().setReplyTo({username,commentId})} onProfilePress={()=>{}}/></div><WebCommentComposer key={parentCommentId||'post'} postId="fixture-post" parentCommentId={parentCommentId} hideWhenClosed={hideWhenClosed}/></main></QueryClientProvider></React.StrictMode>);
+ window.mount=(parentCommentId,hideWhenClosed=false,alwaysVisible=false)=>root.render(<React.StrictMode><QueryClientProvider client={client}><main style={{maxWidth:600,margin:'auto'}}><div style={{height:380,background:'#12141d'}}>Post media fixture</div><button id="comment-trigger" onClick={()=>useCommentDraftStore.getState().openComposer()}>Comment</button><div id="comment-card"><ThreadedComment comment={comment} postId="fixture-post" onReply={(username,commentId)=>useCommentDraftStore.getState().setReplyTo({username,commentId})} onProfilePress={()=>{}}/></div><WebCommentComposer key={parentCommentId||'post'} postId="fixture-post" parentCommentId={parentCommentId} hideWhenClosed={hideWhenClosed} alwaysVisible={alwaysVisible}/></main></QueryClientProvider></React.StrictMode>);
  window.mountGif=()=>root.render(<React.StrictMode><QueryClientProvider client={client}><ThreadedComment comment={{...comment,attachment:window.fixtureGif}} postId="fixture-post" onReply={()=>{}} onProfilePress={()=>{}}/></QueryClientProvider></React.StrictMode>);
  window.mountScreen=kind=>root.render(<React.StrictMode><QueryClientProvider client={client}>{kind==='comments'?<CommentsScreen/>:<CommentRepliesScreen/>}</QueryClientProvider></React.StrictMode>);
  window.mount(undefined,true);`}});
@@ -315,7 +316,23 @@ async function checkMobileGifQuality(page, width) {
   const typeSearch=value=>{const input=w.document.querySelector('[aria-label="Search GIFs"]');Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new w.Event('input',{bubbles:true}));};
   const button=text=>[...w.document.querySelectorAll('button')].find(el=>el.textContent===text);
   try {
-   Object.assign(global,{window:w,document:w.document,Element:w.Element,HTMLInputElement:w.HTMLInputElement,HTMLElement:w.HTMLElement,ShadowRoot:w.ShadowRoot,requestAnimationFrame:w.requestAnimationFrame.bind(w),cancelAnimationFrame:w.cancelAnimationFrame.bind(w)});require('node:vm').runInThisContext(fs.readFileSync(path.join(dir,'app.js'),'utf8'));await wait(()=>button('Comment'));button('Comment').click();await wait(()=>w.document.querySelector('textarea'));
+   Object.assign(global,{window:w,document:w.document,Element:w.Element,HTMLInputElement:w.HTMLInputElement,HTMLElement:w.HTMLElement,ShadowRoot:w.ShadowRoot,requestAnimationFrame:w.requestAnimationFrame.bind(w),cancelAnimationFrame:w.cancelAnimationFrame.bind(w)});require('node:vm').runInThisContext(fs.readFileSync(path.join(dir,'app.js'),'utf8'));await wait(()=>button('Comment'));
+   w.draft.getState().reset();w.mount(undefined,false,true);await wait(()=>w.document.querySelector('textarea'));
+   assert.notEqual(w.document.activeElement,w.document.querySelector('textarea'),'inline input does not autofocus');
+   assert.equal(w.draft.getState().open,false);
+   const typeDirect=value=>{const input=w.document.querySelector('textarea');input.focus();Object.getOwnPropertyDescriptor(w.HTMLTextAreaElement.prototype,'value').set.call(input,value);input.dispatchEvent(new w.Event('input',{bubbles:true}));};
+   for (const text of ['Direct comment','Second direct comment']) {
+    typeDirect(text);await wait(()=>w.draft.getState().text===text);
+    w.document.querySelector('form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+    await wait(()=>w.calls.at(-1)?.text===text);w.release();await wait(()=>!w.draft.getState().open);
+    assert(w.document.querySelector('textarea'),'input persists after send');
+   }
+   w.document.querySelector('[aria-label="Add GIF"]').click();await wait(()=>w.document.querySelector('[aria-label="Search GIFs"]'));
+   button('Close').click();await wait(()=>!w.draft.getState().open);
+   assert(w.document.querySelector('textarea'),'close preserves discoverable input');
+   assert.equal(w.draft.getState().text,'');
+   w.calls.length=0;w.mount(undefined,true);await wait(()=>!w.document.querySelector('textarea'));
+   button('Comment').click();await wait(()=>w.document.querySelector('textarea'));
    w.draft.getState().setText('Offline draft');await wait(()=>w.document.querySelector('textarea')?.value==='Offline draft');
    w.deferGate=true;w.document.querySelector('form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait(()=>w.finishGate);button('Close').click();await wait(()=>!w.document.querySelector('textarea'));w.finishGate();assert.equal(w.calls.length,0,'closed deferred draft must not send');
    w.deferGate=false;button('Comment').click();await wait(()=>w.document.querySelector('textarea'));w.draft.getState().setText('Retry me');await wait(()=>w.document.querySelector('textarea').value==='Retry me');w.fail=true;
@@ -350,6 +367,33 @@ async function checkMobileGifQuality(page, width) {
   const page=await browser.newPage({viewport:{width,height:852},isMobile:width<=430,hasTouch:width<=430});const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.request().resourceType()==='image'?route.fulfill({contentType:'image/gif',body:gifFixtures[new URL(route.request().url()).pathname.includes('tall')?'tall':new URL(route.request().url()).pathname.includes('wide')?'wide':'normal']}):route.abort());
   await page.goto('http://127.0.0.1:'+server.address().port);
+  if (!keyboardBaseline) {
+  // Post details show the actual input without a comment-bubble click or autofocus.
+  await page.evaluate(()=>{draft.getState().reset();mount(undefined,false,true)});
+  const directInput=page.getByRole('textbox',{name:'Add a comment',exact:true});
+  await directInput.waitFor();
+  assert.equal(await directInput.evaluate(el=>el===document.activeElement),false,'initial input must not summon the keyboard');
+  assert.equal(await page.evaluate(()=>draft.getState().open),false);
+  await directInput.fill('Direct comment');
+  await page.getByRole('button',{name:'Post comment',exact:true}).click();
+  await page.waitForFunction(()=>calls.length===1);
+  assert.equal(await page.evaluate(()=>calls[0].text),'Direct comment');
+  await page.evaluate(()=>release());
+  await page.waitForFunction(()=>!draft.getState().open);
+  assert.equal(await directInput.count(),1,'successful send keeps the input visible');
+  await directInput.fill('Second comment without bubble');
+  await directInput.press('Enter');
+  await page.waitForFunction(()=>calls.length===2);
+  await page.evaluate(()=>release());
+  await page.waitForFunction(()=>!draft.getState().open);
+  await page.getByRole('button',{name:'Add GIF',exact:true}).click();
+  await page.getByRole('textbox',{name:'Search GIFs',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Close composer',exact:true}).click();
+  assert.equal(await directInput.count(),1,'Close resets the draft without hiding the input');
+  assert.equal(await directInput.inputValue(),'');
+  await page.screenshot({path:path.join(dir,'direct-composer-'+width+'.png'),fullPage:true});
+  await page.evaluate(()=>{calls.length=0;draft.getState().reset();mount(undefined,true)});
+  }
   if(width<=430){await checkVisualViewportKeyboard(page,width,keyboardBaseline);if(keyboardBaseline){assert.deepEqual(errors,[]);await page.close();continue;}}
   await page.locator('#comment-trigger').click();const input=page.getByRole('textbox',{name:'Add a comment',exact:true});await input.waitFor();
   assert.equal(await input.evaluate(el=>el===document.activeElement),true,'composer receives focus');

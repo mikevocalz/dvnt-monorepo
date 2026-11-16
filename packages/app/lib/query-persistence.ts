@@ -1,3 +1,4 @@
+import { protectedPostMediaEnabled } from "./media/post-media-delivery";
 /**
  * TanStack Query Persistence — MMKV-backed
  *
@@ -56,6 +57,8 @@ const PERSISTED_KEY_PREFIXES = [
 function shouldPersistQuery(queryKey: readonly unknown[]): boolean {
   if (!queryKey || queryKey.length === 0) return false;
   const prefix = String(queryKey[0]);
+  // These families can contain embedded post snapshots. Leases are memory-only.
+  if (protectedPostMediaEnabled() && ["profile", "messages", "stories"].includes(prefix)) return false;
   return PERSISTED_KEY_PREFIXES.includes(prefix);
 }
 
@@ -124,6 +127,7 @@ export const queryPersister = createSyncStoragePersister({
   storage: mmkvStorage,
   key: STORAGE_KEY,
   throttleTime: 2000, // Batch writes: persist at most once per 2s
+  deserialize: (raw) => filterPersistedClient(JSON.parse(raw)),
   serialize: (data) => {
     const filtered = filterPersistedClient(data);
     return JSON.stringify(filtered);

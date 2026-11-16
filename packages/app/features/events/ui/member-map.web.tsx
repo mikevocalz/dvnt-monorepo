@@ -31,7 +31,8 @@ export default function MemberMap(props: UnifiedMapProps = {}) {
 function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOpenEvent }: UnifiedMapProps) {
   const status = useApiLoadingStatus();
   const ready = status === APILoadingStatus.LOADED;
-  const { sharing, enabled } = useLocationSettings();
+  const { sharing, enabled, loading, settings, error: settingsError } = useLocationSettings();
+  const checkingSharing = loading || (!settings && !settingsError);
   const savedCity = useEventsLocationStore((state) => state.activeCity);
   const savedArea = savedMapArea(savedCity);
   const presence = useMemberMapPresence(ready);
@@ -81,7 +82,7 @@ function MemberMapContent({ eventPins = [], selectedEventId, onSelectEvent, onOp
           </div>
           <p className="text-sm text-white/65">Avatars show an approximate area, not an exact location or event attendance. Only members who choose to share appear.</p>
           <MapSharingConsent active={ready} />
-          <p role="status" className="text-sm text-white/60">{members.length ? `${members.length} ${members.length === 1 ? 'avatar' : 'avatars'} sharing an approximate area` : sharing ? 'Your avatar will appear when a fresh permitted location is available.' : 'Turn on avatar sharing to show yourself and nearby members.'}</p>
+          <p role="status" className="text-sm text-white/60">{members.length ? `${members.length} ${members.length === 1 ? 'avatar' : 'avatars'} sharing an approximate area` : sharing ? 'Your avatar will appear when a fresh permitted location is available.' : checkingSharing ? 'Checking your saved sharing preference…' : settingsError ? 'Sharing status is unavailable. Reload settings to check it.' : 'Avatar sharing is off. Choose to share across your account.'}</p>
           <h2 className="text-lg font-semibold">Near You</h2>
           <p className="text-sm text-white/60">{freshArea ? 'Public events within about 25 miles of your approximate area.' : 'Allow device location to find events near you. A saved city is not your current location.'}</p>
           {freshArea && nearEvents.length === 0 ? <p role="status">No public events within about 25 miles in the current event list.</p> : null}

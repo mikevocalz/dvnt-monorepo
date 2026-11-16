@@ -15,6 +15,9 @@ const { build } = require(
 );
 const ROOT = path.resolve(__dirname, "..");
 const fixture = {
+  // This suite exercises sharing/playback with delivery rollout disabled.
+  "@dvnt/app/lib/media/use-post-media-lease": `export const usePostMediaLease=(_id,media)=>media;export const useLeasedPost=post=>post;`,
+  "@dvnt/app/lib/media/use-post-preview-lease": `export const usePostPreviewLease=(_id,fallback)=>fallback;export const usePostGridLease=tile=>tile;`,
   "@dvnt/ui/post-engagement-counts": `export {PostEngagementCounts} from "${ROOT}/packages/ui/src/social/PostEngagementCounts.web.tsx";`,
   // Comment GIF search is a network boundary; keep the real composer mounted.
   "@dvnt/app/features/stickers/api/klipy": `export const klipySearch=async()=>({results:[],source:"klipy"});`,

@@ -10,7 +10,7 @@ import type { StoryAnimatedGifOverlay, StoryOverlay } from "@dvnt/app/lib/types"
 
 export interface MediaAsset {
   /** Already uploaded by the same owner through the authenticated native handoff. */
-  handoffUpload?: { ownerId: string; type: "image"; url: string; livePhotoVideoUrl: string; mimeType: string };
+  handoffUpload?: { photoId?: number; motionId?: number; ownerId: string; type: "image"; url: string; livePhotoVideoUrl: string; mimeType: string };
   id: string;
   uri: string;
   type: "image" | "video";

@@ -757,7 +757,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
             mode === "list" ? "bg-white text-black" : "border border-white/15 text-white/75"
           }`}
         >
-          Guest list
+          Guest list · camera off
         </button>
         <button
           type="button"
@@ -777,17 +777,9 @@ function ScannerActive({ eventId }: { eventId: string }) {
 
       {/* Camera / QR surface — the kit QrScanner, expo-camera's CameraView. */}
       <div className={mode === "scan" ? "relative mt-3" : "hidden"}>
-        {/* `paused` stops the decode loop while a verdict is up. Without it the
-            card from the previous guest is still on screen while the NEXT
-            guest's code is already being decoded behind it — the stale-card
-            failure, and the most dangerous one per guest. The camera itself
-            stays live, so resuming costs nothing. */}
-        {/* Paused for BOTH reasons, and the second one is not cosmetic: in list
-            mode the camera is only `hidden`, so it stays mounted and keeps
-            decoding. It re-read the code in frame, re-armed handleToken's
-            guard, and swallowed the guest list's "Check in" — intermittently,
-            depending on whether a decode landed before the tap. */}
-        <QrScanner
+        {/* Results pause decoding for fast throughput. Guest-list mode instead
+            releases the camera and wake lock entirely, including the legacy engine. */}
+        {mode === "scan" ? <QrScanner
           onScan={handleToken}
           oneShot={false}
           paused={mode !== "scan" || !!scanResult}
@@ -799,7 +791,7 @@ function ScannerActive({ eventId }: { eventId: string }) {
           // from every other failure. The modern engine renders its own panel
           // and calls this too; a second channel costs nothing.
           onError={(message) => setScannerError(message)}
-        />
+        /> : null}
         {scannerError && legacyEngine ? (
           <div
             role="alert"

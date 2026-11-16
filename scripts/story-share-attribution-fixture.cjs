@@ -12,6 +12,9 @@ const load = (name) => require(resolve(name));
 async function buildFixture({ outfile, browser = false }) {
   const reactionArray = fs.readFileSync(path.join(ROOT, "packages/app/lib/stories/story-message.ts"), "utf8").match(/export const STORY_REACTION_EMOJIS = (\[[^;]+\]);/)[1];
   const boundaries = {
+  // This suite exercises sharing/playback with delivery rollout disabled.
+  "@dvnt/app/lib/media/use-post-media-lease": `export const usePostMediaLease=(_id,media)=>media;export const useLeasedPost=post=>post;`,
+  "@dvnt/app/lib/media/use-post-preview-lease": `export const usePostPreviewLease=(_id,fallback)=>fallback;export const usePostGridLease=tile=>tile;`,
   "solito/link": `export const Link=({href,children,...props})=><a href={typeof href === "string" ? href : href?.pathname} {...props}>{children}</a>;`,
     "solito/navigation": `export const useRouter=()=>({push:path=>globalThis.__routes.push(path)});`,
     "@dvnt/app/lib/stores/auth-store": `import {create} from 'zustand';export const useAuthStore=create(()=>({user:{id:'1',authId:'auth1',username:'publisher',avatar:'publisher.jpg'}}));`,

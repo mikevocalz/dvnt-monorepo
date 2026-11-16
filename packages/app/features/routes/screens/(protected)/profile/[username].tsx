@@ -1,3 +1,4 @@
+import { isProfilePrivacyUnavailable } from "@dvnt/app/lib/profile/effective-profile-privacy";
 import { MemberDistanceBadge } from "@dvnt/app/components/feed/member-distance-badge";
 import { FollowStatusRefresh } from "@dvnt/app/components/feed/follow-status-refresh";
 import { useFollowRequestStatus } from "@dvnt/app/lib/hooks/use-follow-requests";
@@ -389,10 +390,11 @@ function UserProfileScreenComponent() {
     isError,
     error,
     isPlaceholderData: isPlaceholderUserData,
+    refetch: retryUser,
   } = useUser(safeUsername || "");
 
   // Fallback: fetch from Better Auth `user` table if no app profile found
-  const { data: authUserData, isLoading: isLoadingAuthUser } = useQuery({
+  const { data: authUserData, isLoading: isLoadingAuthUser, error: authProfileError, refetch: retryAuthUser } = useQuery({
     queryKey: ["auth-user", previewAuthId],
     queryFn: () => usersApi.getProfileByAuthUserId(previewAuthId!),
     enabled: !!previewAuthId && !userData && !isLoadingUser,
@@ -765,6 +767,20 @@ function UserProfileScreenComponent() {
     showToast,
     queryClient,
   ]);
+
+  if (isProfilePrivacyUnavailable(error) || (!userData && isProfilePrivacyUnavailable(authProfileError))) {
+    return (
+      <SafeAreaView edges={["top"]} className="flex-1 bg-background">
+        <DetailBackButton />
+        <View className="flex-1 items-center justify-center p-4">
+          <Text accessibilityRole="alert" className="text-foreground">Could not verify profile privacy.</Text>
+          <Pressable onPress={() => { void retryUser(); if (previewAuthId) void retryAuthUser(); }} className="mt-4">
+            <Text className="text-primary">Try Again</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // DEFENSIVE: Early return for missing username - show safe error state
   if (!safeUsername) {

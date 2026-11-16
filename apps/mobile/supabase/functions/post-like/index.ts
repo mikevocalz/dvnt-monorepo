@@ -4,6 +4,7 @@
  * Returns authoritative { postId, liked, likesCount, viewerHasLiked }.
  */
 
+import { readVisiblePostForEngagement } from "../_shared/post-engagement-access.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
@@ -13,6 +14,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Cache-Control": "private, no-store",
 };
 
 interface ApiResponse<T = unknown> {
@@ -80,7 +82,7 @@ Deno.serve(async (req) => {
     }
 
     const { postId } = body;
-    if (!postId || typeof postId !== "number") {
+    if (!Number.isSafeInteger(postId) || postId <= 0) {
       return errorResponse("validation_error", "postId is required and must be a number", 400);
     }
 
@@ -90,6 +92,10 @@ Deno.serve(async (req) => {
     const userId = userData.id;
 
     console.log(`[Edge:post-like] userId=${userId} postId=${postId}`);
+
+    if (!await readVisiblePostForEngagement(supabaseAdmin, postId, { authId: authUserId, userId })) {
+      return errorResponse("not_found", "Post not found", 404);
+    }
 
     // Idempotent INSERT — ON CONFLICT DO NOTHING (requires unique constraint)
     const { error: insertError } = await supabaseAdmin
@@ -104,22 +110,14 @@ Deno.serve(async (req) => {
       return errorResponse("internal_error", "Failed to like post");
     }
 
-    // Read authoritative count (trigger-maintained)
-    const { data: postData } = await supabaseAdmin
-      .from("posts")
-      .select("likes_count")
-      .eq("id", postId)
-      .single();
-
-    const likesCount = postData?.likes_count ?? 0;
+    // Recheck after mutation so revocation cannot expose a protected count.
+    const visiblePost = await readVisiblePostForEngagement(supabaseAdmin, postId, { authId: authUserId, userId });
+    const likesCount = visiblePost?.likes_count ?? 0;
+    const countHidden = !visiblePost;
 
     // Fire-and-forget: notification to post author
     try {
-      const { data: postAuthor } = await supabaseAdmin
-        .from("posts")
-        .select("author_id")
-        .eq("id", postId)
-        .single();
+      const postAuthor = visiblePost;
 
       if (postAuthor?.author_id && postAuthor.author_id !== userId) {
         // Upsert notification (idempotent — don't spam on rapid re-likes)
@@ -175,7 +173,7 @@ Deno.serve(async (req) => {
     console.log(`[Edge:post-like] OK: liked=true likesCount=${likesCount}`);
     return jsonResponse({
       ok: true,
-      data: { postId, liked: true, likesCount, viewerHasLiked: true },
+      data: { postId, liked: true, likesCount, countHidden, viewerHasLiked: true },
     });
   } catch (err) {
     console.error("[Edge:post-like] Unexpected error:", err);

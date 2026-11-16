@@ -15,6 +15,9 @@ on:
       - 'packages/app/lib/events/confirmed-door-role*'
       - 'packages/app/features/routes/screens/**/events/**/scanner.tsx'
       - 'scripts/test-native-scanner-access.cjs'
+      - 'scripts/test-web-scanner-power.cjs'
+      - 'packages/ui/src/media/QrScanner*.tsx'
+      - 'packages/ui/src/media/qr/**'
       - '.github/workflows/scanner-staff.yml'
       - 'package.json'
   workflow_dispatch:
@@ -36,3 +39,19 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm test:scanner-staff
       - run: pnpm verify:functions
+  web-scanner-power:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated scanner lifecycle test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/scanner-power-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 react@19.2.3 react-dom@19.2.3 zustand@5.0.14 jsdom@26.1.0
+      - name: Web camera lifecycle and QR regression tests
+        env:
+          NODE_PATH: ${{ runner.temp }}/scanner-power-tests/node_modules
+        run: npm run test:web-scanner-power

@@ -1,3 +1,4 @@
+import { usePostGridLease } from "@dvnt/app/lib/media/use-post-preview-lease";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
@@ -212,6 +213,7 @@ const GridCell = memo(function GridCell({
   onPress,
 }: GridCellProps) {
   const handlePress = useCallback(() => onPress(tile.id), [tile.id, onPress]);
+  tile = usePostGridLease(tile);
   if (useSpicyPostLocked(tile)) return <View style={{ width }}><SpicyFollowGate author={tile.author} height={height} /></View>;
 
   return (

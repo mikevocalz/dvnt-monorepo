@@ -152,6 +152,29 @@ const ROOT = path.resolve(__dirname, '..');
     const allowed=f.realLikesApi.likePost('11',()=>true);f.tokens[1]('current-account-token');
     assert.deepEqual(await allowed,{liked:true,likes:8});
     assert.equal(f.writes.length,1);
+    f.setResponse({data:{ok:true,data:{liked:false,likesCount:0,countHidden:true}}});
+    const hiddenApi=f.realLikesApi.unlikePost('11',()=>true);f.tokens.at(-1)('current-token');
+    assert.deepEqual(await hiddenApi,{liked:false,likes:0,countHidden:true},'redaction flag survives the API boundary');
+    seed();f.client.setQueryData(['postLikers','11','viewer-a'],{likers:[{username:'private'}],likesCount:12});
+    await flush(()=>{app.render(12,true,'11');f.client.setQueryData(key,{hasLiked:true,likes:12});});
+    await flush(()=>f.states.feed.unlike());
+    await flush(()=>f.requests.at(-1).resolve({liked:false,likes:0,countHidden:true}));
+    for(const k of [key,detail,sweet,spicy,profile,['postLikers','11','viewer-a']]) {
+      assert.equal(f.client.getQueryData(k),k[0]==='likeState'?null:undefined,'hidden result clears protected cache rather than writing authoritative zero');
+    }
+    const hiddenRequests=f.requests.length;await flush(()=>f.states.feed.toggle());
+    assert.equal(f.requests.length,hiddenRequests,'tombstoned post cannot recreate optimistic content');
+    assert.equal(f.states.feed.hasLiked,false);
+    assert.equal(f.states.feed.likes,0,'stale props cannot redisplay the hidden count');
+    await flush(()=>f.client.refetchQueries({queryKey:key,exact:true}));
+    assert.equal(f.client.getQueryData(key),null,'cache-only refetch preserves hidden tombstone');
+    // A hidden completion belonging to another viewer cannot clear current data.
+    seed();await flush(()=>{app.render(12,true,'11');f.client.setQueryData(key,{hasLiked:true,likes:12});});
+    await flush(()=>f.states.feed.unlike());
+    await flush(()=>f.useAuthStore.setState({user:{id:'viewer-b'}}));
+    f.client.setQueryData(detail,{...p(),likes:88});
+    await flush(()=>f.requests.at(-1).resolve({liked:false,likes:0,countHidden:true}));
+    assert.equal(f.client.getQueryData(detail).likes,88,'old hidden response does not clear new viewer caches');
     const readLiked=()=>{const promise=f.realUsersApi.getLikedPosts();f.tokens.at(-1)('test-token');return promise;};
     f.setResponse({error:{message:'network unavailable'}});await assert.rejects(readLiked(),/network/);
     f.setResponse({data:{error:'Session expired'}});await assert.rejects(readLiked(),/Session/);

@@ -224,7 +224,7 @@ export function EventLiveScreen() {
         const sinceIso = new Date(Date.now() - 60 * 60_000).toISOString();
         const { data: scans } = await supabase
           .from("tickets")
-          .select("id, checked_in_at, qr_token, ticket_types(name)")
+          .select("id, checked_in_at, qr_token, ticket_types:ticket_type_labels(name)")
           .eq("event_id", eventId)
           .eq("status", "scanned")
           .gte("checked_in_at", sinceIso)

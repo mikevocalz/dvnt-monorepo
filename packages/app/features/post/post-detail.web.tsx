@@ -1,3 +1,4 @@
+import { useLeasedPost } from "@dvnt/app/lib/media/use-post-media-lease";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 /**
@@ -71,7 +72,8 @@ function UnlockedPostDetailScreen() {
   const params = useParams();
   const router = useRouter();
   const id = String((params as any)?.id ?? "");
-  const { data: post, isLoading } = usePost(id);
+  const { data: rawPost, isLoading } = usePost(id);
+  const post = useLeasedPost(rawPost);
   const { data: comments } = useComments(id);
   const setReplyTo = useCommentDraftStore((s) => s.setReplyTo);
   const openComposer = useCommentDraftStore((s) => s.openComposer);
@@ -364,7 +366,8 @@ function UnlockedPostDetailScreen() {
             </p>
           )}
         </section>
-        <WebCommentComposer postId={id} hideWhenClosed />
+        {/* The input is discoverable immediately; focus/keyboard stays user-initiated. */}
+        <WebCommentComposer postId={id} alwaysVisible />
       </div>
       <Lightbox />
 

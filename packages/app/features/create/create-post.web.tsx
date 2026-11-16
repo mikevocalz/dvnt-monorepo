@@ -1,4 +1,5 @@
 "use client";
+import { withLeasedHandoffScan } from "@dvnt/app/lib/media/handoff-upload-lease";
 
 /**
  * Create Post — web port of `(protected)/(tabs)/create.tsx`.
@@ -251,7 +252,7 @@ export function CreatePostScreen() {
         let result: NudityReview;
         try {
           const { scanPostMedia } = await import("./nudity-scan.web");
-          result = await scanPostMedia(draft.selectedMedia, controller.signal);
+          result = await withLeasedHandoffScan(draft.selectedMedia, controller.signal, media => scanPostMedia(media, controller.signal));
         } catch { result = { flagged: false, incomplete: true }; }
         finally { if (mounted.current) setCheckingMedia(false); }
         if (!stillCurrent() || controller.signal.aborted) return;

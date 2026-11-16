@@ -287,9 +287,10 @@ export function PrivacyScreen() {
               ))}
             </div>
             <p className="text-sm text-white/65">
-              Public: eligible adults must follow to see Spicy posts. Private:
-              you must approve their follow request first. Age and access checks
-              always apply.
+              All new follows need your approval before members can see Spicy
+              posts. Public profiles keep non-Spicy posts public; private
+              profiles hide all posts until approved. Existing followers keep
+              access. Age and access checks always apply.
             </p>
             {updateMutation.isError && (
               <p role="alert">Could not save visibility. Please try again.</p>

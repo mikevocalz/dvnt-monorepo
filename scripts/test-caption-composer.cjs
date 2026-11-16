@@ -7,6 +7,11 @@ const http = require('node:http');
 const esbuild = require('esbuild');
 const ROOT = path.resolve(__dirname, '..');
 const fixture = {
+  // Lease-enabled behavior is covered separately; caption/import fixtures keep
+  // the rollout disabled and preserve the current post/upload snapshot.
+  '@dvnt/app/lib/media/use-post-media-lease': `export const usePostMediaLease=(_id,media)=>media;export const useLeasedPost=post=>post;`,
+  '@dvnt/app/lib/media/use-handoff-upload-lease': `export const useHandoffUploadLease=asset=>asset;`,
+  '@dvnt/app/lib/media/handoff-upload-lease': `export const withLeasedHandoffScan=async(media,_signal,scan)=>scan(media);`,
   // Classification has its own contract. Keep caption/queue tests deterministic.
   './nudity-scan.web': `import {state} from 'caption-fixture';export const scanPostMedia=async()=>state.scanResult;`,
   'caption-fixture': `export const state={scanResult:{flagged:false,incomplete:false},post:{id:'7',kind:'media',caption:'Old #caption',author:{id:'1'},media:[]},published:[],updated:[],navigations:[],uploads:[],people:[]};

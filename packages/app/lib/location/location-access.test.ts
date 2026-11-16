@@ -56,3 +56,12 @@ test("all device-collection entry points honor overall permission and stale call
   assert.match(controller, /const refresh = useCallback\(async \(requestPermission = false\)/);
   assert.match(controller, /requestLocation: \(\) => refresh\(true\)/);
 });
+test("only explicit account v3 consent is persistent; off always wins", () => {
+ const account = {...on, consentVersion: "events-map-account-v3", sessionExpiresAt: "2099-01-01T00:00:00Z", shareUntil: null};
+ assert.equal(mapGrantActive(account, now), true);
+ assert.equal(mapGrantActive({...account, sessionExpiresAt:null}, now), false);
+ assert.equal(mapGrantActive({...account, sessionExpiresAt:new Date(now).toISOString()}, now), false);
+ assert.equal(mapGrantActive({...account, eventsMapEnabled:false}, now), false);
+ assert.equal(mapGrantActive({...account, locationEnabled:false}, now), false);
+ assert.equal(mapGrantActive({...account, consentVersion:"events-map-session-v2"}, now), false);
+});

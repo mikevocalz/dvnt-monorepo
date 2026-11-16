@@ -3,6 +3,7 @@
  * Toggle like on a post with Better Auth verification
  */
 
+import { readVisiblePostForEngagement } from "../_shared/post-engagement-access.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySessionDetailed } from "../_shared/verify-session.ts";
 import { resolveOrProvisionUser } from "../_shared/resolve-user.ts";
@@ -14,6 +15,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, sentry-trace, baggage",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Cache-Control": "private, no-store",
 };
 
 interface ApiResponse<T = unknown> {
@@ -29,9 +31,9 @@ function jsonResponse<T>(data: ApiResponse<T>, status = 200): Response {
   });
 }
 
-function errorResponse(code: string, message: string): Response {
+function errorResponse(code: string, message: string, status = 200): Response {
   console.error(`[Edge:toggle-like] Error: ${code} - ${message}`);
-  return jsonResponse({ ok: false, error: { code, message } }, 200);
+  return jsonResponse({ ok: false, error: { code, message } }, status);
 }
 
 Deno.serve(async (req) => {
@@ -93,7 +95,7 @@ Deno.serve(async (req) => {
     }
 
     const { postId } = body;
-    if (!postId || typeof postId !== "number") {
+    if (!Number.isSafeInteger(postId) || postId <= 0) {
       return errorResponse(
         "validation_error",
         "postId is required and must be a number",
@@ -148,6 +150,10 @@ Deno.serve(async (req) => {
       // likes_count synced by trigger on likes table
       liked = false;
     } else {
+      // New likes require current post access. A pending follow is not access.
+      if (!await readVisiblePostForEngagement(supabaseAdmin, postId, { authId: authUserId, userId })) {
+        return errorResponse("not_found", "Post not found", 404);
+      }
       // Like - insert new like
       const { error: insertError } = await withRetry(
         () =>
@@ -167,12 +173,8 @@ Deno.serve(async (req) => {
 
       // ── Send like notification to post author (fire-and-forget) ──
       try {
-        // Get post author
-        const { data: postAuthor } = await supabaseAdmin
-          .from("posts")
-          .select("author_id")
-          .eq("id", postId)
-          .single();
+        // Recheck before sending any author notification after the write.
+        const postAuthor = await readVisiblePostForEngagement(supabaseAdmin, postId, { authId: authUserId, userId });
 
         if (
           postAuthor &&
@@ -242,19 +244,15 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Get updated likes count
-    const { data: postData } = await supabaseAdmin
-      .from("posts")
-      .select("likes_count")
-      .eq("id", postId)
-      .single();
-
-    const likesCount = postData?.likes_count || 0;
+    // Unlike remains possible after revocation, but cannot disclose the total.
+    const visiblePost = await readVisiblePostForEngagement(supabaseAdmin, postId, { authId: authUserId, userId });
+    const likesCount = visiblePost?.likes_count ?? 0;
+    const countHidden = !visiblePost;
     console.log("[Edge:toggle-like] Result:", { liked, likesCount });
 
     return jsonResponse({
       ok: true,
-      data: { liked, likesCount },
+      data: { liked, likesCount, countHidden },
     });
   } catch (err) {
     console.error("[Edge:toggle-like] Unexpected error:", err);

@@ -1,0 +1,23 @@
+name: Co-host event editing
+on:
+  # No path filter: shared helpers and later migrations can change authorization.
+  pull_request:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated pinned test dependencies
+        run: npm install --prefix "$RUNNER_TEMP/cohost-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.3 esbuild@0.25.12 @types/node@20.19.43 @electric-sql/pglite@0.3.14 react@19.2.3 react-dom@19.2.3 zustand@5.0.8 happy-dom@20.10.3
+      - name: SQL, Edge, API and mounted web/native permission regressions
+        run: NODE_PATH="$RUNNER_TEMP/cohost-tests/node_modules" npm run test:cohost-editing
+      - name: Typecheck Node-based API tests independently of browser URL globals
+        run: node "$RUNNER_TEMP/cohost-tests/node_modules/typescript/bin/tsc" --noEmit --strict --skipLibCheck --esModuleInterop --module esnext --moduleResolution bundler --target es2022 --types node --typeRoots "$RUNNER_TEMP/cohost-tests/node_modules/@types" packages/app/lib/api/event-edit-access.test.ts packages/app/lib/api/promo-codes.test.ts packages/app/lib/api/ticket-catalog-access.test.ts

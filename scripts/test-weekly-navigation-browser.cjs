@@ -11,6 +11,7 @@ const {compile} = require('tailwindcss');
 const root = path.resolve(__dirname,'..');
 const app = path.join(root,'packages/app');
 const fixtures = {
+ '@dvnt/app/lib/media/use-post-preview-lease': `export const usePostPreviewLease=(_id,fallback)=>fallback;`,
  '@dvnt/app/features/settings/follow-requests-setting.web': `export const FollowRequestsSetting=()=>null;`,
  '@dvnt/app/features/settings/follow-requests-setting': `export const FollowRequestsSetting=()=>null;`,
  // Decorative gradient only: real RN-web View preserves the flex layout.

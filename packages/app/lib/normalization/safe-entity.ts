@@ -54,6 +54,9 @@ export function normalizePost(
 
   const safeMedia = Array.isArray(post.media)
     ? post.media.filter(Boolean).map((media) => ({
+        order: media?.order,
+        postId: media?.postId,
+        expiresAt: media?.expiresAt,
         type: media?.type || "image",
         url: media?.url || "",
         thumbnail: media?.thumbnail,

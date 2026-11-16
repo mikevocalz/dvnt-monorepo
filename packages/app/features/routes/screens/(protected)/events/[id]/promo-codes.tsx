@@ -9,7 +9,7 @@
  * Route: /(protected)/events/[id]/promo-codes
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ErrorBoundary } from "@dvnt/app/components/error-boundary";
 import {
   View,
@@ -34,7 +34,10 @@ import {
 import { useColorScheme } from "@dvnt/app/lib/hooks";
 import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { supabase } from "@dvnt/app/lib/supabase/client";
-import { getCurrentUserAuthId } from "@dvnt/app/lib/api/auth-helper";
+import { createEventPromoCode } from "@dvnt/app/lib/api/promo-codes";
+import { useEventRole } from "@dvnt/app/lib/hooks/use-event-role";
+import { canEditEvent, canManageStaff } from "@dvnt/app/lib/events/event-role";
+import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { invokeEdge } from "@dvnt/app/lib/api/invoke-edge";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
 
@@ -57,9 +60,27 @@ function PromoCodesScreenContent() {
   const { colors } = useColorScheme();
   const showToast = useUIStore((s) => s.showToast);
   const eventId = id ? parseInt(id) : 0;
+  const viewerId = useAuthStore((state) => state.user?.id);
+  const authenticated = useAuthStore((state) => state.isAuthenticated);
+  const access = useEventRole(String(eventId));
+  const mayCreate = authenticated && access.hasResolved && canEditEvent(access.role);
+  const mayRevoke = mayCreate && canManageStaff(access.role);
+  const assertPermission = async (revoke = false) => {
+    if (!mayCreate || (revoke && !mayRevoke)) throw new Error("Not authorized to manage promo codes");
+    const fresh = await access.refetch();
+    const current = useAuthStore.getState();
+    if (!current.isAuthenticated || current.user?.id !== viewerId || !fresh.isSuccess || fresh.fetchStatus === "paused" ||
+        !(revoke ? canManageStaff(fresh.data ?? null) : canEditEvent(fresh.data ?? null))) {
+      throw new Error("Your event access changed. Reopen promo codes before trying again.");
+    }
+  };
+
 
   const [promoCodes, setPromoCodes] = useState<PromoCode[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadedFor, setLoadedFor] = useState("");
+  const [loadError, setLoadError] = useState(false);
+  const loadSequence = useRef(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
 
@@ -73,7 +94,9 @@ function PromoCodesScreenContent() {
   const [isCreating, setIsCreating] = useState(false);
 
   const loadPromoCodes = useCallback(async () => {
-    if (!eventId) return;
+    if (!eventId || !mayCreate) return;
+    const sequence = ++loadSequence.current;
+    setLoadError(false);
     try {
       const { data, error } = await supabase
         .from("promo_codes")
@@ -82,19 +105,32 @@ function PromoCodesScreenContent() {
         .is("deleted_at", null)
         .order("created_at", { ascending: false });
 
+      if (sequence !== loadSequence.current) return;
       if (error) throw error;
       setPromoCodes(data || []);
+      setLoadedFor(`${viewerId}:${eventId}`);
     } catch (err: any) {
+      if (sequence !== loadSequence.current) return;
+      setLoadError(true);
       console.error("[PromoCodes] Load error:", err);
       showToast("error", "Error", "Failed to load promo codes");
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (sequence === loadSequence.current) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
-  }, [eventId, showToast]);
+  }, [eventId, viewerId, mayCreate, showToast]);
 
   useEffect(() => {
-    loadPromoCodes();
+    setPromoCodes([]);
+    setShowCreateForm(false);
+    setNewCode("");
+    setDiscountValue("");
+    setMaxUses("");
+    setIsLoading(true);
+    void loadPromoCodes();
+    return () => { loadSequence.current++; };
   }, [loadPromoCodes]);
 
   const handleRefresh = () => {
@@ -124,24 +160,11 @@ function PromoCodesScreenContent() {
 
     setIsCreating(true);
     try {
-      const authId = await getCurrentUserAuthId();
-      const { error } = await supabase.from("promo_codes").insert({
-        event_id: eventId,
-        code: newCode.trim().toUpperCase(),
-        discount_type: discountType,
-        discount_value: numValue,
-        max_uses: maxUses ? parseInt(maxUses) : null,
-        created_by: authId,
+      await assertPermission();
+      await createEventPromoCode({
+        eventId, code: newCode, discountType, discountValue: numValue,
+        maxUses: maxUses ? Number(maxUses) : null,
       });
-
-      if (error) {
-        if (error.code === "23505") {
-          showToast("error", "Duplicate", "This code already exists");
-        } else {
-          throw error;
-        }
-        return;
-      }
 
       showToast(
         "success",
@@ -155,13 +178,14 @@ function PromoCodesScreenContent() {
       loadPromoCodes();
     } catch (err: any) {
       console.error("[PromoCodes] Create error:", err);
-      showToast("error", "Error", err.message || "Failed to create promo code");
+      showToast("error", err.duplicate ? "Duplicate" : "Error", err.message || "Failed to create promo code");
     } finally {
       setIsCreating(false);
     }
   };
 
   const handleDelete = (promoId: string, code: string) => {
+    if (!mayRevoke) return;
     Alert.alert(
       "Delete Promo Code",
       `Delete "${code}"? This cannot be undone.`,
@@ -172,6 +196,7 @@ function PromoCodesScreenContent() {
           style: "destructive",
           onPress: async () => {
             try {
+              await assertPermission(true);
               const { data, error } = await invokeEdge<{ ok: boolean; error?: string }>(
                 "manage-promo-code",
                 { action: "delete", promo_id: promoId },
@@ -200,6 +225,17 @@ function PromoCodesScreenContent() {
     if (type === "percent") return `${value}% off`;
     return `$${(value / 100).toFixed(2)} off`;
   };
+
+  if (!mayCreate) return (
+    <SafeAreaView style={{ flex: 1, padding: 24, backgroundColor: colors.background }}>
+      <DetailBackButton />
+      <Text style={{ color: colors.foreground }}>{access.isPending && !access.isPaused && authenticated
+        ? "Checking event access…"
+        : access.isError || access.isPaused ? "Could not verify event access. Try again."
+        : "You don't have permission to manage promo codes for this event."}</Text>
+      {(access.isError || access.isPaused) && <Pressable onPress={() => void access.refetch()}><Text style={{ color: colors.foreground }}>Retry</Text></Pressable>}
+    </SafeAreaView>
+  );
 
   return (
     <SafeAreaView
@@ -436,7 +472,9 @@ function PromoCodesScreenContent() {
       )}
 
       {/* Promo Codes List */}
-      {isLoading ? (
+      {loadError ? (
+        <View><Text style={{ color: colors.foreground }}>Could not load promo codes.</Text><Pressable onPress={() => void loadPromoCodes()}><Text style={{ color: colors.foreground }}>Retry</Text></Pressable></View>
+      ) : isLoading || loadedFor !== `${viewerId}:${eventId}` ? (
         <View
           style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
         >
@@ -523,12 +561,13 @@ function PromoCodesScreenContent() {
                     <Copy size={13} color={colors.mutedForeground} />
                   </Pressable>
 
-                  <Pressable
+                  {mayRevoke && <Pressable
+                    accessibilityLabel={`Delete ${promo.code}`}
                     onPress={() => handleDelete(promo.id, promo.code)}
                     hitSlop={12}
                   >
                     <Trash2 size={16} color="#ef4444" />
-                  </Pressable>
+                  </Pressable>}
                 </View>
 
                 <View

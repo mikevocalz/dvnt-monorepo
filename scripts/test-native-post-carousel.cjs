@@ -101,6 +101,7 @@ const ts = require('typescript');
       return player;
     },
   };
+  let renewedLease;
   const cache = new Map();
   const adapters = {
     react: React,
@@ -122,6 +123,7 @@ const ts = require('typescript');
     }) },
     'expo-video': video,
     '@react-navigation/native': { useIsFocused: () => focused },
+    '@dvnt/app/lib/media/use-post-media-lease': {usePostMediaLease: (_id, media) => renewedLease ?? media},
     'lucide-react-native': { Volume2: () => null, VolumeX: () => null, X: () => null },
     '@gorhom/bottom-sheet': {
       BottomSheetModal,
@@ -324,6 +326,28 @@ const ts = require('typescript');
   assert.deepEqual(activeUri(), []);
   assert.equal(appListeners.size, 0);
   assert.ok(events.some(([type, uri]) => type === 'pause' && uri === firstUrl));
+
+  // A renewed whole-post lease must not widen an image-only lightbox subset.
+  media = [
+    {postId:'1',order:0,type:'video',url:'https://cdn/mixed.mp4'},
+    {postId:'1',order:1,type:'image',url:'https://cdn/mixed.jpg'},
+    {postId:'1',order:2,type:'livePhoto',url:'https://cdn/mixed.heic',livePhotoVideoUrl:'https://cdn/mixed.mov'},
+  ];
+  renewedLease = media;
+  const thirdRoot=createRoot(node);
+  await React.act(async()=>thirdRoot.render(React.createElement(Harness,{visible:false})));
+  await React.act(async()=>node.querySelectorAll('button')[0].click());
+  let modal=node.querySelector('[data-modal]');
+  assert.equal(modal.querySelector('[data-image]').getAttribute('data-image'),'https://cdn/mixed.jpg');
+  assert.equal(modal.querySelector('[data-image="https://cdn/mixed.mp4"]'),null);
+  renewedLease=media.map(m=>({...m,url:m.url+'?renewed=1',...(m.livePhotoVideoUrl?{livePhotoVideoUrl:m.livePhotoVideoUrl+'?renewed=1'}:{})}));
+  await React.act(async()=>thirdRoot.render(React.createElement(Harness,{visible:true})));
+  modal=node.querySelector('[data-modal]');
+  assert.equal(modal.querySelector('[data-image]').getAttribute('data-image'),'https://cdn/mixed.jpg?renewed=1');
+  assert.ok(modal.querySelector('[data-native="https://cdn/mixed.heic?renewed=1"]'));
+  assert.equal(modal.querySelector('[data-image="https://cdn/mixed.mp4?renewed=1"]'),null);
+  await React.act(async()=>thirdRoot.unmount());
+  renewedLease=undefined;
 
   const screen = fs.readFileSync(path.resolve(directory, '../../features/routes/screens/(protected)/post/[id].tsx'), 'utf8');
   assert.match(screen, /routePlaybackEnabled = useFeedPlaybackEnabled\(\)/);

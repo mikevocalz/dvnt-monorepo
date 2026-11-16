@@ -947,7 +947,7 @@ export const ticketsApi = {
       const { data: incoming, error: incomingError } = await supabase
         .from("ticket_transfers")
         .select(
-          "*, tickets(id, event_id, ticket_types(name), events(title, start_date))",
+          "*, tickets(id, event_id, ticket_types:ticket_type_labels(name), events(title, start_date))",
         )
         .eq("to_user_id", authId)
         .eq("status", "pending")
@@ -959,7 +959,7 @@ export const ticketsApi = {
       const { data: outgoing, error: outgoingError } = await supabase
         .from("ticket_transfers")
         .select(
-          "*, tickets(id, event_id, ticket_types(name), events(title, start_date))",
+          "*, tickets(id, event_id, ticket_types:ticket_type_labels(name), events(title, start_date))",
         )
         .eq("from_user_id", authId)
         .eq("status", "pending")

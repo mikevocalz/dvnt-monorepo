@@ -1,3 +1,4 @@
+import { useLeasedPost } from "@dvnt/app/lib/media/use-post-media-lease";
 import { SpicyFollowGate } from "@dvnt/app/components/feed/spicy-follow-gate";
 import { useSpicyPostLocked } from "@dvnt/app/components/feed/spicy-lock";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
@@ -849,7 +850,8 @@ function PostDetailScreenContent() {
 
   // CRITICAL: ALL HOOKS MUST BE CALLED UNCONDITIONALLY
   // Pass empty string if invalid - hooks will handle gracefully
-  const { data: post, isLoading, error: postError } = usePost(postId);
+  const { data: rawPost, isLoading, error: postError } = usePost(postId);
+  const post = useLeasedPost(rawPost);
   // Limit must match the comments sheet (app/(protected)/comments/[postId].tsx
   // also uses 50) so they share a React Query cache key. Different limits
   // → different keys → sheet refetches on open even though detail just

@@ -30,6 +30,8 @@ interface EventActionSheetProps {
   visible: boolean;
   onClose: () => void;
   isHost: boolean;
+  /** Accepted editor/admin permission; never substitutes for ownership. */
+  canEdit?: boolean;
   isLiked: boolean;
   /** events.status — drives Postpone vs Resume + hides lifecycle
    * actions once the event is cancelled. */
@@ -64,6 +66,7 @@ export function EventActionSheet({
   visible,
   onClose,
   isHost,
+  canEdit = isHost,
   isLiked,
   eventStatus,
   shareLabel,
@@ -105,8 +108,8 @@ export function EventActionSheet({
   // Hosts get lifecycle rows (duplicate / postpone / cancel) on top of
   // the management rows — the sheet needs the extra height.
   const snapPoints = useMemo(
-    () => [isHost ? (isCancelled ? "72%" : "85%") : "45%"],
-    [isHost, isCancelled],
+    () => [isHost ? (isCancelled ? "72%" : "85%") : canEdit ? "55%" : "45%"],
+    [isHost, isCancelled, canEdit],
   );
 
   useEffect(() => {
@@ -168,9 +171,8 @@ export function EventActionSheet({
           </Pressable>
         </View>
 
-        {/* Host-only actions */}
-        {isHost && (
-          <>
+        {/* Editing does not grant owner-only management or money controls. */}
+        {canEdit && (
             <Pressable
               onPress={() => runAfterClose(onEdit)}
               style={styles.row}
@@ -183,7 +185,11 @@ export function EventActionSheet({
                 <Text style={styles.rowSubtext}>Update details, images, date & time</Text>
               </View>
             </Pressable>
+        )}
 
+        {/* Host-only actions */}
+        {isHost && (
+          <>
             {onDuplicate && (
               <Pressable
                 onPress={() => runAfterClose(onDuplicate)}
