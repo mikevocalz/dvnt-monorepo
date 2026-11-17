@@ -62,6 +62,7 @@ import {
 } from "./browser-live-photo-import";
 
 import { reviewFingerprint, type NudityReview } from "./nudity-review-policy";
+import { runNudityReviewTask } from "./nudity-review-task";
 import { NudityReviewDialog } from "./nudity-review-dialog.web";
 
 const MAX_PHOTOS = MAX_BROWSER_POST_MEDIA;
@@ -251,8 +252,11 @@ export function CreatePostScreen() {
         setCheckingMedia(true);
         let result: NudityReview;
         try {
-          const { scanPostMedia } = await import("./nudity-scan.web");
-          result = await withLeasedHandoffScan(draft.selectedMedia, controller.signal, media => scanPostMedia(media, controller.signal));
+          result = await runNudityReviewTask(async (signal) => {
+            const { scanPostMedia } = await import("./nudity-scan.web");
+            if (signal.aborted) return { flagged: false, incomplete: true };
+            return withLeasedHandoffScan(draft.selectedMedia, signal, media => scanPostMedia(media, signal));
+          }, controller.signal);
         } catch { result = { flagged: false, incomplete: true }; }
         finally { if (mounted.current) setCheckingMedia(false); }
         if (!stillCurrent() || controller.signal.aborted) return;
