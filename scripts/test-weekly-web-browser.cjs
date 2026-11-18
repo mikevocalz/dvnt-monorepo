@@ -22,7 +22,7 @@ Object.assign(fixtures, {
   '@dvnt/app/lib/hooks/use-exact-distance-consent': `export const useExactDistanceConsent=()=>({enabled:false,busy:false,withdrawalPending:false,update:()=>{}});`,
   '@dvnt/app/lib/stores/exact-distance-store': `export const EXACT_DISTANCE_COPY='Exact distances require separate consent';`,
   '@dvnt/app/lib/stores/events-location-store': `export const useEventsLocationStore=s=>s({activeCity:null,visibilityDurationId:'1h',setVisibilityDuration:()=>{},showMeInCity:()=>{},preciseProximityGrant:false});export const useActiveCityVisibility=()=>null;`,
-  '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage={getItem:()=>null,setItem:()=>{}};`,
+  '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage={getItem:key=>JSON.parse(localStorage.getItem(key)||'null'),setItem:(key,value)=>localStorage.setItem(key,JSON.stringify(value))};`,
   '@dvnt/app/lib/hooks/use-member-map': `import {state} from 'fixture';import {useSyncExternalStore} from 'react';function tick(){useSyncExternalStore(cb=>{addEventListener('locationchange',cb);return()=>removeEventListener('locationchange',cb)},()=>state.locationVersion)}function changed(){state.locationVersion++;dispatchEvent(new Event('locationchange'))}export function useLocationSettings(){tick();return {loading:false,busy:false,error:null,sharing:state.sharing,settings:{sessionKey:state.locationSession,sessionExpiresAt:'2099-01-01T00:00:00Z'},setSharing:async value=>{state.sharing=value;state.stops++;changed();}}}export function useMapSharingConsent(){tick();return {busy:false,error:null,cancel:()=>{},share:async()=>{state.shares++;state.sharing=true;changed();return true;}}}`,
 });
 const source = entry + `
@@ -46,11 +46,14 @@ window.weekly={state,useAuth,mount,publishSessionBoundary:publishBoundary};
  const {chromium}=require('playwright');browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,args:['--no-sandbox']});
  const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];
  page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/*',route=>route.abort());
- await page.setContent('<!doctype html><html><body><div id="root"></div></body></html>');
- await page.addScriptTag({path:path.join(dir,'web.js')});
+ await page.route('**/*',route=>route.request().url()==='https://fixture.test/'?route.fulfill({contentType:'text/html',body:'<!doctype html><html><body><div id="root"></div></body></html>'}):route.abort());
  for (const width of [390,1280]) {
  await page.setViewportSize({width,height:844});
+ // Real origin/storage, isolated per viewport. about:blank denies localStorage
+ // and correctly suppresses automatic invitations in the production hook.
+ await page.goto('https://fixture.test/');
+ await page.evaluate(()=>localStorage.clear());
+ await page.addScriptTag({path:path.join(dir,'web.js')});
  const reset=async screen=>page.evaluate(screen=>{
  const f=window.weekly;f.app?.unmount();document.getElementById('root').replaceChildren();
  Object.assign(f.state,{calls:[],reads:[],navigations:[],pending:false,fail:false,loadFail:false,loadHold:false,statusHold:false,statusFail:false,releases:[],readReleases:[],statusReleases:[],requests:{'owner-a':[{follower_id:2,created_at:'2026-11-09T00:00:00Z',requester:{username:'First'}}]},statuses:{},statusReads:0,overlayResets:0,postReads:[],postResponses:{},postHold:false,postReleases:[],gateCalls:[],gateCallbacks:[],verification:{state:'approved'},admission:{state:'allowed',reason:'verified'},verificationError:false,admissionError:false,settingsCalls:[],savedPrivacy:{privateAccount:false,activityStatus:true,readReceipts:true,showLikes:true},saveFail:false,locationVersion:0,locationSession:String(Math.random()),sharing:false,shares:0,stops:0});
@@ -121,6 +124,12 @@ window.weekly={state,useAuth,mount,publishSessionBoundary:publishBoundary};
  assert.equal(await page.evaluate(()=>window.weekly.state.shares),1);
  await button('Stop sharing').click();await button('Show my avatar').waitFor();
  assert.equal(await page.evaluate(()=>window.weekly.state.stops),1);
+ await reset('location');await button('Show my avatar').waitFor();
+ await page.waitForTimeout(50);
+ assert.equal(await page.getByRole('dialog').isVisible().catch(()=>false),false,'new sign-in/remount keeps the completed invitation quiet');
+ await button('Show my avatar').click();await page.getByRole('dialog').waitFor();
+ assert.equal(await page.evaluate(()=>window.weekly.state.shares),0,'manual disclosure never automatically grants sharing');
+ await button('Not now').click();await page.getByRole('dialog').waitFor({state:'hidden'});
  }
  assert.deepEqual(errors,[]);
  console.log('PASS Chromium production web privacy save/remount/failure, request approval/pending, cancel dispatch, status refresh/protected projections/revocation, HTML location disclosure/Escape/explicit share/stop. API/auth/device synthetic; no deployed Next/backend E2E or CSS geometry claim.');
