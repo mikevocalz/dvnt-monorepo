@@ -9,7 +9,7 @@ export function MapSharingConsent({ active, promptOnly = false }: { active: bool
   return owner ? <OwnedConsent key={owner} owner={owner} active={active} promptOnly={promptOnly} /> : null;
 }
 function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: boolean; promptOnly: boolean }) {
-  // Only Home/Events entry instances auto-prompt once per sign-in. The map keeps manual controls.
+  // Only Home/Events entry instances auto-prompt once per account on this device. The map keeps manual controls.
   const flow = useMapSharingPrompt(owner, active, promptOnly);
   const shareAndOpenMap = useMapSharingNavigation(owner, flow.share);
   const dialogId = useId();
