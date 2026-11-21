@@ -447,6 +447,7 @@ Deno.serve(async (req) => {
       expires_at: String(Math.floor(Date.now() / 1000) + 30 * 60),
       success_url: `${SITE_URL}/checkout/success?email=${encodeURIComponent(guestEmail)}`,
       cancel_url: `${SITE_URL}/events`,
+      "metadata[charge_model]": "destination_charge",
       "metadata[type]": "event_ticket",
       "metadata[event_id]": String(eventId),
       "metadata[ticket_type_id]": ticketTypeId,
@@ -458,6 +459,7 @@ Deno.serve(async (req) => {
         ? { "metadata[attendee_names]": JSON.stringify(attendeeNames) }
         : {}),
       // Destination charge → organizer's connected account; DVNT keeps the fee.
+      "payment_intent_data[metadata][charge_model]": "destination_charge",
       "payment_intent_data[transfer_data][destination]": organizer.stripe_account_id,
       "payment_intent_data[application_fee_amount]": String(fees.application_fee_amount),
       "payment_intent_data[metadata][type]": "event_ticket",
@@ -534,6 +536,7 @@ Deno.serve(async (req) => {
       guest_phone: guestPhone,
       type: "event_ticket",
       status: "payment_pending",
+      charge_model: "destination_charge",
       quantity,
       subtotal_cents: fees.subtotal,
       platform_fee_cents: fees.dvnt_total_fee,
@@ -553,9 +556,9 @@ Deno.serve(async (req) => {
       ...pricing.orderFields,
     });
     if (guestOrderError) {
-      // Non-fatal: the Stripe session is already live. Log loudly —
-      // reconciliation can still repair the order later.
+      // Do not release a payment URL without a durable order.
       console.error("[guest-checkout] order insert failed:", guestOrderError);
+      return err("checkout_failed", "Could not save checkout order.", 500);
     }
 
     // The profile is made when the webhook issues the tickets, not now: an
