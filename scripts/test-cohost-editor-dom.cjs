@@ -26,7 +26,7 @@ const router = {push:p=>state.navigations.push(p), replace:p=>state.navigations.
 const mutation = {isPending:false, mutateAsync:async value=>{state.saves.push(value);if(state.eventFailure)throw Error('No row updated');}};
 const queryClient = {invalidateQueries:async()=>{},setQueryData:noop};
 const tier = {id:'tier-7',name:'General Admission',category:'admission',price_cents:2000,quantity_total:100,max_per_user:4,is_active:true};
-const ticketTypesApi = {getByEvent:async()=>{if(state.tierLoadFailure)throw Error('catalog unavailable');return [tier];},create:async params=>{state.tierCreates?.push(params);if(state.deferTierCreate)await new Promise(resolve=>{state.finishTierCreate=resolve;});return {id:'new'};},update:async(...args)=>{state.tierWrites?.push(args);if(state.tierFailure)throw Error('No row updated');return true;},deactivate:async()=>true};
+const ticketTypesApi = {getByEvent:async()=>{if(state.tierLoadFailure)throw Error('catalog unavailable');return state.tierRows ?? [tier];},create:async params=>{state.tierCreates?.push(params);if(state.deferTierCreate)await new Promise(resolve=>{state.finishTierCreate=resolve;});return {id:'new'};},update:async(...args)=>{state.tierWrites?.push(args);if(state.tierFailure)throw Error('No row updated');return true;},deactivate:async(eventId,id)=>{state.tierRemovals?.push([eventId,id]);if(state.tierRemoveFailure)throw Error("Ticket update was not confirmed. Reload before retrying.");if(state.tierRows)state.tierRows=state.tierRows.map(row=>row.id===id?{...row,is_active:false}:row);return true;}};
 const mediaPicker = {pickFromLibrary:async()=>[{uri:'file:///new-flyer.jpg',type:'image'}],requestPermissions:noop};
 const colors = new Proxy({}, {get:()=> '#fff'});
 const dom = tag => function Component({children,onPress,onChangeText,...props}) {
@@ -169,7 +169,7 @@ function load(relative) {
     if((mode==='event-refused'||mode==='revoked-during-upload'))assert.equal(state.tierWrites.length,0,'refused event must not continue catalog writes');
     else {
      assert.equal(state.tierWrites.length,1);
-     assert.equal(state.tierWrites[0][1].price_cents,3725,'changed tier dollars serialize to cents');
+     assert.equal(state.tierWrites[0][2].price_cents,3725,'changed tier dollars serialize to cents');
      if(platform==='web'){assert.equal(state.addonWrites.length,1);assert.equal(state.addonWrites[0][1].price_cents,1250);}
     }
     if(mode==='success'||mode==='admin-success'){assert.ok(state.toasts.some(t=>t[0]==='success'));assert.ok(state.navigations.length);}
@@ -213,7 +213,7 @@ function load(relative) {
    state.tierFailure=false;state.deferTierCreate=false;state.toasts=[];
    await flush(()=>save().click());
    assert.equal(state.tierCreates.length,1,'retry updates confirmed new tier instead of creating it twice');
-   assert.ok(state.tierWrites.some(([id])=>id==='new'));
+   assert.ok(state.tierWrites.some(([eventId,id])=>eventId==='7'&&id==='new'));
    assert.ok(state.toasts.some(t=>t[0]==='success'));
    count++;
   }finally{await flush(()=>root.unmount());node.remove();}
@@ -236,6 +236,35 @@ function load(relative) {
    else {assert.equal(state.variantCalls.length,2);assert.equal(state.variantCalls[1].rows[0].id,'persisted-variant');}
    assert.ok(state.toasts.some(t=>t[0]==='success'));count++;
   }finally{await flush(()=>root.unmount());node.remove();}
+ }
+ // Actual Remove → Save, then reopen using the persisted fixture rows.
+ for(const [platform,Component] of [['web',web],['native',native]])for(const failed of [false,true]){
+  resetInteractions();
+  Object.assign(state,{tierRows:[tier,{...tier,id:'other-tier',name:'VIP'}],tierRemovals:[],tierRemoveFailure:failed,tierFailure:failed});
+  const node=document.createElement('div');document.body.append(node);let root=createRoot(node);
+  try{
+   const removeButtons=()=>[...node.querySelectorAll('button')].filter(b=>b.textContent.includes('Remove tier'));
+   await flush(()=>root.render(React.createElement(Component)));
+   assert.equal(removeButtons().length,2);
+   const save=()=>platform==='web'?[...node.querySelectorAll('button')].find(b=>b.textContent==='Done'):node.querySelector('button');
+   if(platform==='web'){
+    await flush(()=>{removeButtons()[0].click();save().click();});
+   }else{
+    await flush(()=>removeButtons()[0].click());
+    assert.equal(save().disabled,false);
+    await flush(()=>save().click());
+   }
+   assert.deepEqual(state.tierRemovals,[['7','tier-7']]);
+   assert.equal(state.toasts.some(t=>t[0]==='success'),!failed);
+   assert.equal(state.navigations.length,failed?0:1);
+   if(failed){assert.ok(state.toasts.some(t=>t[1]==='Partial save'));await flush(()=>save().click());assert.equal(state.tierRemovals.length,1,'unconfirmed removal cannot be blindly retried');assert.equal(removeButtons().length,1,'the draft remains available');}
+   await flush(()=>root.unmount());
+   root=createRoot(node);
+   await flush(()=>root.render(React.createElement(Component)));
+   assert.equal(removeButtons().length,failed?2:1,'reloaded editor reflects which tier actually persisted as inactive');
+   assert.ok([...node.querySelectorAll('input')].some(input=>input.value==='VIP'),'other tier remains untouched');
+   count++;
+  }finally{await flush(()=>root.unmount());node.remove();delete state.tierRows;delete state.tierRemovals;delete state.tierRemoveFailure;resetInteractions();}
  }
  for(const mode of ['tiers','addons']){
   resetInteractions();state.tierLoadFailure=mode==='tiers';state.addonLoadFailure=mode==='addons';

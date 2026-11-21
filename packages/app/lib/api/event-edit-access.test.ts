@@ -64,24 +64,45 @@ test("missing account and malformed event fail closed before querying", async ()
   assert.equal(f.calls.length,0);
 });
 
-function tierFixture(error: Error | null) {
-  const calls: string[] = [];
+function tierFixture(data: unknown, error: Error | null = null) {
+  const calls: unknown[][] = [];
   const query: any = {};
-  for(const method of ["from","update","eq","select","abortSignal"])
-    query[method] = () => { calls.push(method); return query; };
-  query.single = async () => { calls.push("single"); return {data:error?null:{id:"tier"},error}; };
+  for (const method of ["from", "insert", "update", "eq", "select", "abortSignal"])
+    query[method] = (...args: unknown[]) => { calls.push([method, ...args]); return query; };
+  query.single = async () => { calls.push(["single"]); return { data, error }; };
   const exports: any = {};
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(new URL("./ticket-types.ts",import.meta.url),"utf8"), {
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(new URL("./ticket-types.ts", import.meta.url),"utf8"), {
     compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022},
   }).outputText, {exports,AbortSignal,setTimeout:()=>0,console:{error(){}},require:(name:string)=>name.endsWith("supabase/client")?{supabase:query}:{ensureSupabaseJwt:async()=>true}});
   return {api:exports.ticketTypesApi,calls};
 }
 
-test("ticket-price saves require an actually updated row instead of silent RLS success", async()=>{
-  const ok=tierFixture(null);
-  assert.equal(await ok.api.update("tier",{price_cents:2500}),true);
-  assert.ok(ok.calls.includes("select"));assert.ok(ok.calls.includes("single"));
-  const blocked=tierFixture(new Error("No row updated"));
-  await assert.rejects(blocked.api.update("tier",{price_cents:2500}),/No row updated/);
-  await assert.rejects(blocked.api.deactivate("tier"),/No row updated/);
+test("ticket updates require confirmation of the intended row and event", async () => {
+  const ok = tierFixture({ id: "tier", event_id: 7, is_active: true });
+  assert.equal(await ok.api.update("7", "tier", { price_cents: 2500 }), true);
+  assert.deepEqual(ok.calls.filter(([method]) => method === "eq"), [["eq", "event_id", 7], ["eq", "id", "tier"]]);
+  assert.ok(ok.calls.some(([method, args]) => method === "select" && args === "id,event_id,is_active"));
+  assert.ok(ok.calls.some(([method]) => method === "single"));
+  for (const data of [null, { id: "other", event_id: 7 }, { id: "tier", event_id: 8 }]) {
+    await assert.rejects(tierFixture(data).api.update("7", "tier", { price_cents: 2500 }), /not confirmed/);
+  }
+  await assert.rejects(tierFixture(null, new Error("No row updated")).api.update("7", "tier", { price_cents: 2500 }), /No row updated/);
+});
+
+test("removing a tier succeeds only when that exact row is returned inactive", async () => {
+  const ok = tierFixture({ id: "tier", event_id: 7, is_active: false });
+  assert.equal(await ok.api.deactivate("7", "tier"), true);
+  const update = ok.calls.find(([method]) => method === "update")?.[1] as { is_active: boolean };
+  assert.equal(update.is_active, false);
+  for (const data of [null, { id: "tier", event_id: 7, is_active: true }, { id: "tier", event_id: 8, is_active: false }]) {
+    await assert.rejects(tierFixture(data).api.deactivate("7", "tier"), /not confirmed/);
+  }
+});
+
+test("an unconfirmed create response requires reloading before retry", async () => {
+  const params = { eventId: "7", name: "GA", priceCents: 2500, quantityTotal: 20 };
+  assert.equal((await tierFixture({ id: "new", event_id: 7 }).api.create(params)).id, "new");
+  for (const data of [null, { id: "new", event_id: 8 }]) {
+    await assert.rejects(tierFixture(data).api.create(params), /Reload before retrying/);
+  }
 });

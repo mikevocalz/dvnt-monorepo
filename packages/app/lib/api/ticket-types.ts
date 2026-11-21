@@ -181,6 +181,9 @@ export const ticketTypesApi = {
         .single();
 
       if (error) throw error;
+      if (!data?.id || String(data.event_id) !== params.eventId) {
+        throw new Error("Ticket creation was not confirmed. Reload before retrying.");
+      }
       return data;
     } catch (err) {
       console.error("[TicketTypes] create error:", err);
@@ -201,9 +204,14 @@ export const ticketTypesApi = {
         .order("price_cents", { ascending: true });
 
       if (error) throw error;
+      if (!publicOnly && !Array.isArray(data)) {
+        throw new Error("Existing ticket tiers could not be confirmed.");
+      }
       return data || [];
     } catch (err) {
       console.error("[TicketTypes] getByEvent error:", err);
+      // An editor must not treat an unavailable catalog as an empty one.
+      if (!publicOnly) throw err;
       return [];
     }
   },
@@ -212,6 +220,7 @@ export const ticketTypesApi = {
    * Update a ticket type
    */
   async update(
+    eventId: string,
     id: string,
     updates: Partial<
       Pick<
@@ -234,15 +243,20 @@ export const ticketTypesApi = {
   ): Promise<boolean> {
     try {
       await ensureBridgeAuth();
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("ticket_types")
         .update(updates)
+        .eq("event_id", Number(eventId))
         .eq("id", id)
-        .select("id")
+        .select("id,event_id,is_active")
         .abortSignal(timeoutSignal(MUTATION_TIMEOUT_MS))
         .single();
 
       if (error) throw error;
+      if (data?.id !== id || String(data.event_id) !== eventId ||
+        (updates.is_active !== undefined && data.is_active !== updates.is_active)) {
+        throw new Error("Ticket update was not confirmed. Reload before retrying.");
+      }
       return true;
     } catch (err) {
       console.error("[TicketTypes] update error:", err);
@@ -253,8 +267,8 @@ export const ticketTypesApi = {
   /**
    * Deactivate a ticket type (soft delete)
    */
-  async deactivate(id: string): Promise<boolean> {
-    return ticketTypesApi.update(id, { is_active: false });
+  async deactivate(eventId: string, id: string): Promise<boolean> {
+    return ticketTypesApi.update(eventId, id, { is_active: false });
   },
 
   /**

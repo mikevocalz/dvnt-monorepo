@@ -780,7 +780,7 @@ function EditEventScreenContent() {
           setTicketTiers((current) => current.map((row, index) => index === tierIndex ? { ...row, id: created.id } : row));
           setOriginalTierIds((current) => new Set([...current, created.id]));
         } else {
-          await ticketTypesApi.update(tier.id, {
+          await ticketTypesApi.update(id, tier.id, {
             name: tier.name,
             category: tier.category || "admission",
             description: tier.description || null,
@@ -800,7 +800,7 @@ function EditEventScreenContent() {
       );
       const deactivatePromises = removedIds.map(async (tid) => {
         assertSavingCurrent();
-        await ticketTypesApi.deactivate(tid);
+        await ticketTypesApi.deactivate(id, tid);
         if (savingCurrent()) setOriginalTierIds((current) => new Set([...current].filter((value) => value !== tid)));
       });
 
@@ -824,8 +824,8 @@ function EditEventScreenContent() {
         } : row)),
         onRemoved: (addonId) => setOriginalAddonIds((current) => current.filter((value) => value !== addonId)),
       });
+      const outcomes = await Promise.allSettled([...tierPromises, ...deactivatePromises, addonPromise]);
       try {
-        const outcomes = await Promise.allSettled([...tierPromises, ...deactivatePromises, addonPromise]);
         const failed = outcomes.find((outcome) => outcome.status === "rejected");
         if (failed?.status === "rejected") throw failed.reason;
       } catch (err: any) {
@@ -834,7 +834,7 @@ function EditEventScreenContent() {
         // of thinking the whole save went through.
         if (!savingCurrent()) return;
         console.error("[EditEvent] Tier sync error:", err);
-        const uncertain = catalogSaveNeedsReload(err);
+        const uncertain = outcomes.some((outcome) => outcome.status === "rejected" && catalogSaveNeedsReload(outcome.reason));
         if (uncertain) setCatalogNeedsReload(true);
         showToast(
           "warning",
