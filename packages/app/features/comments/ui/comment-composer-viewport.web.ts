@@ -8,7 +8,7 @@ export function watchCommentComposerViewport(composer: HTMLElement) {
   let frame = 0;
   let disposed = false;
   let geometry = "";
-  const properties = ["--comment-keyboard-clearance", "--comment-gif-gallery-height"];
+  const properties = ["--comment-keyboard-clearance", "--comment-gif-gallery-height", "--comment-tabbar-clearance"];
   const previous = properties.map((name) => composer.style.getPropertyValue(name));
 
   const update = () => {
@@ -20,11 +20,27 @@ export function watchCommentComposerViewport(composer: HTMLElement) {
     const height = viewport?.height ?? window.innerHeight;
     if (height <= 0) return;
     const top = viewport?.offsetTop ?? 0;
+    // Fixed navigation is not part of document flow or visualViewport. Browser
+    // focus scrolling can put the input behind it even with page-end padding.
+    // Measure the real bar (including the raised Create button), not a guessed
+    // keyboard height. A bar behind the OS keyboard must not reserve space twice.
+    const navigation = document.querySelector<HTMLElement>("[data-dvnt-tab-bar]");
+    const navRects = navigation
+      ? [navigation, ...Array.from(navigation.querySelectorAll<HTMLElement>('button, [role="button"]'))]
+        .map(element => element.getBoundingClientRect()).filter(rect => rect.width > 0 && rect.height > 0)
+      : [];
+    const navTop = navRects.length ? Math.min(...navRects.map(rect => rect.top)) : Infinity;
+    const navBottom = navRects.length ? Math.max(...navRects.map(rect => rect.bottom)) : 0;
+    const visibleBottom = Math.min(top + height, navBottom > top ? navTop : Infinity) - 8;
+    const usableHeight = Math.max(0, visibleBottom - top - 8);
+    const navHeight = navRects.length ? navBottom - navTop : 0;
+    if (navHeight) composer.style.setProperty("--comment-tabbar-clearance", `${navHeight}px`);
+    else composer.style.removeProperty("--comment-tabbar-clearance");
     const picker = composer.querySelector<HTMLElement>("[data-comment-gif-picker]");
     const gallery = picker?.querySelector<HTMLElement>("[data-comment-gif-gallery]");
     if (picker && gallery) {
       const chrome = picker.offsetHeight - gallery.offsetHeight;
-      composer.style.setProperty("--comment-gif-gallery-height", `${Math.max(0, Math.min(256, height * 0.4, height - chrome - 16))}px`);
+      composer.style.setProperty("--comment-gif-gallery-height", `${Math.max(0, Math.min(256, height * 0.4, usableHeight - chrome))}px`);
     }
     // The page needs scrollable room at its end even when the layout viewport
     // stays full-height. Do not subtract offsetTop: browser panning must not
@@ -38,10 +54,9 @@ export function watchCommentComposerViewport(composer: HTMLElement) {
     if (!target) return;
     const bounds = target.getBoundingClientRect();
     const visibleTop = top + 8;
-    const visibleBottom = top + height - 8;
     // For an unusually short viewport, favor the search/Close row rather than
     // scrolling it offscreen to expose the bottom of an oversized picker.
-    const delta = bounds.top < visibleTop || bounds.height > height - 16
+    const delta = bounds.top < visibleTop || bounds.height > usableHeight
       ? bounds.top - visibleTop
       : Math.max(0, bounds.bottom - visibleBottom);
     if (Math.abs(delta) > 1) window.scrollBy({ top: delta, behavior: "instant" });

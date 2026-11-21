@@ -69,9 +69,9 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
   }, [open, replyTo?.commentId]);
 
   useEffect(() => {
-    if (!open || !composerRef.current) return;
+    if ((!open && !alwaysVisible) || !composerRef.current) return;
     return watchCommentComposerViewport(composerRef.current);
-  }, [open]);
+  }, [open, alwaysVisible]);
 
   const close = () => {
     if (sending.current) return;
@@ -109,7 +109,7 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
     });
   };
 
-  const bottomPadding = "calc(env(safe-area-inset-bottom, 0px) + 16px + var(--dvnt-tabbar-clearance, 0px) + var(--comment-keyboard-clearance, 0px))";
+  const bottomPadding = "calc(16px + max(env(safe-area-inset-bottom, 0px), var(--comment-tabbar-clearance, calc(env(safe-area-inset-bottom, 0px) + max(var(--dvnt-tabbar-overlay-clearance, 0px), var(--dvnt-tabbar-clearance, 0px))))) + var(--comment-keyboard-clearance, 0px))";
   if (!open && hideWhenClosed && !alwaysVisible) return <div aria-hidden="true" style={{ height: bottomPadding }} />;
   return (
     <section
