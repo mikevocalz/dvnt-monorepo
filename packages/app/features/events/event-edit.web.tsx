@@ -146,7 +146,7 @@ export function EventEditScreen() {
   const routeId = String((params as any)?.id ?? "");
   // Database IDs are positive safe integers. Canonicalize padded deep links
   // before role lookup, hydration, ticket mutations, and save confirmation.
-  const numericId = /^\\d+$/.test(routeId) ? Number(routeId) : NaN;
+  const numericId = /^\d+$/.test(routeId) ? Number(routeId) : NaN;
   const id = Number.isSafeInteger(numericId) && numericId > 0 ? String(numericId) : "";
 
   const showToast = useUIStore((st) => st.showToast);
