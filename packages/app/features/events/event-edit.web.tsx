@@ -143,7 +143,11 @@ export function EventEditScreen() {
     return () => { screenMounted.current = false; };
   }, []);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const id = String((params as any)?.id ?? "");
+  const routeId = String((params as any)?.id ?? "");
+  // Database IDs are positive safe integers. Canonicalize padded deep links
+  // before role lookup, hydration, ticket mutations, and save confirmation.
+  const numericId = /^\\d+$/.test(routeId) ? Number(routeId) : NaN;
+  const id = Number.isSafeInteger(numericId) && numericId > 0 ? String(numericId) : "";
 
   const showToast = useUIStore((st) => st.showToast);
   const updateEventMutation = useUpdateEvent();
@@ -187,7 +191,13 @@ export function EventEditScreen() {
 
   // ── Prefill from the fetched event (mirrors native fetchEvent) ──
   useEffect(() => {
-    if (!event || !mayEdit || String(event.id) !== id) return;
+    if (!mayEdit) {
+      // An in-flight catalog read may have been discarded while access was
+      // unresolved. Recovering access must start fresh reads, not skip them.
+      hydrationScope.current = null;
+      return;
+    }
+    if (!event || String(event.id) !== id) return;
     const hydrationAuthId = getAuthIdFromStore();
     const hydrationEpoch = getSessionLifecycle().epoch;
     const scope = JSON.stringify([id, hydrationAuthId, hydrationEpoch]);
