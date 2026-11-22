@@ -11,7 +11,7 @@ const {createRoot} = require('react-dom/client');
 const ROOT = path.resolve(__dirname, '..');
 const noop = () => {};
 const showToast=(...args)=>state.toasts?.push(args);
-const state = { role: 'editor', resolved: true, pending: false, paused: false, error: false, authenticated: true, saves: [], navigations: [], bankChecks: 0 };
+const state = { routeId: '7', role: 'editor', resolved: true, pending: false, paused: false, error: false, authenticated: true, saves: [], navigations: [], bankChecks: 0 };
 const event = {id:'7', title:'Co-host event', description:'Details', fullDate:'2026-12-11T22:00:00Z', eventTz:'UTC', host:{id:'different-owner-id'}, price:20, ticketingEnabled:true, visibility:'public'};
 const auth = {user:{id:'cohost', authId:'cohost'}, isAuthenticated:true};
 const disturbSession = () => {
@@ -26,7 +26,7 @@ const router = {push:p=>state.navigations.push(p), replace:p=>state.navigations.
 const mutation = {isPending:false, mutateAsync:async value=>{state.saves.push(value);if(state.eventFailure)throw Error('No row updated');}};
 const queryClient = {invalidateQueries:async()=>{},setQueryData:noop};
 const tier = {id:'tier-7',name:'General Admission',category:'admission',price_cents:2000,quantity_total:100,max_per_user:4,is_active:true};
-const ticketTypesApi = {getByEvent:async()=>{if(state.tierLoadFailure)throw Error('catalog unavailable');return state.tierRows ?? [tier];},create:async params=>{state.tierCreates?.push(params);if(state.deferTierCreate)await new Promise(resolve=>{state.finishTierCreate=resolve;});return {id:'new'};},update:async(...args)=>{state.tierWrites?.push(args);if(state.tierFailure)throw Error('No row updated');return true;},deactivate:async(eventId,id)=>{state.tierRemovals?.push([eventId,id]);if(state.tierRemoveFailure)throw Error("Ticket update was not confirmed. Reload before retrying.");if(state.tierRows)state.tierRows=state.tierRows.map(row=>row.id===id?{...row,is_active:false}:row);return true;}};
+const ticketTypesApi = {getByEvent:async()=>{state.tierReads=(state.tierReads??0)+1;if(state.deferTierRead)await new Promise(resolve=>{(state.finishTierReads??=[]).push(resolve);});if(state.tierLoadFailure)throw Error('catalog unavailable');return state.tierRows ?? [tier];},create:async params=>{state.tierCreates?.push(params);if(state.deferTierCreate)await new Promise(resolve=>{state.finishTierCreate=resolve;});return {id:'new'};},update:async(...args)=>{state.tierWrites?.push(args);if(state.tierFailure)throw Error('No row updated');return true;},deactivate:async(eventId,id)=>{state.tierRemovals?.push([eventId,id]);if(state.tierRemoveFailure)throw Error("Ticket update was not confirmed. Reload before retrying.");if(state.tierRows)state.tierRows=state.tierRows.map(row=>row.id===id?{...row,is_active:false}:row);return true;}};
 const mediaPicker = {pickFromLibrary:async()=>[{uri:'file:///new-flyer.jpg',type:'image'}],requestPermissions:noop};
 const colors = new Proxy({}, {get:()=> '#fff'});
 const dom = tag => function Component({children,onPress,onChangeText,...props}) {
@@ -40,7 +40,7 @@ const generic = new Proxy({__esModule:true, default:dom('div')}, {get:(target,ke
 const fixture = {
  'react':React,'react/jsx-runtime':require('react/jsx-runtime'), 'zustand':require('zustand'),
  '@tanstack/react-query':{useQueryClient:()=>queryClient},
- 'solito/navigation':{useParams:()=>({id:'7'}),useRouter:()=>router},
+ 'solito/navigation':{useParams:()=>({id:state.routeId}),useRouter:()=>router},
  'expo-router':{useLocalSearchParams:()=>({id:'7'}),useRouter:()=>router},
  'react-native':{View:dom('div'),Text:dom('span'),ScrollView:dom('div'),Pressable:dom('button'),TextInput:dom('input'),ActivityIndicator:()=>React.createElement('span',null,'Loading event'),Switch:()=>null,Platform:{OS:'ios'},StyleSheet:{create:o=>o}},
  '@gorhom/bottom-sheet':{__esModule:true,default:React.forwardRef(({children},ref)=>{React.useImperativeHandle(ref,()=>({snapToIndex:noop,close:noop}));return React.createElement('div',null,children)}),BottomSheetView:dom('div'),BottomSheetBackdrop:()=>null},
@@ -179,7 +179,7 @@ function load(relative) {
   }
  }
  // Partial multi-row writes must preserve successful IDs for an explicit retry.
- const resetInteractions=()=>{auth.user={id:'cohost',authId:'cohost'};Object.assign(state,{epoch:1,switchAccountOnUpload:false,returnToAccount:false,role:'editor',resolved:true,pending:false,paused:false,error:false,authenticated:true,saves:[],navigations:[],toasts:[],tierWrites:[],addonWrites:[],tierCreates:[],addonCreates:[],variantCalls:[],addonRows:[],tierFailure:false,addonFailure:false,eventFailure:false,revokeOnUpload:false,tierLoadFailure:false,addonLoadFailure:false,addonCreateFailure:false,variantFailure:false,deferTierCreate:false});store.getState().reset();};
+ const resetInteractions=()=>{auth.user={id:'cohost',authId:'cohost'};Object.assign(state,{routeId:'7',tierReads:0,deferTierRead:false,finishTierReads:[],epoch:1,switchAccountOnUpload:false,returnToAccount:false,role:'editor',resolved:true,pending:false,paused:false,error:false,authenticated:true,saves:[],navigations:[],toasts:[],tierWrites:[],addonWrites:[],tierCreates:[],addonCreates:[],variantCalls:[],addonRows:[],tierFailure:false,addonFailure:false,eventFailure:false,revokeOnUpload:false,tierLoadFailure:false,addonLoadFailure:false,addonCreateFailure:false,variantFailure:false,deferTierCreate:false});store.getState().reset();};
  for(const [platform,Component] of [['web',web],['native',native]])for(const returns of [false,true]){
   resetInteractions();state.switchAccountOnUpload=true;state.returnToAccount=returns;
   const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
@@ -236,6 +236,47 @@ function load(relative) {
    else {assert.equal(state.variantCalls.length,2);assert.equal(state.variantCalls[1].rows[0].id,'persisted-variant');}
    assert.ok(state.toasts.some(t=>t[0]==='success'));count++;
   }finally{await flush(()=>root.unmount());node.remove();}
+ }
+ // A temporarily unresolved role must not strand catalog hydration after
+ // its old asynchronous result was discarded.
+ {
+  resetInteractions();
+  state.deferTierRead=true;
+  const node=document.createElement('div');document.body.append(node);const root=createRoot(node);
+  try{
+   await flush(()=>root.render(React.createElement(web)));
+   assert.equal(state.tierReads,1);
+   state.resolved=false;state.error=true;
+   await flush(()=>root.render(React.createElement(web)));
+   assert.equal(node.textContent.includes('Edit Event'),false);
+   await flush(()=>state.finishTierReads.shift()());
+   state.resolved=true;state.error=false;state.deferTierRead=false;
+   await flush(()=>root.render(React.createElement(web)));
+   assert.equal(state.tierReads,2,'access recovery restarts the discarded ticket read');
+   assert.equal([...node.querySelectorAll('button')].filter(b=>b.textContent.includes('Remove tier')).length,1);
+   const done=[...node.querySelectorAll('button')].find(b=>b.textContent==='Done');
+   assert.equal(done.disabled,false,'Save re-enabled after catalog hydration recovers');
+   count++;
+  }finally{await flush(()=>root.unmount());node.remove();resetInteractions();}
+ }
+ // A padded deep link identifies the canonical event and must retain normal
+ // ticket removal, Save and reopen semantics.
+ {
+  resetInteractions();
+  state.routeId='007';state.tierRows=[tier,{...tier,id:'other-tier',name:'VIP'}];state.tierRemovals=[];
+  const node=document.createElement('div');document.body.append(node);let root=createRoot(node);
+  try{
+   await flush(()=>root.render(React.createElement(web)));
+   const remove=()=>[...node.querySelectorAll('button')].filter(b=>b.textContent.includes('Remove tier'));
+   assert.equal(remove().length,2,'padded URL hydrates the canonical event');
+   await flush(()=>{remove()[0].click();[...node.querySelectorAll('button')].find(b=>b.textContent==='Done').click();});
+   assert.deepEqual(state.tierRemovals,[['7','tier-7']],'removal uses canonical event ID');
+   assert.ok(state.toasts.some(t=>t[0]==='success'));
+   await flush(()=>root.unmount());root=createRoot(node);
+   await flush(()=>root.render(React.createElement(web)));
+   assert.equal(remove().length,1,'tier remains removed after reopening a padded link');
+   count++;
+  }finally{await flush(()=>root.unmount());node.remove();delete state.tierRows;delete state.tierRemovals;resetInteractions();}
  }
  // Actual Remove → Save, then reopen using the persisted fixture rows.
  for(const [platform,Component] of [['web',web],['native',native]])for(const failed of [false,true]){
