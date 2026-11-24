@@ -50,6 +50,7 @@ const {useMediaUpload} = load('packages/app/lib/hooks/use-media-upload.ts', {
   '@dvnt/app/lib/media/upload-policy':policy,
   '@dvnt/app/lib/media/browser-file-mime':fileMime,
   '@dvnt/app/lib/media/live-photo-upload':load('packages/app/lib/media/live-photo-upload.ts'),
+  '@dvnt/app/lib/media/crop-export':load('packages/app/lib/media/crop-export.ts'),
   '@dvnt/app/lib/media/single-image-upload':{uploadSingleImage:unexpected},
   '@dvnt/app/lib/media/image-fit-deps':{imageFitDeps:{}},
   '@dvnt/app/lib/auth-client':{getAuthToken:async ()=>'fixture-token'},

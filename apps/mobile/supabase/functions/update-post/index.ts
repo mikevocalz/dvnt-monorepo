@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
       slides?: string[];
       location?: string;
       isNSFW?: boolean;
-      media?: Array<{ order: number; url: string }>;
+      media?: unknown;
       removeMedia?: { expectedIds: string[]; ids: string[]; expectedCaption?: string };
     };
     try {
@@ -133,12 +133,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Published edits never accept replacement URLs. The old app rotation
-    // action did not forward its locally uploaded URL to this endpoint.
-    if (media !== undefined) {
-      return errorResponse("validation_error", "Existing media cannot be replaced; remove it or edit before sharing.");
-    }
-
     if (post.post_kind !== "text" && content !== undefined) {
       const captionValidation = validatePostCaption(content);
       if (!captionValidation.valid) {
@@ -147,6 +141,45 @@ Deno.serve(async (req) => {
           captionValidation.error || "Invalid caption",
           400,
         );
+      }
+    }
+
+    // Older callers may echo existing attachments during a caption edit.
+    // Treat only an exact, unambiguous echo as a no-op; never write media URLs
+    // or combine a legacy media payload with the atomic remove contract.
+    if (media !== undefined) {
+      const refuseReplacement = () => errorResponse(
+        "validation_error",
+        "Existing media cannot be replaced; remove it or edit before sharing.",
+      );
+      if (removeMedia !== undefined || !Array.isArray(media) || media.length > 10) {
+        return refuseReplacement();
+      }
+      const echoed = new Map<number, string>();
+      for (const item of media) {
+        if (!item || typeof item !== "object" || Object.keys(item).length !== 2 ||
+            !Number.isSafeInteger(item.order) || item.order < 0 ||
+            typeof item.url !== "string" || item.url.length === 0 ||
+            echoed.has(item.order)) return refuseReplacement();
+        echoed.set(item.order, item.url);
+      }
+      if (echoed.size > 0) {
+        if (post.post_kind === "text") return refuseReplacement();
+        const { data: current, error } = await supabaseAdmin
+          .from("posts_media")
+          .select("_order, url")
+          .eq("_parent_id", postId)
+          .in("_order", [...echoed.keys()]);
+        if (error || !Array.isArray(current)) {
+          return errorResponse("internal_error", "Could not verify existing media");
+        }
+        const seen = new Set<number>();
+        for (const row of current) {
+          if (seen.has(row._order) || !echoed.has(row._order) ||
+              echoed.get(row._order) !== row.url) return refuseReplacement();
+          seen.add(row._order);
+        }
+        if (seen.size !== echoed.size) return refuseReplacement();
       }
     }
 

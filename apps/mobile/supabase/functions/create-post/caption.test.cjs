@@ -10,6 +10,7 @@ const ts = require('typescript');
 const FUNCTIONS = path.resolve(__dirname, '..');
 const ROOT = path.resolve(FUNCTIONS, '../../../..');
 const MEDIA = [{ type: 'image', url: 'https://fixture.invalid/photo.jpg' }];
+const LEGACY_MEDIA_ECHO = [{ order: 0, url: MEDIA[0].url }];
 const ORIGINAL_CAPTION = 'Original #caption';
 const plain = value => JSON.parse(JSON.stringify(value));
 
@@ -66,6 +67,7 @@ function harness({ kind = 'media', owner = true, session = true, admission = tru
       const query = {
         select() { return query; },
         eq(key, value) { filters.push(row => row[key] === value); return query; },
+        in(key, values) { filters.push(row => values.includes(row[key])); return query; },
         insert(value) { operation = 'insert'; payload = value; return query; },
         update(value) { operation = 'update'; payload = value; return query; },
         delete() { operation = 'delete'; return query; },
@@ -142,7 +144,7 @@ for (const fn of ['create-post', 'update-post']) {
     test(`${fn}: ${description} is refused before any post, slide or media write`, async () => {
       const h = harness();
       const before = plain(h.tables);
-      const result = await h.call(fn, { postId: 1, content, media: MEDIA, location: 'New location' });
+      const result = await h.call(fn, { postId: 1, content, media: fn === 'update-post' ? LEGACY_MEDIA_ECHO : MEDIA, location: 'New location' });
       assert.equal(result.body.ok, false, JSON.stringify(result));
       assert.equal(result.body.error.code, 'validation_error');
       assert.deepEqual(h.writes, []);
@@ -154,22 +156,52 @@ for (const fn of ['create-post', 'update-post']) {
   test(`${fn}: 2200 prose characters plus Unicode hashtags stay intact`, async () => {
     const content = 'x'.repeat(2200) + ' #東京 #café #cafe\u0301 #night_life';
     const h = harness();
-    const result = await h.call(fn, { postId: 1, content, media: MEDIA });
+    const result = await h.call(fn, { postId: 1, content, media: fn === 'update-post' ? LEGACY_MEDIA_ECHO : MEDIA });
     assert.ok(content.length > 2200);
     assert.equal(result.body.ok, true, JSON.stringify(result));
     assert.equal(result.body.data.post.content, content);
     assert.equal(h.tables.posts.find(post => post.id === Number(result.body.data.post.id)).content, content);
+    if (fn === 'update-post') assert.deepEqual(h.writes.map(write => write.table), ['posts']);
   });
 
   for (const content of ['', undefined, '#東京 #café #cafe\u0301']) {
     test(`${fn}: optional and hashtag-only captions remain valid (${String(content)})`, async () => {
       const h = harness();
-      const result = await h.call(fn, { postId: 1, content, media: MEDIA });
+      const result = await h.call(fn, { postId: 1, content, media: fn === 'update-post' ? LEGACY_MEDIA_ECHO : MEDIA });
       assert.equal(result.body.ok, true, JSON.stringify(result));
       assert.equal(result.body.data.post.content, content === undefined
         ? fn === 'create-post' ? '' : ORIGINAL_CAPTION : content);
     });
   }
+}
+
+test('update-post: empty legacy echo does not block or mutate media', async () => {
+  const h = harness();
+  const result = await h.call('update-post', { postId: 1, content: 'new', media: [] });
+  assert.equal(result.body.ok, true);
+  assert.deepEqual(h.writes.map(write => write.table), ['posts']);
+});
+
+for (const [label, media, duplicate, removeMedia] of [
+  ['replacement', [{ order: 0, url: 'https://fixture.invalid/new.jpg' }]],
+  ['foreign order', [{ order: 5, url: MEDIA[0].url }]],
+  ['duplicate submitted order', [...LEGACY_MEDIA_ECHO, ...LEGACY_MEDIA_ECHO]],
+  ['duplicate persisted order', LEGACY_MEDIA_ECHO, true],
+  ['missing order', MEDIA],
+  ['non-string URL', [{ order: 0, url: 1 }]],
+  ['conflicting removal', LEGACY_MEDIA_ECHO, false, { expectedIds: ['a','b'], ids: ['b'] }],
+]) {
+  test('update-post: ' + label + ' cannot change caption or media', async () => {
+    const h = harness();
+    h.tables.posts_media.push({ _parent_id: 2, _order: 5, url: MEDIA[0].url });
+    if (duplicate) h.tables.posts_media.push({ ...h.tables.posts_media[0] });
+    const before = plain(h.tables);
+    const result = await h.call('update-post', { postId: 1, content: 'must not save', media, removeMedia });
+    assert.equal(result.body.error.code, 'validation_error');
+    assert.deepEqual(h.tables, before);
+    assert.deepEqual(h.writes, []);
+    assert.deepEqual(h.rpcCalls, []);
+  });
 }
 
 test('idempotent publishing keeps the exact inline caption in its RPC payload', async () => {

@@ -39,6 +39,7 @@ function harness({ record = null, owner = true, session = true, failWrite = fals
     };
     const q = {
       select() { return q; }, eq(k, v) { filters.push(r => r[k] === v); return q; },
+      in(k, values) { filters.push(r => values.includes(r[k])); return q; },
       update(v) { op = 'update'; payload = v; return q; },
       insert(v) { op = 'insert'; payload = v; return q; },
       single: async () => { const r=run(); return { ...r, data:r.data?.[0] ?? null }; },
