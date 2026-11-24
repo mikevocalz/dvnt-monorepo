@@ -8,7 +8,7 @@
  * is optional and separate; guest purchases send no profile-provisioning fields.
  * State lives in useGuestCheckoutStore (Zustand, no useState).
  */
-import { checkFullName, checkPhone } from "@dvnt/app/lib/checkout/profile-fields";
+import { checkFullName, parseWebGuestTicketContact } from "@dvnt/app/lib/checkout/profile-fields";
 import { useEffect } from "react";
 import { Minus, Plus, Lock, CheckCircle2 } from "lucide-react";
 import { supabase } from "@dvnt/app/lib/supabase/client";
@@ -19,8 +19,6 @@ import { guestQuoteReady, guestQuoteSelectionKey } from "@dvnt/app/lib/tickets/g
 import { useGuestCheckoutQuote } from "./use-guest-checkout-quote.web";
 import { GuestCheckoutCode } from "./guest-checkout-code.web";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function GuestCheckoutSheet() {
   const s = useGuestCheckoutStore();
@@ -70,15 +68,10 @@ export function GuestCheckoutSheet() {
       s.patch({ error: "Apply your code and review the ticket total before paying." });
       return;
     }
-    const email = s.email.trim().toLowerCase();
-    if (!EMAIL_RE.test(email)) {
-      s.patch({ error: "Enter a valid email." });
-      return;
-    }
+    const contact = parseWebGuestTicketContact(s);
     const name = checkFullName(s.name);
-    const phone = checkPhone(s.phone);
-    if (!name.ok || !phone.ok) {
-      s.patch({ error: !name.ok ? name.message : !phone.ok ? phone.message : "Check your contact details." });
+    if (!contact.ok || !name.ok) {
+      s.patch({ error: !contact.ok ? contact.message : !name.ok ? name.message : "Check your contact details." });
       return;
     }
     if (namesRequired) {
@@ -93,19 +86,20 @@ export function GuestCheckoutSheet() {
     let result;
     try {
       result = await supabase.functions.invoke("guest-checkout", {
-      body: {
+      body: { action: "checkout", checkout_contact_version: 1, web_ticket_checkout: {
         event_id: Number(s.eventId),
         ticket_type_id: s.tierId,
         quantity: s.quantity,
-        guest_email: email,
+        guest_email: contact.email,
+        guest_username: contact.username,
         guest_name: name.value,
-        guest_phone: phone.value,
+        guest_phone: contact.phone,
         idempotency_key: s.requestKey,
         discount_code: s.discountCode,
         promoter_code: s.trackedPromoterCode,
         expected_quote_key: quote!.quote_key,
         ...(collectNames ? { attendee_names: s.attendeeNames.slice(0, s.quantity) } : {}),
-      },
+      } },
       });
     } catch {
       if (useGuestCheckoutStore.getState().requestKey === requestKey)
@@ -127,6 +121,8 @@ export function GuestCheckoutSheet() {
       } catch {
         /* ignore */
       }
+    } else if (data?.ok && data.webTicketContactVersion !== 1) {
+      message = "Could not verify your ticket contact. Refresh before retrying.";
     } else if (data?.ok && data.url) {
       url = data.url;
     } else if (data?.ok && data.free) {
@@ -185,6 +181,7 @@ export function GuestCheckoutSheet() {
           <input
             disabled={s.loading}
             type="email"
+            required
             inputMode="email"
             autoComplete="email"
             value={s.email}
@@ -209,10 +206,19 @@ export function GuestCheckoutSheet() {
         </label>
 
         <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium uppercase tracking-wide text-white/45">Ticket username</span>
+          <input type="text" required disabled={s.loading} autoCapitalize="none" spellCheck={false}
+            maxLength={31} value={s.username} onChange={(e) => s.patch({ username: e.target.value, error: null })}
+            className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-[#3FDCFF]" />
+          <span className="text-[11px] text-white/40">A label for ticket lookup. It does not create an account.</span>
+        </label>
+
+        <label className="flex flex-col gap-1.5">
           <span className="text-xs font-medium uppercase tracking-wide text-white/45">Phone number</span>
           <input
             disabled={s.loading}
             type="tel"
+            required
             aria-label="Phone number"
             inputMode="tel"
             autoComplete="tel"
@@ -222,7 +228,7 @@ export function GuestCheckoutSheet() {
             placeholder="+1 212 555 0123"
             className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#3FDCFF]"
           />
-          <span className="text-[11px] text-white/40">Used for ticket lookup at the door. No account or username required.</span>
+          <span className="text-[11px] text-white/40">Used for ticket lookup at the door. No account needed.</span>
         </label>
 
         <div className="flex items-center justify-between">
@@ -281,7 +287,7 @@ export function GuestCheckoutSheet() {
           </p>
         ) : null}
 
-        {s.error ? <p className="text-sm text-[#FC253A]">{s.error}</p> : null}
+        {s.error ? <p role="alert" className="text-sm text-[#FC253A]">{s.error}</p> : null}
 
         <button
           onClick={checkout}

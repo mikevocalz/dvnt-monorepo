@@ -38,6 +38,7 @@ import { hasAdmissionPurpose, ticketCategoryLabel } from "@dvnt/app/lib/tickets/
 import { useAuthStore } from "@dvnt/app/lib/stores/auth-store";
 import { useMemo, useRef, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { DoorContactLookup } from "./door-contact-lookup.web";
 import { CompCancelModal } from "./ui/comp-cancel-modal";
 import { useCompCancelStore } from "@dvnt/app/lib/stores/comp-cancel-store";
 import { CompTicketsModal } from "./ui/comp-tickets-modal";
@@ -336,7 +337,9 @@ function ScopedAttendees({ accountKey }: { accountKey: string }) {
       </div>
 
       <main className="mx-auto w-full max-w-2xl px-4 py-4">
-        {/* Search */}
+        {role ? <DoorContactLookup eventId={String(eventId)} /> : null}
+
+        {/* Historical partial name, username and ticket ID search. */}
         <div className="flex items-center gap-2 rounded-xl bg-white/6 px-3 py-2">
           <Search size={16} color="rgba(255,255,255,0.45)" />
           <input

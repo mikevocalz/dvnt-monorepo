@@ -28,7 +28,8 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
-import { requireMemberPhone } from "../_shared/member-phone.ts";
+import { requireMemberPhone, requireWebMemberTicketContact } from "../_shared/member-phone.ts";
+import { unwrapWebTicketContactRequest, isWebTicketContactRequest } from "../_shared/checkout-profile-fields.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 import {
   CART_LINE_PRICING_SELECT,
@@ -170,17 +171,23 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
 
     let parsed: unknown;
     try {
-      parsed = await req.json();
+      parsed = unwrapWebTicketContactRequest(await req.json());
     } catch {
       return errorResponse("Invalid JSON", 400);
     }
 
+    if (parsed && typeof parsed === "object" && (parsed as Record<string, unknown>).action === "contact_capability") {
+      return jsonResponse({ webTicketContactVersion: 1 });
+    }
     const cartId = parseCartId(parsed);
     if (!cartId) return errorResponse("Invalid cartId", 400);
 
     // A buyer with no phone on file gives one before paying. Stored
     // server-side; a number already on file is never replaced.
-    const memberPhone = await requireMemberPhone(
+    const contactVersion = parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>).checkout_contact_version : undefined;
+    const webContact = isWebTicketContactRequest(contactVersion, req.headers.get("origin"), Deno.env.get("DVNT_REQUIRE_WEB_TICKET_CONTACT") === "true");
+    const memberPhone = await (webContact ? requireWebMemberTicketContact : requireMemberPhone)(
       supabase,
       authId,
       parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).phone : undefined,
@@ -535,6 +542,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
 
     return jsonResponse({
       ok: true,
+      ...(webContact ? { webTicketContactVersion: 1 } : {}),
       cartId,
       clientSecret: pi.client_secret,
       paymentIntent: pi.client_secret,

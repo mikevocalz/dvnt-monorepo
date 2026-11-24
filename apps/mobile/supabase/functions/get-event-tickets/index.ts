@@ -10,6 +10,9 @@
  *       'active' | 'scanned' | 'refunded' | 'transfer_pending' | 'void' | 'all'
  *       search matches holder names / @usernames (literal case-insensitive partial),
  *       ticket UUID / legacy qr_token (prefix).
+ *   { event_id, contact_lookup: { kind, value } }
+ *     → privacy-minimized, exact current-holder username/email/phone; rate
+ *       limited, event-scoped, no offline or partial matches.
  *   { event_id, offline: true }
  *     → minimal payload for offline check-in: just qr_tokens of active
  *       tickets. Same auth gate. Bypasses pagination since the roster
@@ -123,7 +126,7 @@ Deno.serve(async (req: Request) => {
       pageSize?: number;
       status?: string;
       search?: string;
-      contact_lookup?: { kind: "email" | "phone"; value: string };
+      contact_lookup?: { kind: "email" | "phone" | "username"; value: string };
       /** WS-2 sort key. Defaults to `purchased_at` (the historic order). */
       sort?: string;
       /** WS-2 keyset cursor — `{ value, id }` from the previous page's last row. */
@@ -265,14 +268,14 @@ Deno.serve(async (req: Request) => {
     // cursor, status and response projections; no global profile lookup or
     // unbounded ticket-ID list is sent through a PostgREST URL.
     const contact = body.contact_lookup;
-    if (contact && (typeof contact !== "object" || !["email", "phone"].includes(contact.kind)
-      || typeof contact.value !== "string" || contact.value.length > 254 || search)) {
-      return errorResponse("Enter one complete email or phone number", 400);
+    if (contact && (typeof contact !== "object" || !["email", "phone", "username"].includes(contact.kind)
+      || typeof contact.value !== "string" || !contact.value.trim() || contact.value.length > 254 || search)) {
+      return errorResponse("Enter one complete username, email, or phone number", 400);
     }
     let query = contact
       ? supabase.rpc("lookup_event_tickets_contact", {
           p_event_id: eventIdNum, p_auth_id: authId, p_kind: contact.kind, p_value: contact.value,
-        }, { count: "exact" }).select("*, ticket_types(name, category)")
+        }, { count: "exact" }).select("id, event_id, ticket_type_id, status, qr_token, category, checked_in_at, checked_in_by, user_id, attendee_name, guest_name, created_at, ticket_types(name, category)")
       : search
       ? supabase.rpc("search_event_tickets", {
           p_event_id: eventIdNum, p_auth_id: authId, p_search: search,
@@ -329,7 +332,10 @@ Deno.serve(async (req: Request) => {
     if (error) {
       if (contact) {
         // Do not log query arguments or contact-containing database details.
-        return errorResponse(error.code === "P0001" ? "Too many contact lookups. Try again shortly." : "Contact lookup unavailable", error.code === "P0001" ? 429 : 503);
+        if (error.code === "P0001") return errorResponse("Too many contact lookups. Try again shortly.", 429);
+        if (error.code === "22023") return errorResponse("Enter one complete username, email, or phone number", 400);
+        if (error.code === "42501") return errorResponse("Not your event", 403);
+        return errorResponse("Contact lookup unavailable", 503);
       }
       console.error("[get-event-tickets] query error:", error);
       return errorResponse("Could not fetch tickets", 500);
@@ -340,7 +346,7 @@ Deno.serve(async (req: Request) => {
     const cancellationOrders = new Map<string, any>();
     const cancellationTransfers = new Set<string>();
     let cancellationVerified = false;
-    if (isOwner && (data || []).length > 0) {
+    if (isOwner && !contact && (data || []).length > 0) {
       const orderIds = [...new Set((data || []).map((t: any) => t.order_id).filter(Boolean))];
       const ticketIds = (data || []).map((t: any) => t.id);
       const [orders, transfers] = await Promise.all([
@@ -430,7 +436,7 @@ Deno.serve(async (req: Request) => {
         (typeof t.attendee_name === "string" && t.attendee_name.trim().length > 0
           ? t.attendee_name.trim()
           : null) ??
-        (t.user_id ? nameByUser.get(t.user_id) || null : t.guest_name || null);
+        (t.user_id ? (contact ? null : nameByUser.get(t.user_id) || null) : t.guest_name || null);
       const tier = t.user_id ? tierByUser.get(t.user_id) || null : null;
       const membership_tier = isAdmission && tier
         ? { planKey: tier.planKey, rank: tier.rank }

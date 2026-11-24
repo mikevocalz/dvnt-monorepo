@@ -14,6 +14,8 @@ interface GuestRsvpState {
   step: GuestRsvpStep;
   email: string;
   name: string;
+  username: string;
+  phone: string;
   quantity: number;
   attendeeNames: string[];
   /** off | optional | required — fetched when the sheet opens. */
@@ -38,6 +40,8 @@ const initial = {
   step: "form" as GuestRsvpStep,
   email: "",
   name: "",
+  username: "",
+  phone: "",
   quantity: 1,
   attendeeNames: [] as string[],
   nameRequirement: "off",

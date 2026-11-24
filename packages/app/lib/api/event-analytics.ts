@@ -93,6 +93,7 @@ export interface EventAttendeeRow {
   ticketId: string;
   buyerUsername: string | null;
   buyerEmail: string | null;
+  buyerPhone?: string | null;
   buyerName: string | null;
   tierName: string | null;
   tierPriceCents: number | null;
@@ -106,6 +107,7 @@ export interface EventAttendeesResponse {
   eventId: string;
   title: string;
   attendees: EventAttendeeRow[];
+  includesPhone?: true;
 }
 
 type AnalyticsResponse<T> = ({ ok: true } & T) | { ok: false; error?: string };
@@ -140,10 +142,11 @@ export const eventAnalyticsApi = {
 
   async getAttendees(
     eventId: string | number,
+    options?: { includePhone?: boolean },
   ): Promise<EventAttendeesResponse | null> {
     const res = await invokeEdge<AnalyticsResponse<EventAttendeesResponse>>(
       "event-analytics",
-      { event_id: eventId, action: "attendees" },
+      { event_id: eventId, action: "attendees", ...(options?.includePhone ? { include_phone: true } : {}) },
     );
     return unwrap<EventAttendeesResponse>("getAttendees", res);
   },
@@ -154,11 +157,12 @@ export const eventAnalyticsApi = {
  * contain commas, quotes, and newlines per RFC 4180 (quote-wrap and
  * double-up internal quotes).
  */
-export function attendeesToCsv(rows: EventAttendeeRow[]): string {
+export function attendeesToCsv(rows: EventAttendeeRow[], options?: { includePhone?: boolean }): string {
   const headers = [
     "Ticket ID",
     "Username",
     "Email",
+    ...(options?.includePhone ? ["Phone Number"] : []),
     "Name",
     "Tier",
     "Tier Price",
@@ -170,7 +174,9 @@ export function attendeesToCsv(rows: EventAttendeeRow[]): string {
 
   const escape = (v: unknown): string => {
     if (v == null) return "";
-    const s = String(v);
+    const raw = String(v);
+    const s = options?.includePhone && /^(?:[\t\r\n]|[\s\u200B-\u200D\uFEFF]*[=+@\-＝＋＠－])/.test(raw)
+      ? "'" + raw : raw;
     if (s.includes(",") || s.includes("\"") || s.includes("\n") || s.includes("\r")) {
       return `"${s.replace(/"/g, '""')}"`;
     }
@@ -186,6 +192,9 @@ export function attendeesToCsv(rows: EventAttendeeRow[]): string {
         r.ticketId,
         r.buyerUsername ?? "",
         r.buyerEmail ?? "",
+        // A leading apostrophe is a spreadsheet text marker, not a formula.
+        // Keep +, zero prefixes, and long numbers out of numeric coercion.
+        ...(options?.includePhone ? [r.buyerPhone ? "'" + r.buyerPhone : ""] : []),
         r.buyerName ?? "",
         r.tierName ?? "",
         money(r.tierPriceCents),

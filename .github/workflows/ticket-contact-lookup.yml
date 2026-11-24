@@ -29,4 +29,5 @@ jobs:
           node --test apps/mobile/supabase/functions/get-event-tickets/index.test.cjs apps/mobile/supabase/functions/get-event-tickets/offline.test.cjs
           node scripts/test-scanner-contact-dom.cjs
           node scripts/test-guest-contact-sql.cjs
+          node scripts/test-web-ticket-contact-sql.cjs
           node --test apps/mobile/supabase/functions/guest-checkout/contact.test.cjs

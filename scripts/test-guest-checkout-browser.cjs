@@ -24,7 +24,7 @@ const boundaries={
  '@dvnt/app/lib/supabase/client':`export const supabase={from:()=>({select:()=>({eq:()=>({single:()=>Promise.resolve({data:{attendee_name_requirement:'off',refund_policy:'none'}})})})}),functions:{invoke:async(_,options)=>{const response=await fetch('/fixture-api',{method:'POST',body:JSON.stringify(options.body),signal:options.signal});const data=await response.json();return {data,error:null};}}};`,
 };
 (async()=>{
- const build=await esbuild.build({stdin:{contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {GuestCheckoutSheet} from './packages/app/features/events/guest-checkout-sheet.web';import {useGuestCheckoutStore} from './packages/app/lib/stores/guest-checkout-store';window.begin=(args={})=>{useGuestCheckoutStore.getState().openSheet({eventId:'1',eventTitle:'Fixture',tierId:'${TIER}',tierName:'Admission',priceCents:3000,...args});useGuestCheckoutStore.getState().patch({email:'${EMAIL}',name:'Guest Buyer',phone:'+12125550123'});};window.store=useGuestCheckoutStore;createRoot(document.getElementById('root')).render(<GuestCheckoutSheet/>);`,resolveDir:ROOT,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',define:{'process.env.NODE_ENV':'"test"'},plugins:[{name:'explicit-boundaries',setup(build){
+ const build=await esbuild.build({stdin:{contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {GuestCheckoutSheet} from './packages/app/features/events/guest-checkout-sheet.web';import {useGuestCheckoutStore} from './packages/app/lib/stores/guest-checkout-store';window.begin=(args={})=>{useGuestCheckoutStore.getState().openSheet({eventId:'1',eventTitle:'Fixture',tierId:'${TIER}',tierName:'Admission',priceCents:3000,...args});useGuestCheckoutStore.getState().patch({username:'@Door.Test',email:'${EMAIL}',name:'Guest Buyer',phone:'+12125550123'});};window.store=useGuestCheckoutStore;createRoot(document.getElementById('root')).render(<GuestCheckoutSheet/>);`,resolveDir:ROOT,loader:'tsx'},nodePaths:(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean),bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',define:{'process.env.NODE_ENV':'"test"'},plugins:[{name:'explicit-boundaries',setup(build){
   build.onResolve({filter:/.*/},args=>{
    if(Object.hasOwn(boundaries,args.path))return{path:args.path,namespace:'fixture-boundary'};
    if(args.path.startsWith('@dvnt/app/'))return{path:path.join(ROOT,'packages/app',args.path.slice('@dvnt/app/'.length))+(/\.(tsx?|js)$/.test(args.path)?'':'.ts')};
@@ -32,11 +32,13 @@ const boundaries={
   build.onLoad({filter:/.*/,namespace:'fixture-boundary'},args=>({contents:boundaries[args.path],loader:'tsx',resolveDir:ROOT}));
  }}]});
  const bundle=build.outputFiles[0].contents;
+ let omitCapability=false;
  const server=http.createServer(async(req,res)=>{
   if(req.url==='/bundle.js'){res.writeHead(200,{'Content-Type':'application/javascript'});return res.end(bundle)}
   if(req.url==='/fixture-api'){
    let data='';for await(const part of req)data+=part;const body=JSON.parse(data);calls.push(body);
    const result=await f.call(body);
+   if (omitCapability) delete result.data.webTicketContactVersion;
    if(body.quote_request?.discount_code==='SLOW')await new Promise(resolve=>setTimeout(resolve,1000));
    res.writeHead(result.status,{'Content-Type':'application/json'});return res.end(JSON.stringify(result.data));
   }
@@ -45,24 +47,39 @@ const boundaries={
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  let browser;
  try{
-  browser=await chromium.launch({headless:true,channel:'chromium',args:['--no-sandbox','--disable-dev-shm-usage']});
+  const executablePath=process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{channel:'chromium'}),args:['--no-sandbox','--disable-dev-shm-usage','--no-zygote']});
   const page=await browser.newPage({viewport:{width:390,height:844}});const pageErrors=[];page.on('pageerror',e=>pageErrors.push(e.message));
   await page.goto('http://127.0.0.1:'+server.address().port);
+  omitCapability=true;
+  await page.evaluate(()=>window.begin());
+  await page.getByRole('alert').filter({hasText:'Checkout is updating'}).waitFor();
+  assert.equal(f.writes.length,0,'old Edge quote may not initiate an untracked purchase');
+  await page.getByRole('button',{name:'Close checkout',exact:true}).click();
+  omitCapability=false;
   // A signed-out free RSVP must quote and issue without enabling paid sales.
   await page.evaluate(({tier})=>window.begin({eventId:'3',tierId:tier,tierName:'RSVP',priceCents:0}),{tier:RSVP_TIER});
   await page.getByRole('button',{name:'Get free tickets',exact:true}).waitFor();
   assert.equal(f.writes.length,0,'opening RSVP only requests a read-only quote');
   await page.getByRole('button',{name:'More',exact:true}).click();
   await page.waitForFunction(()=>window.store.getState().quote?.total_cents===0&&!window.store.getState().quoteLoading);
+  const handle=page.getByRole('textbox',{name:/Ticket username/});
+  await handle.fill('');
+  await page.getByRole('button',{name:'Get free tickets',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:/Usernames are/}).waitFor();
+  assert.equal(f.writes.length,0,'missing required handle cannot issue tickets');
+  await handle.fill('@Door.Test');
   await page.getByRole('button',{name:'Get free tickets',exact:true}).click();
   await page.getByRole('heading',{name:"You're in!",exact:true}).waitFor();
   assert.equal(f.tables.tickets.length,2);assert.equal(f.emails.length,1);assert.equal(f.stripe.length,0);
-  const rsvp=calls.find(body=>body.action!=='quote');
+  const request=calls.find(body=>body.action==='checkout');
+  assert.equal(request.event_id,undefined,'old Edge cannot use the nested purchase identifiers');
+  const rsvp=request.web_ticket_checkout;
   assert.equal(rsvp.event_id,3);assert.equal(rsvp.quantity,2);assert.match(rsvp.expected_quote_key,/^[a-f0-9]{64}$/);
   assert.deepEqual(f.profileCalls,[],'free RSVP does not create an account');
   await page.getByRole('button',{name:'Done',exact:true}).click();
   await page.evaluate(()=>window.begin());
-  assert.equal(await page.getByRole('textbox',{name:'Username',exact:true}).count(),0);
+  assert.equal(await page.getByRole('textbox',{name:/Ticket username/}).inputValue(),'@Door.Test');
   assert.equal(await page.getByRole('textbox',{name:'Phone number',exact:true}).inputValue(),'+12125550123');
   await page.getByRole('textbox',{name:'Full name',exact:true}).fill('Guest Buyer');
   const code=page.getByRole('textbox',{name:'Promo or promoter code'});
@@ -86,8 +103,9 @@ const boundaries={
   await page.getByRole('button',{name:'Apply code',exact:true}).click();await page.getByRole('button',{name:'Pay $28.68',exact:true}).waitFor();
   await page.route('https://checkout.stripe.com/**',route=>route.fulfill({body:'Fixture hosted checkout; no card charge.'}));
   await page.getByRole('button',{name:'Pay $28.68',exact:true}).click();await page.waitForURL('https://checkout.stripe.com/**');
-  const payment=calls.find(body=>body.action!=='quote'&&body.event_id===1);assert.equal(payment.discount_code,'SAVE10');assert.match(payment.expected_quote_key,/^[a-f0-9]{64}$/);
+  const payment=calls.find(body=>body.web_ticket_checkout?.event_id===1)?.web_ticket_checkout;assert.equal(payment.discount_code,'SAVE10');assert.match(payment.expected_quote_key,/^[a-f0-9]{64}$/);
   for(const field of ['username','full_name','phone'])assert.equal(Object.hasOwn(payment,field),false,field+' must not provision an account');
+  assert.equal(payment.guest_username,'door.test');assert.equal(payment.guest_phone,'+12125550123');
   assert.equal(f.tables.orders.at(-1).total_cents,2868);assert.equal(f.stripe.length,1);
   assert.deepEqual(pageErrors,[],'no unexpected browser errors');
   console.log('PASS: free RSVP with paid sales off, guest issuance without signup, visible mobile code field, apply/remove, quantity repricing, invalid code, stale quote, new-event reset, reviewed checkout payload and redirect (fixture Stripe).');

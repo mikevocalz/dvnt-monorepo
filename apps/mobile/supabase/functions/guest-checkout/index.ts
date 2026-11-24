@@ -34,7 +34,7 @@ import { tierSaleAvailabilityError } from "../_shared/tier-sale-availability.ts"
 import { isUnpublished } from "../_shared/event-access.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import { deliverTicketBundleEmail } from "../_shared/ticket-email-delivery.ts";
-import { checkFullName, checkPhone, parseCheckoutProfileFields } from "../_shared/checkout-profile-fields.ts";
+import { unwrapWebTicketContactRequest, checkFullName, checkPhone, isWebTicketContactRequest, parseCheckoutProfileFields, parseWebGuestTicketContact } from "../_shared/checkout-profile-fields.ts";
 import {
   provisionCheckoutProfile,
   recordCheckoutProfileIntake,
@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
       return err("invalid_request", "Unknown checkout action.", 400);
     // A nested quote payload cannot accidentally execute a purchase against an
     // older deployed guest-checkout version that does not understand quotes.
-    const body = isQuote ? envelope.quote_request : envelope;
+    const body = isQuote ? envelope.quote_request : unwrapWebTicketContactRequest(envelope);
     if (!body || typeof body !== "object" || Array.isArray(body))
       return err("invalid_request", "Invalid checkout request.", 400);
     const eventId = Number(body.event_id);
@@ -139,6 +139,11 @@ Deno.serve(async (req) => {
       return err("invalid_quantity", "Choose between 1 and 10 tickets.", 400);
     const guestEmail = String(body.guest_email || "").trim().toLowerCase();
     const guestName = body.guest_name ? String(body.guest_name).trim() : "";
+    const webContact = !isQuote && (
+      Object.prototype.hasOwnProperty.call(body, "guest_username") ||
+      isWebTicketContactRequest(body.checkout_contact_version, req.headers.get("origin"), Deno.env.get("DVNT_REQUIRE_WEB_TICKET_CONTACT") === "true")
+    ) ? parseWebGuestTicketContact({ email: body.guest_email, username: body.guest_username, phone: body.guest_phone }) : null;
+    if (webContact && !webContact.ok) return err(webContact.code, webContact.message, 400);
     // Independent contact field: never routes a guest into profile creation.
     // Older clients may omit it; new web clients send a validated name/phone pair.
     let guestPhone: string | null = null;
@@ -154,7 +159,7 @@ Deno.serve(async (req) => {
       : [];
     if ((!isQuote || guestEmail) && (!EMAIL_RE.test(guestEmail) || guestEmail.length > 254))
       return err("invalid_email", "Enter a valid email.");
-    const profile = isQuote ? { ok: true as const, fields: null } : parseCheckoutProfileFields(body);
+    const profile = isQuote || webContact ? { ok: true as const, fields: null } : parseCheckoutProfileFields(body);
     if (!profile.ok) return err(profile.code, profile.message);
     const profileFields = profile.fields;
     if (!Number.isSafeInteger(eventId) || eventId <= 0 || !ticketTypeId) return err("invalid_request", "Missing event or tier.");
@@ -180,6 +185,15 @@ Deno.serve(async (req) => {
       if (existing) {
         if (existing.event_id !== eventId || existing.guest_email !== guestEmail || existing.quantity !== quantity)
           return err("idempotency_conflict", "This checkout attempt belongs to a different selection.", 409);
+        if (webContact) {
+          const { data: recorded, error: contactError } = await supabase.from("web_ticket_order_contacts")
+            .select("guest_email,guest_username,guest_phone").eq("order_id", existing.id).maybeSingle();
+          if (contactError) return err("checkout_processing", "Please retry shortly.", 503);
+          if (recorded?.guest_email !== webContact.email || recorded?.guest_username !== webContact.username ||
+              recorded?.guest_phone !== webContact.phone) {
+            return err("idempotency_conflict", "This checkout attempt has different contact details. Reopen checkout to start again.", 409);
+          }
+        }
         if (existing.status !== "paid" || existing.total_cents !== 0)
           return err("checkout_processing", "Your previous checkout is still processing.", 409);
         const { data: existingTickets, error: replayError } = await supabase
@@ -194,6 +208,7 @@ Deno.serve(async (req) => {
         await recordFreePromoterAttribution(supabase, existing);
         return json({
           ok: true,
+          ...(webContact ? { webTicketContactVersion: 1 } : {}),
           free: true,
           order_id: existing.id,
           count: count ?? existing.quantity ?? quantity,
@@ -298,7 +313,10 @@ Deno.serve(async (req) => {
       feeMode: ev.fee_mode, guestEmail, discountCode: body.discount_code,
       promoCode: body.promo_code, promoterCode: body.promoter_code,
     });
-    if (isQuote) return json({ ok: true, quote: pricing.quote });
+    if (isQuote) {
+      const { error } = await supabase.from("web_ticket_order_contacts").select("order_id").limit(0);
+      return json({ ok: true, quote: pricing.quote, ...(error ? {} : { webTicketContactVersion: 1 }) });
+    }
     if ((body.discount_code || body.promo_code) && !body.expected_quote_key)
       return err("quote_required", "Apply your code and review the total before paying.", 409);
     if (body.expected_quote_key && body.expected_quote_key !== pricing.quote.quote_key)
@@ -322,7 +340,7 @@ Deno.serve(async (req) => {
           user_id: null,
           guest_email: guestEmail,
           guest_name: guestName || null,
-          guest_phone: guestPhone,
+          guest_phone: webContact ? null : guestPhone,
           attendee_name: attendeeNames[i] || guestName || null,
           guest_lookup_token: crypto.randomUUID(),
           status: "active",
@@ -335,13 +353,14 @@ Deno.serve(async (req) => {
       }
 
       const { data: issued, error: issueError } = await supabase.rpc(
-        "guest_free_checkout_atomic",
+        webContact ? "guest_free_checkout_with_contact" : "guest_free_checkout_atomic",
         {
+          ...(webContact ? { p_guest_username: webContact.username, p_guest_phone: webContact.phone } : {}),
           p_ticket_type_id: ticketTypeId,
           p_ticket_rows: ticketRows,
           p_order: {
             guest_email: guestEmail,
-            guest_phone: guestPhone,
+            guest_phone: webContact ? null : guestPhone,
             quantity,
             subtotal_cents: 0,
             total_cents: 0,
@@ -375,7 +394,7 @@ Deno.serve(async (req) => {
       // prepared its QR rows. Only the winning transaction runs side effects.
       if (issued.idempotent) {
         await recordFreePromoterAttribution(supabase, issued.order);
-        return json({ ok: true, free: true, order_id: freeOrder.id, count: issued.count, idempotent: true });
+        return json({ ok: true, ...(webContact ? { webTicketContactVersion: 1 } : {}), free: true, order_id: freeOrder.id, count: issued.count, idempotent: true });
       }
 
       // Count a promo only after the ticket insert succeeds, never on quote,
@@ -403,6 +422,7 @@ Deno.serve(async (req) => {
 
       return json({
         ok: true,
+        ...(webContact ? { webTicketContactVersion: 1 } : {}),
         free: true,
         order_id: freeOrder.id,
         count: quantity,
@@ -528,10 +548,10 @@ Deno.serve(async (req) => {
     // nothing to attach to. Fee columns are server-truth from computeFees;
     // in absorb mode the buyer-side fee is zeroed (organizer eats it) and
     // total is just the subtotal.
-    const { error: guestOrderError } = await supabase.from("orders").insert({
+    const orderInsert = supabase.from("orders").insert({
       user_id: null,
       guest_email: guestEmail,
-      guest_phone: guestPhone,
+      guest_phone: webContact ? null : guestPhone,
       type: "event_ticket",
       status: "payment_pending",
       quantity,
@@ -552,10 +572,25 @@ Deno.serve(async (req) => {
       stripe_checkout_session_id: session.id,
       ...pricing.orderFields,
     });
-    if (guestOrderError) {
-      // Non-fatal: the Stripe session is already live. Log loudly —
-      // reconciliation can still repair the order later.
-      console.error("[guest-checkout] order insert failed:", guestOrderError);
+    if (webContact) {
+      const { data: order, error: orderError } = await orderInsert.select("id").single();
+      const contactResult = !orderError && order?.id
+        ? await supabase.rpc("set_web_ticket_order_contact", {
+            p_order_id: order.id, p_guest_email: webContact.email,
+            p_guest_username: webContact.username, p_guest_phone: webContact.phone,
+          })
+        : { error: orderError ?? { code: "missing_order" } };
+      if (contactResult.error) {
+        // The payment URL has not been shared. Expire the exact Stripe session
+        // and leave hold/order reconciliation to existing timeout handling.
+        try { await stripePost("/checkout/sessions/" + session.id + "/expire", {}); }
+        catch { console.error("[guest-checkout] could not expire orphan checkout session"); }
+        console.error("[guest-checkout] guest contact capture failed:", contactResult.error.code);
+        return err("checkout_unavailable", "Couldn't save your ticket contact. Please try again.", 503);
+      }
+    } else {
+      const { error: guestOrderError } = await orderInsert;
+      if (guestOrderError) console.error("[guest-checkout] order insert failed:", guestOrderError);
     }
 
     // The profile is made when the webhook issues the tickets, not now: an
@@ -565,7 +600,7 @@ Deno.serve(async (req) => {
       await recordCheckoutProfileIntake(supabase, session.id, profileFields, "[guest-checkout]");
     }
 
-    return json({ ok: true, url: session.url });
+    return json({ ok: true, ...(webContact ? { webTicketContactVersion: 1 } : {}), url: session.url });
   } catch (e) {
     if (e instanceof GuestPriceError) return err("invalid_discount", e.message, 400);
     console.error("[guest-checkout]", e);

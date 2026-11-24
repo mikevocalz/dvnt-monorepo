@@ -13,6 +13,7 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
       body:JSON.stringify({action:'describe',embedId:id}),cache:'no-store',signal:AbortSignal.timeout(15000)});
     if(!response.ok) return denied(response.status===404?404:503);
     const data=await response.json() as TicketEmbedDescriptor;
+    if (data.webTicketContactVersion !== 1) return denied(503);
     const parent=new URL(data.allowedOrigin);
     if(parent.protocol!=='https:' || parent.origin!==data.allowedOrigin) return denied(503);
     const supplied=new URL(request.url).searchParams.get('channel');
