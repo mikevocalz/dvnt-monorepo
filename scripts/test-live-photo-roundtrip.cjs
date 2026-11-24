@@ -54,7 +54,13 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
       assert.equal(motionObject.mime, 'video/quicktime'); assert.match(motionObject.filename, /\.mov$/);
     }
     const read = await client.read(created.id);
-    assert.deepEqual(JSON.parse(JSON.stringify(read.media)), JSON.parse(JSON.stringify(created.media)), 'optimistic post and fresh persisted read must agree after unordered DB rows');
+    assert.deepEqual(read.media.map(item => item.mediaId), stored.rows.map(row => row.id),
+      'the owner detail read includes durable attachment IDs in display order');
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(read.media.map(({ mediaId, ...item }) => item))),
+      JSON.parse(JSON.stringify(created.media)),
+      'optimistic post and fresh persisted read must still agree on all playback fields',
+    );
     assert.equal(harness.state.reads.length, 1);
     for (let index = 0; index < read.media.length; index++) {
       assert.equal(read.media[index].type, 'livePhoto');
