@@ -27,6 +27,8 @@ interface Props {
   columns?: number;
 }
 
+const MEDIA_CHECK_TIMEOUT_MS = 30_000;
+
 const isHeic = (mime?: string) => mime === "image/heic" || mime === "image/heif";
 
 /**
@@ -103,6 +105,11 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     setPending(label);
   };
   const invalidate = () => { version.current += 1; changePending(null); };
+  const expire = (operation: number, notice: string) => setTimeout(() => {
+    if (operation !== version.current) return;
+    invalidate();
+    setError(notice);
+  }, MEDIA_CHECK_TIMEOUT_MS);
   const notifyExternalPending = useEffectEvent((value: boolean) => onPendingChange(value));
   useEffect(() => {
     // Synchronize the reader lifecycle with an externally replaced draft.
@@ -125,6 +132,7 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     const commit = beginUpdate();
     const original = selectedMedia;
     changePending("Checking selected files…");
+    const deadline = expire(operation, "Checking those files timed out. Your existing items are unchanged. Choose the files again to retry.");
     try {
       const result = await readBrowserMediaFiles(files, { isCurrent: () => operation === version.current });
       if (operation !== version.current) { releaseUnselectedBrowserMedia(result.assets, original); return; }
@@ -144,6 +152,7 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     } catch {
       if (operation === version.current) setError("Could not read those files. Your existing items are unchanged; choose the files again to retry.");
     } finally {
+      clearTimeout(deadline);
       if (operation === version.current) changePending(null);
     }
   };
@@ -161,6 +170,7 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     }
     const operation = ++version.current;
     changePending("Checking motion for this photo…");
+    const deadline = expire(operation, "Checking that motion timed out. The files remain separate. Choose the motion again to retry.");
     try {
       const result = await associateBrowserMedia(selectedMedia, stillId, motionId);
       if (operation !== version.current) return;
@@ -170,6 +180,7 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     } catch {
       if (operation === version.current) setError("Could not read that motion. The files remain separate; choose the motion again to retry.");
     } finally {
+      clearTimeout(deadline);
       if (operation === version.current) changePending(null);
     }
   };
