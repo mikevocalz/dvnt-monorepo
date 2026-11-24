@@ -14,7 +14,7 @@ const fixture = {
   '@dvnt/app/lib/media/handoff-upload-lease': `export const withLeasedHandoffScan=async(media,_signal,scan)=>scan(media);`,
   // Classification has its own contract. Keep caption/queue tests deterministic.
   './nudity-scan.web': `import {state} from 'caption-fixture';export const scanPostMedia=async()=>state.scanResult;`,
-  'caption-fixture': `export const state={scanResult:{flagged:false,incomplete:false},post:{id:'7',kind:'media',caption:'Old #caption',author:{id:'1'},media:[]},published:[],updated:[],navigations:[],uploads:[],people:[]};
+  'caption-fixture': `export const state={scanResult:{flagged:false,incomplete:false},post:{id:'7',kind:'media',caption:'Old #caption',author:{id:'1'},media:[]},published:[],updated:[],editorRead:null,navigations:[],uploads:[],people:[]};
     export const router={push:p=>state.navigations.push(p),replace:p=>state.navigations.push(p),back:()=>state.navigations.push('back')};
     export const createPost=async input=>{state.published.push(input);return {id:77}};
     export const uploadMultiple=async files=>{state.uploads.push(files);return files.map(file=>({success:true,type:file.type,url:'https://fixture.invalid/image.jpg'}))};`,
@@ -26,11 +26,11 @@ const fixture = {
   'lucide-react': ['Hash','X','ImagePlus','MapPin','Trash2','Plus','Type','Image','CalendarPlus','ArrowUp','ArrowDown','AlertCircle','Flame','ImageIcon','Play'].map(n=>`export const ${n}=()=>null;`).join('\n'),
   'react-native-mmkv': `export const createMMKV=()=>{throw new Error('native-only fixture')};`,
   '@dvnt/app/lib/hooks/use-verified-gate': `export const useVerifiedGate=()=> (_action,run)=>run();`,
-  '@dvnt/app/lib/hooks/use-posts': `import {state,createPost} from 'caption-fixture';export const useCreatePost=()=>({mutateAsync:createPost});export const usePost=()=>({data:state.post,isLoading:false,isError:false});export const postKeys={detail:id=>['post',id],feedInfiniteAll:()=>['feed'],feedInfinite:()=>['feed'],profilePosts:()=>['profile']};`,
+  '@dvnt/app/lib/hooks/use-posts': `import {state,createPost} from 'caption-fixture';export const useCreatePost=()=>({mutateAsync:createPost});export const usePost=(id,editor)=>{state.editorRead={id,editor};return {data:state.post,isLoading:false,isError:false}};export const postKeys={detail:id=>['post',id],feedInfiniteAll:()=>['feed'],feedInfinite:()=>['feed'],profilePosts:()=>['profile']};`,
   '@dvnt/app/lib/hooks/use-media-upload': `import {uploadMultiple} from 'caption-fixture';export const useMediaUpload=()=>({uploadMultiple});`,
   '@dvnt/app/lib/stores/auth-store': `const state={user:{id:'1',authId:'owner',username:'member'}};export const useAuthStore=select=>select(state);useAuthStore.getState=()=>state;`,
   '@dvnt/app/lib/api/post-tags': `import {state} from 'caption-fixture';export const postTagsApi={addTags:async(id,tags)=>{state.people.push({id,tags})},getTagsForPost:async()=>[]};`,
-  '@dvnt/app/lib/api/posts': `import {state} from 'caption-fixture';export const postsApi={updatePost:async(id,input)=>{state.updated.push({id,input});return {id}}};`,
+  '@dvnt/app/lib/api/posts': `import {state} from 'caption-fixture';export const postsApi={updatePostWeb:async(id,input)=>{state.updated.push({id,input});return {id}}};`,
   '@dvnt/app/lib/media/persist-local-selection': `export const POST_MEDIA_SCOPE='fixture';export const persistLocalMediaSelection=async uri=>uri;export const deletePersistedMediaSelection=async()=>{};`,
   '@dvnt/app/lib/posts/first-post-event': `export const assertFirstPostPublishable=async()=>{};`,
   '@dvnt/app/lib/profile/new-member-progress': `export const fetchNewMemberProgress=async()=>({step:'complete',hasPost:true});`,
@@ -143,6 +143,7 @@ window.runCaptionScenarios=async()=>{
   check(JSON.stringify(state.published[1].slides)===JSON.stringify(['A branded text post','Second branded slide\\n#community']),'slides and tags survive branded text publication');
   check(state.uploads.length===1,'text publication does not upload media');
   await flush(()=>{useEditPostStore.getState().reset();root.render(<EditPostScreen/>)});
+  check(state.editorRead?.id==='7'&&state.editorRead.editor===true,'web editor uses the dedicated read projection');
   check(document.querySelector('textarea').value==='Old #caption','edit reopens stored inline hashtags');
   await setInput(caption);
   check(!button('Save').disabled,'editor accepts boundary prose plus hashtags');
@@ -150,7 +151,7 @@ window.runCaptionScenarios=async()=>{
   check(button('Save').disabled,'editor refuses overlong prose');
   await setInput(caption);
   await flush(()=>button('Save').click());
-  check(state.updated.length===1&&state.updated[0].input.content===caption,'editor submits exact inline caption');
+  check(state.updated.length===1&&state.updated[0].id==='7'&&state.updated[0].input.content===caption,'editor submits exact inline caption');
   let resetAfterFailure=false;
   const unregisterThrow=registerUserDataReset(()=>{throw new Error('Expected reset failure fixture')});
   const unregisterLater=registerUserDataReset(()=>{resetAfterFailure=true});
