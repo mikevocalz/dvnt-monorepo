@@ -91,8 +91,7 @@ Deno.serve(async (req) => {
       slides?: string[];
       location?: string;
       isNSFW?: boolean;
-      media?: unknown;
-      removeMedia?: { expectedIds: string[]; ids: string[]; expectedCaption?: string };
+      media?: Array<{ order: number; url: string }>;
     };
     try {
       body = await req.json();
@@ -100,9 +99,9 @@ Deno.serve(async (req) => {
       return errorResponse("validation_error", "Invalid JSON body");
     }
 
-    const { postId, content, textTheme, slides, location, isNSFW, media, removeMedia } =
+    const { postId, content, textTheme, slides, location, isNSFW, media } =
       body;
-    if (!Number.isSafeInteger(postId) || postId <= 0) return errorResponse("validation_error", "A valid postId is required");
+    if (!postId) return errorResponse("validation_error", "postId is required");
 
     const userData = await resolveOrProvisionUser(
       supabaseAdmin,
@@ -141,45 +140,6 @@ Deno.serve(async (req) => {
           captionValidation.error || "Invalid caption",
           400,
         );
-      }
-    }
-
-    // Older callers may echo existing attachments during a caption edit.
-    // Treat only an exact, unambiguous echo as a no-op; never write media URLs
-    // or combine a legacy media payload with the atomic remove contract.
-    if (media !== undefined) {
-      const refuseReplacement = () => errorResponse(
-        "validation_error",
-        "Existing media cannot be replaced; remove it or edit before sharing.",
-      );
-      if (removeMedia !== undefined || !Array.isArray(media) || media.length > 10) {
-        return refuseReplacement();
-      }
-      const echoed = new Map<number, string>();
-      for (const item of media) {
-        if (!item || typeof item !== "object" || Object.keys(item).length !== 2 ||
-            !Number.isSafeInteger(item.order) || item.order < 0 ||
-            typeof item.url !== "string" || item.url.length === 0 ||
-            echoed.has(item.order)) return refuseReplacement();
-        echoed.set(item.order, item.url);
-      }
-      if (echoed.size > 0) {
-        if (post.post_kind === "text") return refuseReplacement();
-        const { data: current, error } = await supabaseAdmin
-          .from("posts_media")
-          .select("_order, url")
-          .eq("_parent_id", postId)
-          .in("_order", [...echoed.keys()]);
-        if (error || !Array.isArray(current)) {
-          return errorResponse("internal_error", "Could not verify existing media");
-        }
-        const seen = new Set<number>();
-        for (const row of current) {
-          if (seen.has(row._order) || !echoed.has(row._order) ||
-              echoed.get(row._order) !== row.url) return refuseReplacement();
-          seen.add(row._order);
-        }
-        if (seen.size !== echoed.size) return refuseReplacement();
       }
     }
 
@@ -223,51 +183,13 @@ Deno.serve(async (req) => {
       updateData.content = normalizedSlides[0];
     }
 
-    if (removeMedia !== undefined) {
-      const validIds = (ids: unknown): ids is string[] =>
-        Array.isArray(ids) && ids.length > 0 && ids.length <= 10 &&
-        ids.every((id) => typeof id === "string" && id.length > 0 && id.length <= 255) &&
-        new Set(ids).size === ids.length;
-      if (!removeMedia || !validIds(removeMedia.expectedIds) || !validIds(removeMedia.ids) ||
-          slides !== undefined || textTheme !== undefined ||
-          (content !== undefined && (typeof removeMedia.expectedCaption !== "string" ||
-            removeMedia.expectedCaption.length > 16000)) ||
-          removeMedia.ids.some((id) => !removeMedia.expectedIds.includes(id))) {
-        return errorResponse("validation_error", "Invalid media removal");
-      }
-      const { data, error } = await supabaseAdmin.rpc("remove_owned_post_media", {
-        p_post_id: postId,
-        p_author_id: userData.id,
-        p_expected_ids: removeMedia.expectedIds,
-        p_remove_ids: removeMedia.ids,
-        p_patch: updateData,
-        p_expected_content: removeMedia.expectedCaption ?? null,
-      });
-      if (error) {
-        console.error("[Edge:update-post] Media removal failed:", error.code);
-        return errorResponse("internal_error", "Couldn't save the media changes");
-      }
-      if (data?.result === "caption_changed") {
-        return errorResponse("conflict", "The caption changed. Reopen the post before saving.");
-      }
-      if (data?.result !== "saved") {
-        return data?.result === "last_item"
-          ? errorResponse("validation_error", "A media post needs at least one item")
-          : errorResponse("conflict", "The post changed. Reopen it before removing media.");
-      }
-      return jsonResponse({ ok: true, data: { post: data.post, remainingIds: data.remainingIds } });
-    }
-
     // Update post columns (if any)
     if (Object.keys(updateData).length > 0) {
-      const { data: edited, error } = await supabaseAdmin
+      const { error } = await supabaseAdmin
         .from("posts")
         .update(updateData)
-        .eq("id", postId)
-        .eq("author_id", userData.id)
-        .select("id")
-        .maybeSingle();
-      if (error || Number(edited?.id) !== postId)
+        .eq("id", postId);
+      if (error)
         return errorResponse("internal_error", "Failed to update post");
     }
 
@@ -300,6 +222,22 @@ Deno.serve(async (req) => {
           insertSlidesError,
         );
         return errorResponse("internal_error", "Failed to update text slides");
+      }
+    }
+
+    // Update media URLs (e.g. after image rotation)
+    if (media && Array.isArray(media) && media.length > 0) {
+      for (const item of media) {
+        if (item.order == null || !item.url) continue;
+        // Update by post id + display order
+        const { error: mediaError } = await supabaseAdmin
+          .from("posts_media")
+          .update({ url: item.url })
+          .eq("_parent_id", postId)
+          .eq("_order", item.order);
+        if (mediaError) {
+          console.error("[Edge:update-post] Media update error:", mediaError);
+        }
       }
     }
 

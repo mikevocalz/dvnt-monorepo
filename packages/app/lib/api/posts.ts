@@ -221,7 +221,7 @@ export function transformPost(
         : index;
 
       // Derive kind: existing rows have no mime_type — fall back to type field
-      const kind = rawType === "thumbnail" ? "thumbnail" : deriveMediaKind(rawType, mimeType, livePhotoVideoUrl);
+      const kind = rawType === "thumbnail" && typeof m[DB.postsMedia.id] === "string" ? "thumbnail" : deriveMediaKind(rawType, mimeType, livePhotoVideoUrl);
 
       return {
         type: kind,
@@ -344,8 +344,8 @@ export const postsApi = {
   /**
    * Get single post by ID
    */
-  async getPostById(id: string): Promise<Post | null> {
-    const result = await readProjectedPosts({ mode: "detail", postId: id, limit: 1 });
+  async getPostById(id: string, editor = false): Promise<Post | null> {
+    const result = await readProjectedPosts({ mode: "detail", postId: id, limit: 1, ...(editor ? { editor: true } : {}) });
     return result.posts[0] || null;
   },
 
@@ -632,6 +632,41 @@ export const postsApi = {
       slides?: string[];
       location?: string;
       isNSFW?: boolean;
+      media?: Array<{ order: number; url: string }>;
+    },
+  ) {
+    try {
+      const token = await requireBetterAuthToken();
+      const postIdInt = parseInt(postId);
+
+      const { data: response, error } = await supabase.functions.invoke<{
+        ok: boolean;
+        data?: { post: any };
+        error?: { code: string; message: string };
+      }>("update-post", {
+        body: { postId: postIdInt, ...updates },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (error) throw new Error(error.message || "Failed to update post");
+      if (!response?.ok)
+        throw new Error(response?.error?.message || "Failed to update post");
+
+      return response.data?.post;
+    } catch (error) {
+      console.error("[Posts] updatePost error:", error);
+      throw error;
+    }
+  },
+
+  async updatePostWeb(
+    postId: string,
+    updates: {
+      content?: string;
+      textTheme?: import("@dvnt/app/lib/types").TextPostThemeKey;
+      slides?: string[];
+      location?: string;
+      isNSFW?: boolean;
       removeMedia?: { expectedIds: string[]; ids: string[]; expectedCaption?: string };
     },
   ) {
@@ -643,7 +678,7 @@ export const postsApi = {
         ok: boolean;
         data?: { post: { id?: string | number }; remainingIds?: string[] };
         error?: { code: string; message: string };
-      }>("update-post", {
+      }>("update-post-web", {
         body: { postId: postIdInt, ...updates },
         headers: { Authorization: `Bearer ${token}` },
       });

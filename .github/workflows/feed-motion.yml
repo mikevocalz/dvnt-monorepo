@@ -22,11 +22,14 @@ on:
       - 'packages/app/lib/api/posts.ts'
       - 'packages/app/features/create/*live-photo*'
       - 'packages/app/features/create/browser-media*'
+      - 'packages/app/features/create/browser-crop-media*'
+      - 'packages/app/features/create/crop-preview.web.tsx'
       - 'packages/app/features/create/nudity-review-dialog.web.tsx'
       - 'packages/app/features/post/edit-post*'
       - 'packages/app/features/routes/screens/(protected)/edit-post/**'
       - 'packages/app/lib/posts/edit-post-media*'
       - 'apps/mobile/supabase/functions/update-post/**'
+      - 'apps/mobile/supabase/functions/update-post-web/**'
       - 'apps/mobile/supabase/functions/get-posts/**'
       - 'scripts/test-edit-post-media-dom.cjs'
       - 'scripts/test-post-media-removal-sql.cjs'
@@ -91,7 +94,7 @@ jobs:
           node scripts/test-live-photo-publish-original.cjs
           node scripts/test-live-photo-crop-guard.cjs
           node scripts/test-browser-live-photo-import-dom.cjs
-          node --test packages/app/lib/posts/edit-post-media.test.ts scripts/test-post-media-removal-sql.cjs
+          node --test packages/app/features/create/browser-crop-media.test.ts packages/app/lib/posts/edit-post-media.test.ts scripts/test-post-media-removal-sql.cjs
           node scripts/test-edit-post-media-dom.cjs
           node scripts/test-browser-live-photo-original-contract.cjs
           node scripts/test-browser-intake-diagnostic.cjs

@@ -9,7 +9,7 @@ import { getEditableMediaIds } from "@dvnt/app/lib/posts/edit-post-media";
  * `(protected)/post/edit/[id].tsx` just redirects here, so this one screen
  * serves both web routes).
  *
- * Both routes use the same owner-only save API as native. The published
+ * Both web routes use the dedicated owner-only web save API. The published
  * media editor only removes selected items; it never uploads replacement bytes.
  *
  * Law 3 (web idioms): NativeWind interop OFF — Tailwind className on raw DOM
@@ -51,8 +51,8 @@ export function EditPostScreen() {
   const currentUser = useAuthStore((st) => st.user);
   const s = useEditPostStore();
 
-  // ── Fetch post (same hook native uses for prefill) ──
-  const { data: post, isLoading, isError, isPlaceholderData } = usePost(id);
+  // ── Fetch owner edit projection ──
+  const { data: post, isLoading, isError, isPlaceholderData } = usePost(id, true);
   const leasedMedia = usePostMediaLease(post?.id, post?.media || []);
 
   // ── Post tags (Instagram-style) — same query native runs ──
@@ -125,7 +125,7 @@ export function EditPostScreen() {
   }, [post, currentUser]);
 
   const updateMutation = useMutation({
-    mutationFn: (updates: Parameters<typeof postsApi.updatePost>[1]) => postsApi.updatePost(id, updates),
+    mutationFn: (updates: Parameters<typeof postsApi.updatePostWeb>[1]) => postsApi.updatePostWeb(id, updates),
     onError: (error) => {
       showToast("error", "Couldn't save changes", error instanceof Error && error.message
         ? error.message

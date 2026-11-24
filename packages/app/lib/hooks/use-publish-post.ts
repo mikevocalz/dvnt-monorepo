@@ -71,7 +71,6 @@ function usePublishTaskDeps(): PublishTaskDeps {
           type: file.type,
           kind: file.kind as MediaFile["kind"],
           mimeType: file.mimeType,
-          cropExportMimeType: file.cropExportMimeType,
           pairedVideoUri: file.pairedVideoUri,
         })),
         report,

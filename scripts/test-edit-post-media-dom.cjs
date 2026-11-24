@@ -30,7 +30,7 @@ const { build } = require("esbuild");
       {mediaId:'c',order:3,url:'data:image/jpeg;base64,AAA=',type:'image'}]};
     export const data=create(()=>({data:{...original,caption:'truncated'},isPlaceholderData:true}));
     export const usePost=()=>data();
-    export const api={updatePost:async(id, update)=>{
+    export const api={updatePostWeb:async(id, update)=>{
       f.edits.push({id,update});
       if (f.fail) throw Error('write denied');
       const post=data.getState().data;

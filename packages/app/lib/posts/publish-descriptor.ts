@@ -1,4 +1,3 @@
-import type { CropExportMime } from "@dvnt/app/lib/media/crop-export";
 import type { TextPostThemeKey } from "@dvnt/app/lib/types";
 
 /** A picked file, pointed at an app-storage copy once the job has run once. */
@@ -7,8 +6,6 @@ export interface PublishMediaFile {
   type: "image" | "video";
   kind?: string;
   mimeType?: string;
-  /** Present only on a metadata-stripped native editor export. */
-  cropExportMimeType?: CropExportMime;
   pairedVideoUri?: string;
 }
 

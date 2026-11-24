@@ -31,7 +31,7 @@ async function createHarness() {
     'apps/mobile/supabase/migrations/20260916091500_idempotent_post_publish.sql',
     'apps/mobile/supabase/migrations/20260918180000_text_post_theme_deviant.sql',
   ]) await db.exec(fs.readFileSync(path.join(root, relative), 'utf8'));
-  const state = { objects: new Map(), uploads: [], creates: [], reads: [], failMotion: false, loseCreateAcknowledgement: false };
+  const state = { objects: new Map(), uploads: [], creates: [], reads: [], viewer: 'fixture-owner', failMotion: false, loseCreateAcknowledgement: false };
   const admin = {
     async rpc(name, args) {
       assert.equal(name, 'create_post_idempotent', 'queued publishes must use the real idempotent path');
@@ -59,12 +59,20 @@ async function createHarness() {
 
   // Exercise the real get-posts handler and authorization projection, rather
   // than retaining a legacy direct PostgREST transport after the API changed.
-  const readAdmin = { from(table) {
+  const readAdmin = {
+  async rpc(name, { p_authors }) {
+    assert.equal(name, 'post_relationship_access');
+    return { data: p_authors.map(author_id => ({ author_id, is_private: false })), error: null };
+  },
+  from(table) {
     assert.ok(['users', 'posts', 'follows', 'follow_requests', 'user_settings', 'blocks'].includes(table), `Unexpected read table ${table}`);
-    const filters = []; let single = false; let start = 0; let end = Infinity;
+    const filters = []; let single = false; let start = 0; let end = Infinity; let includeMediaId = false;
     const query = {
       select(columns) {
-        if (table === 'posts') assert.ok(columns.includes('live_photo_video_url') && columns.includes('_order'), 'real post read must request both pairing and order');
+        if (table === 'posts') {
+          assert.ok(columns.includes('live_photo_video_url') && columns.includes('_order'), 'real post read must request both pairing and order');
+          includeMediaId = columns.includes('media:posts_media(id,');
+        }
         return query;
       },
       eq(key, value) { filters.push(row => String(row[key]) === String(value)); return query; },
@@ -75,14 +83,15 @@ async function createHarness() {
       async then(resolve, reject) {
         try {
           let rows = table === 'users' || table === 'posts' ? (await db.query(`SELECT * FROM public.${table}`)).rows : [];
-          if (table === 'users') rows = rows.map(row => ({ ...row, auth_id: 'fixture-owner', is_private: false }));
+          if (table === 'users') rows = [...rows.map(row => ({ ...row, auth_id: 'fixture-owner', is_private: false })), { id: 88, auth_id: 'fixture-visitor', is_private: false }];
           rows = rows.filter(row => filters.every(filter => filter(row)));
           const count = rows.length;
           rows = rows.slice(start, end + 1);
           if (table === 'posts') rows = await Promise.all(rows.map(async row => ({
             ...row,
             // Reversed SQL results ensure transformPost still honors _order.
-            media: (await db.query('SELECT * FROM public.posts_media WHERE _parent_id = $1 ORDER BY _order DESC', [row.id])).rows,
+            media: (await db.query('SELECT * FROM public.posts_media WHERE _parent_id = $1 ORDER BY _order DESC', [row.id])).rows
+              .map(({ id, ...media }) => includeMediaId ? { id, ...media } : media),
             post_text_slides: (await db.query('SELECT * FROM public.post_text_slides WHERE post_id = $1', [row.id])).rows,
             author: { id: 1, username: 'fixture', first_name: 'Fixture' },
           })));
@@ -99,7 +108,7 @@ async function createHarness() {
     'https://esm.sh/@supabase/supabase-js@2': { createClient: () => readAdmin },
     '../_shared/verify-session.ts': { verifySession: async (_db, request) => {
       assert.equal(request.headers.get('Authorization'), 'Bearer fixture-token');
-      return 'fixture-owner';
+      return state.viewer;
     } },
     '../_shared/post-access.ts': postAccess,
   }, { Deno: { serve: fn => { readHandler = fn; }, env: { get: () => 'synthetic-fixture-only' } } });

@@ -80,7 +80,7 @@ function harness({ record = null, owner = true, session = true, failWrite = fals
     return {status:response.status,body:await response.json()};
   } };
 }
-for (const fn of ['update-post','create-post']) {
+for (const fn of ['update-post','update-post-web','create-post']) {
   test(fn+': missing verification opens the existing prompt instead of a silent generic failure',async()=>{
     const h=harness();
     const r=await h.call(fn,{postId:1,content:CAPTION,isNSFW:true,media:[{type:'image',url:'https://fixture.invalid/a.jpg'}]});
@@ -103,7 +103,7 @@ test('approved adult owner can save SPICY and caption without changing photos',a
 });
 test('adult owner cannot replace an existing attachment through the legacy payload',async()=>{
   const h=harness({record:{status:'passed',date_of_birth:'1990-01-01'}});
-  const r=await h.call('update-post',{postId:1,content:'New caption',isNSFW:true,
+  const r=await h.call('update-post-web',{postId:1,content:'New caption',isNSFW:true,
     media:[{order:0,url:'https://fixture.invalid/replacement.jpg'}]});
   assert.equal(r.body.error.code,'validation_error');
   assert.match(r.body.error.message,/cannot be replaced/);
@@ -186,8 +186,13 @@ for (const editor of [
     const snapshot={previousPost:{content:'old'},previousFeed:[{content:'old'}]};
     onError(new Error(message),{},snapshot);
     assert.equal(toasts[0][2],message,'do not discard the backend explanation');
-    assert.equal(optimistic,undefined,'do not optimistically expose an unconfirmed label or edit');
-    assert.equal(writes.length,0,'a refused edit changes no post cache');
+    if (editor.endsWith('.web.tsx')) {
+      assert.equal(optimistic,undefined,'do not optimistically expose an unconfirmed label or edit');
+      assert.equal(writes.length,0,'a refused edit changes no post cache');
+    } else {
+      assert.ok(optimistic);
+      assert.equal(writes.length,2,'existing native editor restores optimistic feed/detail caches');
+    }
     onError(null,{},null);
     assert.equal(toasts[1][2],"Couldn't save changes. Try again.");
   });

@@ -1,4 +1,3 @@
-import type { CropExportMime } from "@dvnt/app/lib/media/crop-export";
 import { useCallback, useState } from "react";
 import { sizeLimitForKind } from "@dvnt/app/lib/media/upload-policy";
 import * as ImagePicker from "expo-image-picker";
@@ -17,8 +16,6 @@ export interface MediaAsset {
   type: "image" | "video";
   kind: MediaKind;
   mimeType?: string;
-  /** Present only on a metadata-stripped native editor export. */
-  cropExportMimeType?: CropExportMime;
   width?: number;
   height?: number;
   duration?: number;

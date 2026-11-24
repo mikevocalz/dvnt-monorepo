@@ -1,4 +1,4 @@
--- Rollout order: migration, update-post and get-posts, then web/native clients.
+-- Rollout order: migration, update-post-web and get-posts, then web client.
 BEGIN;
 CREATE OR REPLACE FUNCTION public.remove_owned_post_media(
   p_post_id bigint, p_author_id integer, p_expected_ids text[],

@@ -8,6 +8,8 @@ import { ImageCropper, getCroppedDataUrl } from "@dvnt/ui";
 import type { Area } from "react-easy-crop";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
+import { canCropMedia } from "@dvnt/app/lib/media/live-photo-original";
+import { applyBrowserCrops } from "./browser-crop-media";
 import type { AspectPreset } from "@dvnt/app/features/crop/edit-state";
 
 /**
@@ -122,7 +124,7 @@ export function CropPreviewScreen() {
 
   // Hydrate the screen from the shared store's image assets on mount.
   useEffect(() => {
-    const imgs = selectedMedia.filter((m) => m.type === "image");
+    const imgs = selectedMedia.filter(canCropMedia);
     setImages(imgs);
     if (imgs.length === 0) router.replace("/feed/create");
     return () => reset();
@@ -143,12 +145,13 @@ export function CropPreviewScreen() {
       for (const img of images) {
         const area = areas[img.id];
         const source = srcOf(img);
-        // Only re-render if the user actually adjusted a crop for this image.
+        // Never export animated media. It remains in the original draft slot.
         const uri = area ? await getCroppedDataUrl(source, area) : img.uri;
         croppedResults.push({
           ...img,
           uri,
           editedUri: area ? uri : img.editedUri,
+          mimeType: area ? "image/jpeg" : img.mimeType,
           editorOpened: true,
           originalUri: img.originalUri || img.uri,
           width: area ? Math.round(area.width) : img.width,
@@ -156,10 +159,11 @@ export function CropPreviewScreen() {
         });
       }
 
-      // Mirror native handleDone: keep non-image assets, replace images,
-      // and honor the new ordering from the carousel.
-      const nonImage = selectedMedia.filter((m) => m.type !== "image");
-      setSelectedMedia([...nonImage, ...croppedResults]);
+      // Do not overwrite a draft replaced while waiting for a canvas export.
+      if (useCreatePostStore.getState().selectedMedia !== selectedMedia) {
+        throw new Error("The draft changed. Reopen the crop editor to try again.");
+      }
+      setSelectedMedia(applyBrowserCrops(selectedMedia, croppedResults));
       router.push("/feed/create");
     } catch (err: any) {
       setError(err?.message || "Failed to crop images. Please try again.");

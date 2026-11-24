@@ -62,12 +62,13 @@ Deno.serve(async (req) => {
         return json({ posts: [], nextCursor: null, hasMore: false });
       authorId = Number(author.data.id);
     }
+    const editorProjection = mode === "detail" && body.editor === true && userId !== null;
     let query = db.from("posts").select(
       `
       id, author_id, visibility, content, post_kind, text_theme, created_at, is_nsfw, location,
       likes_count, comments_count,
       author:users!posts_author_id_users_id_fk(id, username, first_name, verified, avatar:avatar_id(url)),
-      media:posts_media(${mode === "detail" && userId !== null ? "id, " : ""}type, url, _order, mime_type, live_photo_video_url, thumbnail),
+      media:posts_media(${editorProjection ? "id, " : ""}type, url, _order, mime_type, live_photo_video_url, thumbnail),
       post_text_slides(id, slide_index, content)
     `,
       { count: "exact" },
@@ -101,7 +102,7 @@ Deno.serve(async (req) => {
     );
     const hasMore = mode !== "detail" && (result.count || 0) > cursor + limit;
     return json({
-      posts: mode === "detail" && userId !== null
+      posts: editorProjection
         ? posts.map((post) => Number(post.author_id) === userId ? post : {
             ...post,
             media: (post.media ?? []).map(({ id: _id, ...media }: Record<string, unknown>) => media),

@@ -139,12 +139,12 @@ const invalidCaptions = [
   ['hashtag length guard', '#' + '語'.repeat(101)],
 ];
 
-for (const fn of ['create-post', 'update-post']) {
+for (const fn of ['create-post', 'update-post', 'update-post-web']) {
   for (const [description, content] of invalidCaptions) {
     test(`${fn}: ${description} is refused before any post, slide or media write`, async () => {
       const h = harness();
       const before = plain(h.tables);
-      const result = await h.call(fn, { postId: 1, content, media: fn === 'update-post' ? LEGACY_MEDIA_ECHO : MEDIA, location: 'New location' });
+      const result = await h.call(fn, { postId: 1, content, media: fn === 'create-post' ? MEDIA : fn === 'update-post-web' ? LEGACY_MEDIA_ECHO : undefined, location: 'New location' });
       assert.equal(result.body.ok, false, JSON.stringify(result));
       assert.equal(result.body.error.code, 'validation_error');
       assert.deepEqual(h.writes, []);
@@ -156,18 +156,18 @@ for (const fn of ['create-post', 'update-post']) {
   test(`${fn}: 2200 prose characters plus Unicode hashtags stay intact`, async () => {
     const content = 'x'.repeat(2200) + ' #東京 #café #cafe\u0301 #night_life';
     const h = harness();
-    const result = await h.call(fn, { postId: 1, content, media: fn === 'update-post' ? LEGACY_MEDIA_ECHO : MEDIA });
+    const result = await h.call(fn, { postId: 1, content, media: fn === 'create-post' ? MEDIA : fn === 'update-post-web' ? LEGACY_MEDIA_ECHO : undefined });
     assert.ok(content.length > 2200);
     assert.equal(result.body.ok, true, JSON.stringify(result));
     assert.equal(result.body.data.post.content, content);
     assert.equal(h.tables.posts.find(post => post.id === Number(result.body.data.post.id)).content, content);
-    if (fn === 'update-post') assert.deepEqual(h.writes.map(write => write.table), ['posts']);
+    if (fn === 'update-post-web') assert.deepEqual(h.writes.map(write => write.table), ['posts']);
   });
 
   for (const content of ['', undefined, '#東京 #café #cafe\u0301']) {
     test(`${fn}: optional and hashtag-only captions remain valid (${String(content)})`, async () => {
       const h = harness();
-      const result = await h.call(fn, { postId: 1, content, media: fn === 'update-post' ? LEGACY_MEDIA_ECHO : MEDIA });
+      const result = await h.call(fn, { postId: 1, content, media: fn === 'create-post' ? MEDIA : fn === 'update-post-web' ? LEGACY_MEDIA_ECHO : undefined });
       assert.equal(result.body.ok, true, JSON.stringify(result));
       assert.equal(result.body.data.post.content, content === undefined
         ? fn === 'create-post' ? '' : ORIGINAL_CAPTION : content);
@@ -175,9 +175,9 @@ for (const fn of ['create-post', 'update-post']) {
   }
 }
 
-test('update-post: empty legacy echo does not block or mutate media', async () => {
+test('update-post-web: empty legacy echo does not block or mutate media', async () => {
   const h = harness();
-  const result = await h.call('update-post', { postId: 1, content: 'new', media: [] });
+  const result = await h.call('update-post-web', { postId: 1, content: 'new', media: [] });
   assert.equal(result.body.ok, true);
   assert.deepEqual(h.writes.map(write => write.table), ['posts']);
 });
@@ -191,12 +191,12 @@ for (const [label, media, duplicate, removeMedia] of [
   ['non-string URL', [{ order: 0, url: 1 }]],
   ['conflicting removal', LEGACY_MEDIA_ECHO, false, { expectedIds: ['a','b'], ids: ['b'] }],
 ]) {
-  test('update-post: ' + label + ' cannot change caption or media', async () => {
+  test('update-post-web: ' + label + ' cannot change caption or media', async () => {
     const h = harness();
     h.tables.posts_media.push({ _parent_id: 2, _order: 5, url: MEDIA[0].url });
     if (duplicate) h.tables.posts_media.push({ ...h.tables.posts_media[0] });
     const before = plain(h.tables);
-    const result = await h.call('update-post', { postId: 1, content: 'must not save', media, removeMedia });
+    const result = await h.call('update-post-web', { postId: 1, content: 'must not save', media, removeMedia });
     assert.equal(result.body.error.code, 'validation_error');
     assert.deepEqual(h.tables, before);
     assert.deepEqual(h.writes, []);
@@ -230,7 +230,7 @@ test('create and update return the same validation explanation as the canonical 
     const expected = create.load(path.join(FUNCTIONS, '_shared/post-caption.ts')).validatePostCaption(content);
     assert.equal(expected.valid, false);
     const created = await create.call('create-post', { content, media: MEDIA });
-    const updated = await update.call('update-post', { postId: 1, content });
+    const updated = await update.call('update-post-web', { postId: 1, content });
     assert.equal(created.body.error.message, expected.error);
     assert.equal(updated.body.error.message, expected.error);
   }
@@ -260,12 +260,12 @@ test('client and Edge caption contracts are byte-identical and agree on real pay
 
 test('update uses the saved post kind, so a request cannot claim to be a text post to bypass validation', async () => {
   const h = harness();
-  const result = await h.call('update-post', { postId: 1, kind: 'text', content: 'x'.repeat(2201), slides: ['Small slide'] });
+  const result = await h.call('update-post-web', { postId: 1, kind: 'text', content: 'x'.repeat(2201), slides: ['Small slide'] });
   assert.equal(result.body.error.code, 'validation_error');
   assert.deepEqual(h.writes, []);
 });
 
-for (const fn of ['create-post', 'update-post']) {
+for (const fn of ['create-post', 'update-post', 'update-post-web']) {
   test(`${fn}: text slides retain their separate existing character limits`, async () => {
     const h = harness({ kind: 'text' });
     // Media captions reject a 101-character hashtag; text slides still accept it.
@@ -299,8 +299,16 @@ for (const fn of ['create-post', 'update-post']) {
 test('ownership is still required before updating a valid or invalid caption', async () => {
   for (const content of ['#東京', 'x'.repeat(2201)]) {
     const h = harness({ owner: false });
-    const result = await h.call('update-post', { postId: 1, content });
+    const result = await h.call('update-post-web', { postId: 1, content });
     assert.equal(result.body.error.code, 'forbidden');
     assert.deepEqual(h.writes, []);
   }
+});
+
+test('legacy update-post keeps baseline owner URL updates; web stays separate', async () => {
+  const h = harness();
+  const replacement = 'https://fixture.invalid/rotated.jpg';
+  const result = await h.call('update-post', { postId: 1, media: [{ order: 0, url: replacement }] });
+  assert.equal(result.body.ok, true);
+  assert.equal(h.tables.posts_media[0].url, replacement);
 });

@@ -38,4 +38,4 @@ export async function publish() {
   })(() => {}, descriptor => { state.descriptor = descriptor; });
   return state.created;
 }
-export const read = (id: string) => postsApi.getPostById(id);
+export const read = (id: string, editor = false) => postsApi.getPostById(id, editor);
