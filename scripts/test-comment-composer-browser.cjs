@@ -47,8 +47,9 @@ const gifFixtures = { normal: animatedGif(), tall: animatedGif(60, 180), wide: a
 fs.writeFileSync(path.join(dir, 'visible-two-frame.gif'), gifFixtures.normal);
 
 const mocks = {
+ '@dvnt/app/lib/hooks/use-notifications-query': `export const useBadges=()=>({data:{unread:0}});`,
  '../../stickers/api/klipy': `const item=(id,title,width=160,height=120)=>({id,title,media_formats:{gif:{url:'https://static.klipy.com/'+id+'.gif',width,height}}});export const getItemImageUri=item=>item.media_formats.gif.url;export const getItemPreviewUri=getItemImageUri;export const klipySearch=async (_kind,query,options)=>{window.gifRequests.push({query,next:options.next});if(query==='slow')await new Promise(resolve=>window.releaseSlowGif=resolve);if(query==='error'&&!window.gifRecovered)throw Error('offline provider failure');if(query==='empty')return {results:[],source:'klipy'};if(query==='fallback')return {results:[{...item('noto','Noto smile'),media_formats:{gif:{url:'https://fonts.gstatic.com/s/e/notoemoji/latest/1f600/512.gif',width:160,height:120}}}],source:'fallback'};if(query==='slow')return {results:[item('stale','Stale result')],source:'klipy'};if(query==='gallery'){if(options.next&&window.pauseNextGif)await new Promise(resolve=>window.releaseNextGif=resolve);return {results:options.next?[item('tall','Tall celebration',120,360),item('last','Final wave')]:[item('tall','Tall celebration',120,360),item('wide','Wide celebration',480,120),...Array.from({length:12},(_,i)=>item('gallery-'+i,'Celebration '+(i+1)))],next:options.next?undefined:'gallery-2',source:'klipy'};}if(query)return {results:[item('search','Search wave')],source:'klipy'};return {results:options.next?[item('wave','Wave'),item('dance','Dance')]:[item('wave','Wave')],next:options.next?undefined:'page-2',source:'klipy'};};`,
- 'solito/navigation': `export const useParams=()=>({postId:'fixture-post',commentId:'17'});export const useRouter=()=>({back(){},push(){}});`,
+ 'solito/navigation': `export const usePathname=()=>'/feed/viewer/post/fixture-post';export const useParams=()=>({postId:'fixture-post',commentId:'17'});export const useRouter=()=>({back(){},push(){}});`,
  '@dvnt/app/lib/hooks/use-comments': `import {useMutation} from '@tanstack/react-query'; const comment={id:'17',username:'deviantevents',text:'🔥🔥🔥',timeAgo:'12h',attachment:{provider:'klipy',id:'saved',url:'https://static.klipy.com/saved.gif',previewUrl:'https://static.klipy.com/saved.gif',width:160,height:120,title:'Saved wave'},replies:[]};export const useComments=()=>({data:[comment],isLoading:false});export const useCommentThread=()=>({data:{parentComment:comment,replies:[]},isLoading:false});export const useCreateComment=()=>useMutation({mutationFn:async data=>{window.calls.push(data);await new Promise(resolve=>window.release=resolve);if(window.fail)throw Error('offline fixture failure');return {id:'created'};}});`,
  '@dvnt/app/lib/hooks/use-verified-gate': `export const useVerifiedGate=()=> (_action,run)=>{if(window.deferGate)window.finishGate=run;else if(!window.blocked)run()};`,
  '@dvnt/app/lib/stores/auth-store': `import {create} from 'zustand';export const useAuthStore=create(()=>({user:{id:'fixture-author',username:'viewer'}}));window.auth=useAuthStore;`,
@@ -152,6 +153,36 @@ async function checkVisualViewportKeyboard(page, width, baseline = false) {
   Object.defineProperty(window,'visualViewport',originalVisualViewport);window.scrollBy=originalScrollBy;
   document.querySelector('#keyboard-occlusion').remove();delete window.setKeyboardViewport;
  });
+}
+
+
+async function checkMountedNavigation(page, width) {
+ await page.evaluate(()=>{draft.getState().reset();mount(undefined,false,true);mountNav(true)});
+ await page.locator('[data-dvnt-tab-bar]').waitFor();
+ const input=page.getByRole('textbox',{name:'Add a comment',exact:true});
+ await input.waitFor();
+ // A keyboard that resizes the layout viewport also moves the fixed nav up.
+ // Focus without Playwright scrolling the target into view on our behalf.
+ for (const height of [852,400,320,400,852]) {
+  await page.setViewportSize({width,height});
+  await input.evaluate(el=>el.focus({preventScroll:true}));
+  await page.waitForFunction(()=>{
+   const nav=document.querySelector('[data-dvnt-tab-bar]');
+   const top=Math.min(...[nav,...nav.querySelectorAll('button,[role="button"]')].map(el=>el.getBoundingClientRect().top));
+   const row=document.querySelector('textarea').parentElement.getBoundingClientRect();
+   return row.bottom<=top-7 && row.top>=7;
+  });
+  await input.fill('Visible above navigation');
+  const geometry=await page.evaluate(()=>{
+   const input=document.querySelector('textarea'),send=document.querySelector('[aria-label="Post comment"]');
+   return [input,send].map(el=>{const r=el.getBoundingClientRect();return {top:r.top,bottom:r.bottom,hit:el===document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)||el.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))}});
+  });
+  assert(geometry.every(item=>item.hit),'textarea and Send must be hit-testable, not behind nav');
+ }
+ await page.screenshot({path:path.join(dir,`mounted-nav-${width}.png`)});
+ await page.getByRole('button',{name:'Close composer',exact:true}).evaluate(el=>el.click());
+ await page.evaluate(()=>mountNav(false));await page.locator('[data-dvnt-tab-bar]').waitFor({state:'detached'});
+ await page.evaluate(()=>{draft.getState().reset();mount(undefined,true)});
 }
 
 async function checkMobileGifQuality(page, width) {
@@ -293,6 +324,7 @@ async function checkMobileGifQuality(page, width) {
  stdin:{resolveDir:root,loader:'tsx',contents:`
  import React from 'react';import {createRoot} from 'react-dom/client';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
  import {CommentsScreen} from './packages/app/features/comments/comments.web';import {CommentRepliesScreen} from './packages/app/features/comments/comment-replies.web';
+ import {WebTabBar} from './packages/app/components/web-tab-bar.web';
  import {WebCommentComposer} from './packages/app/features/comments/ui/comment-composer.web';
  import {ThreadedComment} from './packages/app/features/comments/ui/threaded-comment';
  import {useCommentDraftStore} from './packages/app/lib/stores/comment-draft-store';
@@ -300,6 +332,7 @@ async function checkMobileGifQuality(page, width) {
  window.fixtureGif={provider:'klipy',id:'saved',url:'https://static.klipy.com/saved.gif',previewUrl:'https://static.klipy.com/saved.gif',width:160,height:120,title:'Saved wave'};window.gifRequests=[];window.calls=[];window.draft=useCommentDraftStore;window.cleanup=()=>{root.unmount();client.clear()};
  const comment={id:'17',username:'deviantevents',text:'🔥🔥🔥',timeAgo:'12h',replies:[]};
  window.mount=(parentCommentId,hideWhenClosed=false,alwaysVisible=false)=>root.render(<React.StrictMode><QueryClientProvider client={client}><main style={{maxWidth:600,margin:'auto'}}><div style={{height:380,background:'#12141d'}}>Post media fixture</div><button id="comment-trigger" onClick={()=>useCommentDraftStore.getState().openComposer()}>Comment</button><div id="comment-card"><ThreadedComment comment={comment} postId="fixture-post" onReply={(username,commentId)=>useCommentDraftStore.getState().setReplyTo({username,commentId})} onProfilePress={()=>{}}/></div><WebCommentComposer key={parentCommentId||'post'} postId="fixture-post" parentCommentId={parentCommentId} hideWhenClosed={hideWhenClosed} alwaysVisible={alwaysVisible}/></main></QueryClientProvider></React.StrictMode>);
+ const navNode=document.createElement('div');document.body.append(navNode);const navRoot=createRoot(navNode);window.mountNav=visible=>navRoot.render(visible?<WebTabBar/>:null);
  window.mountGif=()=>root.render(<React.StrictMode><QueryClientProvider client={client}><ThreadedComment comment={{...comment,attachment:window.fixtureGif}} postId="fixture-post" onReply={()=>{}} onProfilePress={()=>{}}/></QueryClientProvider></React.StrictMode>);
  window.mountScreen=kind=>root.render(<React.StrictMode><QueryClientProvider client={client}>{kind==='comments'?<CommentsScreen/>:<CommentRepliesScreen/>}</QueryClientProvider></React.StrictMode>);
  window.mount(undefined,true);`}});
@@ -320,6 +353,13 @@ async function checkMobileGifQuality(page, width) {
    w.draft.getState().reset();w.mount(undefined,false,true);await wait(()=>w.document.querySelector('textarea'));
    assert.notEqual(w.document.activeElement,w.document.querySelector('textarea'),'inline input does not autofocus');
    assert.equal(w.draft.getState().open,false);
+   const directComposer=w.document.querySelector('[aria-label="Comment composer"]');
+   const directGif=directComposer.querySelector('[aria-label="Add GIF"]');
+   assert.doesNotMatch(directComposer.textContent,/Add a comment/i,'duplicate visible composer copy');
+   assert.equal(directComposer.querySelector('textarea').placeholder,'Add a comment…');
+   assert.equal(directGif.getAttribute('aria-expanded'),'false');
+   assert.equal(directComposer.querySelector('[aria-label="Choose a GIF"]'),null);
+   assert.equal(w.gifRequests.length,0,'no initial provider request');
    const typeDirect=value=>{const input=w.document.querySelector('textarea');input.focus();Object.getOwnPropertyDescriptor(w.HTMLTextAreaElement.prototype,'value').set.call(input,value);input.dispatchEvent(new w.Event('input',{bubbles:true}));};
    for (const text of ['Direct comment','Second direct comment']) {
     typeDirect(text);await wait(()=>w.draft.getState().text===text);
@@ -327,7 +367,10 @@ async function checkMobileGifQuality(page, width) {
     await wait(()=>w.calls.at(-1)?.text===text);w.release();await wait(()=>!w.draft.getState().open);
     assert(w.document.querySelector('textarea'),'input persists after send');
    }
-   w.document.querySelector('[aria-label="Add GIF"]').click();await wait(()=>w.document.querySelector('[aria-label="Search GIFs"]'));
+   let directTextFocusCount=0;
+   directComposer.querySelector('textarea').addEventListener('focus',()=>directTextFocusCount++);
+   directGif.click();await wait(()=>w.document.querySelector('[aria-label="Search GIFs"]'));
+   assert.equal(directTextFocusCount,0,'GIF opens without bouncing through the comment textarea');
    button('Close').click();await wait(()=>!w.draft.getState().open);
    assert(w.document.querySelector('textarea'),'close preserves discoverable input');
    assert.equal(w.draft.getState().text,'');
@@ -368,12 +411,21 @@ async function checkMobileGifQuality(page, width) {
   await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.request().resourceType()==='image'?route.fulfill({contentType:'image/gif',body:gifFixtures[new URL(route.request().url()).pathname.includes('tall')?'tall':new URL(route.request().url()).pathname.includes('wide')?'wide':'normal']}):route.abort());
   await page.goto('http://127.0.0.1:'+server.address().port);
   if (!keyboardBaseline) {
+  if(width<=430) await checkMountedNavigation(page,width);
   // Post details show the actual input without a comment-bubble click or autofocus.
   await page.evaluate(()=>{draft.getState().reset();mount(undefined,false,true)});
   const directInput=page.getByRole('textbox',{name:'Add a comment',exact:true});
   await directInput.waitFor();
   assert.equal(await directInput.evaluate(el=>el===document.activeElement),false,'initial input must not summon the keyboard');
   assert.equal(await page.evaluate(()=>draft.getState().open),false);
+  const directComposer = page.getByRole('region',{name:'Comment composer'});
+  const directGif = directComposer.getByRole('button',{name:'Add GIF',exact:true});
+  assert.equal(await directComposer.getByText(/^Add a comment…?$/i).count(),0,'the accessible input is the only Add a comment prompt');
+  assert.equal(await directInput.getAttribute('placeholder'),'Add a comment…');
+  assert.equal(await directGif.isVisible(),true,'GIF affordance is visible by default');
+  assert.equal(await directGif.getAttribute('aria-expanded'),'false','GIF picker remains closed until requested');
+  assert.equal(await directComposer.getByRole('region',{name:'Choose a GIF'}).count(),0);
+  assert.equal(await page.evaluate(()=>gifRequests.length),0,'no GIF request on initial post load');
   await directInput.fill('Direct comment');
   await page.getByRole('button',{name:'Post comment',exact:true}).click();
   await page.waitForFunction(()=>calls.length===1);
@@ -386,8 +438,13 @@ async function checkMobileGifQuality(page, width) {
   await page.waitForFunction(()=>calls.length===2);
   await page.evaluate(()=>release());
   await page.waitForFunction(()=>!draft.getState().open);
-  await page.getByRole('button',{name:'Add GIF',exact:true}).click();
+  await page.evaluate(() => {
+    window.directTextFocusCount = 0;
+    document.querySelector('[aria-label="Comment composer"] textarea').addEventListener('focus', () => window.directTextFocusCount++);
+  });
+  await directGif.click();
   await page.getByRole('textbox',{name:'Search GIFs',exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>directTextFocusCount),0,'opening GIF search does not bounce focus through the comment textarea');
   await page.getByRole('button',{name:'Close composer',exact:true}).click();
   assert.equal(await directInput.count(),1,'Close resets the draft without hiding the input');
   assert.equal(await directInput.inputValue(),'');

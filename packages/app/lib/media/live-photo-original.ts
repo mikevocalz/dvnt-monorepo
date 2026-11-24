@@ -24,6 +24,9 @@ export function publishMediaFile(media: SelectedMedia): PublishMediaFile {
     type: media.type,
     kind: livePhoto ? "livePhoto" : media.kind,
     mimeType: media.mimeType,
+    ...(media.kind === "image" && !livePhoto && media.editorOpened && media.editedUri && media.cropExportMimeType
+      ? { cropExportMimeType: media.cropExportMimeType }
+      : {}),
     pairedVideoUri: media.pairedVideoUri,
   };
 }

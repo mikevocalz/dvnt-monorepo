@@ -1,4 +1,5 @@
 import { canCropMedia } from "@dvnt/app/lib/media/live-photo-original";
+import { cropExportMimeType, replaceCroppedMedia } from "@dvnt/app/lib/media/crop-export";
 /**
  * Crop & Preview Screen
  *
@@ -102,7 +103,6 @@ function CropPreviewScreenContent() {
     undefined,
   );
 
-  const { selectedMedia, setSelectedMedia } = useCreatePostStore();
 
   // Compute effective aspect ratio from EditState aspect preset
   const activeMedia = media[activeIndex];
@@ -322,6 +322,7 @@ function CropPreviewScreenContent() {
           uri: result.uri,
           editedUri: result.uri,
           editorOpened: true,
+          cropExportMimeType: cropExportMimeType(state.output.format),
           originalUri: img.originalUri || img.uri,
           width: result.width,
           height: result.height,
@@ -332,18 +333,8 @@ function CropPreviewScreenContent() {
       if (onCompleteRef.current) {
         onCompleteRef.current(croppedResults);
       } else {
-        const existingNonImage = selectedMedia.filter(
-          (m) => m.type !== "image",
-        );
-        const existingCropped = selectedMedia.filter(
-          (m) =>
-            m.type === "image" && !croppedResults.some((cr) => cr.id === m.id),
-        );
-        setSelectedMedia([
-          ...existingNonImage,
-          ...existingCropped,
-          ...croppedResults,
-        ]);
+        const { selectedMedia, setSelectedMedia } = useCreatePostStore.getState();
+        setSelectedMedia(replaceCroppedMedia(selectedMedia, croppedResults));
       }
 
       router.back();
@@ -356,8 +347,6 @@ function CropPreviewScreenContent() {
     isProcessing,
     media,
     dimensions,
-    selectedMedia,
-    setSelectedMedia,
     router,
     baseAspectRatio,
   ]);

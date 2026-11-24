@@ -1,3 +1,4 @@
+import type { CropExportMime } from "@dvnt/app/lib/media/crop-export";
 /**
  * React hook for media uploads to Bunny.net CDN
  *
@@ -16,7 +17,8 @@
  */
 
 import { useState, useCallback } from "react";
-import { sizeLimitForKind } from "@dvnt/app/lib/media/upload-policy";
+import { folderToKind, sizeLimitForKind } from "@dvnt/app/lib/media/upload-policy";
+import { inspectCropExport } from "@dvnt/app/lib/media/crop-export";
 import { uploadLivePhotoPair } from "@dvnt/app/lib/media/live-photo-upload";
 import { uploadSingleImage } from "@dvnt/app/lib/media/single-image-upload";
 import { imageFitDeps } from "@dvnt/app/lib/media/image-fit-deps";
@@ -59,6 +61,8 @@ export interface MediaFile {
   type: "image" | "video";
   kind?: import("@dvnt/app/lib/media/types").MediaKind;
   mimeType?: string;
+  /** Present only on a metadata-stripped native editor export. */
+  cropExportMimeType?: CropExportMime;
   pairedVideoUri?: string; // Live Photo paired video (iOS)
   /**
    * Dimensions the picker measured, when it reported them. Used as the source
@@ -616,24 +620,37 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           updateProgress(result.success ? "Live Photo uploaded" : "Live Photo upload failed");
         } else {
           // ========== IMAGE PROCESSING (compress + upload) ==========
-          reportStatus("Optimizing image...");
           let imageUri = file.uri;
-          try {
-            const compressed = await manipulateAsync(
-              file.uri,
-              [{ rotate: 0 }, { resize: { width: 1440 } }],
-              { compress: 0.85, format: SaveFormat.JPEG },
-            );
-            imageUri = compressed.uri;
-            console.log(
-              "[useMediaUpload] Image optimized:",
-              imageUri.substring(0, 50),
-            );
-          } catch (compressErr) {
-            console.warn(
-              "[useMediaUpload] Image optimization failed, using original:",
-              compressErr,
-            );
+          const cropExport = Platform.OS === "web" ? null : await inspectCropExport(
+            file,
+            sizeLimitForKind(folderToKind(folder)),
+            imageFitDeps.byteSize,
+          );
+          if (cropExport && !cropExport.ok) {
+            results.push({ type: "image", kind: "image", url: "", success: false, error: cropExport.error });
+            updateProgress("Image upload failed");
+            continue;
+          }
+
+          if (!cropExport) {
+            reportStatus("Optimizing image...");
+            try {
+              const compressed = await manipulateAsync(
+                file.uri,
+                [{ rotate: 0 }, { resize: { width: 1440 } }],
+                { compress: 0.85, format: SaveFormat.JPEG },
+              );
+              imageUri = compressed.uri;
+              console.log(
+                "[useMediaUpload] Image optimized:",
+                imageUri.substring(0, 50),
+              );
+            } catch (compressErr) {
+              console.warn(
+                "[useMediaUpload] Image optimization failed, using original:",
+                compressErr,
+              );
+            }
           }
 
           // Compact fade-in placeholder from the downscaled image, sent
@@ -645,6 +662,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
           const uploadResult = await serverUpload(imageUri, folder, reportBytes, {
             onStatus: reportStatus,
             expectedAuthToken,
+            ...(cropExport ? { mimeType: cropExport.mimeType } : {}),
             blurhash,
           });
 
@@ -661,6 +679,7 @@ export function useMediaUpload(options: UseMediaUploadOptions = {}) {
               type: "image",
               kind: "image",
               url: uploadResult.url,
+              ...(cropExport ? { mimeType: cropExport.mimeType } : {}),
               blurhash,
               success: true,
             });

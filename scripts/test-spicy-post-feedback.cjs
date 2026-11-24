@@ -100,6 +100,15 @@ test('approved adult owner can save SPICY and caption without changing photos',a
   assert.equal(h.tables.posts[0].is_nsfw,true);
   assert.equal(h.tables.posts_media[0].url,'https://fixture.invalid/photo.jpg');
 });
+test('adult owner cannot replace an existing attachment through the legacy payload',async()=>{
+  const h=harness({record:{status:'passed',date_of_birth:'1990-01-01'}});
+  const r=await h.call('update-post',{postId:1,content:'New caption',isNSFW:true,
+    media:[{order:0,url:'https://fixture.invalid/replacement.jpg'}]});
+  assert.equal(r.body.error.code,'validation_error');
+  assert.match(r.body.error.message,/cannot be replaced/);
+  assert.equal(h.writes.length,0); assert.equal(h.tables.posts[0].content,CAPTION);
+  assert.equal(h.tables.posts_media[0].url,'https://fixture.invalid/photo.jpg');
+});
 test('ordinary caption editing remains allowed by the rollout policy',async()=>{
   const h=harness();const r=await h.call('update-post',{postId:1,content:'Updated caption'});
   assert.equal(r.body.ok,true);assert.equal(h.tables.posts[0].is_nsfw,false);
@@ -155,9 +164,10 @@ for (const editor of [
   test(editor+': failed save shows the actionable message and keeps the draft',()=>{
     const filename=path.join(ROOT,editor);
     const source=ts.createSourceFile(filename,fs.readFileSync(filename,'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
-    let callback;
+    let callback, optimistic;
     function visit(node) {
       if (ts.isPropertyAssignment(node) && node.name.getText(source)==='onError' && ts.isArrowFunction(node.initializer)) callback=node.initializer;
+      if (ts.isPropertyAssignment(node) && node.name.getText(source)==='onMutate') optimistic=node;
       ts.forEachChild(node,visit);
     }
     visit(source);assert.ok(callback,'editor must have its error callback');
@@ -175,7 +185,8 @@ for (const editor of [
     const snapshot={previousPost:{content:'old'},previousFeed:[{content:'old'}]};
     onError(new Error(message),{},snapshot);
     assert.equal(toasts[0][2],message,'do not discard the backend explanation');
-    assert.equal(writes.length,2,'restore optimistic feed/detail caches');
+    assert.equal(optimistic,undefined,'do not optimistically expose an unconfirmed label or edit');
+    assert.equal(writes.length,0,'a refused edit changes no post cache');
     onError(null,{},null);
     assert.equal(toasts[1][2],"Couldn't save changes. Try again.");
   });

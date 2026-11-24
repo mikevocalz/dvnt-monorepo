@@ -221,10 +221,11 @@ export function transformPost(
         : index;
 
       // Derive kind: existing rows have no mime_type — fall back to type field
-      const kind = deriveMediaKind(rawType, mimeType, livePhotoVideoUrl);
+      const kind = rawType === "thumbnail" ? "thumbnail" : deriveMediaKind(rawType, mimeType, livePhotoVideoUrl);
 
       return {
         type: kind,
+        ...(typeof m[DB.postsMedia.id] === "string" ? { mediaId: m[DB.postsMedia.id] } : {}),
         url: m[DB.postsMedia.url] || "",
         mimeType,
         livePhotoVideoUrl,
@@ -631,7 +632,7 @@ export const postsApi = {
       slides?: string[];
       location?: string;
       isNSFW?: boolean;
-      media?: Array<{ order: number; url: string }>;
+      removeMedia?: { expectedIds: string[]; ids: string[]; expectedCaption?: string };
     },
   ) {
     try {
@@ -640,7 +641,7 @@ export const postsApi = {
 
       const { data: response, error } = await supabase.functions.invoke<{
         ok: boolean;
-        data?: { post: any };
+        data?: { post: { id?: string | number }; remainingIds?: string[] };
         error?: { code: string; message: string };
       }>("update-post", {
         body: { postId: postIdInt, ...updates },
@@ -651,7 +652,20 @@ export const postsApi = {
       if (!response?.ok)
         throw new Error(response?.error?.message || "Failed to update post");
 
-      return response.data?.post;
+      const savedPost = response.data?.post;
+      if (!savedPost || String(savedPost.id) !== String(postIdInt)) {
+        throw new Error("Could not confirm that this post was saved.");
+      }
+      if (updates.removeMedia) {
+        const removed = new Set(updates.removeMedia.ids);
+        const expected = updates.removeMedia.expectedIds.filter((id) => !removed.has(id));
+        if (!Array.isArray(response.data?.remainingIds) ||
+            response.data.remainingIds.length !== expected.length ||
+            response.data.remainingIds.some((id, index) => id !== expected[index])) {
+          throw new Error("Could not confirm the media changes. Reopen the post before trying again.");
+        }
+      }
+      return savedPost;
     } catch (error) {
       console.error("[Posts] updatePost error:", error);
       throw error;

@@ -35,6 +35,7 @@ import {
   getRouteForLikedActivity,
 } from "@dvnt/app/lib/hooks/use-activities-query";
 import { useQueryClient } from "@tanstack/react-query";
+import { notificationKeys } from "@dvnt/app/lib/notifications/query-keys";
 import {
   activityKeys,
   type LikedActivity,
@@ -277,6 +278,7 @@ function EventInviteAcceptButton({ entityId }: { entityId: string }) {
  * route through the edge fn (notifications fire, audit-safe).
  */
 function CoOrgInviteActions({ inviteId }: { inviteId: string }) {
+  const queryClient = useQueryClient();
   const [resolved, setResolved] = useState<null | "accepted" | "declined">(
     null,
   );
@@ -284,6 +286,8 @@ function CoOrgInviteActions({ inviteId }: { inviteId: string }) {
   const showToast = useUIStore((s) => s.showToast);
 
   const handle = async (action: "accept" | "decline") => {
+    const viewerId = useAuthStore.getState().user?.id;
+    if (!viewerId) return;
     if (loading || resolved) return;
     setLoading(action);
     try {
@@ -295,9 +299,18 @@ function CoOrgInviteActions({ inviteId }: { inviteId: string }) {
       if ((res as any)?.error) {
         throw new Error(String((res as any).error));
       }
+      if (action === "accept") {
+        for (const queryKey of [
+          activityKeys.list(viewerId), notificationKeys.list(viewerId), notificationKeys.badges(viewerId),
+        ]) {
+          void queryClient.invalidateQueries({ queryKey, exact: true }).catch(() => {});
+        }
+      }
+      if (useAuthStore.getState().user?.id !== viewerId) return;
       setResolved(action === "accept" ? "accepted" : "declined");
       showToast("success", action === "accept" ? "Accepted" : "Declined", "");
     } catch (err: any) {
+      if (useAuthStore.getState().user?.id !== viewerId) return;
       showToast(
         "error",
         action === "accept" ? "Couldn't accept" : "Couldn't decline",

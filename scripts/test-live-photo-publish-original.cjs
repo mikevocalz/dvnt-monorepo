@@ -37,14 +37,15 @@ const hook = load('packages/app/lib/hooks/use-publish-post.ts', {
 });
 const publish = hook.usePublishPost();
 const pair = { uri: 'file:///crop.jpg', originalUri: 'file:///original.heic', editedUri: 'file:///crop.jpg', editorOpened: true, type: 'image', kind: 'livePhoto', mimeType: 'image/heic', pairedVideoUri: 'file:///original.mov' };
-const still = { type: 'image', kind: 'image', uri: 'file:///still.jpg', editedUri: 'file:///still-crop.jpg', editorOpened: true };
+const still = { type: 'image', kind: 'image', uri: 'file:///still.jpg', editedUri: 'file:///still-crop.png', editorOpened: true, cropExportMimeType: 'image/png' };
 const draft = { postKind: 'media', caption: 'Motion', tags: [], textSlides: [], selectedMedia: [pair, still, { ...pair, uri: 'file:///second-crop.jpg', originalUri: 'file:///second.heic', pairedVideoUri: 'file:///second.mov' }], placedTags: [] };
 publish(draft);
 assert.equal(descriptor.files[0].uri, pair.originalUri);
 assert.equal(descriptor.files[0].pairedVideoUri, pair.pairedVideoUri);
 assert.equal(descriptor.files[0].mimeType, 'image/heic');
 assert.equal(descriptor.files[0].kind, 'livePhoto');
-assert.deepEqual(descriptor.files.map(file => file.uri), ['file:///original.heic', 'file:///still-crop.jpg', 'file:///second.heic']);
+assert.deepEqual(descriptor.files.map(file => file.uri), ['file:///original.heic', 'file:///still-crop.png', 'file:///second.heic']);
+assert.deepEqual(descriptor.files.map(file => file.cropExportMimeType), [undefined, 'image/png', undefined]);
 assert.deepEqual(descriptor.files.map(file => file.pairedVideoUri), ['file:///original.mov', undefined, 'file:///second.mov']);
 descriptor = undefined;
 assert.throws(() => publish({ ...draft, selectedMedia: [{ ...pair, originalUri: undefined }] }), /original Live Photo is missing/);

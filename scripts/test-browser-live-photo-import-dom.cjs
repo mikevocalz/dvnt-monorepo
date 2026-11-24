@@ -22,7 +22,7 @@ const { build } = require('esbuild');
   const mockState = `
     import { create } from 'zustand';
     const initial = () => ({ selectedMedia: [], caption: '', textSlides: [{ id: 'slide', content: '', order: 0 }], activeTextSlideIndex: 0, isNSFW: false, tags: [], postKind: 'media', textTheme: 'graphite' });
-    export const fixture = { published: [], toasts: [], routes: [], deferGate: false, gate: null, progress: [], failPublish: false, deferPublish: false, finishPublish: null };
+    export const fixture = { published: [], toasts: [], routes: [], deferGate: false, gate: null, progress: [], failPublish: false, deferPublish: false, finishPublish: null, scanResult: {flagged:false,incomplete:false}, publishLabels: [] };
     export const store = create((set) => ({ ...initial(), setSelectedMedia: selectedMedia => set({selectedMedia}), setCaption: caption => set({caption}), setPostKind: postKind => set({postKind}), setIsNSFW: isNSFW => set({isNSFW}), reset: () => set(initial()), setTextTheme: textTheme => set({textTheme}), setActiveTextSlideIndex: () => {}, updateTextSlide: () => {}, addTextSlide: () => {}, removeTextSlide: () => {}, addTag: () => {}, removeTag: () => {} }));
     export const ui = create(set => ({ isSubmitLocked: false, tagInput: '', setTagInput: tagInput => set({tagInput}), setIsSubmitLocked: isSubmitLocked => set({isSubmitLocked}) }));
     export const camera = create(() => ({ result: null, clear: () => {} }));
@@ -33,13 +33,13 @@ const { build } = require('esbuild');
     '@dvnt/app/lib/media/handoff-upload-lease': `export const withLeasedHandoffScan=async(media,_signal,scan)=>scan(media);`,
     '@dvnt/app/lib/media/use-handoff-upload-lease': `export const useHandoffUploadLease=asset=>asset;`,
     // This suite isolates import, publication and auth-return behavior.
-    './nudity-scan.web': `export const scanPostMedia=async()=>({flagged:false,incomplete:false});`,
+    './nudity-scan.web': `import {fixture} from 'composer-fixture'; export const scanPostMedia=async()=>fixture.scanResult;`,
     './native-live-photo-handoff.web': `export const NativeLivePhotoHandoff = () => null;`,
     'next/dynamic': `export default () => () => null;`,
     'solito/navigation': `import {fixture} from 'composer-fixture'; export const useRouter = () => ({ back: () => fixture.routes.push('back'), push: route => fixture.routes.push(route), replace: route => fixture.routes.push(route) });`,
     '@dvnt/app/lib/stores/create-post-store': `export {store as useCreatePostStore} from 'composer-fixture';`,
     '@dvnt/app/lib/hooks/use-verified-gate': `import {fixture} from 'composer-fixture'; export const useVerifiedGate = () => (_action, callback) => { if(fixture.deferGate) fixture.gate = callback; else callback(); };`,
-    '@dvnt/app/lib/hooks/use-publish-post': `import {fixture} from 'composer-fixture'; export const usePublishPost = () => draft => { fixture.published.push(draft.selectedMedia.map(item => ({...item}))); return 'fixture'; };`,
+    '@dvnt/app/lib/hooks/use-publish-post': `import {fixture} from 'composer-fixture'; export const usePublishPost = () => draft => { fixture.publishLabels.push(draft.isNSFW); fixture.published.push(draft.selectedMedia.map(item => ({...item}))); return 'fixture'; };`,
     '@dvnt/app/lib/posts/publish-queue': `import {fixture} from 'composer-fixture'; export const postPublishQueue = { whenFinished: async () => { if(fixture.failPublish) throw Error('fixture publication failed'); if(fixture.deferPublish) await new Promise(resolve=>{fixture.finishPublish=resolve}); } };`,
     '@dvnt/app/lib/profile/new-member-progress': `import {fixture} from 'composer-fixture'; export const fetchNewMemberProgress = async () => fixture.progress.shift() || ({step:'complete',hasPost:true});`,
     '@dvnt/app/lib/posts/first-post-event': `export const assertFirstPostPublishable = async () => {};`,
@@ -160,6 +160,38 @@ const { build } = require('esbuild');
     assert.equal(window.sessionStorage.getItem('dvnt:review-return'), null);
     fixture.deferPublish = false; fixture.progress = [];
     await act(async () => store.getState().reset());
+
+    const originalShowModal = window.HTMLDialogElement.prototype.showModal;
+    try {
+      // Exercise the actual composer plus production review UI; inference and
+      // publish transport stay synthetic. No label is selected by the fixture
+      // until a real review action is fired.
+      window.HTMLDialogElement.prototype.showModal = undefined;
+      fixture.scanResult = {flagged:true,incomplete:false};
+      await pick([image('review-first.jpg')]);
+      const before = fixture.published.length;
+      await act(async () => share().click());
+      let dialog = document.querySelector('[role="dialog"]');
+      assert.ok(dialog, 'missing native modal still offers explicit choices');
+      assert.equal(fixture.published.length,before);
+      const choice = (label) => [...document.querySelectorAll('[role="dialog"] button')].find(el => el.textContent.trim() === label);
+      await act(async () => choice('Review draft').click());
+      assert.equal(fixture.published.length,before); assert.equal(assets().length,1);
+      await act(async () => share().click());
+      await act(async () => choice('This is a mistake: share as Sweet').click());
+      assert.equal(fixture.published.length,before+1); assert.equal(fixture.publishLabels.at(-1),false);
+      window.HTMLDialogElement.prototype.showModal = () => { throw Error('fixture unavailable modal'); };
+      fixture.scanResult = {flagged:false,incomplete:true};
+      await pick([image('review-second.jpg')]);
+      await act(async () => share().click());
+      assert.equal(fixture.published.length,before+1);
+      await act(async () => choice('Mark Spicy and share').click());
+      assert.equal(fixture.published.length,before+2); assert.equal(fixture.publishLabels.at(-1),true);
+    } finally {
+      window.HTMLDialogElement.prototype.showModal = originalShowModal;
+      fixture.scanResult = {flagged:false,incomplete:false};
+      await act(async () => store.getState().reset());
+    }
 
     const allFiles = Array.from({ length: 10 }, (_, i) => [image(`still-${i}.jpg`), movie(`clip-${i}.mov`)]).flat();
     await pick(allFiles); await finishBatch(); assert.equal(assets().length, 20); assert.equal(share().disabled, true);

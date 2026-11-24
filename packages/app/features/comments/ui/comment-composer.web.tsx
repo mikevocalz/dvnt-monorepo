@@ -31,6 +31,7 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
+  const openedForGif = useRef(false);
   const composerRef = useRef<HTMLElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const sending = useRef(false);
@@ -64,14 +65,15 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
       returnFocus.current = document.activeElement;
     }
     wasOpen.current = true;
-    inputRef.current?.focus({ preventScroll: true });
+    if (!openedForGif.current) inputRef.current?.focus({ preventScroll: true });
+    openedForGif.current = false;
     composerRef.current?.scrollIntoView({ block: "nearest" });
   }, [open, replyTo?.commentId]);
 
   useEffect(() => {
-    if (!open || !composerRef.current) return;
+    if ((!open && !alwaysVisible) || !composerRef.current) return;
     return watchCommentComposerViewport(composerRef.current);
-  }, [open]);
+  }, [open, alwaysVisible]);
 
   const close = () => {
     if (sending.current) return;
@@ -109,7 +111,7 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
     });
   };
 
-  const bottomPadding = "calc(env(safe-area-inset-bottom, 0px) + 16px + var(--dvnt-tabbar-clearance, 0px) + var(--comment-keyboard-clearance, 0px))";
+  const bottomPadding = "calc(16px + max(env(safe-area-inset-bottom, 0px), var(--comment-tabbar-clearance, calc(env(safe-area-inset-bottom, 0px) + max(var(--dvnt-tabbar-overlay-clearance, 0px), var(--dvnt-tabbar-clearance, 0px))))) + var(--comment-keyboard-clearance, 0px))";
   if (!open && hideWhenClosed && !alwaysVisible) return <div aria-hidden="true" style={{ height: bottomPadding }} />;
   return (
     <section
@@ -124,14 +126,14 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
           {label}…
         </button>
       ) : (
-        <form onSubmit={(event) => { event.preventDefault(); submit(); }} className="overflow-hidden rounded-2xl border border-white/12 bg-[#0b0d16]" aria-busy={mutation.isPending}>
-          <div className="flex min-w-0 items-center justify-between gap-3 border-b border-white/10 bg-[#171923] px-3 py-2 text-sm text-white/65">
-            <span className="min-w-0 break-words">{replyTo ? `Replying to @${replyTo.username}` : label}</span>
+        <form onSubmit={(event) => { event.preventDefault(); submit(); }} className="overflow-hidden rounded-2xl border border-white/25 bg-[#0b0d16] focus-within:border-[#3FDCFF]" aria-busy={mutation.isPending}>
+          {(replyTo || open) && <div className="flex min-w-0 items-center justify-between gap-3 border-b border-white/10 bg-[#171923] px-3 py-2 text-sm text-white/65">
+            <span className="min-w-0 break-words">{replyTo ? `Replying to @${replyTo.username}` : null}</span>
             <div className="flex shrink-0 items-center gap-3">
               {replyTo && <button type="button" disabled={mutation.isPending} onClick={() => setReplyTo(null)} className="min-h-11 min-w-11 rounded-lg px-1 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">Cancel reply</button>}
               {open && <button type="button" disabled={mutation.isPending} onClick={close} aria-label="Close composer" className="min-h-11 min-w-11 rounded-lg px-1 font-medium focus-visible:outline focus-visible:outline-2 disabled:opacity-40">Close</button>}
             </div>
-          </div>
+          </div>}
           {attachment && <div className="px-3"><CommentGif attachment={attachment} preview /><button type="button" disabled={mutation.isPending} onClick={() => setAttachment(null)} className="min-h-11 min-w-11 rounded-lg px-2 text-sm text-white/65 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">Remove GIF</button></div>}
           <div className="flex items-end gap-2 px-3 py-3">
             <textarea
@@ -148,7 +150,7 @@ export function WebCommentComposer({ postId, parentCommentId, hideWhenClosed = f
               className="min-w-0 flex-1 resize-y bg-transparent text-base text-white outline-none placeholder:text-white/40 disabled:opacity-60"
               style={{ minHeight: 48, maxHeight: 160 }}
             />
-            <button ref={gifButtonRef} type="button" aria-label="Add GIF" aria-expanded={pickerOpen} disabled={mutation.isPending} onClick={() => { if (!open) openComposer(); usePicker.setState({ open: !pickerOpen }); }} className="h-11 min-w-11 shrink-0 rounded-lg px-2 text-sm font-bold text-white/65 focus-visible:outline focus-visible:outline-2 disabled:opacity-40">GIF</button>
+            <button ref={gifButtonRef} type="button" aria-label="Add GIF" aria-expanded={pickerOpen} disabled={mutation.isPending} onClick={() => { if (!open) { openedForGif.current = true; openComposer(); } usePicker.setState({ open: !pickerOpen }); }} className="h-11 min-w-11 shrink-0 rounded-lg border border-[#3FDCFF]/40 bg-[#3FDCFF]/10 px-2 text-sm font-bold text-[#3FDCFF] focus-visible:outline focus-visible:outline-2 disabled:opacity-40">GIF</button>
             <button type="submit" disabled={(!text.trim() && !attachment) || mutation.isPending} aria-label={parentCommentId || replyTo ? "Post reply" : "Post comment"} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[#3FDCFF] focus-visible:outline focus-visible:outline-2 disabled:opacity-35">
               <Send size={20} />
             </button>

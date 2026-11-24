@@ -1,5 +1,6 @@
 import { usePostMediaLease } from "@dvnt/app/lib/media/use-post-media-lease";
-import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delivery";
+import { retirePostMediaLeases } from "@dvnt/app/lib/media/post-media-lease-events";
+import { getEditableMediaIds, toggleMediaRemoval, type PostMediaRemoval } from "@dvnt/app/lib/posts/edit-post-media";
 import { getCaptionMetrics, validatePostCaption, MAX_CAPTION_LENGTH, MAX_CAPTION_RAW_LENGTH } from "@dvnt/app/lib/posts/post-caption";
 import { SafeAreaView } from "@dvnt/app/components/ui/html";
 /**
@@ -7,10 +8,10 @@ import { SafeAreaView } from "@dvnt/app/components/ui/html";
  *
  * Production-ready post editor with:
  * - Authorization guard (only post author)
- * - Media carousel preview (read-only)
+ * - Remove selected published media without changing retained items
  * - Caption editor with character counter
  * - Location editor
- * - Optimistic TanStack Query mutation with rollback
+ * - Confirmed save before navigation
  * - NativeWind dark theme, Motion animations
  * - Unsaved changes detection
  * - Keyboard-safe scrolling
@@ -61,11 +62,8 @@ import { postsApi } from "@dvnt/app/lib/api/posts";
 import { postTagsApi, type PostTag } from "@dvnt/app/lib/api/post-tags";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import type { Post } from "@dvnt/app/lib/types";
-import * as ImageManipulator from "expo-image-manipulator";
-import { uploadToServer } from "@dvnt/app/lib/server-upload";
 import { DETAIL_HEADER_ROW } from "@dvnt/app/components/layout/screen-shell";
 import { DetailBackButton } from "@dvnt/app/components/layout/detail-header";
-import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 
 /**
  * Fallback only — see the live read inside the screen. A module-scope
@@ -89,10 +87,10 @@ function EditPostScreenContent() {
   const showToast = useUIStore((s) => s.showToast);
   const currentUser = useAuthStore((s) => s.user);
   const scrollRef = useRef<RNScrollView>(null);
-  const hydratedPostId = useRef<string | null>(null);
+  const [hydratedPostId, setHydratedPostId] = useState<string | null>(null);
 
   // ─── Fetch post ───
-  const { data: post, isLoading, isError } = usePost(id || "");
+  const { data: post, isLoading, isError, isPlaceholderData } = usePost(id || "");
   const leasedMedia = usePostMediaLease(post?.id, post?.media || []);
 
   // ─── Local form state ───
@@ -105,8 +103,7 @@ function EditPostScreenContent() {
   const [isNSFW, setIsNSFW] = useState(false);
   const [originalIsNSFW, setOriginalIsNSFW] = useState(false);
   const [mediaIndex, setMediaIndex] = useState(0);
-  const [rotations, setRotations] = useState<Record<number, number>>({});
-  const [isRotating, setIsRotating] = useState(false);
+  const [removal, setRemoval] = useState<PostMediaRemoval | null>(null);
 
   // ─── Post tags (Instagram-style) ───
   const { data: postTags = [], refetch: refetchTags } = useQuery({
@@ -123,13 +120,12 @@ function EditPostScreenContent() {
   );
 
   // ─── Dirty detection ───
-  const hasRotations = Object.values(rotations).some((r) => r % 360 !== 0);
   const isDirty = useMemo(
     () =>
       caption !== originalCaption ||
       location?.name !== originalLocation?.name ||
       isNSFW !== originalIsNSFW ||
-      hasRotations,
+      removal !== null,
     [
       caption,
       originalCaption,
@@ -137,16 +133,17 @@ function EditPostScreenContent() {
       originalLocation,
       isNSFW,
       originalIsNSFW,
-      hasRotations,
+      removal,
     ],
   );
 
   // Initialize form from post data
   useEffect(() => {
-    if (post && (hydratedPostId.current !== String(post.id) || !isDirty)) {
+    if (post && String(post.id) === id && !isPlaceholderData && (hydratedPostId !== id || !isDirty)) {
       // Accept a fresh server response until editing starts; preserve dirty drafts.
       // usePost may initially expose an older feed/profile placeholder.
-      hydratedPostId.current = String(post.id);
+      if (hydratedPostId !== id) setRemoval(null);
+      setHydratedPostId(id);
       const nextCaption =
         post.kind === "text"
           ? resolveTextPostPresentation(post.textSlides, post.caption).previewText
@@ -158,7 +155,7 @@ function EditPostScreenContent() {
       setIsNSFW(post.isNSFW || false);
       setOriginalIsNSFW(post.isNSFW || false);
     }
-  }, [post, isDirty]);
+  }, [post, isDirty, isPlaceholderData, id, hydratedPostId]);
 
   const captionMetrics = getCaptionMetrics(caption);
   const captionValidation = validatePostCaption(caption);
@@ -172,192 +169,40 @@ function EditPostScreenContent() {
     );
   }, [post?.author?.username, currentUser?.username]);
 
-  // ─── Optimistic mutation ───
   const updateMutation = useMutation({
-    mutationFn: (updates: {
-      content?: string;
-      location?: string | undefined;
-      isNSFW?: boolean;
-    }) =>
-      postsApi.updatePost(id!, {
-        content: updates.content,
-        location: updates.location,
-        isNSFW: updates.isNSFW,
-      }),
-
-    onMutate: async (updates) => {
-      // Cancel outgoing refetches
-      await queryClient.cancelQueries({ queryKey: postKeys.detail(id!) });
-      await queryClient.cancelQueries({ queryKey: postKeys.feedInfiniteAll() });
-
-      // Snapshot previous values
-      const previousPost = queryClient.getQueryData<Post>(postKeys.detail(id!));
-      const previousFeed = queryClient.getQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled));
-
-      // Optimistic update — post detail
-      queryClient.setQueryData<Post | null>(postKeys.detail(id!), (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          caption: updates.content ?? old.caption,
-          location: updates.location ?? old.location,
-        };
-      });
-
-      // Optimistic update — infinite feed
-      queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), (old: any) => {
-        if (!old?.pages) return old;
-        return {
-          ...old,
-          pages: old.pages.map((page: any) => ({
-            ...page,
-            data: page.data?.map((p: any) =>
-              p.id === id
-                ? {
-                    ...p,
-                    caption: updates.content ?? p.caption,
-                    location: updates.location ?? p.location,
-                  }
-                : p,
-            ),
-          })),
-        };
-      });
-
-      // Optimistic update — profile posts
-      if (currentUser?.username) {
-        queryClient.setQueryData(
-          postKeys.profilePosts(currentUser.username),
-          (old: any) => {
-            if (!old || !Array.isArray(old)) return old;
-            return old.map((p: any) =>
-              p.id === id
-                ? {
-                    ...p,
-                    caption: updates.content ?? p.caption,
-                    location: updates.location ?? p.location,
-                  }
-                : p,
-            );
-          },
-        );
-      }
-
-      return { previousPost, previousFeed };
-    },
-
-    onError: (error, _vars, context) => {
-      // Rollback
-      if (context?.previousPost) {
-        queryClient.setQueryData(postKeys.detail(id!), context.previousPost);
-      }
-      if (context?.previousFeed) {
-        queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), context.previousFeed);
-      }
+    mutationFn: (updates: Parameters<typeof postsApi.updatePost>[1]) => postsApi.updatePost(id!, updates),
+    onError: (error) => {
       showToast("error", "Couldn't save changes", error instanceof Error && error.message
         ? error.message
         : "Couldn't save changes. Try again.");
     },
-
-    onSuccess: () => {
-      // Sync server state in background
-      queryClient.invalidateQueries({ queryKey: postKeys.detail(id!) });
+    onSuccess: async (_post, updates) => {
+      if (updates.removeMedia) retirePostMediaLeases();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: postKeys.all }),
+        queryClient.invalidateQueries({ queryKey: ["profilePosts"] }),
+        queryClient.invalidateQueries({ queryKey: ["postTags", id] }),
+      ]);
     },
   });
 
-  // ─── Save handler ───
-  const handleSave = useCallback(async () => {
-    if (
-      !id ||
-      !isDirty ||
-      captionOverLimit ||
-      updateMutation.isPending ||
-      isRotating
-    )
-      return;
-
+  const handleSave = useCallback(() => {
+    if (!id || !isDirty || captionOverLimit || updateMutation.isPending) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-    const updates: {
-      content?: string;
-      location?: string;
-      isNSFW?: boolean;
-      media?: Array<{ order: number; url: string }>;
-    } = {
-      content: caption.trim(),
-      location: location?.name || undefined,
+    updateMutation.mutate({
+      ...(caption !== originalCaption ? { content: caption.trim() } : {}),
+      ...(location?.name !== originalLocation?.name ? { location: location?.name || "" } : {}),
       ...(isNSFW !== originalIsNSFW ? { isNSFW } : {}),
-    };
-
-    // Process rotated images: manipulate → upload → collect new URLs
-    if (hasRotations && post?.media) {
-      setIsRotating(true);
-      try {
-        const mediaUpdates: Array<{ order: number; url: string }> = [];
-
-        for (const [indexStr, degrees] of Object.entries(rotations)) {
-          if (degrees % 360 === 0) continue;
-          const idx = parseInt(indexStr, 10);
-          const mediaItem = leasedMedia[idx];
-          if (!mediaItem?.url) throw new Error("Media access expired. Please reopen this post before editing.");
-          if (mediaItem.type === "video") continue;
-
-          // Rotate locally with expo-image-manipulator
-          const rotated = await ImageManipulator.manipulateAsync(
-            mediaItem.url,
-            [{ rotate: degrees }],
-            { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
-          );
-
-          // Upload rotated image via server upload
-          const uploadResult = await uploadToServer(rotated.uri, "posts");
-          if (uploadResult.success && uploadResult.url) {
-            mediaUpdates.push({ order: idx, url: uploadResult.url });
-          } else {
-            showToast(
-              "error",
-              "Upload Failed",
-              `Failed to upload rotated image ${idx + 1}`,
-            );
-            setIsRotating(false);
-            return;
-          }
-        }
-
-        if (mediaUpdates.length > 0) {
-          updates.media = mediaUpdates;
-        }
-      } catch (err) {
-        console.error("[EditPost] Rotation processing error:", err);
-        showToast("error", "Error", "Failed to process rotated images");
-        setIsRotating(false);
-        return;
-      }
-      setIsRotating(false);
-    }
-
-    // Keep the draft open if verification or the save is refused.
-    updateMutation.mutate(updates, { onSuccess: () => router.back() });
-  }, [
-    id,
-    isDirty,
-    captionOverLimit,
-    caption,
-    location,
-    isNSFW,
-    originalIsNSFW,
-    updateMutation,
-    router,
-    hasRotations,
-    rotations,
-    post?.media,
-    leasedMedia,
-    isRotating,
-    showToast,
-  ]);
+      ...(removal ? { removeMedia: {
+        ...removal,
+        ...(caption !== originalCaption ? { expectedCaption: originalCaption } : {}),
+      } } : {}),
+    }, { onSuccess: () => router.back() });
+  }, [id, isDirty, captionOverLimit, updateMutation, caption, originalCaption, location, originalLocation, isNSFW, originalIsNSFW, removal, router]);
 
   // ─── Cancel with unsaved changes warning ───
   const handleCancel = useCallback(() => {
+    if (updateMutation.isPending) return;
     if (isDirty) {
       Alert.alert(
         "Discard Changes?",
@@ -374,16 +219,7 @@ function EditPostScreenContent() {
     } else {
       router.back();
     }
-  }, [isDirty, router]);
-
-  // ─── Image rotation handler ───
-  const handleRotate = useCallback((index: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setRotations((prev) => ({
-      ...prev,
-      [index]: ((prev[index] || 0) + 90) % 360,
-    }));
-  }, []);
+  }, [isDirty, router, updateMutation.isPending]);
 
   // ─── Media carousel scroll handler ───
   const handleMediaScroll = useCallback(
@@ -398,7 +234,7 @@ function EditPostScreenContent() {
   // ═══════════════════════════════════════════
   // LOADING STATE
   // ═══════════════════════════════════════════
-  if (isLoading) {
+  if (isLoading || isPlaceholderData || (post && hydratedPostId !== String(post.id))) {
     return (
       <SafeAreaView edges={["top"]} className="flex-1 bg-background">
         <View className="flex-1 items-center justify-center">
@@ -498,6 +334,8 @@ function EditPostScreenContent() {
   // MAIN EDIT FORM
   // ═══════════════════════════════════════════
   const mediaItems = leasedMedia;
+  const editableMediaIds = getEditableMediaIds(post.media);
+  const pendingIds = removal?.ids ?? [];
   const hasMedia = mediaItems.length > 0;
   const hasMultipleMedia = mediaItems.length > 1;
 
@@ -519,8 +357,7 @@ function EditPostScreenContent() {
           disabled={
             !isDirty ||
             captionOverLimit ||
-            updateMutation.isPending ||
-            isRotating
+            updateMutation.isPending
           }
           hitSlop={12}
           className={`px-5 py-2 rounded-full ${
@@ -530,13 +367,12 @@ function EditPostScreenContent() {
             opacity:
               isDirty &&
               !captionOverLimit &&
-              !updateMutation.isPending &&
-              !isRotating
+              !updateMutation.isPending
                 ? 1
                 : 0.4,
           }}
         >
-          {updateMutation.isPending || isRotating ? (
+          {updateMutation.isPending ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
             <Text
@@ -553,6 +389,7 @@ function EditPostScreenContent() {
       </Motion.View>
 
       <KeyboardAwareScrollView
+        pointerEvents={updateMutation.isPending ? "none" : "auto"}
         bottomOffset={insets.bottom + 20}
         showsVerticalScrollIndicator={false}
         keyboardDismissMode="on-drag"
@@ -571,12 +408,16 @@ function EditPostScreenContent() {
               onMomentumScrollEnd={handleMediaScroll}
               decelerationRate="fast"
             >
-              {mediaItems.map((media, index) => (
+              {mediaItems.map((media, index) => {
+                const mediaId = post.media.find((item) => item.order === media.order)?.mediaId;
+                const pendingRemoval = !!mediaId && pendingIds.includes(mediaId);
+                return (
                 <View
-                  key={`media-${index}`}
+                  key={mediaId ?? `media-${index}`}
                   style={{ width: screenWidth, height: mediaHeight }}
                   className="bg-black"
                 >
+                  <View className="flex-1" style={{ opacity: pendingRemoval ? 0.35 : 1 }} pointerEvents={pendingIds.length ? "none" : "auto"}>
                   {media.type === "video" ? (
                     <View className="flex-1 items-center justify-center">
                       <Image
@@ -598,12 +439,20 @@ function EditPostScreenContent() {
                       height={mediaHeight}
                       existingTags={postTags}
                       onTagsChanged={handleTagsChanged}
-                      onRotate={() => handleRotate(index)}
-                      rotationDegrees={rotations[index] || 0}
                     />
                   )}
+                  </View>
+                  {mediaId && editableMediaIds.length > 1 ? (
+                    <Pressable accessibilityRole="button"
+                      accessibilityLabel={(pendingRemoval ? "Restore" : "Remove") + " media item " + (index + 1)}
+                      disabled={updateMutation.isPending || (!pendingRemoval && pendingIds.length >= editableMediaIds.length - 1)}
+                      onPress={() => setRemoval((current) => toggleMediaRemoval(editableMediaIds, current, mediaId))}
+                      className="absolute right-3 top-3 rounded-lg bg-black/80 px-3 py-2">
+                      <Text className="text-xs font-semibold text-white">{pendingRemoval ? "Restore" : "Remove"}</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
-              ))}
+              );})}
             </RNScrollView>
 
             {/* Carousel dots */}
@@ -632,9 +481,7 @@ function EditPostScreenContent() {
                 </Text>
               </View>
               <Text className="text-muted-foreground text-[11px]">
-                {hasRotations
-                  ? "Rotated images will be re-uploaded on save"
-                  : "Tap rotate to adjust images"}
+                {pendingIds.length ? pendingIds.length + " marked for removal on Save" : ""}
               </Text>
             </View>
           </Motion.View>

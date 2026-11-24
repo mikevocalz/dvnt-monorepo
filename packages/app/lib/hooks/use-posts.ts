@@ -760,12 +760,10 @@ export function useUpdatePost() {
       updates: { content?: string; location?: string };
     }) => postsApi.updatePost(postId, updates),
     onMutate: () => ({ isCurrent: capturePostReadOwner(queryClient) }),
-    onSuccess: (updatedPost, { postId }, context) => {
+    onSuccess: (_confirmation, { postId }, context) => {
       if (!context?.isCurrent()) return;
-      // Update the specific post in cache
-      if (updatedPost) {
-        queryClient.setQueryData<Post>(postKeys.detail(postId), updatedPost);
-      }
+      // The write response confirms identity; it is not a projected Post.
+      queryClient.invalidateQueries({ queryKey: postKeys.detail(postId) });
       // Invalidate feed to show updated content
       queryClient.invalidateQueries({ queryKey: postKeys.feed() });
       queryClient.invalidateQueries({ queryKey: postKeys.feedInfiniteAll() });

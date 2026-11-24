@@ -717,11 +717,9 @@ export function useUpdatePost() {
       postId: string;
       updates: { content?: string; location?: string };
     }) => postsApi.updatePost(postId, updates),
-    onSuccess: (updatedPost, { postId }) => {
-      // Update the specific post in cache
-      if (updatedPost) {
-        queryClient.setQueryData<Post>(postKeys.detail(postId), updatedPost);
-      }
+    onSuccess: (_confirmation, { postId }) => {
+      // The write response confirms identity; it is not a projected Post.
+      queryClient.invalidateQueries({ queryKey: postKeys.detail(postId) });
       // Invalidate feed to show updated content
       queryClient.invalidateQueries({ queryKey: postKeys.feed() });
       queryClient.invalidateQueries({ queryKey: postKeys.feedInfinite() });

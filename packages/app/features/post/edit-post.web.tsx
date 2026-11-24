@@ -1,6 +1,7 @@
 "use client";
 import { usePostMediaLease } from "@dvnt/app/lib/media/use-post-media-lease";
-import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delivery";
+import { retirePostMediaLeases } from "@dvnt/app/lib/media/post-media-lease-events";
+import { getEditableMediaIds } from "@dvnt/app/lib/posts/edit-post-media";
 
 /**
  * Edit Post — WEB (@dvnt/app/features/post/edit-post). Real web port of the
@@ -8,18 +9,8 @@ import { protectedPostMediaEnabled } from "@dvnt/app/lib/media/post-media-delive
  * `(protected)/post/edit/[id].tsx` just redirects here, so this one screen
  * serves both web routes).
  *
- * Law 1 (data wiring is sacred): PREFILLS from the SAME fetch the native screen
- * uses — `usePost(id)` — and the post tags via `postTagsApi.getTagsForPost`
- * (TanStack `useQuery` keyed `["postTags", id]`, exactly like native). Saves
- * through the EXACT mutation native calls: `postsApi.updatePost(id, …)` wrapped
- * in a `useMutation` with the same optimistic cache writes against `postKeys`.
- * Author-only guard mirrors event-edit.web's ownership guard (compares the
- * post author username to the auth user, like native's `isOwner`).
- *
- * Media is NOT re-editable on edit (read-only carousel) — matches native;
- * native's image-rotation step relies on expo-image-manipulator and is
- * intentionally omitted on web. Editable fields: caption, location, tags,
- * spicy/NSFW, and per-slide text for text posts.
+ * Both routes use the same owner-only save API as native. The published
+ * media editor only removes selected items; it never uploads replacement bytes.
  *
  * Law 3 (web idioms): NativeWind interop OFF — Tailwind className on raw DOM
  * tags only, no <View>/<Text>. State lives in the dedicated Zustand
@@ -42,7 +33,6 @@ import { useUIStore } from "@dvnt/app/lib/stores/ui-store";
 import { resolveTextPostPresentation } from "@dvnt/app/lib/posts/text-post";
 import type { Post } from "@dvnt/app/lib/types";
 import { useEditPostStore } from "./edit-post-store";
-import { useAppStore } from "@dvnt/app/lib/stores/app-store";
 import { ownsContent } from "@dvnt/app/lib/profile/same-user";
 
 const MAX_CAPTION = MAX_CAPTION_LENGTH;
@@ -62,7 +52,7 @@ export function EditPostScreen() {
   const s = useEditPostStore();
 
   // ── Fetch post (same hook native uses for prefill) ──
-  const { data: post, isLoading, isError } = usePost(id);
+  const { data: post, isLoading, isError, isPlaceholderData } = usePost(id);
   const leasedMedia = usePostMediaLease(post?.id, post?.media || []);
 
   // ── Post tags (Instagram-style) — same query native runs ──
@@ -76,7 +66,7 @@ export function EditPostScreen() {
 
   // ── Prefill from the fetched post (mirrors native's useEffect) ──
   useEffect(() => {
-    if (!post || s.hydratedId === id) return;
+    if (!post || String(post.id) !== id || isPlaceholderData) return;
     const presentation = resolveTextPostPresentation(
       post.textSlides,
       post.caption,
@@ -99,7 +89,7 @@ export function EditPostScreen() {
       textSlides: slides,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [post, id]);
+  }, [post, id, isPlaceholderData]);
 
   // ── Dirty detection (mirrors native's isDirty) ──
   const hydrated = s.hydratedId === id;
@@ -118,7 +108,7 @@ export function EditPostScreen() {
     (s.caption !== s.originalCaption ||
       s.location !== s.originalLocation ||
       s.isNSFW !== s.originalIsNSFW ||
-      slidesDirty);
+      slidesDirty || s.removal !== null);
   useDirtyGuard(isDirty);
 
   // ── Author-only guard (mirrors native isOwner + event-edit ownership) ──
@@ -134,94 +124,20 @@ export function EditPostScreen() {
     return ownsContent(currentUser, post);
   }, [post, currentUser]);
 
-  // ── Optimistic mutation — EXACT native path: postsApi.updatePost ──
   const updateMutation = useMutation({
-    mutationFn: (updates: {
-      content?: string;
-      location?: string;
-      isNSFW?: boolean;
-      slides?: string[];
-    }) =>
-      postsApi.updatePost(id, {
-        content: updates.content,
-        location: updates.location,
-        isNSFW: updates.isNSFW,
-        slides: updates.slides,
-      }),
-    onMutate: async (updates) => {
-      await queryClient.cancelQueries({ queryKey: postKeys.detail(id) });
-      await queryClient.cancelQueries({ queryKey: postKeys.feedInfiniteAll() });
-
-      const previousPost = queryClient.getQueryData<Post>(postKeys.detail(id));
-      const previousFeed = queryClient.getQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled));
-
-      queryClient.setQueryData<Post | null>(postKeys.detail(id), (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          caption: updates.content ?? old.caption,
-          location: updates.location ?? old.location,
-          isNSFW: updates.isNSFW ?? old.isNSFW,
-        };
-      });
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), (old: any) => {
-        if (!old?.pages) return old;
-        return {
-          ...old,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          pages: old.pages.map((page: any) => ({
-            ...page,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            data: page.data?.map((p: any) =>
-              p.id === id
-                ? {
-                    ...p,
-                    caption: updates.content ?? p.caption,
-                    location: updates.location ?? p.location,
-                  }
-                : p,
-            ),
-          })),
-        };
-      });
-
-      if (currentUser?.username) {
-        queryClient.setQueryData(
-          postKeys.profilePosts(currentUser.username),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (old: any) => {
-            if (!old || !Array.isArray(old)) return old;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            return old.map((p: any) =>
-              p.id === id
-                ? {
-                    ...p,
-                    caption: updates.content ?? p.caption,
-                    location: updates.location ?? p.location,
-                  }
-                : p,
-            );
-          },
-        );
-      }
-
-      return { previousPost, previousFeed };
-    },
-    onError: (error, _vars, context) => {
-      if (context?.previousPost) {
-        queryClient.setQueryData(postKeys.detail(id), context.previousPost);
-      }
-      if (context?.previousFeed) {
-        queryClient.setQueryData(postKeys.feedInfinite(useAppStore.getState().nsfwEnabled), context.previousFeed);
-      }
+    mutationFn: (updates: Parameters<typeof postsApi.updatePost>[1]) => postsApi.updatePost(id, updates),
+    onError: (error) => {
       showToast("error", "Couldn't save changes", error instanceof Error && error.message
         ? error.message
         : "Couldn't save changes. Try again.");
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: postKeys.detail(id) });
+    onSuccess: async (_post, updates) => {
+      if (updates.removeMedia) retirePostMediaLeases();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: postKeys.all }),
+        queryClient.invalidateQueries({ queryKey: ["profilePosts"] }),
+        queryClient.invalidateQueries({ queryKey: ["postTags", id] }),
+      ]);
     },
   });
 
@@ -237,10 +153,14 @@ export function EditPostScreen() {
 
     updateMutation.mutate(
       {
-        content: isTextPost ? trimmedSlides[0] : s.caption.trim(),
-        location: s.location.trim() || undefined,
+        ...(!isTextPost && s.caption !== s.originalCaption ? { content: s.caption.trim() } : {}),
+        ...(s.location !== s.originalLocation ? { location: s.location.trim() } : {}),
         ...(s.isNSFW !== s.originalIsNSFW ? { isNSFW: s.isNSFW } : {}),
         ...(isTextPost && slidesDirty ? { slides: trimmedSlides } : {}),
+        ...(s.removal ? { removeMedia: {
+          ...s.removal,
+          ...(s.caption !== s.originalCaption ? { expectedCaption: s.originalCaption } : {}),
+        } } : {}),
       },
       {
         onSuccess: () => {
@@ -252,12 +172,13 @@ export function EditPostScreen() {
   };
 
   const handleCancel = () => {
+    if (updateMutation.isPending) return;
     s.reset();
     router.back();
   };
 
   // ── Loading ──
-  if (isLoading || !hydrated) {
+  if (isLoading || isPlaceholderData || (post && !hydrated)) {
     return (
       <div className="min-h-[100dvh] bg-[#06070d] text-white flex items-center justify-center">
         <span className="text-sm text-white/50">Loading post…</span>
@@ -302,6 +223,8 @@ export function EditPostScreen() {
   }
 
   const mediaItems = leasedMedia;
+  const editableMediaIds = getEditableMediaIds(post.media);
+  const pendingIds = s.removal?.ids ?? [];
   const hasMedia = mediaItems.length > 0;
   const activeSlide = s.textSlides[s.activeSlideIndex] ?? s.textSlides[0] ?? "";
 
@@ -314,6 +237,7 @@ export function EditPostScreen() {
       >
         <button
           onClick={handleCancel}
+          disabled={updateMutation.isPending}
           className="text-[16px] text-white/80 active:opacity-60"
         >
           Cancel
@@ -328,16 +252,20 @@ export function EditPostScreen() {
         </button>
       </div>
 
-      <div className="mx-auto w-full max-w-2xl px-4 pb-32 pt-4 flex flex-col gap-4">
-        {/* Media preview — READ-ONLY (media cannot be modified after posting) */}
+      <div inert={updateMutation.isPending} className="mx-auto w-full max-w-2xl px-4 pb-32 pt-4 flex flex-col gap-4">
+        {/* Tile remains visible until Save so a selection can be undone. */}
         {hasMedia ? (
           <section className="flex flex-col gap-2">
             <div className="flex gap-2 overflow-x-auto pb-1">
-              {mediaItems.map((media, index) => (
+              {mediaItems.map((media, index) => {
+                const mediaId = post.media.find((item) => item.order === media.order)?.mediaId;
+                const pendingRemoval = !!mediaId && pendingIds.includes(mediaId);
+                return (
                 <div
-                  key={`media-${index}`}
+                  key={mediaId ?? `media-${index}`}
                   className="relative shrink-0 w-40 aspect-[4/5] overflow-hidden rounded-2xl bg-black"
                 >
+                  <div className={pendingRemoval ? "size-full opacity-35" : "size-full"}>
                   {media.type === "video" ? (
                     <>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -360,15 +288,25 @@ export function EditPostScreen() {
                       className="w-full h-full object-cover"
                     />
                   )}
+                  </div>
+                  {mediaId && editableMediaIds.length > 1 ? (
+                    <button type="button"
+                      disabled={updateMutation.isPending || (!pendingRemoval && pendingIds.length >= editableMediaIds.length - 1)}
+                      aria-label={(pendingRemoval ? "Restore" : "Remove") + " media item " + (index + 1)}
+                      onClick={() => s.toggleRemoval(editableMediaIds, mediaId)}
+                      className="absolute right-2 top-2 rounded-lg bg-black/80 px-2 py-2 text-xs font-semibold text-white disabled:opacity-40">
+                      {pendingRemoval ? "Restore" : "Remove"}
+                    </button>
+                  ) : null}
                 </div>
-              ))}
+              );})}
             </div>
             <div className="flex items-center gap-2 text-white/40">
               <ImageIcon size={14} />
               <span className="text-xs">
                 {mediaItems.length}{" "}
-                {mediaItems.length === 1 ? "item" : "items"} · media can&apos;t
-                be changed after posting
+                {mediaItems.length === 1 ? "item" : "items"}
+                {pendingIds.length ? " · " + pendingIds.length + " marked for removal on Save" : ""}
               </span>
             </div>
           </section>
@@ -543,8 +481,7 @@ export function EditPostScreen() {
         <div className="flex gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4">
           <AlertCircle size={18} className="shrink-0 text-white/25" />
           <p className="text-xs leading-[18px] text-white/55">
-            Changes will be visible immediately to all followers. Media files
-            cannot be modified after posting.
+            Changes are saved together. You can remove media here, but you can’t replace the original files.
           </p>
         </div>
       </div>
