@@ -82,7 +82,8 @@ function App(){const s=useEventDetailUiStore();const routePath=route(st=>st.path
  const response=await f.call(body);if(body.code==='SLOW')await new Promise(r=>setTimeout(r,700));res.writeHead(response.status,{'Content-Type':'application/json'});return res.end(JSON.stringify(response.data));
  }
  if(name==='cart-create-hold')data={ok:true,cartId:body.cartId,holdExpiresAt:new Date(Date.now()+600000).toISOString(),holdId:'hold-fixture'};
- else if(name==='cart-checkout')data={ok:true,cartId:body.cartId,paymentIntent:'pi_fixture',ephemeralKey:'fixture',customer:'cus_fixture',paymentIntentId:'pi_fixture',clientSecret:'pi_fixture_secret_fixture',publishableKey:'pk_test_fixture',holdExpiresAt:new Date(Date.now()+600000).toISOString(),totals:{totalCents:3993,subtotalCents:3700,buyerFeeCents:293,discountCents:300,currency:'usd'}};
+ else if(name==='cart-checkout'&&body.action==='contact_capability')data={webTicketContactVersion:1};
+ else if(name==='cart-checkout')data={ok:true,webTicketContactVersion:1,cartId:body.web_ticket_checkout?.cartId,paymentIntent:'pi_fixture',ephemeralKey:'fixture',customer:'cus_fixture',paymentIntentId:'pi_fixture',clientSecret:'pi_fixture_secret_fixture',publishableKey:'pk_test_fixture',holdExpiresAt:new Date(Date.now()+600000).toISOString(),totals:{totalCents:3993,subtotalCents:3700,buyerFeeCents:293,discountCents:300,currency:'usd'}};
  else throw Error('Unexpected boundary '+name);
  res.writeHead(200,{'Content-Type':'application/json'});return res.end(JSON.stringify(data));
  }
@@ -105,8 +106,9 @@ function App(){const s=useEventDetailUiStore();const routePath=route(st=>st.path
  await page.evaluate(()=>window.cart.getState().addLineItem('1',{category:'coat_check',tierId:'coat-fixture',quantity:1,unitPriceCents:1000,metadata:{name:'Coat Check'}}));
  await page.waitForFunction(()=>document.body.innerText.includes('39.93'));
  await page.getByRole('button',{name:'Continue to payment',exact:true}).click();
- await page.waitForTimeout(500);const payment=calls.find(c=>c.name==='cart-checkout');assert.ok(payment,JSON.stringify({errors,calls,text:await page.locator('body').innerText()}));
- assert.equal(payment.body.promoterCode,'COOLIN');assert.equal(payment.body.promoCode,undefined);
+ await page.waitForTimeout(500);const payment=calls.find(c=>c.name==='cart-checkout'&&c.body.checkout_contact_version===1);assert.ok(payment,JSON.stringify({errors,calls,text:await page.locator('body').innerText()}));
+ assert.deepEqual(Object.keys(payment.body).sort(),['checkout_contact_version','web_ticket_checkout']);
+ assert.equal(payment.body.web_ticket_checkout.promoterCode,'COOLIN');assert.equal(payment.body.web_ticket_checkout.promoCode,undefined);
  assert.equal(f.writes.length,0,'Apply did not bind a claim or create an order');
  // Retry directly on review, not only via the event sheet.
  await page.reload();await page.evaluate(()=>{window.begin();window.cart.getState().startCart('1');window.cart.getState().addLineItem('1',{category:'admission',tierId:'11111111-1111-4111-8111-111111111111',quantity:1,unitPriceCents:3000,metadata:{tierName:'Admission'}});window.__nav('/feed/checkout/review');});

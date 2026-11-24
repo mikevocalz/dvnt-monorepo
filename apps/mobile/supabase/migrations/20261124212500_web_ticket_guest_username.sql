@@ -19,7 +19,8 @@ CREATE INDEX web_ticket_guest_contacts_order_idx ON public.web_ticket_guest_cont
 ALTER TABLE public.web_ticket_order_contacts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.web_ticket_guest_contacts ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.web_ticket_order_contacts, public.web_ticket_guest_contacts FROM PUBLIC, anon, authenticated;
-GRANT SELECT ON public.web_ticket_order_contacts, public.web_ticket_guest_contacts TO service_role;
+GRANT SELECT ON public.web_ticket_order_contacts TO service_role;
+GRANT SELECT ON public.web_ticket_guest_contacts TO service_role;
 
 -- Bind immutable contact to the exact guest order created by the server.
 CREATE FUNCTION public.set_web_ticket_order_contact(

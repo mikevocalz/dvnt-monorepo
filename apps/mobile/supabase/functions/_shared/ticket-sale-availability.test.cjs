@@ -97,7 +97,6 @@ function checkout(rail, patch = {}, options = {}) {
     "sentry.ts": { withSentry: (_name, handler) => handler },
     "capacity-alerts.ts": { maybeFireCapacityAlerts: async () => {} },
     "ticket-email-delivery.ts": { deliverTicketBundleEmail: async (...args) => { deliveries.push(args); } },
-    "checkout-profile-fields.ts": { parseCheckoutProfileFields: () => ({ ok: true, fields: null }) },
     "checkout-profile.ts": {
       provisionCheckoutProfile: async () => { throw new Error("Unexpected profile provisioning"); },
       recordCheckoutProfileIntake: async () => { throw new Error("Unexpected profile intake"); },
@@ -106,11 +105,11 @@ function checkout(rail, patch = {}, options = {}) {
   };
   const realHelpers = new Set([
     "checkout-replay.ts", "tier-sale-availability.ts", "tier-visibility.ts", "sales-cutoff.ts",
-    "fee-calculator.ts", "async-settlement.ts", "checkout-line-items.ts",
+    "fee-calculator.ts", "async-settlement.ts", "checkout-line-items.ts", "checkout-profile-fields.ts",
   ]);
   let handler;
   const context = {
-    Request, Response, URLSearchParams, crypto, Date: FixedDate,
+    Request, Response, URL, URLSearchParams, crypto, Date: FixedDate,
     console: { log() {}, warn() {}, error() {} },
     Deno: { env: { get: () => "test-fixture" }, serve: (fn) => { handler = fn; } },
     fetch: async (url, init) => {
