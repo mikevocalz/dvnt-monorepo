@@ -26,8 +26,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Install isolated fixture dependency
-        run: npm install --prefix "$RUNNER_TEMP/guest-free" --ignore-scripts --no-audit --no-fund --no-save typescript@6.0.3
+      - name: Install isolated fixture dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/guest-free" --ignore-scripts --no-audit --no-fund --no-save typescript@6.0.3 pg@8.21.0
+          # ESM imports do not resolve via NODE_PATH. Keep pg visible to the verifier.
+          mkdir -p node_modules
+          ln -s "$RUNNER_TEMP/guest-free/node_modules/pg" node_modules/pg
       - name: Real handler contracts, paid-path compatibility and replay behavior
         env:
           NODE_PATH: ${{ runner.temp }}/guest-free/node_modules
