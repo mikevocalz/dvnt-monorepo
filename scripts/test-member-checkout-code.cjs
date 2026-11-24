@@ -2,7 +2,7 @@
 // shared hook/stores/pricing/cart API. Auth, transport, unrelated UI and Stripe
 // are explicit test boundaries. No live member session or card is used.
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
-const ts=require('typescript'),esbuild=require('esbuild'),{chromium}=require('playwright');
+const ts=require('typescript'),esbuild=require('esbuild'),{chromium,webkit}=require('playwright');
 const {fixture,promo,promoter,TIER}=require('../apps/mobile/supabase/functions/guest-checkout/discounts-fixture.cjs');
 const ROOT=path.resolve(__dirname,'..');
 const f=fixture({entrypoint:path.join(ROOT,'apps/mobile/supabase/functions/validate-promo-code/index.ts'),
@@ -92,8 +92,12 @@ function App(){const s=useEventDetailUiStore();const routePath=route(st=>st.path
  });
  await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;
  try{
- browser=await chromium.launch({headless:true,channel:'chromium',args:['--no-sandbox','--disable-dev-shm-usage']});
- const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const browserName=process.env.DVNT_CHECKOUT_TEST_BROWSER ?? 'chromium';
+  assert.ok(['chromium','webkit'].includes(browserName), 'Unsupported checkout test browser: '+browserName);
+  const useWebKit=browserName==='webkit';
+  const executablePath=process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  browser=await (useWebKit ? webkit : chromium).launch(useWebKit ? {headless:true} : {headless:true,...(executablePath?{executablePath}:{channel:'chromium'}),args:['--no-sandbox','--disable-dev-shm-usage']});
+ const page=await browser.newPage({viewport:{width:390,height:844},...(useWebKit ? {isMobile:true,hasTouch:true} : {})});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto('http://127.0.0.1:'+server.address().port);await page.evaluate(()=>window.begin());
  let input=page.getByRole('textbox',{name:'Promo or promoter code'});
  await input.fill('COOLIN');assert.equal(await page.getByRole('button',{name:'Pay $31.75',exact:true}).isDisabled(),true);

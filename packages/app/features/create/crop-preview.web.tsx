@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { useRouter } from "solito/navigation";
 import { ArrowLeft, Check, GripVertical } from "lucide-react";
@@ -72,7 +72,13 @@ const useCropUIStore = create<CropUIState>((set, get) => ({
       areas: { ...s.areas, [id]: area },
       croppedDone: { ...s.croppedDone, [id]: true },
     })),
-  setAspect: (id, value) => set((s) => ({ aspects: { ...s.aspects, [id]: value } })),
+  setAspect: (id, value) => set((s) => {
+    const areas = { ...s.areas };
+    const croppedDone = { ...s.croppedDone };
+    delete areas[id];
+    delete croppedDone[id];
+    return { areas, croppedDone, aspects: { ...s.aspects, [id]: value } };
+  }),
   reorder: (from, to) => {
     const { images, activeIndex } = get();
     if (to < 0 || to >= images.length) return;
@@ -101,10 +107,59 @@ function srcOf(m: MediaAsset): string {
   return m.editedUri || m.originalUri || m.uri;
 }
 
+// Chrome and Firefox cannot always decode an unpaired HEIC original. Decode
+// an editable PNG on demand rather than JPEG-encoding the source twice.
+async function getHeicCropBlob(source: string) {
+  const { heicTo } = await import("heic-to/next");
+  const response = await fetch(source);
+  if (!response.ok) throw new Error("Could not read the original");
+  return heicTo({ blob: await response.blob(), type: "image/png" });
+}
+
+function needsHeicDecode(media: MediaAsset) {
+  return !media.editedUri && /^(image\/hei[cf])$/i.test(media.mimeType ?? "");
+}
+
+function useCropSource(media: MediaAsset | undefined) {
+  const source = media ? srcOf(media) : null;
+  const heic = Boolean(media && needsHeicDecode(media));
+  const [heicPreview, setHeicPreview] = useState<{ source: string; url: string | null } | null>(null);
+  useEffect(() => {
+    if (!source || !heic) return;
+    let active = true;
+    let decoded: string | undefined;
+    const image = new Image();
+    image.onload = () => { if (active) setHeicPreview({ source, url: source }); };
+    image.onerror = async () => {
+      try {
+        const blob = await getHeicCropBlob(source);
+        if (!active) return;
+        decoded = URL.createObjectURL(blob);
+        setHeicPreview({ source, url: decoded });
+      } catch {
+        if (active) setHeicPreview({ source, url: null });
+      }
+    };
+    image.src = source;
+    return () => {
+      active = false;
+      image.onload = image.onerror = null;
+      if (decoded) URL.revokeObjectURL(decoded);
+      // Clear the lease if the same item is selected again after visiting one
+      // that did not itself require HEIC decoding.
+      setHeicPreview((current) => current?.source === source ? null : current);
+    };
+  }, [source, heic]);
+  return {
+    url: !heic ? source : heicPreview?.source === source ? heicPreview?.url ?? null : null,
+    failed: heic && heicPreview?.source === source && heicPreview.url === null,
+  };
+}
+
 export function CropPreviewScreen() {
   const router = useRouter();
-  const selectedMedia = useCreatePostStore((s) => s.selectedMedia);
-  const setSelectedMedia = useCreatePostStore((s) => s.setSelectedMedia);
+  const originalSelection = useRef<MediaAsset[] | null>(null);
+  const cropRun = useRef(0);
 
   const images = useCropUIStore((s) => s.images);
   const activeIndex = useCropUIStore((s) => s.activeIndex);
@@ -124,20 +179,29 @@ export function CropPreviewScreen() {
 
   // Hydrate the screen from the shared store's image assets on mount.
   useEffect(() => {
-    const imgs = selectedMedia.filter(canCropMedia);
+    const selection = useCreatePostStore.getState().selectedMedia;
+    originalSelection.current = selection;
+    const imgs = selection.filter(canCropMedia);
     setImages(imgs);
     if (imgs.length === 0) router.replace("/feed/create");
-    return () => reset();
+    return () => {
+      cropRun.current += 1;
+      originalSelection.current = null;
+      reset();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const activeMedia = images[activeIndex];
+  const cropSource = useCropSource(activeMedia);
   const activeAspect = activeMedia
     ? aspects[activeMedia.id] ?? DEFAULT_ASPECT.value
     : DEFAULT_ASPECT.value;
 
   const handleDone = async () => {
-    if (isProcessing || images.length === 0) return;
+    const selection = originalSelection.current;
+    if (!selection || useCropUIStore.getState().isProcessing || !activeMedia || !cropSource.url || !areas[activeMedia.id]) return;
+    const operation = ++cropRun.current;
     setProcessing(true);
     setError(null);
     try {
@@ -146,7 +210,24 @@ export function CropPreviewScreen() {
         const area = areas[img.id];
         const source = srcOf(img);
         // Never export animated media. It remains in the original draft slot.
-        const uri = area ? await getCroppedDataUrl(source, area) : img.uri;
+        let uri = img.uri;
+        if (area) {
+          try {
+            uri = await getCroppedDataUrl(img.id === activeMedia.id ? cropSource.url : source, area);
+          } catch (cause) {
+            if (operation !== cropRun.current) return;
+            if (!needsHeicDecode(img) || img.id === activeMedia.id) throw cause;
+            // A previously edited HEIC is no longer mounted, so its decoded
+            // preview URL has been released. Decode locally for export only.
+            const decoded = URL.createObjectURL(await getHeicCropBlob(source));
+            try { uri = await getCroppedDataUrl(decoded, area); }
+            finally { URL.revokeObjectURL(decoded); }
+          }
+        }
+        if (operation !== cropRun.current) return;
+        if (area && !uri.startsWith("data:image/jpeg;base64,")) {
+          throw new Error("This browser couldn’t export the crop. Your draft is unchanged.");
+        }
         croppedResults.push({
           ...img,
           uri,
@@ -160,13 +241,15 @@ export function CropPreviewScreen() {
       }
 
       // Do not overwrite a draft replaced while waiting for a canvas export.
-      if (useCreatePostStore.getState().selectedMedia !== selectedMedia) {
+      const current = useCreatePostStore.getState();
+      if (current.postKind !== "media" || current.selectedMedia !== selection) {
         throw new Error("The draft changed. Reopen the crop editor to try again.");
       }
-      setSelectedMedia(applyBrowserCrops(selectedMedia, croppedResults));
-      router.push("/feed/create");
-    } catch (err: any) {
-      setError(err?.message || "Failed to crop images. Please try again.");
+      current.setSelectedMedia(applyBrowserCrops(selection, croppedResults));
+      router.replace("/feed/create");
+    } catch (err: unknown) {
+      if (operation !== cropRun.current) return;
+      setError(err instanceof Error ? err.message : "Failed to crop images. Please try again.");
       setProcessing(false);
     }
   };
@@ -179,8 +262,12 @@ export function CropPreviewScreen() {
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
         <button
-          onClick={() => router.back()}
-          aria-label="Back"
+          onClick={() => {
+            cropRun.current += 1;
+            router.replace("/feed/create");
+          }}
+          disabled={isProcessing}
+          aria-label="Cancel crop"
           className="w-9 h-9 rounded-xl bg-white/8 flex items-center justify-center active:scale-95"
         >
           <ArrowLeft size={18} color="#fff" />
@@ -190,10 +277,10 @@ export function CropPreviewScreen() {
         </h1>
         <button
           onClick={handleDone}
-          disabled={isProcessing || images.length === 0}
+          disabled={isProcessing || !activeMedia || !cropSource.url || !areas[activeMedia.id]}
           className="text-[16px] font-semibold text-[#3FDCFF] disabled:text-white/40"
         >
-          {isProcessing ? "Cropping…" : "Next"}
+          {isProcessing ? "Cropping…" : "Apply crop"}
         </button>
       </header>
 
@@ -202,13 +289,21 @@ export function CropPreviewScreen() {
           <>
             {/* Crop frame — KIT ImageCropper (react-easy-crop) */}
             <div className="w-full">
-              <ImageCropper
-                key={`${activeMedia.id}-${activeAspect}`}
-                src={srcOf(activeMedia)}
-                aspect={activeAspect}
-                cropShape="rect"
-                onCropComplete={(areaPixels) => setArea(activeMedia.id, areaPixels)}
-              />
+              {cropSource.url ? (
+                <ImageCropper
+                  key={`${activeMedia.id}-${activeAspect}`}
+                  src={cropSource.url}
+                  aspect={activeAspect}
+                  cropShape="rect"
+                  onCropComplete={(areaPixels) => setArea(activeMedia.id, areaPixels)}
+                />
+              ) : (
+                <p role="status" className="p-6 text-center text-sm text-white/70">
+                  {cropSource.failed
+                    ? "This photo can’t be cropped here. It’s unchanged in your draft."
+                    : "Preparing photo…"}
+                </p>
+              )}
             </div>
 
             {/* Aspect ratio options */}
@@ -218,7 +313,8 @@ export function CropPreviewScreen() {
                 return (
                   <button
                     key={opt.preset}
-                    onClick={() => setAspect(activeMedia.id, opt.value)}
+                    onClick={() => { if (!selected) setAspect(activeMedia.id, opt.value); }}
+                    aria-pressed={selected}
                     className={`px-3.5 h-9 rounded-xl text-[13px] font-medium ${
                       selected ? "bg-[#3FDCFF] text-black" : "bg-white/8 text-white/85"
                     }`}

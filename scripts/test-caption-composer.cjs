@@ -23,7 +23,7 @@ const fixture = {
   'next/dynamic': `export default ()=>()=>null;`,
   'solito/navigation': `export {router as unused} from 'caption-fixture';import {router} from 'caption-fixture';export const useRouter=()=>router;export const useParams=()=>({id:'7'});`,
   'react-native': `export const Platform={OS:'web'};`,
-  'lucide-react': ['Hash','X','ImagePlus','MapPin','Trash2','Plus','Type','Image','CalendarPlus','ArrowUp','ArrowDown','AlertCircle','Flame','ImageIcon','Play'].map(n=>`export const ${n}=()=>null;`).join('\n'),
+  'lucide-react': ['Hash','X','ImagePlus','MapPin','Trash2','Plus','Type','Image','CalendarPlus','Crop','ArrowUp','ArrowDown','AlertCircle','Flame','ImageIcon','Play'].map(n=>`export const ${n}=()=>null;`).join('\n'),
   'react-native-mmkv': `export const createMMKV=()=>{throw new Error('native-only fixture')};`,
   '@dvnt/app/lib/hooks/use-verified-gate': `export const useVerifiedGate=()=> (_action,run)=>run();`,
   '@dvnt/app/lib/hooks/use-posts': `import {state,createPost} from 'caption-fixture';export const useCreatePost=()=>({mutateAsync:createPost});export const usePost=(id,editor)=>{state.editorRead={id,editor};return {data:state.post,isLoading:false,isError:false}};export const postKeys={detail:id=>['post',id],feedInfiniteAll:()=>['feed'],feedInfinite:()=>['feed'],profilePosts:()=>['profile']};`,

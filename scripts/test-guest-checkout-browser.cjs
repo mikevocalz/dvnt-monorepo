@@ -2,7 +2,7 @@
 // unrelated-profile boundaries, real guest handler with fixture DB/Stripe only.
 // This is not a real payment or a pixel-accurate device acceptance test.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),http=require('node:http');
-const esbuild=require('esbuild');const {chromium}=require('playwright');
+const esbuild=require('esbuild');const {chromium,webkit}=require('playwright');
 const {fixture,promo,promoter,TIER,EMAIL}=require('../apps/mobile/supabase/functions/guest-checkout/discounts-fixture.cjs');
 const ROOT=path.resolve(__dirname,'..');
 const f=fixture({promos:[promo(),promo({id:'slow',code:'SLOW',discount_value:50})],promoters:[promoter()]});
@@ -48,8 +48,11 @@ const boundaries={
  let browser;
  try{
   const executablePath=process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
-  browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{channel:'chromium'}),args:['--no-sandbox','--disable-dev-shm-usage','--no-zygote']});
-  const page=await browser.newPage({viewport:{width:390,height:844}});const pageErrors=[];page.on('pageerror',e=>pageErrors.push(e.message));
+  const browserName=process.env.DVNT_CHECKOUT_TEST_BROWSER ?? 'chromium';
+  assert.ok(['chromium','webkit'].includes(browserName), 'Unsupported checkout test browser: '+browserName);
+  const useWebKit=browserName==='webkit';
+  browser=await (useWebKit ? webkit : chromium).launch(useWebKit ? {headless:true} : {headless:true,...(executablePath?{executablePath}:{channel:'chromium'}),args:['--no-sandbox','--disable-dev-shm-usage','--no-zygote']});
+  const page=await browser.newPage({viewport:{width:390,height:844},...(useWebKit ? {isMobile:true,hasTouch:true} : {})});const pageErrors=[];page.on('pageerror',e=>pageErrors.push(e.message));
   await page.goto('http://127.0.0.1:'+server.address().port);
   omitCapability=true;
   await page.evaluate(()=>window.begin());

@@ -29,13 +29,19 @@ const fixture={
  await flush(()=>a.state.pending.shift().reject({status:429}));assert.match(w.document.body.textContent,/Too many ticket lookups/);
  console.log('PASS exact username/email/phone, organizer read-only, duplicate guard, redacted rows, shared check-in, rate-limit message and stale input/event/account guards');
  }finally{await flush(()=>a.root.unmount());w.close();}
- if(process.env.DVNT_CONTACT_CHROMIUM==='1') {
-   const { chromium }=require('playwright-core'), chrome=require('@sparticuz/chromium');
-   const browser=await chromium.launch({executablePath:await chrome.executablePath(),args:chrome.args});
+ const useWebKit=process.env.DVNT_CONTACT_WEBKIT==='1';
+ if(useWebKit || process.env.DVNT_CONTACT_CHROMIUM==='1') {
+   let browser;
+   if(useWebKit) {
+     browser=await require('playwright').webkit.launch({headless:true});
+   } else {
+     const { chromium }=require('playwright-core'), chrome=require('@sparticuz/chromium');
+     browser=await chromium.launch({executablePath:await chrome.executablePath(),args:chrome.args});
+   }
    try {
      const page=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
      const attempted=[];await page.route('**/*',r=>{attempted.push(r.request().url());return r.abort();});
-     await page.setContent('<div id="root"></div>');
+     await page.setContent('<meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div>');
      await page.addScriptTag({content:output.outputFiles[0].text});
      await page.evaluate(()=>window.api.root.render(window.api.render('17')));
      const contact=page.getByRole('textbox',{name:'Complete checkout contact'});
@@ -53,7 +59,7 @@ const fixture={
      assert.equal(await page.evaluate(()=>window.api.state.token),'synthetic-qr');
      assert.equal(await contact.inputValue(),'');
      assert.deepEqual(attempted,[]);
-     console.log('PASS mounted contact component in mobile Chromium for three modes, no external traffic');
+     console.log('PASS mounted contact component in mobile '+(useWebKit?'WebKit':'Chromium')+' for three modes, no external traffic');
    } finally {await browser.close();}
  }
 })().catch(e=>{console.error(e);process.exitCode=1});
