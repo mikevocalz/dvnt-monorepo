@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import test from "node:test";
+import { URL } from "node:url";
 import { runInNewContext } from "node:vm";
 
 const source = readFileSync(new URL("./posts.ts", import.meta.url), "utf8");
