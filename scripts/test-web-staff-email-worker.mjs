@@ -74,3 +74,29 @@ test("sender outside attested nontracking domain does not call provider",async()
   assert.equal((await f.worker(req())).status,503);
   assert.ok(!f.calls.some(c=>c[0]==="provider"));
 });
+
+test("worker route is dark unless independently enabled on the exact app origin and path",async()=>{
+  const {selectStaffEmailWorker}=await import("../apps/web/src/lib/staff-email/worker-runtime.mjs");
+  const url=web+"/staff-email/worker";
+  const request=(urlParam=url,token=auth)=>new Request(urlParam,{method:"POST",headers:{authorization:"Bearer "+token}});
+  const env={
+    DVNT_STAFF_EMAIL_ENABLED:"true", DVNT_STAFF_EMAIL_WORKER_ENABLED:"true",
+    DVNT_STAFF_EMAIL_TRACKING_VERIFIED_OFF:"true", DVNT_STAFF_EMAIL_WEB_ORIGIN:web,
+    DVNT_STAFF_EMAIL_WORKER_ORIGIN:web, DVNT_STAFF_EMAIL_WORKER_TOKEN:auth,
+    DVNT_STAFF_EMAIL_WORKER_RESEND_KEY:"fixture-resend",DVNT_STAFF_EMAIL_WORKER_SENDER_DOMAIN:"example.invalid",
+    DVNT_STAFF_EMAIL_RPC_ORIGIN:db,DVNT_STAFF_EMAIL_RPC_SERVICE_KEY:"fixture-db",
+    DVNT_STAFF_EMAIL_ACTIVE_KEY_ID:"fixture",DVNT_STAFF_EMAIL_KEYS:"fixture:"+"03".repeat(32),
+  };
+  const calls=[];
+  const fetcher=async(u,init)=>{calls.push([u,init.headers.Authorization]);return Response.json([]);};
+  for(const overrides of [{DVNT_STAFF_EMAIL_WORKER_ENABLED:"false"},{DVNT_STAFF_EMAIL_TRACKING_VERIFIED_OFF:""},
+    {DVNT_STAFF_EMAIL_WORKER_ORIGIN:"https://other.example.invalid"},{DVNT_STAFF_EMAIL_KEYS:"invalid"}]) {
+    assert.equal((await selectStaffEmailWorker({...env,...overrides},fetcher)(request())).status,404);
+  }
+  const handler=selectStaffEmailWorker(env,fetcher);
+  assert.equal((await handler(request(web+"/something-else"))).status,404);
+  assert.equal((await handler(request(url,"B".repeat(43)))).status,404);
+  assert.deepEqual(calls,[]);
+  assert.equal((await handler(request())).status,204);
+  assert.deepEqual(calls,[[db+"/rest/v1/rpc/lease_staff_email_delivery","Bearer fixture-db"]]);
+});
