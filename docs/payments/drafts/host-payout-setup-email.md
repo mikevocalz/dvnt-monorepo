@@ -34,3 +34,36 @@ ownership and fresh status, mail sender and suppression checks in staging;
 confirm receipt and dedupe using an authorized test inbox. Separately approve
 the production mail deployment. This email path never clears a payout hold,
 reconciles the external Dre payment, or initiates a payout.
+
+## Restricted private staging adapter (manual invocation only)
+
+`host-payout-setup-email-staging.ts` accepts a bodyless POST to a fixed private
+path with a dedicated long bearer. It is disabled unless explicitly marked
+private staging, and is limited to one configured test host, event and exact
+verified test inbox. Neither the browser/session nor request body can select a
+recipient. Each provider/RPC dependency is bounded, and a timed-out mail attempt
+remains uncertain and is not retried.
+
+In a disposable database, use both SQL drafts in order: ledger, then staging.
+The fixture creates only synthetic Better Auth/app users, organizer, and event
+rows. It grants a synthetic dispatcher role schema USAGE and EXECUTE on the
+three `staging_*` routines only, not any direct rows or generic ledger function.
+The test invokes the exported HTTP handler with that role and an in-memory
+transport; it never connects to Stripe, Resend or an external inbox. Repeat:
+
+```sh
+NODE_PATH="$test_deps/node_modules" node --experimental-strip-types --test \
+  docs/payments/drafts/host-payout-setup-email-staging.test.cjs
+```
+
+For a future approved private staging smoke, independently confirm the actual
+schema and dedicated restricted role, set the pinned host/event/inbox, connect
+the approved suppression source and read-only Stripe sandbox account lookup
+(the adapter rejects a different platform, account, or live evidence), and
+allowlist only the authorized test inbox in the delivery transport. Inject
+adapters that honor the supplied abort signal. Then invoke one bodyless POST
+with the dedicated stage bearer, confirm exactly one provider acceptance and
+actual authorized inbox receipt, and verify replay returns `already_claimed`.
+Sender verification, credentials, grants, a real deployment and a schedule are
+intentionally not bundled or installed. Production needs a separately reviewed
+scope expansion and coordinated release; this adapter refuses production mode.
