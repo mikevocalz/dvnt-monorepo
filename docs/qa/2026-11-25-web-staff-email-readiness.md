@@ -23,3 +23,22 @@ Before enabling in any live environment:
   of inbox arrival. Use separate consenting staff test endpoints to verify push.
 - Do not enable a phone route until the account system has a verified-phone
   factor. Do not substitute checkout phone values or a guest ticket link.
+
+## Existing-account staff push routing
+
+The separate `invite-co-organizer` Edge path preserves its existing in-app
+Activity row and native Expo payload. Valid native Expo tokens are sent only
+to Expo. Valid browser subscriptions use the project's VAPID record and open
+`/feed/activity`, where pending invitations can be accepted. Malformed or
+non-provider endpoints, VoIP tokens and tokens belonging to other recipients
+are not sent. The repository fixture substitutes both providers and proves
+that a failure in one transport neither suppresses the other nor undoes a
+role/invitation mutation. This is not device receipt proof.
+
+For a real private-stage browser acceptance test, sign in as the authorized
+stage staff recipient, enable push on the stage origin in notification
+settings (an installed Home Screen web app is required for iPhone Web Push),
+have a stage event owner send one pending invitation to that recipient, and
+verify the on-device banner, its Activity click target and role after taking
+action. Use only consented stage identities, a stage-matched VAPID record and
+a separate browser profile; never call this with a production destination.
