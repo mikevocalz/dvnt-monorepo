@@ -67,6 +67,9 @@ const boundaries={
   await page.getByRole('button',{name:'More',exact:true}).click();
   await page.waitForFunction(()=>window.store.getState().quote?.total_cents===0&&!window.store.getState().quoteLoading);
   const handle=page.getByRole('textbox',{name:/Ticket username/});
+  assert.equal(await handle.getAttribute('required'),'','ticket lookup label remains required');
+  assert.equal(await page.getByText('A label for ticket lookup. It does not create an account.',{exact:true}).isVisible(),true);
+  assert.equal(await page.getByText("We'll email your free ticket. No DVNT account required.",{exact:true}).isVisible(),true);
   await handle.fill('');
   await page.getByRole('button',{name:'Get free tickets',exact:true}).click();
   await page.getByRole('alert').filter({hasText:/Usernames are/}).waitFor();
@@ -87,6 +90,7 @@ const boundaries={
   await page.getByRole('textbox',{name:'Full name',exact:true}).fill('Guest Buyer');
   const code=page.getByRole('textbox',{name:'Promo or promoter code'});
   await page.getByRole('button',{name:'Pay $31.75',exact:true}).waitFor();
+  assert.equal(await page.getByText('Secure checkout by Stripe. No DVNT account required.',{exact:true}).isVisible(),true);
   await code.fill('save10');await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent?.includes('Pay $31.75')&&b.disabled),{},{timeout:5000});
   await page.getByRole('button',{name:'Apply code',exact:true}).click();await page.getByText('SAVE10 applied',{exact:false}).waitFor();
   await page.getByRole('button',{name:'Pay $28.68',exact:true}).waitFor();

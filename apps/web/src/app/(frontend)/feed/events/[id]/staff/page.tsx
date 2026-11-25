@@ -1,15 +1,9 @@
-'use client';
+import { staffEmailRuntime } from "@/lib/staff-email/runtime";
+import { StaffClient } from "./staff-client";
 
-import dynamic from 'next/dynamic';
-
-const EventStaffScreen = dynamic(
-  () =>
-    import('@dvnt/app/features/events/staff.web').then(
-      (m) => m.EventStaffScreen,
-    ),
-  { ssr: false },
-);
+// The UI gate and server handlers must evaluate the same runtime binding.
+export const dynamic = "force-dynamic";
 
 export default function Page() {
-  return <EventStaffScreen />;
+  return <StaffClient staffEmailEnabled={staffEmailRuntime() !== null} />;
 }

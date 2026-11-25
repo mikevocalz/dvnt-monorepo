@@ -23,11 +23,15 @@ jobs:
         with:
           node-version: '24'
       - name: Install isolated test tools
-        run: npm install --prefix "$RUNNER_TEMP/cart-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.2 pg@8.21.0
+        run: npm install --prefix "$RUNNER_TEMP/cart-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.2 pg@8.21.0 @electric-sql/pglite@0.3.15
       - name: Signed webhook and real reconciler regressions
         env:
           NODE_PATH: ${{ runner.temp }}/cart-tests/node_modules
         run: npm run test:cart-recovery
+      - name: Member receipt order binding, provider idempotency and outbox recovery
+        env:
+          NODE_PATH: ${{ runner.temp }}/cart-tests/node_modules
+        run: node --test apps/mobile/supabase/functions/_shared/ticket-receipt-delivery.test.cjs apps/mobile/supabase/functions/_shared/web-member-receipt-sql.cjs
       - name: Real PostgreSQL concurrent recovery, rollback and inventory checks
         env:
           NODE_PATH: ${{ runner.temp }}/cart-tests/node_modules

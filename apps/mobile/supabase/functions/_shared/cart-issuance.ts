@@ -8,6 +8,7 @@ import { createSignedQrPayload } from "./hmac-qr.ts";
 import { maybeFireCapacityAlerts } from "./capacity-alerts.ts";
 import { recordPromoterEarning } from "./order-state.ts";
 import { confirmCartPayment } from "./confirmed-cart-payment.ts";
+import { deliverTicketReceipts } from "./ticket-receipt-delivery.ts";
 
 async function prepareCartTicketRows(
   // deno-lint-ignore no-explicit-any
@@ -228,6 +229,7 @@ export async function handleCartPaymentIntentSucceeded(
       cartId,
       issuedCount: issuanceResult.issuedCount,
     });
+    await enqueueWebMemberReceipt(supabase, cartId, pi.id);
     return true;
   }
 
@@ -283,5 +285,20 @@ export async function handleCartPaymentIntentSucceeded(
     issuedCount: issuanceResult.issuedCount,
   });
 
+  await enqueueWebMemberReceipt(supabase, cartId, pi.id);
   return true;
+}
+
+async function enqueueWebMemberReceipt(supabase: any, cartId: string, paymentIntentId: string) {
+  // Durable outbox is separate from payment and issuance. Unmarked native and
+  // legacy carts enqueue nothing. The sweep recovers a crash after issuance.
+  try {
+    const { data: receiptId, error: receiptError } = await supabase.rpc("enqueue_v1_web_member_purchase_receipt", {
+      p_cart_id: cartId, p_payment_intent_id: paymentIntentId,
+    });
+    if (receiptError) throw receiptError;
+    if (typeof receiptId === "string") await deliverTicketReceipts(supabase, [receiptId]);
+  } catch {
+    console.warn("[stripe-webhook] Purchase receipt deferred for recovery");
+  }
 }

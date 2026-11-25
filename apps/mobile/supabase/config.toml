@@ -624,7 +624,3 @@ verify_jwt = false
 verify_jwt = false
 [functions.external-promoter-payment-status]
 verify_jwt = false
-
-# Explicit operator-only sender. Verifies the service credential internally.
-[functions.host-payout-setup-email]
-verify_jwt = false

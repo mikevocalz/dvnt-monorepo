@@ -303,7 +303,7 @@ export function GuestCheckoutSheet() {
         </button>
         <p className="text-center text-[11px] text-white/40">
           {isFree ? "We'll email your free ticket." : "Secure checkout by Stripe."}{" "}
-          No account or username required.
+          No DVNT account required.
         </p>
       </div>
       )}

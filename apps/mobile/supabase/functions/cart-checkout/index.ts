@@ -535,6 +535,16 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
       return errorResponse("Could not save order", 500);
     }
 
+    // Mark only the server-validated v1 browser rail, bound to the saved cart,
+    // order, buyer and PI. Do not change the pre-existing Stripe idempotency
+    // request body: an older retry may already have reserved that exact key.
+    if (webContact) {
+      const { data: marked, error: markerError } = await supabase.rpc("mark_v1_web_member_purchase_receipt", {
+        p_cart_id: cartId, p_payment_intent_id: pi.id, p_buyer_id: authId,
+      });
+      if (markerError || marked !== true) return errorResponse("Could not prepare ticket receipt", 500);
+    }
+
     console.log("[cart-checkout] PaymentIntent ready", {
       cartId,
       paymentIntentId: pi.id,
