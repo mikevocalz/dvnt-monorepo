@@ -37,9 +37,6 @@ try:
         ctx = browser.new_context(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
         stage_step = 'real preview sign-in'
         account = fixture_host if action == 'issue' else fixture_recipient
-        head={'x-vercel-protection-bypass': key, 'Origin': origin}
-        signin=ctx.request.post(origin + '/api/auth/sign-in/email', headers=head, data={'email':account['email'],'password':account['password']}, max_redirects=0, timeout=25000)
-        assert signin.ok and signin.json()['user']['id'] == account['id']
         def route_request(route):
             u=urlsplit(route.request.url)
             if u.scheme=='https' and u.hostname==host:
@@ -50,12 +47,25 @@ try:
                 route.abort()
         ctx.route('**/*', route_request)
         page=ctx.new_page()
+        login=page.goto(origin+'/auth/login',wait_until='domcontentloaded',timeout=45000)
+        assert login and login.ok
+        page.get_by_placeholder('you@example.com').fill(account['email'],timeout=20000)
+        page.get_by_placeholder('Enter your password').fill(account['password'])
+        with page.expect_response(lambda r: r.request.method=='POST' and urlsplit(r.url).path=='/api/auth/sign-in/email', timeout=20000) as sign:
+            page.get_by_text('Sign in',exact=True).last.click()
+        assert sign.value.ok and sign.value.json()['user']['id']==account['id']
+        page.wait_for_url(lambda u: urlsplit(u).hostname==host and urlsplit(u).path!='/auth/login',timeout=30000)
         if action=='issue':
             stage_step = 'protected staff page entry'
             response=page.goto(origin + '/feed/events/' + event + '/staff', wait_until='domcontentloaded', timeout=75000)
             assert response and response.ok
             link=page.get_by_role('link', name='Invite event staff by email', exact=True)
-            link.wait_for(timeout=60000)
+            try:
+                link.wait_for(timeout=45000)
+            except Exception:
+                safe=page.locator('body').inner_text(timeout=3000).lower()
+                print('staff diagnostics:', 'add-staff='+str('add staff member' in safe), 'staff-owner-only='+str('only the event owner' in safe), 'onboard='+str('first post' in safe or 'profile photo' in safe), 'login='+str('/auth/login' in page.url))
+                raise
             link.click(timeout=15000)
             stage_step = 'hosted invitation form'
             page.get_by_role('heading', name='Invite event staff by email', exact=True).wait_for(timeout=20000)
