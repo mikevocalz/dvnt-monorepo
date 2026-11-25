@@ -1,0 +1,31 @@
+name: DVNT cutover non-writing smoke
+on:
+  push:
+    branches: [qa/dvnt-prod-nonwriting-smoke-fb97649]
+permissions: {}
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify public homepage, capability, and authorization boundaries (no purchase)
+        shell: bash
+        run: |
+          d=$(mktemp -d)
+          web=$(curl -sSL --retry 1 --max-time 16 -o /dev/null -w '%{http_code}' https://dvntapp.live/)
+          printf 'existing_web %s\n' "$web"
+          test "$web" = 200
+          base=https://npfjanxturvmjyevoyfo.supabase.co/functions/v1
+          for f in rsvp-issue-guest update-post-web invite-co-organizer cart-checkout stripe-webhook; do
+            case "$f" in
+              rsvp-issue-guest|cart-checkout) body='{"action":"contact_capability"}' ;;
+              *) body='{}' ;;
+            esac
+            code=$(curl -sS --max-time 15 -X POST -H 'Origin: https://dvntapp.live' -H 'Content-Type: application/json' --data "$body" -o "$d/$f" -w '%{http_code}' "$base/$f")
+            printf '%s %s\n' "$f" "$code"
+            case "$f" in
+              rsvp-issue-guest) test "$code" = 200; jq -e '.ok == true and .webTicketContactVersion==1' "$d/$f" ;;
+              stripe-webhook) case "$code" in 400|401|403) ;; *) exit 1;; esac ;;
+              *) case "$code" in 401|403) ;; *) exit 1;; esac ;;
+            esac
+          done
