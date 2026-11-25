@@ -16,7 +16,9 @@ certify the entire clip. Live Photo still and paired motion are both visited.
 Unsupported decodes, model failure, animated GIFs and remote handoff media produce
 an incomplete-check dialog with explicit continue/review choices, not silent pass.
 Only blob/data media is decoded; remote user-media URLs are not fetched by this
-checker. Cancel returns to the draft without posting. Draft media/label changes
+checker. The composer waits at most eight seconds for an asynchronous check;
+Review manually opens the incomplete-check dialog immediately without uploading.
+Cancel returns to the draft without posting. Draft media/label changes
 invalidate review, including during async onboarding checks.
 
 Still required before release: signed-in Chrome/Safari/iOS-web testing, realistic

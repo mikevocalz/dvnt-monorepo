@@ -146,10 +146,16 @@ export function CreatePostScreen() {
   const publishPost = usePublishPost();
   const guardVerified = useVerifiedGate();
   const submittingRef = useRef(false);
-  const scanAbort = useRef<AbortController | null>(null);
+  const activeMediaCheck = useRef<{ controller: AbortController; manualReview: boolean } | null>(null);
   const [checkingMedia, setCheckingMedia] = useState(false);
   const [nudityReview, setNudityReview] = useState<(NudityReview & { fingerprint: string }) | null>(null);
-  useEffect(() => () => scanAbort.current?.abort(), []);
+  useEffect(() => () => activeMediaCheck.current?.controller.abort(), []);
+  const stopMediaCheck = (manualReview: boolean) => {
+    const check = activeMediaCheck.current;
+    if (!check || check.controller.signal.aborted) return;
+    check.manualReview = manualReview;
+    check.controller.abort();
+  };
 
   // Same hand-off as native `(tabs)/create.tsx`: the /feed/camera screen writes
   // `useCameraResultStore` before routing back here; consume it into the
@@ -259,7 +265,8 @@ export function CreatePostScreen() {
       const fingerprint = reviewFingerprint(draft);
       if (draft.postKind === "media" && !draft.isNSFW && fingerprint !== reviewedFingerprint) {
         const controller = new AbortController();
-        scanAbort.current = controller;
+        const check = { controller, manualReview: false };
+        activeMediaCheck.current = check;
         setCheckingMedia(true);
         let result: NudityReview;
         try {
@@ -269,8 +276,13 @@ export function CreatePostScreen() {
             return withLeasedHandoffScan(draft.selectedMedia, signal, media => scanPostMedia(media, signal));
           }, controller.signal);
         } catch { result = { flagged: false, incomplete: true }; }
-        finally { if (mounted.current) setCheckingMedia(false); }
-        if (!stillCurrent() || controller.signal.aborted) return;
+        finally {
+          if (activeMediaCheck.current === check) activeMediaCheck.current = null;
+          if (mounted.current) setCheckingMedia(false);
+        }
+        if (!stillCurrent() || (controller.signal.aborted && !check.manualReview)) return;
+        // A manual review never treats a late or skipped result as clean.
+        if (check.manualReview) result = { flagged: result.flagged, incomplete: true };
         if (reviewFingerprint(useCreatePostStore.getState()) !== fingerprint) {
           showToast("warning", "Draft changed", "Review your changes and tap Share again.");
           return;
@@ -332,10 +344,6 @@ export function CreatePostScreen() {
         setNudityReview(null);
         guardVerified("post", () => void submitPost(reviewed));
       }} />}
-      {checkingMedia && <div role="status" className="px-4 py-3 text-sm text-white/70">
-        Checking media privately in your browser…
-        <button className="ml-3 underline" onClick={() => scanAbort.current?.abort()}>Cancel check</button>
-      </div>}
       {/* Header */}
       <div
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
@@ -596,6 +604,11 @@ export function CreatePostScreen() {
           >
             {checkingMedia ? "Checking media…" : busy ? "Posting…" : "Share"}
           </button>
+          <span role="status" className="sr-only">{checkingMedia ? "Checking media privately in your browser" : ""}</span>
+          {checkingMedia && <div className="mt-2 flex flex-wrap items-center justify-center gap-x-4 text-sm">
+            <button type="button" className="min-h-11 text-cyan-300 underline" onClick={() => stopMediaCheck(true)}>Review manually</button>
+            <button type="button" className="min-h-11 text-white/70 underline" onClick={() => stopMediaCheck(false)}>Cancel check</button>
+          </div>}
         </div>
       </div>
 

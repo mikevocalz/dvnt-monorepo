@@ -13,7 +13,7 @@ const fixture = {
   '@dvnt/app/lib/media/use-handoff-upload-lease': `export const useHandoffUploadLease=asset=>asset;`,
   '@dvnt/app/lib/media/handoff-upload-lease': `export const withLeasedHandoffScan=async(media,_signal,scan)=>scan(media);`,
   // Classification has its own contract. Keep caption/queue tests deterministic.
-  './nudity-scan.web': `import {state} from 'caption-fixture';export const scanPostMedia=async()=>state.scanResult;`,
+  './nudity-scan.web': `import {state} from 'caption-fixture';export const scanPostMedia=async()=>state.stallScan ? new Promise(resolve=>{state.finishScan=resolve}) : state.scanResult;`,
   'caption-fixture': `export const state={scanResult:{flagged:false,incomplete:false},post:{id:'7',kind:'media',caption:'Old #caption',author:{id:'1'},media:[]},published:[],updated:[],editorRead:null,navigations:[],uploads:[],people:[]};
     export const router={push:p=>state.navigations.push(p),replace:p=>state.navigations.push(p),back:()=>state.navigations.push('back')};
     export const createPost=async input=>{state.published.push(input);return {id:77}};
@@ -120,9 +120,23 @@ window.runCaptionScenarios=async()=>{
   check(!!button('Review draft'),'flagged media shows the real review dialog');
   await flush(()=>button('Review draft').click());
   check(store.getState().caption===caption&&state.published.length===0,'cancel review preserves draft without publishing');
-  state.scanResult={flagged:false,incomplete:true};
+  state.stallScan=true;
   await flush(()=>button('Share').click());
-  check(!!button('Share with current label'),'incomplete scan is explicit, not a silent pass');
+  check(!!state.finishScan&&!!button('Checking media…')?.disabled,'stalled scan holds the real draft without uploading');
+  check(document.querySelector('[data-testid="composer-publish-footer"]').contains(button('Cancel check')),'cancel is next to Share');
+  await flush(()=>button('Cancel check').click());
+  check(!button('Share').disabled&&store.getState().caption===caption&&state.uploads.length===0,'cancel stalled scan restores Share and preserves draft');
+  await flush(()=>button('Share').click());
+  const deadline=Date.now()+10000;
+  while(!button('Share with current label')&&Date.now()<deadline) await flush(()=>new Promise(resolve=>setTimeout(resolve,50)));
+  check(!!button('Share with current label')&&state.uploads.length===0,'stalled scan reaches explicit review on its own within ten seconds');
+  await flush(()=>button('Review draft').click());
+  await flush(()=>button('Share').click());
+  check(document.querySelector('[data-testid="composer-publish-footer"]').contains(button('Review manually')),'manual review is next to Share');
+  await flush(()=>button('Review manually').click());
+  check(!!button('Share with current label')&&state.uploads.length===0,'manual review is explicit, not a silent pass');
+  await flush(()=>state.finishScan({flagged:false,incomplete:false}));
+  check(!!button('Share with current label')&&state.uploads.length===0,'late successful check cannot publish before confirmation');
   await flush(()=>{button('Share with current label').click();button('Share with current label')?.click()});
   check(state.published.length===1,'repeated Share only publishes once');
   check(state.published[0].content===caption,'actual publish hook keeps inline caption without text-card tags');
@@ -189,7 +203,7 @@ window.runCaptionScenarios=async()=>{
   let browser;
   try{
     browser=await chromium.launch({headless:true,...(fs.existsSync('/usr/bin/chromium')?{executablePath:'/usr/bin/chromium'}:{}),args:['--no-sandbox','--disable-dev-shm-usage']});
-    const page=await browser.newPage();await page.goto('http://127.0.0.1:'+server.address().port);await page.addScriptTag({content:bundle});
+    const page=await browser.newPage({viewport:{width:390,height:844},hasTouch:true,isMobile:true});await page.goto('http://127.0.0.1:'+server.address().port);await page.addScriptTag({content:bundle});
     console.log(await page.evaluate(()=>window.runCaptionScenarios()));
   }finally{await browser?.close();await new Promise(resolve=>server.close(resolve))}
 })().catch(error=>{console.error(error);process.exitCode=1});
