@@ -32,6 +32,7 @@ test('dormant staff invitations: role ACLs, close-on-revoke and exact verified c
   await db.exec(verified);
   await db.exec(checkout.slice(checkout.indexOf('CREATE OR REPLACE FUNCTION public.is_checkout_restricted('),checkout.indexOf('-- ── Create or reuse')));
   await db.exec(candidate);
+  await db.exec(readFileSync(join(migrations, "20261124221600_web_staff_email_route_policy.sql"), "utf8"));
   const q = async (sql, args = []) => (await db.query(sql, args)).rows[0];
   const service = async (sql, args) => {
     await db.exec('SET ROLE service_role');
@@ -48,7 +49,7 @@ test('dormant staff invitations: role ACLs, close-on-revoke and exact verified c
   const revoke = (actor, request) => service('SELECT public.revoke_event_staff_email_invite(1,$1,$2) ok', [actor, request]);
   const claim = (actor, token) => service('SELECT public.claim_event_staff_email_invite($1,$2) ok', [actor, token]);
   for (const role of ['anon', 'authenticated', 'service_role']) {
-    for (const rel of ['event_staff_email_invites','event_staff_email_outbox']) {
+    for (const rel of ['event_staff_email_invites','event_staff_email_outbox','event_staff_email_rate_budget']) {
       const access = await q('SELECT has_table_privilege($1,$2,$3) ok', [role,'public.'+rel,'SELECT,INSERT,UPDATE,DELETE']);
       assert.equal(access.ok,false, `${role} cannot inspect or mutate ${rel}`);
     }
@@ -57,6 +58,10 @@ test('dormant staff invitations: role ACLs, close-on-revoke and exact verified c
     const denied = await q("SELECT has_function_privilege($1, 'public.claim_event_staff_email_invite(text,text)', 'EXECUTE') ok",[role]);
     assert.equal(denied.ok,false);
   }
+  for (let i = 0; i < 8; i++) {
+    assert.equal((await service("SELECT public.take_event_staff_email_budget('rate-fixture','issue') ok")).ok, true);
+  }
+  assert.equal((await service("SELECT public.take_event_staff_email_budget('rate-fixture','issue') ok")).ok, false);
   const noDirectIssue=await q("SELECT has_function_privilege('service_role', 'public.issue_event_staff_email_invite(integer,text,text,text,uuid,text)', 'EXECUTE') ok");
   assert.equal(noDirectIssue.ok,false);
   const a = '1'.repeat(64), b = '2'.repeat(64), r1 = crypto.randomUUID(), r2 = crypto.randomUUID();

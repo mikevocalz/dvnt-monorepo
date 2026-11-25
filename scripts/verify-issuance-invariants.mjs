@@ -11,8 +11,8 @@
  *     `42501 permission denied for table ticket_addons` — swallowed by a catch,
  *     retried every 15 minutes, never surfaced. Supabase applies a schema-wide
  *     grant at project setup; tables created by later migrations do not inherit
- *     it. So: every migration that creates a public table must also grant
- *     service_role, in that same migration.
+ *     it. Tables accessed directly by Edge code must grant service_role.
+ *     A small, named set of RPC-only tables must instead revoke direct access.
  *
  * (B) An upsert aimed at an index Postgres cannot infer.
  *     `_shared/session-issuance.ts` upserted with
@@ -77,14 +77,32 @@ const GRANT_TO_SERVICE_ROLE =
 const GRANT_ALL_TABLES =
   /\bgrant\s+[^;]*?\s+on\s+all\s+tables\s+in\s+schema\s+public\s+to\s+[^;]*?service_role/i;
 
+// Exact RPC-only exceptions: require the creating migration's explicit RLS
+// and revocation. Unlisted tables still have to satisfy the ordinary grant rule.
+const RPC_ONLY_TABLES = new Map([
+  ["event_staff_email_invites", "20261124221500_web_staff_email_invite_foundation.sql"],
+  ["event_staff_email_outbox", "20261124221500_web_staff_email_invite_foundation.sql"],
+  ["event_staff_email_rate_budget", "20261124221600_web_staff_email_route_policy.sql"],
+  ["web_member_purchase_receipt_intents", "20261125103000_web_member_purchase_receipts.sql"],
+]);
+
+const RPC_RLS = /\balter\s+table\s+public\.TABLE\s+enable\s+row\s+level\s+security\s*;/i;
+const RPC_REVOKE = /\brevoke\s+all(?:\s+privileges)?\s+on\s+(?:table\s+)?public\.TABLE\s+from\s+public\s*,\s*anon\s*,\s*authenticated\s*,\s*service_role\s*;/i;
+
 function checkGrants(files) {
   const created = new Map(); // table -> migration that created it
   const granted = new Set();
+  const rpcOnlyVerified = new Set();
   let blanketGrant = null;
 
   for (const { name, sql } of files) {
     const body = stripComments(sql);
     if (GRANT_ALL_TABLES.test(body)) blanketGrant = name;
+    for (const [table, migration] of RPC_ONLY_TABLES) {
+      if (migration !== name) continue;
+      const matches = (pattern) => new RegExp(pattern.source.replace("TABLE", table), pattern.flags).test(body);
+      if (matches(RPC_RLS) && matches(RPC_REVOKE)) rpcOnlyVerified.add(table);
+    }
     for (const m of body.matchAll(CREATE_TABLE)) {
       if (m[1] && m[1].toLowerCase() !== "public") continue;
       if (!created.has(m[2])) created.set(m[2], name);
@@ -95,6 +113,13 @@ function checkGrants(files) {
   }
 
   for (const [table, where] of created) {
+    if (RPC_ONLY_TABLES.get(table) === where) {
+      if (!rpcOnlyVerified.has(table) || granted.has(table) || (blanketGrant && where <= blanketGrant)) {
+        fail("rpc-only-access", where + " → public." + table,
+          "RPC-only tables must enable RLS, explicitly revoke direct access and have no service_role table grant.");
+      }
+      continue;
+    }
     if (granted.has(table)) continue;
     // A blanket grant only helps tables that already existed when it ran.
     const blanketCoversIt =
@@ -401,7 +426,7 @@ if (JSON_OUT) {
       `${summary.upsertsChecked} upserts checked, ${summary.cartLineReads} cart line reads checked`,
   );
   if (failures.length === 0) {
-    console.log("✓ every created table is granted to service_role");
+    console.log("✓ every created public table has the required service_role access or a verified RPC-only boundary");
     console.log("✓ every onConflict target is an inferable unique index");
     console.log("✓ every cart line read that joins ticket_types also handles add-on lines");
   } else {

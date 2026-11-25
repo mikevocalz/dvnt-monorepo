@@ -72,10 +72,10 @@ test('real checkout receipt SQL preserves exact future-only ownership and recove
    assert.equal(await one("SELECT count(*)::integer FROM ticket_receipt_outbox WHERE source_id=$1",[legacy.order]),0);
  });
  await t.test('private RPCs and marker are not callable/readable by clients',async()=>{
-   for(const role of ['anon','authenticated']){
-    assert.equal(await one("SELECT has_table_privilege($1,'web_member_purchase_receipt_intents','SELECT')",[role]),false);
+   for(const role of ['anon','authenticated','service_role']){
+    assert.equal(await one("SELECT has_table_privilege($1,'web_member_purchase_receipt_intents','SELECT,INSERT,UPDATE,DELETE')",[role]),false);
     for(const sig of ['mark_v1_web_member_purchase_receipt(uuid,text,text)','enqueue_v1_web_member_purchase_receipt(uuid,text)','recover_v1_web_member_purchase_receipts(integer)'])
-      assert.equal(await one("SELECT has_function_privilege($1,$2,'EXECUTE')",[role,sig]),false);
+      assert.equal(await one("SELECT has_function_privilege($1,$2,'EXECUTE')",[role,sig]),role==='service_role');
    }
  });
  } finally {await db.close()}
