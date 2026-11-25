@@ -1,54 +1,98 @@
 name: Ticket embed staging preflight
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/ticket-embed-staging-preflight.yml'
-      - 'scripts/check-ticket-embed-test-key.py'
-      - 'scripts/test-ticket-embed-test-key.py'
   workflow_dispatch:
-permissions:
-  contents: read
-concurrency:
-  group: ticket-embed-staging-preflight-${{ github.ref }}
-  cancel-in-progress: true
+    inputs:
+      fixture_fingerprint:
+        description: SHA-256 of the exact staging Checkout Session ID (never the session ID itself)
+        required: true
+        type: string
+      fixture_created_epoch:
+        description: UTC epoch seconds of the synthetic staging order
+        required: true
+        type: string
+permissions: {}
 jobs:
-  test-key-authentication:
-    name: Stripe TEST key authentication only (not purchase acceptance)
-    if: >-
-      github.repository == 'mikevocalz/dvnt-monorepo' &&
-      ((github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'feat/ticket-embed-commerce') ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/ticket-embed-commerce'))
+  reconcile-sandbox-session:
+    if: github.repository == 'mikevocalz/dvnt-monorepo' && github.ref == 'refs/heads/qa/dvnt-stripe-session-reconcile'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 4
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Unit tests for redaction and test-mode rejection
-        run: python scripts/test-ticket-embed-test-key.py
-      - name: Read-only Stripe test-key authentication
+      - name: Read exact sandbox Checkout Session, sanitized result only
         env:
           STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
-          STRIPE_TEST_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
-          TICKET_EMBED_SANDBOX_HOST_URL: ${{ vars.TICKET_EMBED_SANDBOX_HOST_URL }}
-          TICKET_EMBED_SANDBOX_ID: ${{ vars.TICKET_EMBED_SANDBOX_ID }}
-          TICKET_EMBED_SANDBOX_EMAIL: ${{ secrets.TICKET_EMBED_SANDBOX_EMAIL }}
-        run: python scripts/check-ticket-embed-test-key.py
-      - name: Package committed source for isolated staging diagnosis
-        if: always()
+          FIXTURE_FINGERPRINT: ${{ inputs.fixture_fingerprint }}
+          FIXTURE_CREATED_EPOCH: ${{ inputs.fixture_created_epoch }}
+        shell: bash
         run: |
-          git archive --format=tar.gz HEAD -o ticket-embed-source.tar.gz
-          git rev-parse HEAD > ticket-embed-source-commit.txt
-      - name: Upload sanitized result and committed source (no runtime secrets)
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: ticket-embed-staging-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            stripe-test-key-check.json
-            ticket-embed-source.tar.gz
-            ticket-embed-source-commit.txt
-          retention-days: 1
-          if-no-files-found: error
+          python3 - <<'PY'
+          import hashlib, hmac, json, os, re, sys
+          import urllib.error, urllib.parse, urllib.request
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs):
+                  return None
+
+          def fail(reason):
+              print(json.dumps({"result": reason}))
+              sys.exit(1)
+
+          key = os.environ.get("STRIPE_TEST_SECRET_KEY", "").strip()
+          fp = os.environ.get("FIXTURE_FINGERPRINT", "")
+          epoch = os.environ.get("FIXTURE_CREATED_EPOCH", "")
+          if not re.fullmatch(r"(?:sk|rk)_test_[A-Za-z0-9]{16,}", key):
+              fail("test_key_missing_or_invalid")
+          if not re.fullmatch(r"[a-f0-9]{64}", fp) or not re.fullmatch(r"[0-9]{10}", epoch):
+              fail("invalid_fixture_binding")
+
+          opener = urllib.request.build_opener(NoRedirect())
+          def get(path, query=None):
+              uri = "https://api.stripe.com/v1" + path
+              if query:
+                  uri += "?" + urllib.parse.urlencode(query)
+              req = urllib.request.Request(uri, method="GET", headers={
+                  "Authorization": "Bearer " + key,
+                  "Stripe-Version": "2025-02-24.acacia",
+              })
+              try:
+                  with opener.open(req, timeout=25) as response:
+                      value = json.load(response)
+                      if not isinstance(value, dict):
+                          fail("unexpected_response")
+                      return value
+              except urllib.error.HTTPError as error:
+                  fail("stripe_http_" + str(error.code))
+              except Exception:
+                  fail("stripe_read_unavailable")
+
+          def safe(value, allowed):
+              return value if isinstance(value, str) and value in allowed else None
+
+          results = get("/checkout/sessions", {"created[gte]": int(epoch)-120,
+                                                "created[lte]": int(epoch)+120, "limit": 100})
+          if results.get("object") != "list" or not isinstance(results.get("data"), list):
+              fail("unexpected_checkout_list")
+          hits = []
+          for row in results["data"]:
+              sid = row.get("id", "") if isinstance(row, dict) else ""
+              if isinstance(sid, str) and re.fullmatch(r"cs_test_[A-Za-z0-9]+", sid):
+                  if hmac.compare_digest(hashlib.sha256(sid.encode("ascii")).hexdigest(), fp):
+                      hits.append((sid, row))
+          if len(hits) != 1:
+              fail("fingerprint_not_found_in_bounded_page" if not hits else "ambiguous_fingerprint")
+          sid, row = hits[0]
+          if row.get("livemode") is not False or row.get("amount_total") != 613 or row.get("currency") != "usd":
+              fail("sandbox_amount_binding_mismatch")
+          exact = get("/checkout/sessions/" + sid, {"expand[]":"payment_intent"})
+          if exact.get("id") != sid or exact.get("livemode") is not False:
+              fail("sandbox_session_confirmation_failed")
+          pi = exact.get("payment_intent")
+          pi_status = None
+          if isinstance(pi, dict) and pi.get("livemode") is False:
+              pi_status = safe(pi.get("status"), {"requires_payment_method","requires_confirmation",
+                "requires_action","processing","requires_capture","canceled","succeeded"})
+          print(json.dumps({"result":"exact_sandbox_session_verified","test_mode":True,
+             "session_status":safe(exact.get("status"),{"open","complete","expired"}),
+             "payment_status":safe(exact.get("payment_status"),{"paid","unpaid","no_payment_required"}),
+             "payment_intent_status":pi_status,
+             "no_provider_writes":True},sort_keys=True))
+          PY
