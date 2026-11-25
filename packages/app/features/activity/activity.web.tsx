@@ -32,6 +32,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { create } from "zustand";
 import { useRouter } from "solito/navigation";
 import { useQueryClient } from "@tanstack/react-query";
+import { notificationKeys } from "@dvnt/app/lib/notifications/query-keys";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Heart,
@@ -398,6 +399,7 @@ function getLikedDescriptor(item: LikedActivity): string {
 
 // ── New 4-action co-organizer invite buttons (privileged edge fn wrappers). ──
 function CoOrgInviteActions({ inviteId }: { inviteId: string }) {
+  const queryClient = useQueryClient();
   const resolved = useRef<null | "accepted" | "declined">(null);
   const showToast = useUIStore((s) => s.showToast);
   // Transient render flags held in refs (mirrors native local resolved/loading).
@@ -405,6 +407,8 @@ function CoOrgInviteActions({ inviteId }: { inviteId: string }) {
   const loading = useRef<null | "accept" | "decline">(null);
 
   const handle = async (action: "accept" | "decline") => {
+    const viewerId = useAuthStore.getState().user?.id;
+    if (!viewerId) return;
     if (loading.current || resolved.current) return;
     loading.current = action;
     force();
@@ -415,9 +419,18 @@ function CoOrgInviteActions({ inviteId }: { inviteId: string }) {
           : privileged.declineCoOrganizerInvite;
       const res = await fn(inviteId);
       if ((res as any)?.error) throw new Error(String((res as any).error));
+      if (action === "accept") {
+        for (const queryKey of [
+          activityKeys.list(viewerId), notificationKeys.list(viewerId), notificationKeys.badges(viewerId),
+        ]) {
+          void queryClient.invalidateQueries({ queryKey, exact: true }).catch(() => {});
+        }
+      }
+      if (useAuthStore.getState().user?.id !== viewerId) return;
       resolved.current = action === "accept" ? "accepted" : "declined";
       showToast("success", action === "accept" ? "Accepted" : "Declined", "");
     } catch (err: any) {
+      if (useAuthStore.getState().user?.id !== viewerId) return;
       showToast(
         "error",
         action === "accept" ? "Couldn't accept" : "Couldn't decline",

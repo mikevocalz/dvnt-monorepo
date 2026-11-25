@@ -47,6 +47,9 @@ verify_jwt = false
 [functions.update-post]
 verify_jwt = false
 
+[functions.update-post-web]
+verify_jwt = false
+
 [functions.delete-post]
 verify_jwt = false
 

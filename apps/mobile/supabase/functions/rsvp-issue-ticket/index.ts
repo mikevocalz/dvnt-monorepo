@@ -15,9 +15,12 @@ import {
 } from "../_shared/verify-session.ts";
 import { checkRateLimit, WRITE_LIMIT } from "../_shared/rate-limit.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
+import { unwrapWebTicketContactRequest, isWebTicketContactRequest } from "../_shared/checkout-profile-fields.ts";
+import { requireWebMemberTicketContact } from "../_shared/member-phone.ts";
 
 interface ApiResponse<T = unknown> {
   ok: boolean;
+  webTicketContactVersion?: number;
   data?: T;
   error?: { code: string; message: string };
 }
@@ -66,6 +69,15 @@ Deno.serve(async (req) => {
       return errorResponse(req, "unauthorized", "Invalid or expired session");
     }
 
+    let body: { eventId?: number | string; checkout_contact_version?: unknown; phone?: unknown; action?: unknown };
+    try {
+      body = unwrapWebTicketContactRequest(await req.json());
+    } catch {
+      return errorResponse(req, "validation_error", "Invalid JSON body", 400);
+    }
+
+    if (body.action === "contact_capability") return jsonResponse(req, { ok: true, data: { webTicketContactVersion: 1 } });
+
     const rl = checkRateLimit(authUserId, "rsvp-issue-ticket", WRITE_LIMIT);
     if (!rl.allowed) {
       return errorResponse(
@@ -73,13 +85,6 @@ Deno.serve(async (req) => {
         "rate_limited",
         "Too many requests. Try again shortly.",
       );
-    }
-
-    let body: { eventId?: number | string };
-    try {
-      body = await req.json();
-    } catch {
-      return errorResponse(req, "validation_error", "Invalid JSON body", 400);
     }
 
     const eventIdInt =
@@ -144,6 +149,12 @@ Deno.serve(async (req) => {
       );
     }
 
+    const webContact = isWebTicketContactRequest(body.checkout_contact_version, req.headers.get("origin"), Deno.env.get("DVNT_REQUIRE_WEB_TICKET_CONTACT") === "true");
+    if (webContact) {
+      const contact = await requireWebMemberTicketContact(supabase, authUserId, body.phone, "[rsvp-issue-ticket]");
+      if (!contact.ok) return errorResponse(req, contact.code, contact.message, contact.status);
+    }
+
     const { data, error } = await supabase.rpc("issue_rsvp_ticket", {
       p_event_id: eventIdInt,
       p_user_auth_id: authUserId,
@@ -154,7 +165,7 @@ Deno.serve(async (req) => {
       return errorResponse(req, "internal_error", "Failed to issue ticket");
     }
 
-    return jsonResponse(req, { ok: true, data });
+    return jsonResponse(req, { ok: true, ...(webContact ? { webTicketContactVersion: 1 } : {}), data });
   } catch (e) {
     console.error("[Edge:rsvp-issue-ticket] Unexpected:", e);
     return errorResponse(req, "internal_error", "Unexpected server error", 500);

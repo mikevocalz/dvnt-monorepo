@@ -53,9 +53,22 @@ const { createHarness, clientAdapters, root, digest } = require('./fixtures/live
       assert.equal(motionObject.sha256, digest(originals[index].motion));
       assert.equal(motionObject.mime, 'video/quicktime'); assert.match(motionObject.filename, /\.mov$/);
     }
-    const read = await client.read(created.id);
-    assert.deepEqual(JSON.parse(JSON.stringify(read.media)), JSON.parse(JSON.stringify(created.media)), 'optimistic post and fresh persisted read must agree after unordered DB rows');
-    assert.equal(harness.state.reads.length, 1);
+    const ordinary = await client.read(created.id);
+    assert.ok(ordinary.media.every(item => item.mediaId === undefined), 'unchanged standard/native detail has no editing IDs');
+    const read = await client.read(created.id, true);
+    assert.deepEqual(read.media.map(item => item.mediaId), stored.rows.map(row => row.id),
+      'the owner detail read includes durable attachment IDs in display order');
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(read.media.map(({ mediaId, ...item }) => item))),
+      JSON.parse(JSON.stringify(created.media)),
+      'optimistic post and fresh persisted read must still agree on all playback fields',
+    );
+    harness.state.viewer = 'fixture-visitor';
+    const visitor = await client.read(created.id, true);
+    assert.equal(visitor.media.length, read.media.length, 'visible post retains playback for other readers');
+    assert.ok(visitor.media.every(item => item.mediaId === undefined), 'asking for editor projection cannot reveal another author’s row IDs');
+    harness.state.viewer = 'fixture-owner';
+    assert.equal(harness.state.reads.length, 3);
     for (let index = 0; index < read.media.length; index++) {
       assert.equal(read.media[index].type, 'livePhoto');
       const source = client.resolveWebPostMedia(read.media[index]);

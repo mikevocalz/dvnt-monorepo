@@ -23,7 +23,8 @@ import {
   TIER_VISIBILITY_MESSAGES,
 } from "../_shared/tier-visibility.ts";
 import { verifySession } from "../_shared/verify-session.ts";
-import { requireMemberPhone } from "../_shared/member-phone.ts";
+import { requireMemberPhone, requireWebMemberTicketContact } from "../_shared/member-phone.ts";
+import { unwrapWebTicketContactRequest, isWebTicketContactRequest } from "../_shared/checkout-profile-fields.ts";
 import { createSignedQrPayload } from "../_shared/hmac-qr.ts";
 import {
   validateAndApplyPromo,
@@ -190,7 +191,11 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
       unlock_code,
       idempotency_key,
       phone,
-    } = await req.json();
+      checkout_contact_version,
+      action,
+    } = unwrapWebTicketContactRequest(await req.json()) as any;
+
+    if (action === "contact_capability") return json({ webTicketContactVersion: 1 });
 
     // Idempotency: one key per checkout attempt — double-tap/retry returns
     // the SAME order+tickets instead of minting a duplicate set.
@@ -211,20 +216,25 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
 
     // Replay is allowed before caps/cutoff, but only for this buyer's exact
     // completed free purchase. An attempt key is never authentication.
+    const webContact = isWebTicketContactRequest(checkout_contact_version, req.headers.get("origin"), Deno.env.get("DVNT_REQUIRE_WEB_TICKET_CONTACT") === "true");
+    if (webContact) {
+      const memberPhone = await requireWebMemberTicketContact(supabase, user_id, phone, "[create-payment-intent]");
+      if (!memberPhone.ok) return json({ error: memberPhone.message, code: memberPhone.code }, memberPhone.status);
+    }
     const replayRequest = {
       idempotencyKey: idemKey || "", eventId: Number(event_id),
       ticketTypeId: ticket_type_id, quantity, userId: user_id, guestEmail: null,
     };
     if (idemKey) {
       const replay = await readCheckoutReplay(supabase, replayRequest);
-      if (replay) return json(replay.body, replay.status);
+      if (replay) return json({ ...replay.body, ...(webContact && replay.status === 200 ? { webTicketContactVersion: 1 } : {}) }, replay.status);
     }
 
     // A signed-in buyer with no phone on file gives one before paying. It is
     // stored server-side; a number already on file is never replaced.
-    const memberPhone = await requireMemberPhone(supabase, user_id, phone, "[create-payment-intent]");
-    if (!memberPhone.ok) {
-      return json({ error: memberPhone.message, code: memberPhone.code }, memberPhone.status);
+    if (!webContact) {
+      const memberPhone = await requireMemberPhone(supabase, user_id, phone, "[create-payment-intent]");
+      if (!memberPhone.ok) return json({ error: memberPhone.message, code: memberPhone.code }, memberPhone.status);
     }
 
     if (!await canAccessEvent(supabase, Number(event_id), user_id)) {
@@ -443,7 +453,7 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
       const issued = freeResult.tickets;
       if (freeResult.idempotent) {
         const replay = await readCheckoutReplay(supabase, replayRequest);
-        return json(replay?.body ?? CHECKOUT_REPLAY_UNAVAILABLE, replay?.status ?? 409);
+        return json({ ...(replay?.body ?? CHECKOUT_REPLAY_UNAVAILABLE), ...(webContact && replay?.status === 200 ? { webTicketContactVersion: 1 } : {}) }, replay?.status ?? 409);
       }
 
       // Increment promo usage if a promo was used
@@ -471,7 +481,7 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
         }
       }
 
-      return json({ tickets: issued, free: true });
+      return json({ tickets: issued, free: true, ...(webContact ? { webTicketContactVersion: 1 } : {}) });
     }
 
     // ── Paid tickets: PaymentIntent flow ─────────────────────
@@ -677,6 +687,7 @@ Deno.serve(withSentry("create-payment-intent", async (req: Request) => {
     });
 
     return json({
+      ...(webContact ? { webTicketContactVersion: 1 } : {}),
       paymentIntent: pi.client_secret,
       ephemeralKey: ephemeralKey.secret,
       customer: customerId,

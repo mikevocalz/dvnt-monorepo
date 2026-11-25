@@ -28,7 +28,7 @@ permissions:
 jobs:
   guest-discount-contract:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -39,7 +39,11 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Real guest handler with explicit database and Stripe fixtures
         run: node --test apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs apps/mobile/supabase/functions/guest-checkout/access.test.cjs
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium webkit
       - name: Guest sheet code entry, stale quote protection and reviewed checkout
+        run: node scripts/test-guest-checkout-browser.cjs
+      - name: Repeat the checkout flow in mobile WebKit (fixture transport)
+        env:
+          DVNT_CHECKOUT_TEST_BROWSER: webkit
         run: node scripts/test-guest-checkout-browser.cjs
       - run: pnpm --filter web exec tsc --noEmit

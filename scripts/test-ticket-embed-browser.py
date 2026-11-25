@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SITE, HOST = 'https://dvntapp.live', 'https://events.example.com'
 EMBED, TIER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 CHANNEL = '11111111-1111-4111-8111-111111111111'
-data = {'embedId':EMBED,'allowedOrigin':HOST,'revision':1,'siteOrigin':SITE,
+data = {'embedId':EMBED,'allowedOrigin':HOST,'revision':1,'webTicketContactVersion':1,'siteOrigin':SITE,
         'event':{'id':90,'title':'Example event','startDate':'2026-10-12T20:00:00Z','timeZone':'America/New_York','location':'New York','flyerUrl':SITE+'/fixture.png','attendeeNamesRequired':False},
         'tiers':[{'id':TIER,'name':'General Admission','priceCents':2500,'maxQuantity':10,'available':20}]}
 render = subprocess.run(['node',str(ROOT/'scripts/render-ticket-embed-test.cjs')],input=json.dumps({'data':data,'channel':CHANNEL}),text=True,capture_output=True,check=True).stdout
@@ -72,6 +72,8 @@ with sync_playwright() as p:
             if action=='quote':respond({'totals':totals,'quoteHash':'a'*64});return
             attempt_id=body.get('attemptId')
             if action=='checkout':
+                assert body.get('checkout_contact_version') == 1 and 'tierId' not in body
+                assert body['web_ticket_checkout']['username'] and body['web_ticket_checkout']['phone']
                 state['attempts'].setdefault(attempt_id,{'token':body['token']})
                 if state['lost']:
                     state['lost']=False;respond({'error':'Test response lost. Retry to recover.','code':'retry_same_attempt'},503);return
@@ -79,7 +81,7 @@ with sync_playwright() as p:
                 if state['cancel_failure']:respond({'error':'Provider cancellation outcome unknown.'},503);return
                 respond({'state':'expired'});return
             if action in ['checkout','resume']:
-                respond({'state':'payment_open','clientSecret':'fixture_payment_secret','publishableKey':'pk_test_fixture','totals':totals});return
+                respond({'state':'payment_open','webTicketContactVersion':1,'clientSecret':'fixture_payment_secret','publishableKey':'pk_test_fixture','totals':totals});return
             if action=='status':
                 state['paid']=True
                 if not state['fulfilled']:respond({'state':'paid_issuing'});return
@@ -105,7 +107,7 @@ with sync_playwright() as p:
     check('host purchase control unchanged',page.evaluate('window.hostClicks')==1)
     check('host CSS unchanged',page.locator('#host-button').evaluate('(el)=>[getComputedStyle(el).backgroundColor,getComputedStyle(el).fontSize]')==baseline)
     page.locator('#embed').evaluate('(el)=>el.style.width="390px"')
-    frame.locator('#buyer-name').fill('Test Guest');frame.locator('#buyer-email').fill('test@example.com')
+    frame.locator('#buyer-name').fill('Test Guest');frame.locator('#buyer-email').fill('test@example.com');frame.locator('#buyer-username').fill('door.test');frame.locator('#buyer-phone').fill('2125550123')
     frame.get_by_role('button',name='Review total').click()
     expect(frame.get_by_role('button',name='Pay $26.63')).to_be_visible()
     check('quote does not open payment',len([c for c in calls if c['action']=='checkout'])==0)
@@ -148,7 +150,7 @@ with sync_playwright() as p:
     # Fresh context: confirmed cancellation clears only its recovery record.
     page.evaluate('sessionStorage.clear()');state['cancel_failure']=False;page.reload(wait_until='domcontentloaded')
     frame=page.frame_locator('#embed iframe');expect(frame.locator('#buyer-name')).to_be_visible()
-    frame.locator('#buyer-name').fill('Second Guest');frame.locator('#buyer-email').fill('second@example.com')
+    frame.locator('#buyer-name').fill('Second Guest');frame.locator('#buyer-email').fill('second@example.com');frame.locator('#buyer-username').fill('door.second');frame.locator('#buyer-phone').fill('2125550124')
     frame.get_by_role('button',name='Review total').click();expect(frame.get_by_role('button',name='Pay $26.63')).to_be_visible()
     frame.get_by_role('button',name='Pay $26.63').click();expect(page.get_by_role('button',name='Cancel checkout')).to_be_visible()
     page.get_by_role('button',name='Cancel checkout').click();expect(frame.get_by_role('button',name='Review total')).to_be_visible()

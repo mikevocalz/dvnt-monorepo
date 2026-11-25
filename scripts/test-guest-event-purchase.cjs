@@ -64,7 +64,10 @@ app('lib/hooks/use-events', {
   useEvent: (id) => { scenario.resolvedIds.push(id); return id ? scenario.eventQuery : query(undefined, { isPending: true }); },
   useDeleteEvent: () => ({ isPending: false }),
   useToggleEventLike: () => ({ mutate: noop }),
-  useRsvpEvent: () => ({ isPending: false, mutate: (value) => scenario.memberRsvps.push(value) }),
+  useRsvpEvent: () => ({ isPending: false, mutate: (value, callbacks) => {
+    scenario.memberRsvps.push(value);
+    if (scenario.rsvpError) callbacks?.onError(scenario.rsvpError);
+  } }),
 });
 app('lib/hooks/use-ticket-sale-clock', { useTicketSaleClock: () => scenario.now ?? Date.now() });
 app('lib/hooks/use-event-attendee-privacy', { useEventAttendeePrivacy: (_id, event) => attendeePrivacy.canShowEventAttendees(event) });
@@ -92,6 +95,12 @@ app('lib/stores/auth-store', { useAuthStore: (select) => select(scenario.auth) }
 app('lib/stores/event-detail-ui-store', { useEventDetailUiStore: ui });
 app('lib/stores/guest-checkout-store', { useGuestCheckoutStore: store({ openSheet: (value) => scenario.guestCheckouts.push(value) }) });
 app('lib/stores/guest-rsvp-store', { useGuestRsvpStore: store({ openSheet: (...value) => scenario.guestRsvps.push(value) }) });
+app('lib/stores/checkout-phone-store', { useCheckoutPhoneStore: { getState: () => ({
+  forRequest: () => scenario.memberPhoneNeeded && !scenario.memberPhone
+    ? {ok:false,message:'Missing phone'} : {ok:true,phone:scenario.memberPhone},
+  markNeeded: () => { scenario.memberPhoneNeeded = true; }, reset: noop,
+}) } });
+app('lib/checkout/member-phone', { isPhoneRequiredError: (error) => error?.code === 'phone_required' });
 app('lib/stores/ui-store', { useUIStore: store({ showToast: noop }) });
 app('lib/stores/lightbox-store', { useLightboxStore: store({ openAt: noop }) });
 app('lib/stores/ticket-store', { useTicketStore: store({ setTicket: noop }) });
@@ -231,7 +240,23 @@ test('member checkout and tier-less RSVP still use their existing member actions
   await click(button('RSVP'));
   assert.equal(scenario.memberRsvps.length, 1);
   assert.equal(scenario.memberRsvps[0].eventId, '42');
+  assert.ok(scenario.memberRsvps[0].webContact, 'web issuance opts into the required contact contract');
   assertNoPurchase();
+});
+
+test('member tier-less RSVP requests a phone after refusal and never retries with an empty field', async () => {
+  scenario.auth={isAuthenticated:true,user:{id:'member',username:'fixture-member'}};
+  scenario.eventQuery=query({...fixtureEvent, price:0,ticketingEnabled:false,ticketTiers:[]});
+  scenario.tiersQuery=query([]);
+  scenario.rsvpError=Object.assign(new Error('Add your mobile number to finish checkout.'),{code:'phone_required'});
+  await render();
+  await click(button('RSVP'));
+  assert.equal(scenario.memberPhoneNeeded,true);
+  await click(button('RSVP'));
+  assert.equal(scenario.memberRsvps.length,1,'empty phone never goes back to the server');
+  scenario.memberPhone='+12125550123';
+  await click(button('RSVP'));
+  assert.equal(scenario.memberRsvps[1].webContact.phone,'+12125550123');
 });
 
 test('unlimited inventory is buyable and scheduled tiers remain unavailable', async () => {

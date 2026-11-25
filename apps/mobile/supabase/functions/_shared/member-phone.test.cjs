@@ -21,7 +21,7 @@ function load(file, cache = {}) {
   return exports;
 }
 
-const { requireMemberPhone } = load('member-phone.ts');
+const { requireMemberPhone, requireWebMemberTicketContact } = load('member-phone.ts');
 const fields = load('checkout-profile-fields.ts');
 const plain = (v) => JSON.parse(JSON.stringify(v));
 
@@ -73,10 +73,34 @@ test('every signed-in purchase rail calls requireMemberPhone before money or inv
     ['ticket-checkout', '// This rail inserts ticket_holds directly'],
   ]) {
     const src = fs.readFileSync(`${__dirname}/../${fn}/index.ts`, 'utf8');
-    const at = src.indexOf('await requireMemberPhone(');
+    const at = Math.max(src.indexOf('await requireMemberPhone('),
+      src.indexOf('await (webContact ? requireWebMemberTicketContact : requireMemberPhone)('));
+    if (fn !== 'cart-checkout') {
+      assert.ok(src.indexOf('await requireWebMemberTicketContact(') > 0);
+      assert.ok(src.indexOf('await requireWebMemberTicketContact(') < src.indexOf('const replayRequest ='),
+        'v1 acknowledgments validate the member before reaching either success route');
+    }
     assert.ok(at > 0, `${fn} does not check the phone`);
     const effect = src.indexOf(firstEffect);
     assert.ok(effect > at, `${fn}: phone check must run before ${firstEffect}`);
     assert.match(src, /code: memberPhone\.code/);
   }
+});
+
+test('web checks only the authenticated member canonical identity and writes only the normalized private phone', async () => {
+  const reads = [];
+  const d = db(() => ({ data: { ok: true }, error: null }));
+  let username = "";
+  d.from = (table) => ({
+    select: (field) => ({ eq: (key, id) => ({ maybeSingle: async () => {
+      reads.push([table, field, key, id]);
+      return {data:table === "user" ? {email:"member@example.test"} : {username},error:null};
+    } }) }),
+  });
+  assert.equal((await requireWebMemberTicketContact(d,"verified-id","+12125550123","fixture")).code,"ticket_account_required");
+  assert.equal(d.calls.length,0);
+  username = "existing_member";
+  assert.equal((await requireWebMemberTicketContact(d,"verified-id","2125550123","fixture")).ok,true);
+  assert.deepEqual(reads.slice(-2),[["user","email","id","verified-id"],["users","username","auth_id","verified-id"]]);
+  assert.deepEqual(d.calls,[["ensure_member_phone",{p_auth_id:"verified-id",p_phone_e164:"+12125550123"}]]);
 });

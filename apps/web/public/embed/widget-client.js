@@ -39,15 +39,17 @@
   document.querySelectorAll('input[name="tier"]').forEach((i) => i.addEventListener('change', tierChanged));
   $('quantity').addEventListener('change', attendeeFields);
   $('continue').addEventListener('click', () => {
-    const inputs = [$('buyer-name'), $('buyer-email'), ...$('attendees').querySelectorAll('input')];
+    const inputs = [$('buyer-name'), $('buyer-email'), $('buyer-username'), $('buyer-phone'), ...$('attendees').querySelectorAll('input')];
     if (inputs.some((i) => !i.reportValidity())) return;
     const payload = { tierId: document.querySelector('input[name="tier"]:checked')?.value,
       quantity: Number($('quantity').value), name: $('buyer-name').value.trim(), email: $('buyer-email').value.trim(),
+      username: $('buyer-username').value.trim(), phone: $('buyer-phone').value.trim(),
       promoterCode: $('promoter-code').value.trim(), attendeeNames: Array.from($('attendees').querySelectorAll('input')).map((i) => i.value.trim()) };
     const requestId = ++sequence; pending = requestId;
     lockSelection(true);
     $('continue').disabled = true; $('continue').textContent = quoteHash ? 'Opening secure checkout…' : 'Checking price…';
-    send(quoteHash ? 'checkout' : 'quote', { requestId, payload: { ...payload, ...(quoteHash ? { quoteHash } : {}) } });
+    send(quoteHash ? 'checkout' : 'quote', { requestId, payload: quoteHash
+      ? { checkout_contact_version: 1, quoteHash, web_ticket_checkout: payload } : payload });
     // Do not create another attempt on timeout. The parent retains its attempt ID.
     setTimeout(() => { if (pending === requestId) { pending = null; lockSelection(!!quoteHash); $('continue').disabled = false;
       $('continue').textContent = quoteHash ? 'Resume checkout' : 'Review total'; } }, 30000);
@@ -67,7 +69,7 @@
       $('totals').hidden = false; $('continue').textContent = `Pay ${money(totals.total)}`;
     } else if (message.type === 'error') {
       $('error').textContent = message.error || 'Please try again.'; $('error').hidden = false;
-      if (['quote_changed','selection_changed','sold_out','buyer_limit','tier_unavailable','promoter_changed','embed_unavailable','organizer_changed','invalid_buyer','names_required'].includes(message.code)) quoteHash = null;
+      if (['quote_changed','selection_changed','sold_out','buyer_limit','tier_unavailable','promoter_changed','embed_unavailable','organizer_changed','invalid_buyer','invalid_username','reserved_username','invalid_phone','names_required'].includes(message.code)) quoteHash = null;
       lockSelection(!!quoteHash);
       $('continue').textContent = quoteHash ? 'Resume checkout' : 'Review total';
     }

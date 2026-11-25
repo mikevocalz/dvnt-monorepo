@@ -201,7 +201,7 @@ function StaffRow({
   );
 }
 
-export function EventStaffScreen() {
+export function EventStaffScreen({ staffEmailEnabled = false }: { staffEmailEnabled?: boolean } = {}) {
   const params = useParams();
   const router = useRouter();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -427,6 +427,13 @@ export function EventStaffScreen() {
               you as an admin if you need to manage this list.
             </p>
           )}
+
+          {staffEmailEnabled && callerRole === "owner" && viewerId && Number.isSafeInteger(eventId) && eventId > 0 ? (
+            <a className="mb-4 block rounded-xl border border-white/15 px-4 py-3 text-center font-semibold"
+              href={`/staff-email/invite/${eventId}`}>
+              Invite event staff by email
+            </a>
+          ) : null}
 
           {staff.length === 0 ? (
             <div className="rounded-2xl border border-white/8 bg-white/4 px-6 py-10 text-center">

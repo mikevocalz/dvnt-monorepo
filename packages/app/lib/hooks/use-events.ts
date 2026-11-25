@@ -737,9 +737,11 @@ export function useRsvpEvent() {
     mutationFn: async ({
       eventId,
       status,
+      webContact,
     }: {
       eventId: string;
       status: "going" | "interested" | "not_going";
+      webContact?: { phone?: string };
     }) => {
       // Prevent concurrent RSVP mutations on the same event
       if (pendingRsvpMutations.has(eventId)) {
@@ -750,12 +752,19 @@ export function useRsvpEvent() {
       }
       pendingRsvpMutations.add(eventId);
       try {
+        if (status === "going" && webContact) {
+          // Validate/issue the web pass before displaying a confirmed RSVP.
+          // Repeated issuance is already idempotent for this event+member.
+          const { ticketsApi } = await import("@dvnt/app/lib/api/tickets");
+          const ticket = await ticketsApi.issueRsvpTicket({ eventId, userId: "", webContact });
+          if (!ticket?.id) throw new Error("Could not confirm your RSVP ticket. Please try again.");
+        }
         const result = await eventsApiClient.rsvpEvent(eventId, status);
         // Every "going" RSVP issues a free ticket via the idempotent
         // issue_rsvp_ticket RPC. Web never did this (only native called it), so
         // web RSVPs had no ticket. Best-effort: a ticket hiccup must NOT fail or
         // hang the RSVP — the query invalidation + next RSVP cover stragglers.
-        if (status === "going") {
+        if (status === "going" && !webContact) {
           try {
             const { ticketsApi } = await import("@dvnt/app/lib/api/tickets");
             await ticketsApi.issueRsvpTicket({ eventId, userId: "" });

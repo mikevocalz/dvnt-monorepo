@@ -42,6 +42,8 @@ export type TextPostSlide = {
 };
 
 export type PostMediaItem = {
+  /** Stable row identity, only included in an owner’s detail response. */
+  mediaId?: string;
   order?: number;
   postId?: string;
   expiresAt?: number;

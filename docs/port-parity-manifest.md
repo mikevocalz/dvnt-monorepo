@@ -46,8 +46,12 @@ Shipped (lands before Phase 1 screens):
   asserts the native's stores / `lib/hooks` / domain hooks / react-query keys all
   appear in the web file. **Native-only wiring** (video stores, render-loop/
   telemetry probes, safe-area, native media-pick, realtime/geo) is filtered;
-  **landing marketing sections** are exempt (presentational platform-splits);
-  genuinely-deferred **portable** features become a phase-tagged **DEBT LEDGER**.
+  **landing marketing sections** are exempt (presentational platform-splits).
+  Browser Edit Post intentionally replaces the native optimistic app-store feed
+  key with confirmed-write query invalidation. Its route-specific exception
+  is not a portable feature deferral; the feedback fixture checks that refused
+  edits never write to the web cache.
+  Genuinely deferred **portable** features become a phase-tagged **DEBT LEDGER**.
   A *new* web screen that drops portable wiring **hard-fails** (exit 1). Gate is
   **GREEN** against the real web screens today.
 - **Form scaffolding in `@dvnt/ui`** (`packages/ui/src/form/`, web + native

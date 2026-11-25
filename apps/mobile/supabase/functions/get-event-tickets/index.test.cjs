@@ -7,10 +7,10 @@ function harness({rows=Array.from({length:1207},(_,i)=>ticket(i+1)),actor='host'
  let handler;const calls=[];const response=(data,status=200)=>new Response(JSON.stringify(data),{status});
  function query(table,seed){let filters=[],sorts=[],start=0,take=Infinity,countRequested=false;const q={select(fields,opts){calls.push({table,method:'select',fields,opts});countRequested ||=opts?.count==='exact';return q},eq(k,v){filters.push(x=>x[k]===v);return q},in(k,v){filters.push(x=>v.includes(x[k]));return q},ilike(k,pattern){const prefix=pattern.slice(0,-1).replace(/\\([%_\\])/g,'$1').toLowerCase();filters.push(x=>String(x[k]||'').toLowerCase().startsWith(prefix));return q},order(k,o){sorts.push([k,o]);return q},range(a,b){start=a;take=b-a+1;calls.push({table,method:'range',a,b});return q},limit(n){take=n;return q},or(value){calls.push({table,method:'or',value});const m=value.match(/^([a-z_]+)\.(gt|lt)\.([^,]+),and\([a-z_]+\.eq\.[^,]+,id\.(?:gt|lt)\.([^)]*)\)$/);if(m){const[,k,op,v,id]=m;filters.push(x=>op==='gt'?(x[k]>v||x[k]===v&&x.id>id):(x[k]<v||x[k]===v&&x.id<id));}return q},not(){return q},
  result(){let data=(seed||[]).filter(x=>filters.every(f=>f(x)));const count=data.length;data.sort((a,b)=>{for(const[k,o]of sorts){const c=a[k]<b[k]?-1:a[k]>b[k]?1:0;if(c)return o.ascending?c:-c;}return 0});return {data:data.slice(start,start+take),count,error:table==='search'&&rpcError?{message:'missing column private_schema'}:null}},then(resolve,reject){return Promise.resolve(q.result()).then(resolve,reject)},maybeSingle(){const r=q.result();return Promise.resolve({...r,data:r.data[0]||null})}};return q;}
- const db={from(table){calls.push({table,method:'from'});return query(table,table==='events'?[{id:7,host_id:'host',title:'Synthetic',location:'Venue'}]:table==='event_co_organizers'?(role==='owner'||role==='outsider'?[]:[{event_id:7,user_id:actor,role,accepted:true}]):table==='tickets'?rows:table==='users'?users:[])},rpc(name,args,options){calls.push({method:'rpc',name,args,options});if(name==='lookup_event_tickets_contact'){return query('search',rows.filter(t=>t.event_id===args.p_event_id&&t.guest_email===args.p_value));}assert.equal(name,'search_event_tickets');const needle=args.p_search.toLowerCase();const handle=needle.replace(/^@/,'');const filtered=rows.filter(t=>t.event_id===args.p_event_id&&((t.attendee_name||'').toLowerCase().includes(needle)||(t.guest_name||'').toLowerCase().includes(needle)||users.some(u=>u.auth_id===t.user_id&&(u.username||'').toLowerCase().includes(handle))||t.id.startsWith(needle)||(t.qr_token||'').toLowerCase().startsWith(needle)));return query('search',filtered)}};
+ const db={from(table){calls.push({table,method:'from'});return query(table,table==='events'?[{id:7,host_id:'host',title:'Synthetic',location:'Venue'}]:table==='event_co_organizers'?(role==='owner'||role==='outsider'?[]:[{event_id:7,user_id:actor,role,accepted:true}]):table==='tickets'?rows:table==='users'?users:[])},rpc(name,args,options){calls.push({method:'rpc',name,args,options});if(name==='lookup_event_tickets_contact'){return query('search',rows.filter(t=>t.event_id===args.p_event_id&&t[({email:'guest_email',phone:'guest_phone',username:'guest_username'})[args.p_kind]]===args.p_value));}assert.equal(name,'search_event_tickets');const needle=args.p_search.toLowerCase();const handle=needle.replace(/^@/,'');const filtered=rows.filter(t=>t.event_id===args.p_event_id&&((t.attendee_name||'').toLowerCase().includes(needle)||(t.guest_name||'').toLowerCase().includes(needle)||users.some(u=>u.auth_id===t.user_id&&(u.username||'').toLowerCase().includes(handle))||t.id.startsWith(needle)||(t.qr_token||'').toLowerCase().startsWith(needle)));return query('search',filtered)}};
  const code=ts.transpileModule(fs.readFileSync(path.join(__dirname,'index.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  vm.runInNewContext(code,{exports:{},console:{error(){}},Deno:{env:{get:()=>''},serve:fn=>handler=fn},require(name){if(name.includes('supabase-js'))return{createClient:()=>db};if(name.endsWith('verify-session.ts'))return{verifySession:async()=>actor,jsonResponse:response,errorResponse:(error,status)=>response({error},status),optionsResponse:()=>response({})};if(name.endsWith('read-all-rows.ts')){const out={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../_shared/read-all-rows.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:out});return out;}if(name.endsWith('organizer-free-cancellation.ts'))return{organizerFreeCancellation:()=>({eligible:false})};throw Error(name)}});
- return{calls,async call(body={}){const res=await handler(new Request('https://offline.test',{method:'POST',body:JSON.stringify({event_id:7,...body})}));return {status:res.status,body:await res.json()}}};
+ return{calls,async call(body={}){const res=await handler(new Request('https://offline.test',{method:'POST',body:JSON.stringify({event_id:7,...body})}));return {status:res.status,headers:res.headers,body:await res.json()}}};
 }
 test('search finds attendee beyond rows200 and1000 before pagination',async()=>{for(const n of [207,1207]){const h=harness();const r=await h.call({search:`Attendee ${n}`});assert.equal(r.status,200);assert.equal(r.body.total,1);assert.equal(r.body.tickets[0].id,ticket(n).id);assert.ok(!h.calls.some(c=>c.method==='from'&&c.table==='tickets'));}});
 test('matching count and ordered pages preserve >1000 matches',async()=>{const h=harness();const r=await h.call({search:'Attendee',pageSize:200,page:6});assert.equal(r.body.total,1207);assert.equal(r.body.tickets.length,200);assert.equal(r.body.tickets[0].id,ticket(207).id);assert.equal(r.body.hasMore,true);assert.equal(r.body.nextCursor.id,ticket(8).id);const final=await h.call({search:'Attendee',pageSize:200,page:7});assert.equal(final.body.tickets.length,7);assert.equal(final.body.hasMore,false)});
@@ -33,11 +33,11 @@ for(const role of ['owner','scanner'])test(`${role} roster exposes authoritative
 });
 
 for(const role of ['owner','scanner'])test(`${role} contact lookup returns only redacted ticket data`,async()=>{
- const h=harness({actor:role==='owner'?'host':'door',role,rows:[ticket(1,{guest_phone:'+12125550123'})]});
+ const h=harness({actor:role==='owner'?'host':'door',role,rows:[ticket(1,{guest_phone:'+12125550123',guest_username:'guest_handle'})]});
  const r=await h.call({contact_lookup:{kind:'email',value:'private1@example.test'},p_auth_id:'spoofed'});
  assert.equal(r.status,200);assert.equal(r.body.tickets.length,1);
  assert.equal(h.calls.find(c=>c.method==='rpc').args.p_auth_id,role==='owner'?'host':'door');
- for(const key of ['guest_email','guest_phone','purchase_amount_cents','user_id','guest_name','attendee_name'])assert.equal(r.body.tickets[0][key],undefined);
+ for(const key of ['guest_email','guest_phone','guest_username','purchase_amount_cents','user_id','guest_name','attendee_name'])assert.equal(r.body.tickets[0][key],undefined);
 });
 test('invalid or offline contact lookup cannot fall through to broad roster',async()=>{
  for(const body of [{contact_lookup:null},{contact_lookup:[]},{contact_lookup:{kind:'email',value:'a@b.test'},offline:true},{contact_lookup:{kind:'email',value:'a@b.test'},summary:true},{contact_lookup:{kind:'other',value:'x'}},{contact_lookup:{kind:'email',value:9}},{contact_lookup:{kind:'email',value:'a@b.test'},search:'name'}]){
@@ -46,4 +46,28 @@ test('invalid or offline contact lookup cannot fall through to broad roster',asy
 });
 test('contact lookup transport/schema failure returns no partial result or detail',async()=>{
  const h=harness({rpcError:true});const r=await h.call({contact_lookup:{kind:'email',value:'private1@example.test'}});assert.equal(r.status,503);assert.ok(!JSON.stringify(r.body).includes('private_schema'));assert.ok(!h.calls.some(c=>c.table==='tickets'));
+});
+
+
+test('exact username contact lookup is authorized, no-store and never serializes a guest label',async()=>{
+ const h=harness({actor:'door',role:'scanner',rows:[ticket(1,{user_id:null,guest_username:'deck_guest'})]});
+ const r=await h.call({contact_lookup:{kind:'username',value:'deck_guest'}});
+ assert.equal(r.status,200);
+ assert.equal(r.body.tickets.length,1);
+ assert.equal(r.headers.get('Cache-Control'),'private, no-store');
+ const rpc=h.calls.find(c=>c.method==='rpc');
+ assert.equal(rpc.args.p_kind,'username');assert.equal(rpc.args.p_auth_id,'door');
+ assert.ok(!h.calls.find(c=>c.table==='search'&&c.method==='select').fields.includes('guest_username'));
+ assert.ok(!JSON.stringify(r.body).includes('deck_guest'));
+ const outsider=harness({actor:'intruder',role:'outsider'});
+ assert.equal((await outsider.call({contact_lookup:{kind:'username',value:'deck_guest'}})).status,403);
+ assert.ok(!outsider.calls.some(c=>c.method==='rpc'));
+});
+
+for (const role of ['owner','admin','editor','scanner']) test(`exact phone permits accepted ${role} without returning stored contacts`,async()=>{
+ const actor=role==='owner'?'host':role;const h=harness({actor,role,rows:[ticket(1,{user_id:null,guest_phone:'+12125550123'})]});
+ const r=await h.call({contact_lookup:{kind:'phone',value:'+12125550123'}});
+ assert.equal(r.status,200); assert.equal(r.body.tickets.length,1); assert.equal(r.body.role,role);
+ assert.equal(h.calls.find(c=>c.method==='rpc').args.p_auth_id,actor);
+ assert.equal(r.body.tickets[0].guest_phone,undefined);
 });

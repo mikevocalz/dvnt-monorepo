@@ -39,7 +39,7 @@ export function useGuestCheckoutQuote() {
             } catch { /* Keep a safe retry message for network failures. */ }
             throw new Error(message);
           }
-          if (!data?.ok || !isGuestCheckoutQuote(data.quote))
+          if (!data?.ok || data.webTicketContactVersion !== 1 || !isGuestCheckoutQuote(data.quote))
             throw new Error(data?.error?.message || "Checkout is updating. Refresh and try again.");
           if (current()) snapshot.patch({ quote: data.quote, quoteSelectionKey: key,
             quoteLoading: false, quoteError: null });

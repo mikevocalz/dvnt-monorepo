@@ -18,6 +18,7 @@ import { requireBetterAuthToken } from "@dvnt/app/lib/auth/identity";
 import { usePaymentsStore } from "@dvnt/app/lib/stores/payments-store";
 import { getPendingPromoterRef } from "@dvnt/app/lib/stores/promoter-ref-store";
 import { useCheckoutPhoneStore } from "@dvnt/app/lib/stores/checkout-phone-store";
+import { webTicketContactBody, requireWebTicketContactAck } from "@dvnt/app/lib/checkout/web-ticket-contact";
 import { isPhoneRequiredError } from "@dvnt/app/lib/checkout/member-phone";
 
 interface CheckoutParams {
@@ -68,14 +69,14 @@ export function useTicketCheckout() {
         const { data, error } = await supabase.functions.invoke(
           "create-payment-intent",
           {
-            body: {
+            body: await webTicketContactBody("create-payment-intent", {
               event_id: eventId,
               ticket_type_id: ticketTypeId,
               quantity,
               ...(promoCode ? { promo_code: promoCode } : {}),
               ...(promoterCode ? { promoter_code: promoterCode } : {}),
               ...(phone.phone ? { phone: phone.phone } : {}),
-            },
+            }),
             headers: { Authorization: `Bearer ${token}` },
           },
         );
@@ -96,7 +97,8 @@ export function useTicketCheckout() {
 
         const result = typeof data === "string" ? JSON.parse(data) : data;
 
-        if (result.error) throw new Error(result.error);
+        if (result?.error) throw new Error(result.error);
+        requireWebTicketContactAck(result);
         // Past the phone check: the number is on file now.
         useCheckoutPhoneStore.getState().reset();
 

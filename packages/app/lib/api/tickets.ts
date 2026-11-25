@@ -1,3 +1,4 @@
+import { webTicketContactBody, requireWebTicketContactAck } from "@dvnt/app/lib/checkout/web-ticket-contact";
 import type { ScanCredentialKind } from "@dvnt/app/lib/tickets/scan-verdict";
 import { supabase } from "../supabase/client";
 import { getCurrentUserAuthId } from "./auth-helper";
@@ -278,7 +279,7 @@ export const ticketsApi = {
         | "transfer_pending"
         | "void";
       search?: string;
-      contactLookup?: { kind: "email" | "phone"; value: string };
+      contactLookup?: { kind: "email" | "phone" | "username"; value: string };
       /** WS-2 sort key; defaults server-side to `purchased_at`. */
       sort?: "purchased_at" | "checked_in" | "ticket_tier" | "status";
       /**
@@ -317,6 +318,8 @@ export const ticketsApi = {
       cursor: opts.cursor ?? null,
     });
     if (error) {
+      // Contact lookup is intentionally not included in generic error logs.
+      if (opts.contactLookup) throw Object.assign(new Error("Ticket lookup unavailable."), { status: error.status });
       // Same split patch 01 made in scanTicket, for the same reason and with
       // the same consequence if it is missing. Returning `role: null` for BOTH
       // a refusal and a dropped connection made `useEventRole` resolve
@@ -468,7 +471,7 @@ export const ticketsApi = {
       const { data, error } = await supabase.functions.invoke(
         "ticket-checkout",
         {
-          body: {
+          body: await webTicketContactBody("ticket-checkout", {
             event_id: params.eventId,
             ticket_type_id: params.ticketTypeId,
             quantity: params.quantity,
@@ -478,12 +481,13 @@ export const ticketsApi = {
               ? { idempotency_key: params.idempotencyKey }
               : {}),
             ...(params.phone ? { phone: params.phone } : {}),
-          },
+          }),
           headers: { Authorization: `Bearer ${token}` },
         },
       );
 
       if (error) throw error;
+      if (!data?.error) requireWebTicketContactAck(data);
       return data;
     } catch (error: any) {
       console.error("[Tickets] checkout error:", error);
@@ -814,7 +818,7 @@ export const ticketsApi = {
    * Issue a ticket for a free RSVP (legacy path when ticketing is OFF).
    * Creates a real DB row with a crypto-random token via server-side RPC.
    */
-  async issueRsvpTicket(params: { eventId: string; userId: string }): Promise<{
+  async issueRsvpTicket(params: { eventId: string; userId: string; webContact?: { phone?: string } }): Promise<{
     id: string;
     qr_token: string;
     already_existed: boolean;
@@ -824,14 +828,18 @@ export const ticketsApi = {
         ok: boolean;
         data?: { id: string; qr_token: string; already_existed: boolean };
         error?: { code: string; message: string };
-      }>("rsvp-issue-ticket", { eventId: parseInt(params.eventId, 10) });
+      }>("rsvp-issue-ticket", params.webContact
+        ? await webTicketContactBody("rsvp-issue-ticket", { eventId: parseInt(params.eventId, 10), phone: params.webContact.phone })
+        : { eventId: parseInt(params.eventId, 10) });
 
       if (error) throw error;
       if (!data?.ok) {
-        throw new Error(data?.error?.message || "Failed to issue ticket");
+        throw Object.assign(new Error(data?.error?.message || "Failed to issue ticket"), { code: data?.error?.code });
       }
+      if (params.webContact) requireWebTicketContactAck(data);
       return data.data ?? null;
     } catch (error) {
+      if (params.webContact) throw error;
       console.error("[Tickets] issueRsvpTicket error:", error);
       return null;
     }

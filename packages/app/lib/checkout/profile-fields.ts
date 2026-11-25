@@ -201,3 +201,36 @@ export function parseCheckoutProfileFields(
     },
   };
 }
+
+/** Commerce labels are never account credentials or username reservations. */
+export function parseWebGuestTicketContact(input: { email?: unknown; username?: unknown; phone?: unknown }) {
+  const email = checkEmail(input.email);
+  if (!email.ok) return email;
+  const username = checkUsername(input.username);
+  if (!username.ok) return username;
+  const phone = checkPhone(input.phone);
+  if (!phone.ok) return phone;
+  return { ok: true as const, email: email.value, username: username.value, phone: phone.value };
+}
+
+/** Web sender marker covers browser relays that do not forward Origin. Native
+ * callers without HTTP(S) browser Origin retain their existing wire contract. */
+export const WEB_TICKET_CONTACT_VERSION = 1;
+
+export function isWebTicketContactRequest(version: unknown, origin: string | null, enforceBrowser = false) {
+  if (version === WEB_TICKET_CONTACT_VERSION) return true;
+  if (!enforceBrowser) return false;
+  try { return /^https?:$/.test(new URL(origin ?? "").protocol); } catch { return false; }
+}
+
+/** Old handlers see no purchase identity at the top level and cannot
+ * silently ignore the required v1 fields while still issuing a ticket. */
+export function unwrapWebTicketContactRequest(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const request = input as Record<string, unknown>;
+  if (request.checkout_contact_version !== WEB_TICKET_CONTACT_VERSION ||
+      request.web_ticket_checkout === undefined) return request;
+  const nested = request.web_ticket_checkout;
+  if (!nested || typeof nested !== "object" || Array.isArray(nested)) return {};
+  return { ...(nested as Record<string, unknown>), checkout_contact_version: WEB_TICKET_CONTACT_VERSION };
+}

@@ -7,6 +7,7 @@ const db = enabled ? createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SU
   {auth:{persistSession:false,autoRefreshToken:false}}) : null;
 Deno.serve(createTicketEmbedHandler({
   db,enabled,publishableKey,livemode:live,siteOrigin,
+  requireWebContact: Deno.env.get("DVNT_REQUIRE_WEB_TICKET_CONTACT") === "true",
   stripe:async(method,path,body,idempotencyKey)=>{
     const response = await fetch(`https://api.stripe.com/v1${path}`,{
       method,headers:{Authorization:`Bearer ${secret}`,'Stripe-Version':'2025-02-24.acacia',
