@@ -88,3 +88,119 @@ test('dormant staff invitations: role ACLs, close-on-revoke and exact verified c
   assert.equal((await revoke('host',r2)).ok,false);
   assert.deepEqual(await q('SELECT user_id,role,accepted FROM public.event_co_organizers'),{user_id:'member',role:'admin',accepted:true});
 });
+
+test('no-account invite runs queue → synthetic provider acceptance → verified signup → exact role', async (t) => {
+  const [{ selectStaffEmailRuntime }, { staffEmailRoutes }, { selectStaffEmailWorker }] = await Promise.all([
+    import('../apps/web/src/lib/staff-email/runtime.ts'),
+    import('../apps/web/src/lib/staff-email/routes.ts'),
+    import('../apps/web/src/lib/staff-email/worker-runtime.mjs'),
+  ]);
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(`
+    CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
+    CREATE TABLE public.events(id integer PRIMARY KEY, status text, host_id text);
+    INSERT INTO public.events VALUES (1,'active','host');
+    CREATE TABLE public."user"(id text PRIMARY KEY,email text,"emailVerified" boolean);
+    INSERT INTO public."user" VALUES ('host','host@example.invalid',true),('wrong','wrong@example.invalid',true);
+    CREATE TABLE public.identity_verifications(user_id text PRIMARY KEY,status text,date_of_birth date,failure_code text,failure_message text);
+    INSERT INTO public.identity_verifications VALUES ('wrong','passed','1990-01-01',NULL,NULL);
+    CREATE TABLE public.verified_admission_policy(id integer PRIMARY KEY,denylist text[] NOT NULL);
+    INSERT INTO public.verified_admission_policy VALUES(1,'{}');
+    CREATE TABLE public.user_private_profile(auth_id text PRIMARY KEY,checkout_restricted boolean);
+    CREATE TABLE public.event_co_organizers(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),event_id int,user_id text,role text,invited_by text,accepted boolean,UNIQUE(event_id,user_id));
+  `);
+  await db.exec(verified);
+  await db.exec(checkout.slice(checkout.indexOf('CREATE OR REPLACE FUNCTION public.is_checkout_restricted('),checkout.indexOf('-- ── Create or reuse')));
+  await db.exec(candidate);
+  await db.exec(readFileSync(join(migrations, '20261124221600_web_staff_email_route_policy.sql'), 'utf8'));
+  const web='https://app.example.invalid', storage='https://storage.example.invalid', workerToken='W'.repeat(43);
+  const env={
+    DVNT_STAFF_EMAIL_ENABLED:'true',DVNT_STAFF_EMAIL_WEB_ORIGIN:web,
+    DVNT_STAFF_EMAIL_RPC_ORIGIN:storage,DVNT_STAFF_EMAIL_RPC_SERVICE_KEY:'fixture-db',
+    DVNT_STAFF_EMAIL_FROM:'DVNT Fixture <sender@example.invalid>',
+    DVNT_STAFF_EMAIL_ACTIVE_KEY_ID:'fixture',DVNT_STAFF_EMAIL_KEYS:'fixture:'+'12'.repeat(32),
+    DVNT_STAFF_EMAIL_WORKER_ENABLED:'true',DVNT_STAFF_EMAIL_TRACKING_VERIFIED_OFF:'true',
+    DVNT_STAFF_EMAIL_WORKER_ORIGIN:web,DVNT_STAFF_EMAIL_WORKER_TOKEN:workerToken,
+    DVNT_STAFF_EMAIL_WORKER_RESEND_KEY:'fixture-resend',DVNT_STAFF_EMAIL_WORKER_SENDER_DOMAIN:'example.invalid',
+  };
+  const rpcs={
+    can_issue_event_staff_email_invite:['p_event_id','p_actor'],
+    take_event_staff_email_budget:['p_actor','p_operation'],
+    queue_event_staff_email_invite:['p_event','p_actor','p_email','p_role','p_request','p_token','p_intent','p_acceptable_intents','p_key_id','p_nonce','p_ciphertext'],
+    lease_staff_email_delivery:[],
+    staff_email_delivery_authorized:['p_delivery','p_lease'],
+    finish_staff_email_delivery:['p_delivery','p_lease','p_state','p_receipt'],
+    claim_event_staff_email_invite:['p_claimant','p_token'],
+  };
+  let mail, issued=0, providerCalls=0;
+  const fixtureFetch=async(url,init)=>{
+    if(url===web+'/api/auth/get-session'){
+      const actor=init.headers.cookie?.match(/^fixture-session=(host|joiner|wrong)$/)?.[1];
+      const found=actor && (await db.query('SELECT id FROM public."user" WHERE id=$1',[actor])).rows[0]?.id;
+      return Response.json(found ? {user:{id:found},session:{userId:found}} : null);
+    }
+    if(url==='https://api.resend.com/emails'){
+      providerCalls++;
+      assert.equal(init.headers.Authorization,'Bearer fixture-resend');
+      assert.match(init.headers['Idempotency-Key'],/^dvnt-staff-invite:v1:[a-f0-9-]{36}$/);
+      mail=JSON.parse(init.body);
+      return Response.json({id:'synthetic-provider-acceptance'});
+    }
+    assert.ok(url.startsWith(storage+'/rest/v1/rpc/'));
+    assert.equal(init.headers.Authorization,'Bearer fixture-db');
+    const name=url.split('/').at(-1);
+    const args=rpcs[name];
+    assert.ok(args, 'only known test RPCs are supported');
+    const body=JSON.parse(init.body);
+    assert.deepEqual(Object.keys(body).sort(),[...args].sort());
+    const params=args.map(key=>body[key]);
+    // PostgreSQL/WASM uses a text encoder for the named bytea array, while
+    // PostgREST receives a JSON array. Match the same bytes in both adapters.
+    const bindings=args.map((key,i)=>key==='p_acceptable_intents'?
+      `ARRAY(SELECT jsonb_array_elements_text($${i+1}::jsonb)::bytea)`:`$${i+1}`).join(',');
+    if(name==='queue_event_staff_email_invite'){
+      issued++;
+      params[7]=JSON.stringify(params[7]);
+      for (const i of [6,9,10]) params[i]=Buffer.from(params[i].slice(2),"hex");
+    }
+    await db.exec('SET ROLE service_role');
+    try {
+      await db.query("SELECT set_config('request.jwt.claims', $1, false)", ['{"role":"service_role"}']);
+      const table=name==='lease_staff_email_delivery';
+      const rows=(await db.query(table?`SELECT * FROM public.${name}(${bindings})`:`SELECT public.${name}(${bindings}) AS result`,params)).rows;
+      return Response.json(table?rows:rows[0].result);
+    } finally {
+      await db.exec('RESET request.jwt.claims; RESET ROLE');
+    }
+  };
+  const routes=staffEmailRoutes(selectStaffEmailRuntime(env,fixtureFetch));
+  const worker=selectStaffEmailWorker(env,fixtureFetch);
+  const workerRequest=()=>new Request(web+'/staff-email/worker',{method:'POST',headers:{authorization:'Bearer '+workerToken}});
+  const req=(path,actor,payload)=>new Request(web+path,{
+    method:payload===undefined?'GET':'POST',
+    headers:{host:new URL(web).host,origin:web,cookie:'fixture-session='+actor,'content-type':'application/json'},
+    ...(payload===undefined?{}:{body:JSON.stringify(payload)}),
+  });
+  const email='not-yet-registered@example.invalid', invitePath='/staff-email/invite/1', claimPath='/public/staff/claim';
+  assert.equal((await routes.issuePage(req(invitePath,'host'))).status,200);
+  assert.equal((await routes.mutate(req(invitePath,'host',{eventId:1,requestId:crypto.randomUUID(),email,role:'editor'}),'issue')).status,202);
+  assert.equal(issued,1);
+  assert.equal(providerCalls,0);
+  assert.equal((await worker(workerRequest())).status,204);
+  assert.equal((await worker(workerRequest())).status,204);
+  assert.equal(providerCalls,1);
+  assert.deepEqual(mail.to,[email]);
+  const token=mail.html.match(/\/public\/staff\/claim#([a-f0-9]{64})/)?.[1];
+  assert.ok(token);
+  assert.equal((await routes.mutate(req(claimPath,'joiner',{token}),'claim')).status,401);
+  assert.equal((await routes.mutate(req(claimPath,'wrong',{token}),'claim')).status,404);
+  await db.query('INSERT INTO public."user" VALUES ($1,$2,false)',['joiner',email]);
+  assert.equal((await routes.mutate(req(claimPath,'joiner',{token}),'claim')).status,404);
+  await db.exec(`UPDATE public."user" SET "emailVerified"=true WHERE id='joiner';
+    INSERT INTO public.identity_verifications VALUES ('joiner','passed','1990-01-01',NULL,NULL)`);
+  assert.equal((await routes.mutate(req(claimPath,'joiner',{token}),'claim')).status,200);
+  assert.equal((await routes.mutate(req(claimPath,'joiner',{token}),'claim')).status,200);
+  assert.deepEqual((await db.query('SELECT event_id,user_id,role,accepted FROM public.event_co_organizers')).rows,
+    [{event_id:1,user_id:'joiner',role:'editor',accepted:true}]);
+});
