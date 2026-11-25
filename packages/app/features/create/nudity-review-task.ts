@@ -1,10 +1,10 @@
 import type { NudityReview } from "./nudity-review-policy";
 
-export const MEDIA_REVIEW_DEADLINE_MS = 8_000;
+export const MEDIA_REVIEW_DEADLINE_MS = 5_000;
 
 /** Bound the entire advisory check, including lazy chunks and media leases.
  * A timeout is an incomplete review, never a clean result or automatic publish.
- * The caller's cancellation signal remains distinct so Cancel returns to draft.
+ * The caller's cancellation signal remains distinct from a detector timeout.
  */
 export function runNudityReviewTask(
   task: (signal: AbortSignal) => Promise<NudityReview>,

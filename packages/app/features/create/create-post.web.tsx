@@ -146,16 +146,9 @@ export function CreatePostScreen() {
   const publishPost = usePublishPost();
   const guardVerified = useVerifiedGate();
   const submittingRef = useRef(false);
-  const activeMediaCheck = useRef<{ controller: AbortController; manualReview: boolean } | null>(null);
-  const [checkingMedia, setCheckingMedia] = useState(false);
+  const scanAbort = useRef<AbortController | null>(null);
   const [nudityReview, setNudityReview] = useState<(NudityReview & { fingerprint: string }) | null>(null);
-  useEffect(() => () => activeMediaCheck.current?.controller.abort(), []);
-  const stopMediaCheck = (manualReview: boolean) => {
-    const check = activeMediaCheck.current;
-    if (!check || check.controller.signal.aborted) return;
-    check.manualReview = manualReview;
-    check.controller.abort();
-  };
+  useEffect(() => () => scanAbort.current?.abort(), []);
 
   // Same hand-off as native `(tabs)/create.tsx`: the /feed/camera screen writes
   // `useCameraResultStore` before routing back here; consume it into the
@@ -265,9 +258,7 @@ export function CreatePostScreen() {
       const fingerprint = reviewFingerprint(draft);
       if (draft.postKind === "media" && !draft.isNSFW && fingerprint !== reviewedFingerprint) {
         const controller = new AbortController();
-        const check = { controller, manualReview: false };
-        activeMediaCheck.current = check;
-        setCheckingMedia(true);
+        scanAbort.current = controller;
         let result: NudityReview;
         try {
           result = await runNudityReviewTask(async (signal) => {
@@ -277,17 +268,16 @@ export function CreatePostScreen() {
           }, controller.signal);
         } catch { result = { flagged: false, incomplete: true }; }
         finally {
-          if (activeMediaCheck.current === check) activeMediaCheck.current = null;
-          if (mounted.current) setCheckingMedia(false);
+          if (scanAbort.current === controller) scanAbort.current = null;
         }
-        if (!stillCurrent() || (controller.signal.aborted && !check.manualReview)) return;
-        // A manual review never treats a late or skipped result as clean.
-        if (check.manualReview) result = { flagged: result.flagged, incomplete: true };
+        if (!stillCurrent() || controller.signal.aborted) return;
         if (reviewFingerprint(useCreatePostStore.getState()) !== fingerprint) {
           showToast("warning", "Draft changed", "Review your changes and tap Share again.");
           return;
         }
-        if (result.flagged || result.incomplete) {
+        // Only a positive detection interrupts Share. A missing advisory result
+        // leaves the user's label unchanged; all normal publish checks still run.
+        if (result.flagged) {
           setNudityReview({ ...result, fingerprint });
           return;
         }
@@ -349,7 +339,7 @@ export function CreatePostScreen() {
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
-        <button onClick={() => { filePickVersion.current += 1; clearReviewReturn(); ui.setIsSubmitLocked(false); router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
+        <button onClick={() => { filePickVersion.current += 1; scanAbort.current?.abort(); clearReviewReturn(); ui.setIsSubmitLocked(false); router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
           <X size={22} />
         </button>
         <h1 className="text-[17px] font-semibold">New Post</h1>
@@ -602,13 +592,8 @@ export function CreatePostScreen() {
             disabled={!isValid || busy || pendingMedia || handoffPending}
             className="min-h-12 w-full rounded-xl px-4 py-3 text-[16px] font-bold bg-cyan-500 text-white disabled:bg-white/8 disabled:text-white/30"
           >
-            {checkingMedia ? "Checking media…" : busy ? "Posting…" : "Share"}
+            {busy ? "Posting…" : "Share"}
           </button>
-          <span role="status" className="sr-only">{checkingMedia ? "Checking media privately in your browser" : ""}</span>
-          {checkingMedia && <div className="mt-2 flex flex-wrap items-center justify-center gap-x-4 text-sm">
-            <button type="button" className="min-h-11 text-cyan-300 underline" onClick={() => stopMediaCheck(true)}>Review manually</button>
-            <button type="button" className="min-h-11 text-white/70 underline" onClick={() => stopMediaCheck(false)}>Cancel check</button>
-          </div>}
         </div>
       </div>
 
