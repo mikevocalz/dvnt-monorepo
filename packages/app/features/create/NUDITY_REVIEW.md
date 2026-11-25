@@ -13,10 +13,13 @@ as nudity. Thresholds are heuristics, not calibrated accuracy guarantees.
 
 Five frames per video/motion component are sampled (0/25/50/75/98%). This does not
 certify the entire clip. Live Photo still and paired motion are both visited.
-Unsupported decodes, model failure, animated GIFs and remote handoff media produce
-an incomplete-check dialog with explicit continue/review choices, not silent pass.
-Only blob/data media is decoded; remote user-media URLs are not fetched by this
-checker. Cancel returns to the draft without posting. Draft media/label changes
+Unsupported decodes, model failure, animated GIFs and remote handoff media are
+incomplete results, not clean classifications. Only blob/data media is decoded
+by the checker. A positive detection opens the existing advisory dialog promptly.
+If no positive result is returned within the five-second asynchronous review
+budget, original Share proceeds using the user's selected label and normal
+publish checks without a second prompt. Closing the composer cancels the check
+without posting. Draft media/label changes
 invalidate review, including during async onboarding checks.
 
 Still required before release: signed-in Chrome/Safari/iOS-web testing, realistic

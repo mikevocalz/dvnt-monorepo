@@ -147,7 +147,6 @@ export function CreatePostScreen() {
   const guardVerified = useVerifiedGate();
   const submittingRef = useRef(false);
   const scanAbort = useRef<AbortController | null>(null);
-  const [checkingMedia, setCheckingMedia] = useState(false);
   const [nudityReview, setNudityReview] = useState<(NudityReview & { fingerprint: string }) | null>(null);
   useEffect(() => () => scanAbort.current?.abort(), []);
 
@@ -260,7 +259,6 @@ export function CreatePostScreen() {
       if (draft.postKind === "media" && !draft.isNSFW && fingerprint !== reviewedFingerprint) {
         const controller = new AbortController();
         scanAbort.current = controller;
-        setCheckingMedia(true);
         let result: NudityReview;
         try {
           result = await runNudityReviewTask(async (signal) => {
@@ -269,13 +267,17 @@ export function CreatePostScreen() {
             return withLeasedHandoffScan(draft.selectedMedia, signal, media => scanPostMedia(media, signal));
           }, controller.signal);
         } catch { result = { flagged: false, incomplete: true }; }
-        finally { if (mounted.current) setCheckingMedia(false); }
+        finally {
+          if (scanAbort.current === controller) scanAbort.current = null;
+        }
         if (!stillCurrent() || controller.signal.aborted) return;
         if (reviewFingerprint(useCreatePostStore.getState()) !== fingerprint) {
           showToast("warning", "Draft changed", "Review your changes and tap Share again.");
           return;
         }
-        if (result.flagged || result.incomplete) {
+        // Only a positive detection interrupts Share. A missing advisory result
+        // leaves the user's label unchanged; all normal publish checks still run.
+        if (result.flagged) {
           setNudityReview({ ...result, fingerprint });
           return;
         }
@@ -332,16 +334,12 @@ export function CreatePostScreen() {
         setNudityReview(null);
         guardVerified("post", () => void submitPost(reviewed));
       }} />}
-      {checkingMedia && <div role="status" className="px-4 py-3 text-sm text-white/70">
-        Checking media privately in your browser…
-        <button className="ml-3 underline" onClick={() => scanAbort.current?.abort()}>Cancel check</button>
-      </div>}
       {/* Header */}
       <div
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
-        <button onClick={() => { filePickVersion.current += 1; clearReviewReturn(); ui.setIsSubmitLocked(false); router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
+        <button onClick={() => { filePickVersion.current += 1; scanAbort.current?.abort(); clearReviewReturn(); ui.setIsSubmitLocked(false); router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
           <X size={22} />
         </button>
         <h1 className="text-[17px] font-semibold">New Post</h1>
@@ -594,7 +592,7 @@ export function CreatePostScreen() {
             disabled={!isValid || busy || pendingMedia || handoffPending}
             className="min-h-12 w-full rounded-xl px-4 py-3 text-[16px] font-bold bg-cyan-500 text-white disabled:bg-white/8 disabled:text-white/30"
           >
-            {checkingMedia ? "Checking media…" : busy ? "Posting…" : "Share"}
+            {busy ? "Posting…" : "Share"}
           </button>
         </div>
       </div>
