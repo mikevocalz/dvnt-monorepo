@@ -36,6 +36,20 @@ class CopySkiaPlugin {
 // Invalid explicit overrides fail the build instead of falling back to production.
 const webBackend = resolveNextWebBackend(process.env);
 
+// This QA branch must not build with the normal production fallback.
+const cohostStage = 'https://hsedurpcxcqsgoonatth.supabase.co';
+let anonClaims: {ref?: string; role?: string} = {};
+try {
+  anonClaims = JSON.parse(Buffer.from(webBackend.supabaseAnonKey.split('.')[1], 'base64url').toString('utf8'));
+} catch { /* fail closed below */ }
+if (process.env.VERCEL_ENV === 'production' ||
+    webBackend.supabaseUrl !== cohostStage ||
+    webBackend.authUrl !== cohostStage + '/functions/v1/auth' ||
+    anonClaims.ref !== 'hsedurpcxcqsgoonatth' || anonClaims.role !== 'anon') {
+  throw new Error('Cohost preview requires its private staging backend and public anon key.');
+}
+
+
 const nextConfig: NextConfig = {
   // reactStrictMode left at the Next default (true). The reanimated 4.4.1
   // _updatePropsJS double-mount crash that forced it off is gone since the
