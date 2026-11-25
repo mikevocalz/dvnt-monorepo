@@ -20,10 +20,18 @@ function matchingBearer(header, token) {
   if (!schedulerTokenPattern.test(supplied) || supplied.length!==token.length) return false;
   return timingSafeEqual(Buffer.from(supplied), Buffer.from(token));
 }
-function senderDomain(value) {
+export function staffEmailSenderDomain(value) {
   if (typeof value!=="string" || value.length>320 || /[\r\n]/.test(value)) return null;
   const address=value.match(/^.* <([^<>]+)>$/)?.[1] ?? value;
   return bareAddress.test(address) ? address.split("@")[1].toLowerCase() : null;
+}
+
+export function staffEmailWorkerSettings({workerOrigin, rpcOrigin, schedulerToken, rpcKey, resendKey, approvedSenderDomain}) {
+  const web=origin(workerOrigin), db=origin(rpcOrigin);
+  if (!web || !db || !schedulerTokenPattern.test(schedulerToken ?? "") ||
+      typeof approvedSenderDomain!=="string" || !/^[a-z0-9]+(?:[.-][a-z0-9]+)+$/.test(approvedSenderDomain) ||
+      ![rpcKey,resendKey].every(value=>typeof value==="string" && value.length>0 && value.length<=4096 && !/\s/.test(value))) return null;
+  return {web,db};
 }
 
 /**
@@ -33,13 +41,12 @@ function senderDomain(value) {
  */
 export function createStaffEmailWorker({enabled=false, schedulerToken, keys, workerOrigin, rpcOrigin,
   rpcKey, resendKey, approvedSenderDomain, trackingVerifiedOff=false, requestFetch}={}) {
-  const web=origin(workerOrigin), db=origin(rpcOrigin);
-  if (!enabled || !trackingVerifiedOff || !web || !db || !schedulerTokenPattern.test(schedulerToken ?? "") ||
-      !keys?.active || !keys?.keys?.has(keys.active) || typeof requestFetch!=="function" ||
-      typeof approvedSenderDomain!=="string" || !/^[a-z0-9]+(?:[.-][a-z0-9]+)+$/.test(approvedSenderDomain) ||
-      ![rpcKey,resendKey].every(value=>typeof value==="string" && value.length>0 && value.length<=4096 && !/\s/.test(value))) {
+  const settings=staffEmailWorkerSettings({workerOrigin,rpcOrigin,schedulerToken,rpcKey,resendKey,approvedSenderDomain});
+  if (!enabled || !trackingVerifiedOff || !settings ||
+      !keys?.active || !keys?.keys?.has(keys.active) || typeof requestFetch!=="function") {
     return async () => status(404);
   }
+  const {web,db}=settings;
 
   async function rpc(name, body) {
     const response=await requestFetch(db+"/rest/v1/rpc/"+name,{
@@ -67,7 +74,7 @@ export function createStaffEmailWorker({enabled=false, schedulerToken, keys, wor
     },
   };
   async function provider({from,to,subject,html,idempotencyKey,timeoutMs}) {
-    if (senderDomain(from)!==approvedSenderDomain || typeof to!=="string" || !bareAddress.test(to) ||
+    if (staffEmailSenderDomain(from)!==approvedSenderDomain || typeof to!=="string" || !bareAddress.test(to) ||
         !idempotencyKey.startsWith("dvnt-staff-invite:v1:") || !uuid.test(idempotencyKey.split(":").at(-1))) {
       throw new Error("Staff email provider guard refused delivery");
     }

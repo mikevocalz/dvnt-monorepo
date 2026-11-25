@@ -44,8 +44,10 @@ const { build } = require('esbuild');
         useEffect(()=>{ onCropComplete({x:100,y:200,width:720,height:Math.round(720/aspect)}); },[src,aspect]);
         return null;
       }
-      export async function getCroppedDataUrl(src,area) {
-        fixture.cropExports.push({src,area});
+      export async function getCroppedDataUrl(src,area,transform) {
+        const pixels=new Uint8ClampedArray([200,75,25,255]);
+        transform?.({canvas:{width:1,height:1},getImageData:()=>({data:pixels}),putImageData:()=>{}});
+        fixture.cropExports.push({src,area,...(transform?{pixels:[...pixels]}:{})});
         if(fixture.deferCrop) await new Promise(resolve=>{ fixture.finishCrop=resolve; });
         if(fixture.invalidCrop) return src;
         return 'data:image/jpeg;base64,/9j/2Q==';
@@ -217,25 +219,25 @@ const { build } = require('esbuild');
     }
 
     // Enter the actual web crop screen via the regular mounted composer.
-    assert.equal(button('Crop photos'), undefined, 'empty draft has no crop entry');
+    assert.equal(button('Edit photos'), undefined, 'empty draft has no crop entry');
     fixture.route = route => mounted.render(route === '/feed/crop-preview');
     fixture.progress = [];
     fixture.routes.length = 0;
     const cropInput = image('crop-source.jpg');
     await pick([new File([1,2,3], 'animated.gif', {type:'image/gif'})]);
-    assert.equal(button('Crop photos'), undefined, 'animated-only draft has no crop entry');
+    assert.equal(button('Edit photos'), undefined, 'animated-only draft has no crop entry');
     await pick([cropInput]);
     const originalCropDraft = assets();
     const animatedOriginal = assets()[0], cropOriginal = assets()[1];
     await pick([movie('pending-entry.mov')]);
-    assert.equal(button('Crop photos').disabled, true, 'crop waits for pending file checks');
+    assert.equal(button('Edit photos').disabled, true, 'crop waits for pending file checks');
     const pendingCropProbe = probes()[0];
     await cancel();
     await act(async () => ready(pendingCropProbe));
     fixture.deferGate = true;
     await act(async () => share().click());
     const staleShare = fixture.gate;
-    await act(async () => button('Crop photos').click());
+    await act(async () => button('Edit photos').click());
     assert.equal(fixture.routes.at(-1), '/feed/crop-preview'); assert.ok(button('Apply crop'));
     const publishedBefore = fixture.published.length;
     await act(async () => staleShare());
@@ -246,7 +248,7 @@ const { build } = require('esbuild');
 
     // A decoder completing after the editor goes away must not change the draft.
     fixture.deferCrop = true;
-    await act(async () => button('Crop photos').click());
+    await act(async () => button('Edit photos').click());
     await act(async () => button('Apply crop').click());
     await act(async () => mounted.render());
     await act(async () => fixture.finishCrop());
@@ -254,7 +256,7 @@ const { build } = require('esbuild');
     fixture.deferCrop = false;
 
     fixture.invalidCrop = true;
-    await act(async () => button('Crop photos').click());
+    await act(async () => button('Edit photos').click());
     await act(async () => button('Apply crop').click());
     assert.match(node.textContent, /couldn’t export the crop/);
     assert.equal(assets(), originalCropDraft, 'unsupported encoder output leaves real original unchanged');
@@ -275,6 +277,21 @@ const { build } = require('esbuild');
     assert.equal(published[0].uri, animatedOriginal.uri);
     assert.equal(published[1].uri, derivative);
     assert.equal(fixture.publishFiles.at(-1)[1].uri, derivative, 'real publish mapper chooses the cropped JPEG');
+    await act(async () => store.getState().setSelectedMedia([animatedOriginal, cropOriginal]));
+    await act(async () => button('Edit photos').click());
+    assert.equal(node.querySelectorAll('input[type="range"]').length,3, 'photo controls are in the existing editor');
+    await act(async () => button('Mono').click());
+    assert.equal(button('Mono').getAttribute('aria-pressed'),'true');
+    await act(async () => button('Reset adjustments').click());
+    assert.equal(button('Original').getAttribute('aria-pressed'),'true');
+    await act(async () => button('Mono').click());
+    await act(async () => button('Apply edits').click());
+    const result=fixture.cropExports.at(-1);
+    assert.deepEqual(result.pixels,[98,98,98,255], 'selected filter is baked into exported pixels');
+    assert.equal(assets()[0], animatedOriginal,'animation is unchanged by still edits');
+    assert.equal(assets()[1].width,720);
+    await act(async () => store.getState().reset());
+
     fixture.route = null;
     console.log('PASS normal composer crop: eligibility, route entry, pending and stale guards, cancellation, saved derivative and unchanged animation');
 

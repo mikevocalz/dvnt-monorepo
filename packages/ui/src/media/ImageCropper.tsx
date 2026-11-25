@@ -12,6 +12,8 @@ export interface ImageCropperProps {
   aspect?: number;
   cropShape?: "rect" | "round";
   onCropComplete?: (areaPixels: Area) => void;
+  /** Optional filter for the web preview only. */
+  previewFilter?: string;
 }
 
 /**
@@ -24,6 +26,6 @@ export function ImageCropper({ src, aspect = 1 }: ImageCropperProps) {
 }
 
 /** Native counterpart returns the source; real crops go through expo-image-manipulator. */
-export async function getCroppedDataUrl(src: string, _area: Area): Promise<string> {
+export async function getCroppedDataUrl(src: string, _area: Area, _transform?: (ctx: CanvasRenderingContext2D) => void): Promise<string> {
   return src;
 }

@@ -5,5 +5,5 @@ import { StaffClient } from "./staff-client";
 export const dynamic = "force-dynamic";
 
 export default function Page() {
-  return <StaffClient staffEmailEnabled={staffEmailRuntime() !== null} />;
+  return <StaffClient staffEmailEnabled={staffEmailRuntime()?.issuanceReady === true} />;
 }

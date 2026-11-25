@@ -12,6 +12,8 @@ export interface ImageCropperProps {
   cropShape?: "rect" | "round";
   /** Fires with the pixel crop rect when the user adjusts. */
   onCropComplete?: (areaPixels: Area) => void;
+  /** Optional filter for the web preview only. */
+  previewFilter?: string;
 }
 
 /**
@@ -19,7 +21,7 @@ export interface ImageCropperProps {
  * crop-preview screen. Returns the pixel crop area; the caller draws it onto a
  * canvas to produce the final blob. Native sibling delegates to expo-image-manipulator.
  */
-export function ImageCropper({ src, aspect = 1, cropShape = "rect", onCropComplete }: ImageCropperProps) {
+export function ImageCropper({ src, aspect = 1, cropShape = "rect", onCropComplete, previewFilter }: ImageCropperProps) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
 
@@ -37,6 +39,7 @@ export function ImageCropper({ src, aspect = 1, cropShape = "rect", onCropComple
         aspect={aspect}
         cropShape={cropShape}
         showGrid={false}
+        style={previewFilter ? { mediaStyle: { filter: previewFilter } } : undefined}
         onCropChange={setCrop}
         onZoomChange={setZoom}
         onCropComplete={onComplete}
@@ -49,7 +52,7 @@ export function ImageCropper({ src, aspect = 1, cropShape = "rect", onCropComple
  * Draw a pixel crop area onto a canvas and return a JPEG data URL — companion to
  * `ImageCropper` for producing the final cropped image client-side.
  */
-export async function getCroppedDataUrl(src: string, area: Area): Promise<string> {
+export async function getCroppedDataUrl(src: string, area: Area, transform?: (ctx: CanvasRenderingContext2D) => void): Promise<string> {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const i = new Image();
     i.crossOrigin = "anonymous";
@@ -63,5 +66,6 @@ export async function getCroppedDataUrl(src: string, area: Area): Promise<string
   const ctx = canvas.getContext("2d");
   if (!ctx) return src;
   ctx.drawImage(img, area.x, area.y, area.width, area.height, 0, 0, area.width, area.height);
+  transform?.(ctx);
   return canvas.toDataURL("image/jpeg", 0.92);
 }
