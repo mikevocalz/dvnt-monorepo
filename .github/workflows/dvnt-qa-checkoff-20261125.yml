@@ -8,8 +8,6 @@ jobs:
   browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    env:
-      NODE_PATH: ${{ runner.temp }}/qa/node_modules
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,13 +24,13 @@ jobs:
       - name: Real HEIC display in the crop decoder
         run: |
           heif-enc -q 95 scripts/fixtures/dvnt-checkoff/synthetic.png -o "$RUNNER_TEMP/synthetic.heic"
-          node scripts/fixtures/dvnt-checkoff/heic-browser.cjs "$RUNNER_TEMP/synthetic.heic"
+          NODE_PATH="$RUNNER_TEMP/qa/node_modules" node scripts/fixtures/dvnt-checkoff/heic-browser.cjs "$RUNNER_TEMP/synthetic.heic"
       - name: Live Photo publish roundtrip
         if: always() && steps.fixtures.outcome == 'success'
-        run: node scripts/test-live-photo-roundtrip-browser.cjs
+        run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node scripts/test-live-photo-roundtrip-browser.cjs
       - name: Live Photo feed carousel
         if: always() && steps.fixtures.outcome == 'success'
-        run: node scripts/test-web-live-photo-carousel-browser.cjs
+        run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node scripts/test-web-live-photo-carousel-browser.cjs
       - name: Event notifications
         if: always() && steps.fixtures.outcome == 'success'
-        run: node scripts/test-event-notification-browser.cjs
+        run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node scripts/test-event-notification-browser.cjs
