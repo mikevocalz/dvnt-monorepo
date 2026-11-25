@@ -5,7 +5,7 @@ export type HostEvidence = Readonly<{
   organizerEventId: number;
   organizerAccountId: string | null;
   accountEvidence: "missing" | "verified_current" | "unknown";
-  stripe: LiveConnectState | null;
+  stripe: (LiveConnectState & { accountId: string }) | null;
   verifiedDvntUserId: number;
   verifiedEmail: string;
   emailSuppressed: boolean;
@@ -24,7 +24,7 @@ export function planHostPayoutSetupEmail(hostId: number, evidence: HostEvidence 
   if (evidence.accountEvidence === "missing") {
     if (evidence.organizerAccountId !== null || evidence.stripe !== null) return null;
   } else if (evidence.accountEvidence === "verified_current") {
-    if (!evidence.organizerAccountId || !/^acct_[a-z0-9]{12,}$/i.test(evidence.organizerAccountId) || !evidence.stripe) return null;
+    if (!evidence.organizerAccountId || !/^acct_[a-z0-9]{12,}$/i.test(evidence.organizerAccountId) || evidence.stripe?.accountId !== evidence.organizerAccountId) return null;
   } else {
     return null;
   }

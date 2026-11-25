@@ -7,7 +7,7 @@ const sample: HostEvidence = {
 };
 const current = {
   ...sample, organizerAccountId: "acct_syntheticFixture", accountEvidence: "verified_current",
-  stripe: { payoutsEnabled: false, chargesEnabled: false, detailsSubmitted: true, currentlyDue: ["bank"], pastDue: [], pendingVerification: [], disabledReason: null },
+  stripe: { accountId: "acct_syntheticFixture", payoutsEnabled: false, chargesEnabled: false, detailsSubmitted: true, currentlyDue: ["bank"], pastDue: [], pendingVerification: [], disabledReason: null },
 } satisfies HostEvidence;
 function harness() {
   const h = { evidence: sample as HostEvidence|null, reads: 0, reservations: new Set<string>(), sendCalls: 0, records: [] as string[], pause: null as Promise<void>|null, responseLost: false, recordLost: false, changeOnRead: undefined as HostEvidence|undefined };
@@ -50,7 +50,7 @@ test("actionable current Stripe evidence only; never email already ready, pendin
   assert.equal(planHostPayoutSetupEmail(21,current)?.state,"action_required");
   const ready = {...current,stripe:{...current.stripe,payoutsEnabled:true,chargesEnabled:true}};
   const pending = {...current,stripe:{...current.stripe,currentlyDue:[],pendingVerification:["bank"]}};
-  for(const evidence of [ready,pending,{...current,stripe:null},{...current,accountEvidence:"unknown"} as HostEvidence])
+  for(const evidence of [ready,pending,{...current,stripe:{...current.stripe,accountId:"acct_otherSynthetic"}},{...current,stripe:null},{...current,accountEvidence:"unknown"} as HostEvidence])
     assert.equal(planHostPayoutSetupEmail(21,evidence),null);
 });
 test("two competing dispatches issue one synthetic transport attempt",async()=>{
