@@ -22,7 +22,8 @@ const contentId = load('packages/app/lib/media/apple-content-id.ts');
 const motionPhoto = load('packages/app/lib/media/motion-photo.ts');
 const videoPolicy = load('packages/app/lib/media/video-pick-policy.ts', {'./upload-policy.ts':policy});
 const liveImport = load('packages/app/features/create/browser-live-photo-import.ts', {'../../lib/media/upload-policy.ts':policy,'../../lib/media/video-pick-policy.ts':videoPolicy,'../../lib/media/browser-file-mime.ts':fileMime});
-const intake = load('packages/app/features/create/browser-media-intake.ts', {'../../lib/media/upload-policy.ts':policy,'../../lib/media/video-pick-policy.ts':videoPolicy,'../../lib/media/browser-file-mime.ts':fileMime,'../../lib/media/apple-content-id.ts':contentId,'../../lib/media/motion-photo.ts':motionPhoto,'./browser-live-photo-import.ts':liveImport});
+const videoDuration = load('packages/app/lib/media/video-duration.web.ts', {'./upload-policy.ts':policy});
+const intake = load('packages/app/features/create/browser-media-intake.ts', {'../../lib/media/upload-policy.ts':policy,'../../lib/media/video-pick-policy.ts':videoPolicy,'../../lib/media/browser-file-mime.ts':fileMime,'../../lib/media/apple-content-id.ts':contentId,'../../lib/media/motion-photo.ts':motionPhoto,'../../lib/media/video-duration.web.ts':videoDuration,'./browser-live-photo-import.ts':liveImport});
 const calls = [], sent = [], urls = [];
 const blobURL = (bytes, type) => { const uri = URL.createObjectURL(new Blob([bytes],{type})); urls.push(uri); return uri; };
 const functions = new FunctionsClient('https://fixture.invalid/functions/v1', {customFetch: async (url, init) => {
