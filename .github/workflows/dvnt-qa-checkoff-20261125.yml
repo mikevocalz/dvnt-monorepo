@@ -18,7 +18,7 @@ jobs:
       - name: Install isolated browser fixture dependencies
         run: |
           npm install --prefix "$RUNNER_TEMP/qa" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 @tanstack/react-query@5.101.0 zustand@5.0.14 happy-dom@20.0.11 jsdom@26.1.0 @electric-sql/pglite@0.3.15 @supabase/supabase-js@2.112.2 lucide-react@1.30.0 heic-to@1.6.6
-          "$RUNNER_TEMP/qa/node_modules/.bin/playwright" install --with-deps chromium
+          "$RUNNER_TEMP/qa/node_modules/.bin/playwright" install --with-deps chromium chrome
           sudo apt-get install -y libheif-examples libheif-plugin-x265 ffmpeg
         id: fixtures
       - name: Real HEIC display in the crop decoder
@@ -27,10 +27,10 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/qa/node_modules" node scripts/fixtures/dvnt-checkoff/heic-browser.cjs "$RUNNER_TEMP/synthetic.heic"
       - name: Live Photo publish roundtrip
         if: always() && steps.fixtures.outcome == 'success'
-        run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node scripts/test-live-photo-roundtrip-browser.cjs
+        run: FEED_BROWSER_CHANNEL=chrome NODE_PATH="$RUNNER_TEMP/qa/node_modules" node scripts/test-live-photo-roundtrip-browser.cjs
       - name: Live Photo feed carousel
         if: always() && steps.fixtures.outcome == 'success'
-        run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node scripts/test-web-live-photo-carousel-browser.cjs
+        run: FEED_BROWSER_CHANNEL=chrome NODE_PATH="$RUNNER_TEMP/qa/node_modules" node scripts/test-web-live-photo-carousel-browser.cjs
       - name: Event notifications
         if: always() && steps.fixtures.outcome == 'success'
         run: NODE_PATH="$RUNNER_TEMP/qa/node_modules" node scripts/test-event-notification-browser.cjs
