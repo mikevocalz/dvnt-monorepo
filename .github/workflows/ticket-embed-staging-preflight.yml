@@ -1,98 +1,85 @@
-name: Ticket embed staging preflight
+name: DVNT signed-in staging fulfillment proof
 on:
   workflow_dispatch:
     inputs:
-      fixture_fingerprint:
-        description: SHA-256 of the exact staging Checkout Session ID (never the session ID itself)
+      fingerprint:
         required: true
         type: string
-      fixture_created_epoch:
-        description: UTC epoch seconds of the synthetic staging order
+      cart:
         required: true
         type: string
-permissions: {}
+      valid_until:
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: dvnt-member-sandbox-proof
+  cancel-in-progress: false
 jobs:
-  reconcile-sandbox-session:
-    if: github.repository == 'mikevocalz/dvnt-monorepo' && github.ref == 'refs/heads/qa/dvnt-stripe-session-reconcile'
-    runs-on: ubuntu-latest
-    timeout-minutes: 4
+  exact-sandbox-member:
+    if: github.repository == 'mikevocalz/dvnt-monorepo' && github.ref == 'refs/heads/qa/dvnt-member-sandbox-proof'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
     steps:
-      - name: Read exact sandbox Checkout Session, sanitized result only
+      - name: Confirm one exact synthetic member payment in Stripe Sandbox
         env:
-          STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
-          FIXTURE_FINGERPRINT: ${{ inputs.fixture_fingerprint }}
-          FIXTURE_CREATED_EPOCH: ${{ inputs.fixture_created_epoch }}
-        shell: bash
+          STRIPE_TEST_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          EXPECTED_FINGERPRINT: ${{ inputs.fingerprint }}
+          EXPECTED_TEST_CART: ${{ inputs.cart }}
+          VALID_UNTIL: ${{ inputs.valid_until }}
         run: |
           python3 - <<'PY'
-          import hashlib, hmac, json, os, re, sys
-          import urllib.error, urllib.parse, urllib.request
-
+          import hashlib, json, os, re, time, urllib.error, urllib.parse, urllib.request
+          key = os.environ['STRIPE_TEST_KEY'].strip()
+          finger = os.environ['EXPECTED_FINGERPRINT']
+          cart = os.environ['EXPECTED_TEST_CART']
+          deadline = int(os.environ['VALID_UNTIL'])
+          assert re.fullmatch(r'(?:sk|rk)_test_[a-zA-Z0-9]+', key), 'Missing sandbox-only secret'
+          assert re.fullmatch(r'[0-9a-f]{64}', finger)
+          assert re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', cart)
+          assert 10 < deadline - int(time.time()) <= 900, 'Exact staging hold too old'
           class NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self, *args, **kwargs):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
                   return None
-
-          def fail(reason):
-              print(json.dumps({"result": reason}))
-              sys.exit(1)
-
-          key = os.environ.get("STRIPE_TEST_SECRET_KEY", "").strip()
-          fp = os.environ.get("FIXTURE_FINGERPRINT", "")
-          epoch = os.environ.get("FIXTURE_CREATED_EPOCH", "")
-          if not re.fullmatch(r"(?:sk|rk)_test_[A-Za-z0-9]{16,}", key):
-              fail("test_key_missing_or_invalid")
-          if not re.fullmatch(r"[a-f0-9]{64}", fp) or not re.fullmatch(r"[0-9]{10}", epoch):
-              fail("invalid_fixture_binding")
-
           opener = urllib.request.build_opener(NoRedirect())
-          def get(path, query=None):
-              uri = "https://api.stripe.com/v1" + path
-              if query:
-                  uri += "?" + urllib.parse.urlencode(query)
-              req = urllib.request.Request(uri, method="GET", headers={
-                  "Authorization": "Bearer " + key,
-                  "Stripe-Version": "2025-02-24.acacia",
-              })
+          def stripe(path, data=None):
+              assert path.startswith('/payment_intents')
+              headers = {'Authorization': 'Bearer ' + key}
+              if data is not None:
+                  headers['Idempotency-Key'] = 'dvnt-member-staging-' + cart
+                  headers['Content-Type'] = 'application/x-www-form-urlencoded'
+                  data = urllib.parse.urlencode(data).encode()
+              req = urllib.request.Request('https://api.stripe.com/v1' + path, data=data, headers=headers)
               try:
-                  with opener.open(req, timeout=25) as response:
-                      value = json.load(response)
-                      if not isinstance(value, dict):
-                          fail("unexpected_response")
-                      return value
-              except urllib.error.HTTPError as error:
-                  fail("stripe_http_" + str(error.code))
-              except Exception:
-                  fail("stripe_read_unavailable")
-
-          def safe(value, allowed):
-              return value if isinstance(value, str) and value in allowed else None
-
-          results = get("/checkout/sessions", {"created[gte]": int(epoch)-120,
-                                                "created[lte]": int(epoch)+120, "limit": 100})
-          if results.get("object") != "list" or not isinstance(results.get("data"), list):
-              fail("unexpected_checkout_list")
-          hits = []
-          for row in results["data"]:
-              sid = row.get("id", "") if isinstance(row, dict) else ""
-              if isinstance(sid, str) and re.fullmatch(r"cs_test_[A-Za-z0-9]+", sid):
-                  if hmac.compare_digest(hashlib.sha256(sid.encode("ascii")).hexdigest(), fp):
-                      hits.append((sid, row))
-          if len(hits) != 1:
-              fail("fingerprint_not_found_in_bounded_page" if not hits else "ambiguous_fingerprint")
-          sid, row = hits[0]
-          if row.get("livemode") is not False or row.get("amount_total") != 613 or row.get("currency") != "usd":
-              fail("sandbox_amount_binding_mismatch")
-          exact = get("/checkout/sessions/" + sid, {"expand[]":"payment_intent"})
-          if exact.get("id") != sid or exact.get("livemode") is not False:
-              fail("sandbox_session_confirmation_failed")
-          pi = exact.get("payment_intent")
-          pi_status = None
-          if isinstance(pi, dict) and pi.get("livemode") is False:
-              pi_status = safe(pi.get("status"), {"requires_payment_method","requires_confirmation",
-                "requires_action","processing","requires_capture","canceled","succeeded"})
-          print(json.dumps({"result":"exact_sandbox_session_verified","test_mode":True,
-             "session_status":safe(exact.get("status"),{"open","complete","expired"}),
-             "payment_status":safe(exact.get("payment_status"),{"paid","unpaid","no_payment_required"}),
-             "payment_intent_status":pi_status,
-             "no_provider_writes":True},sort_keys=True))
+                  with opener.open(req, timeout=12) as result:
+                      return json.load(result)
+              except urllib.error.HTTPError as e:
+                  try:
+                      err = json.load(e)['error']
+                      code = str(err.get('code') or err.get('type') or 'unknown')
+                      print('Stripe API:', e.code, code if re.fullmatch(r'[a-z0-9_]{1,70}', code) else 'unknown')
+                  except Exception:
+                      print('Stripe API:', e.code)
+                  raise SystemExit(2)
+          params = urllib.parse.urlencode({'limit': 100,'created[gte]': int(time.time())-1200})
+          match = [v for v in stripe('/payment_intents?' + params)['data'] if hashlib.sha256(v['id'].encode()).hexdigest() == finger]
+          assert len(match) == 1, 'Exact Stripe test PaymentIntent not found'
+          v = match[0]
+          m = v['metadata']
+          assert v['livemode'] is False and v['amount'] == 613 and v['currency'] == 'usd'
+          assert m.get('cart_id') == cart and m.get('event_id') == '2' and m.get('type') == 'cart_checkout'
+          if v['status'] == 'succeeded':
+              print('Exact sandbox payment already succeeded; no second confirmation')
+              raise SystemExit(0)
+          assert v['status'] == 'requires_payment_method' and not v.get('payment_method')
+          assert time.time() < deadline - 5, 'Hold expires too soon'
+          assert re.fullmatch(r'pi_[A-Za-z0-9]+', v['id'])
+          paid = stripe('/payment_intents/' + v['id'] + '/confirm', {
+              'payment_method': 'pm_card_visa',
+              'return_url': 'https://dvnt-blog-h8kraebmu-mikefacesnys-projects.vercel.app/feed/checkout/success',
+          })
+          assert paid['id'] == v['id'] and paid['livemode'] is False and paid['amount'] == 613
+          print('Exact Stripe sandbox confirmation:', paid['status'])
+          assert paid['status'] == 'succeeded'
           PY
