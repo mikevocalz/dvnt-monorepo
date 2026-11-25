@@ -60,7 +60,16 @@ export function selectStaffEmailRuntime(
   if (env.DVNT_STAFF_EMAIL_ENABLED !== "true") return null;
   const origin=exactOrigin(env.DVNT_STAFF_EMAIL_WEB_ORIGIN,allowLoopback);
   const supabase=exactOrigin(env.DVNT_STAFF_EMAIL_RPC_ORIGIN,allowLoopback);
-  const key=env.DVNT_STAFF_EMAIL_RPC_SERVICE_KEY;
+  const stageOrigin="https://hsedurpcxcqsgoonatth.supabase.co";
+  const qaRequested=env.DVNT_STAFF_EMAIL_QA_BRIDGE_ENABLED==="true";
+  // Never fall back to a broad RPC key or arbitrary bridge when QA is selected.
+  const qa=qaRequested && env.VERCEL_ENV==="preview" &&
+    env.VERCEL_GIT_COMMIT_REF==="qa/dvnt-cohost-preview" &&
+    supabase===stageOrigin && origin?.startsWith("https://") &&
+    !env.DVNT_STAFF_EMAIL_RPC_SERVICE_KEY;
+  if (qaRequested && !qa) return null;
+  const key=qa?env.DVNT_STAFF_EMAIL_QA_BRIDGE_TOKEN:env.DVNT_STAFF_EMAIL_RPC_SERVICE_KEY;
+  if (qa && (!key || !/^[A-Za-z0-9_-]{43,128}$/.test(key))) return null;
   const sender=env.DVNT_STAFF_EMAIL_FROM;
   const active=env.DVNT_STAFF_EMAIL_ACTIVE_KEY_ID;
   if (!origin || !supabase || !key || /\s/.test(key) || key.length>4096 ||
@@ -77,9 +86,16 @@ export function selectStaffEmailRuntime(
   let keysPromise: ReturnType<typeof keyring> | undefined;
 
   async function actor(request:Request) {
-    const cookie=request.headers.get("cookie");
-    if (!cookie || cookie.length>16384) return null;
-    const response=await requestFetch(origin+"/api/auth/get-session",{
+    const originalCookie=request.headers.get("cookie");
+    if (!originalCookie || originalCookie.length>16384) return null;
+    // The protected preview host can gate a server-to-self fetch. In QA only,
+    // query the pinned Better Auth function directly with the signed session
+    // cookie(s), never its Vercel protection cookie or any other app cookie.
+    const cookie=qa?originalCookie.split(";").map(part=>part.trim()).filter(part=>
+        /^(?:__Secure-)?better-auth\.session_token=[^;\s]+$/.test(part)).join("; "):originalCookie;
+    if (!cookie) return null;
+    const sessionUrl=qa?stageOrigin+"/functions/v1/auth/api/auth/get-session":origin+"/api/auth/get-session";
+    const response=await requestFetch(sessionUrl,{
       headers:{cookie}, signal:AbortSignal.timeout(authTimeoutMs), cache:"no-store", redirect:"error",
     });
     if (!response.ok) throw new Error("Staff session check unavailable");
@@ -90,8 +106,9 @@ export function selectStaffEmailRuntime(
   }
 
   async function rpc(name:string,input:Record<string,unknown>):Promise<unknown> {
-    const response=await requestFetch(supabase+"/rest/v1/rpc/"+name,{
-      method:"POST", headers:{apikey:key!,Authorization:"Bearer "+key!,"Content-Type":"application/json"},
+    const endpoint=supabase+(qa?"/functions/v1/stage-cohost-preview-rpc/":"/rest/v1/rpc/")+name;
+    const response=await requestFetch(endpoint,{
+      method:"POST", headers:{...(qa?{}:{apikey:key!}),Authorization:"Bearer "+key!,"Content-Type":"application/json"},
       body:JSON.stringify(input),signal:AbortSignal.timeout(rpcTimeoutMs),cache:"no-store",redirect:"error",
     });
     if (!response.ok) throw new Error("Staff invitation storage unavailable");
