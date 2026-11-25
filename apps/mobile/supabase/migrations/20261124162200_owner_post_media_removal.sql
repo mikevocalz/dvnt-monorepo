@@ -30,7 +30,9 @@ BEGIN
   SELECT array_agg(m.id::text ORDER BY m._order, m.id), count(DISTINCT m._order)
   INTO v_ids, v_distinct_orders
   FROM public.posts_media AS m
-  WHERE m._parent_id = p_post_id AND m.type <> 'thumbnail';
+  -- Hosted databases store type as an enum with only image/video. Compare
+  -- its text representation so old text-based schemas can still omit covers.
+  WHERE m._parent_id = p_post_id AND m.type::text <> 'thumbnail';
   IF v_ids IS NULL OR cardinality(v_ids) <> v_distinct_orders
      OR v_ids IS DISTINCT FROM p_expected_ids OR NOT (p_remove_ids <@ v_ids)
   THEN RETURN jsonb_build_object('result', 'changed'); END IF;
@@ -43,7 +45,7 @@ BEGIN
   -- bytes. Legacy standalone covers are detached from any one item; drop
   -- them to avoid showing a potentially removed image.
   DELETE FROM public.posts_media AS m WHERE m._parent_id = p_post_id
-    AND (m.id::text = ANY(p_remove_ids) OR m.type = 'thumbnail');
+    AND (m.id::text = ANY(p_remove_ids) OR m.type::text = 'thumbnail');
 
   -- Tags are indexed by displayed ordinal, not _order. Shift survivors in
   -- ascending order to preserve the existing unique user/post/ordinal key.

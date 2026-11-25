@@ -62,6 +62,34 @@ test("removes exact Live Photo even with duplicate still, retains media order/st
   assert.equal((await db.query("SELECT content FROM posts WHERE id=1")).rows[0].content, "new");
 });
 
+test("hosted image/video enum supports removing one attachment and reopening", async () => {
+  const hosted = new PGlite();
+  try {
+    await hosted.exec(read("./fixtures/live-photo-roundtrip/schema.sql"));
+    await hosted.exec(`
+      CREATE TYPE public.enum_posts_media_type AS ENUM ('image','video');
+      ALTER TABLE public.posts_media DROP CONSTRAINT posts_media_type_check;
+      ALTER TABLE public.posts_media ALTER COLUMN type TYPE public.enum_posts_media_type
+        USING type::public.enum_posts_media_type;
+      CREATE TABLE public.post_tags(id int PRIMARY KEY, post_id bigint,
+        media_index int NOT NULL, tagged_user_id int);
+      INSERT INTO public.posts(author_id,content,visibility,is_nsfw) VALUES(1,'before','private',false);
+      INSERT INTO public.posts_media(id,_parent_id,_order,type,url)
+        VALUES ('first',1,0,'image','first'),('middle',1,1,'image','middle'),('last',1,2,'video','last');
+    `);
+    await hosted.exec(read("../apps/mobile/supabase/migrations/20261124162200_owner_post_media_removal.sql"));
+    const saved = (await hosted.query("SELECT public.remove_owned_post_media($1,$2,$3,$4,$5,$6) AS result",
+      [1, 1, ["first", "middle", "last"], ["middle"], { content: "after" }, "before"])).rows[0].result;
+    assert.equal(saved.result, "saved");
+    assert.deepEqual(saved.remainingIds, ["first", "last"]);
+    assert.deepEqual((await hosted.query("SELECT id FROM public.posts_media WHERE _parent_id=1 ORDER BY _order")).rows,
+      [{ id: "first" }, { id: "last" }]);
+    assert.equal((await hosted.query("SELECT content FROM public.posts WHERE id=1")).rows[0].content, "after");
+  } finally {
+    await hosted.close();
+  }
+});
+
 test("RPC grants execution only to the existing service role", async () => {
   const result = (await db.query("SELECT r, has_function_privilege(r,'public.remove_owned_post_media(bigint,integer,text[],text[],jsonb,text)','execute') AS allow FROM unnest(ARRAY['anon','authenticated','service_role']) AS r")).rows;
   assert.deepEqual(result.map(x => x.allow), [false, false, true]);
