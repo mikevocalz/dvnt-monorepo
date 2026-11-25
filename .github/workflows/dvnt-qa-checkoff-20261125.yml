@@ -1,0 +1,30 @@
+name: DVNT mobile-web QA checkoff
+on:
+  push:
+    branches: [qa/dvnt-mobile-web-checkoff-20261125]
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install isolated browser fixture dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qa" --ignore-scripts --no-audit --no-fund --no-save esbuild@0.25.11 playwright@1.58.2 typescript@6.0.3 react@19.2.3 react-dom@19.2.3 @tanstack/react-query@5.101.0 zustand@5.0.14 happy-dom@20.0.11 jsdom@26.1.0 @electric-sql/pglite@0.3.15 @supabase/supabase-js@2.112.2 lucide-react@1.30.0 heic-to@1.6.6
+          "$RUNNER_TEMP/qa/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y libheif-examples
+      - name: HEIC display, Live Photo publish and feed, and notifications in mobile browsers
+        run: |
+          export NODE_PATH="$RUNNER_TEMP/qa/node_modules"
+          heif-enc -q 95 scripts/fixtures/dvnt-checkoff/synthetic.png -o "$RUNNER_TEMP/synthetic.heic"
+          node scripts/fixtures/dvnt-checkoff/heic-browser.cjs "$RUNNER_TEMP/synthetic.heic"
+          node scripts/test-live-photo-roundtrip-browser.cjs
+          node scripts/test-web-live-photo-carousel-browser.cjs
+          node scripts/test-event-notification-browser.cjs
