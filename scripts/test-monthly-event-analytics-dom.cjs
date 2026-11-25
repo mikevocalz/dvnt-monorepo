@@ -6,11 +6,11 @@ const deps=(process.env.NODE_PATH||'').split(path.delimiter).filter(Boolean);
 const resolve=n=>require.resolve(n,{paths:[ROOT,...deps]});
 const {build}=require(resolve('esbuild'));
 const fixtures={
- 'analytics-fixture':`import {create} from 'zustand';export const useRoute=create(()=>({id:'17'}));export const useActor=create(()=>({user:{id:'fixture-a'},isAuthenticated:true}));export const state={payload:null,error:null,calls:[],defer:false,releases:[]};export const router={push(){},back(){}};`,
+ 'analytics-fixture':`import {create} from 'zustand';export const useRoute=create(()=>({id:'17'}));export const useActor=create(()=>({user:{id:'fixture-a'},isAuthenticated:true}));export const state={payload:null,attendeesPayload:null,exportRole:'owner',error:null,calls:[],defer:false,releases:[]};export const router={push(){},back(){}};`,
  'solito/navigation':`import {router,useRoute} from 'analytics-fixture';export const useParams=()=>useRoute();export const useRouter=()=>router;`,
  'expo-router':`import {router,useRoute} from 'analytics-fixture';export const useLocalSearchParams=()=>useRoute();export const useRouter=()=>router;`,
  '@dvnt/app/lib/stores/auth-store':`export {useActor as useAuthStore} from 'analytics-fixture';`,
- '@dvnt/app/lib/hooks/use-event-role':`export const useEventRole=()=>({role:'owner',hasResolved:true,isPending:false,isPaused:false,isError:false,refetch:async()=>({isSuccess:true,data:'owner',fetchStatus:'idle'})});`,
+ '@dvnt/app/lib/hooks/use-event-role':`import {state} from 'analytics-fixture';export const useEventRole=()=>({role:'owner',hasResolved:true,isPending:false,isPaused:false,isError:false,refetch:async()=>({isSuccess:true,data:state.exportRole,fetchStatus:'idle'})});`,
  '@dvnt/app/lib/api/promoters':`export const promotersApi={leaderboard:async()=>[]};`,
  '@dvnt/app/lib/stores/ui-store':`export const useUIStore=s=>s({showToast(){}});`,
  '@dvnt/app/lib/hooks':`export const useColorScheme=()=>({colors:{background:'#000',card:'#111',foreground:'#fff',mutedForeground:'#aaa',primary:'#0cf',border:'#333'}});`,
@@ -21,7 +21,7 @@ const fixtures={
  'expo-file-system/legacy':`export const cacheDirectory='fixture';export const EncodingType={UTF8:'utf8'};export const writeAsStringAsync=async()=>{throw Error('Unexpected export');};`,
  'react-native':`export const View=({children})=><div>{children}</div>;export const Text=({children})=><span>{children}</span>;export const ScrollView=({children,refreshControl})=><div>{refreshControl}{children}</div>;export const Pressable=({children,onPress,disabled,accessibilityLabel})=><button aria-label={accessibilityLabel} onClick={onPress} disabled={disabled}>{children}</button>;export const RefreshControl=({onRefresh})=><button onClick={onRefresh}>Refresh analytics</button>;export const StyleSheet={create:s=>s};`,
  'react-native-safe-area-context':`export const SafeAreaView=({children})=><div>{children}</div>;`,
- 'analytics-invoke':`import {state} from 'analytics-fixture';export async function invokeEdge(name,body){state.calls.push({name,body});const payload=state.payload,error=state.error;if(state.defer)await new Promise(r=>state.releases.push(r));return error?{error:{message:error}}:{data:{ok:true,...payload}};}`,
+ 'analytics-invoke':`import {state} from 'analytics-fixture';export async function invokeEdge(name,body){state.calls.push({name,body});const payload=body.action==='attendees'?state.attendeesPayload:state.payload,error=state.error;if(state.defer)await new Promise(r=>state.releases.push(r));return error?{error:{message:error}}:{data:{ok:true,...payload}};}`,
 };
 const icons=['ArrowLeft','DollarSign','Ticket','CheckCircle2','TrendingUp','Tag','AlertCircle','Download'];
 fixtures['lucide-react']=fixtures['lucide-react-native']=icons.map(n=>`export const ${n}=()=>null;`).join('\n');
@@ -83,6 +83,37 @@ const ledger={month:'2026-10',timeZone:'America/New_York',start:'2026-10-01T04:0
     await flush(()=>f.useActor.setState({user:null}));assert.doesNotMatch(node.textContent,/\$123\.45/);
     count++;console.log(`ok ${count} - ${platform}: late event response stays isolated; changed account and logout cannot see cached money`);
    }finally{f.state.defer=false;f.state.error=null;await flush(()=>app.unmount());node.remove();}
+  }
+  f.useRoute.setState({id:'17'});f.useActor.setState({user:{id:'fixture-a'},isAuthenticated:true});f.store.setState({month:'2026-10'});
+  f.state.payload={...summary,monthlyPlatformFees:ledger};f.state.calls=[];
+  const attendee={ticketId:'sample-ticket',buyerUsername:'member-fixture',buyerEmail:'attendee@example.invalid',buyerPhone:'+12025550112',buyerName:null,tierName:null,tierPriceCents:null,status:'active',purchaseAmountCents:0,checkedInAt:null,createdAt:'2026-01-01'};
+  f.state.attendeesPayload={eventId:'17',title:'Synthetic event',includesPhone:true,attendees:[attendee]};
+  const originalCreate=URL.createObjectURL,originalRevoke=URL.revokeObjectURL,originalClick=window.HTMLAnchorElement.prototype.click,originalAlert=window.alert,originalLog=console.error;
+  const blobs=[],downloads=[],alerts=[];
+  URL.createObjectURL=blob=>{blobs.push(blob);return 'blob:fixture-attendee-csv';};
+  URL.revokeObjectURL=()=>{};
+  window.HTMLAnchorElement.prototype.click=function(){downloads.push(this.download);};
+  window.alert=message=>alerts.push(message); console.error=()=>{};
+  const browserNode=document.createElement('div');document.body.append(browserNode);const browserApp=f.mount(browserNode,'web');
+  try{
+    await flush(()=>browserApp.render());await flush();
+    const button=browserNode.querySelector('[aria-label="Export attendees as CSV"]');
+    assert.ok(button&&!button.disabled);
+    await flush(()=>button.click());
+    assert.deepEqual(f.state.calls.filter(x=>x.body.action==='attendees'),[{name:'event-analytics',body:{event_id:'17',action:'attendees',include_phone:true}}]);
+    assert.deepEqual(downloads,['synthetic-event-attendees-17.csv']);
+    assert.match(await blobs[0].text(),/^Ticket ID,Username,Email,Phone Number,Name/);
+    assert.match(await blobs[0].text(),/sample-ticket,member-fixture,attendee@example\.invalid,'\+12025550112/);
+    f.state.attendeesPayload={eventId:'17',title:'Synthetic event',attendees:[attendee]};
+    await flush(()=>button.click());
+    assert.equal(downloads.length,1,'older server must not export a misleading empty phone column');
+    assert.match(alerts.at(-1),/couldn't generate/i);
+    f.state.exportRole='editor';const requests=f.state.calls.length;
+    await flush(()=>button.click());assert.equal(f.state.calls.length,requests);assert.equal(downloads.length,1);
+    count++;console.log(`ok ${count} - web: actual download uses scoped opt-in and safe phone text; older backend and revoked role do not download`);
+  }finally{
+    URL.createObjectURL=originalCreate;URL.revokeObjectURL=originalRevoke;window.HTMLAnchorElement.prototype.click=originalClick;window.alert=originalAlert;console.error=originalLog;
+    await flush(()=>browserApp.unmount());browserNode.remove();
   }
   console.log(`PASS ${count} actual analytics UI scenarios (offline API boundary)`);
  }finally{fs.rmSync(dir,{recursive:true,force:true});await window.happyDOM.abort();}

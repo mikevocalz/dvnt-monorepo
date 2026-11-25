@@ -16,6 +16,7 @@ interface GuestCheckoutState {
   priceCents: number;
   email: string;
   name: string;
+  username: string;
   phone: string;
   quantity: number;
   attendeeNames: string[];
@@ -61,6 +62,7 @@ const base = {
   priceCents: 0,
   email: "",
   name: "",
+  username: "",
   phone: "",
   quantity: 1,
   attendeeNames: [] as string[],

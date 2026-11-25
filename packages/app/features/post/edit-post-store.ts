@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { toggleMediaRemoval, type PostMediaRemoval } from "../../lib/posts/edit-post-media";
 
 /**
  * Edit Post form store (web).
@@ -24,6 +25,7 @@ export interface EditPostState {
   textSlides: string[];
   originalTextSlides: string[];
   activeSlideIndex: number;
+  removal: PostMediaRemoval | null;
 
   hydrate: (init: {
     hydratedId: string;
@@ -37,6 +39,7 @@ export interface EditPostState {
   setIsNSFW: (v: boolean) => void;
   setActiveSlideIndex: (i: number) => void;
   updateSlide: (index: number, content: string) => void;
+  toggleRemoval: (ids: string[], id: string) => void;
   reset: () => void;
 }
 
@@ -51,12 +54,19 @@ const initial = {
   textSlides: [] as string[],
   originalTextSlides: [] as string[],
   activeSlideIndex: 0,
+  removal: null as PostMediaRemoval | null,
 };
 
 export const useEditPostStore = create<EditPostState>((set) => ({
   ...initial,
   hydrate: ({ hydratedId, caption, location, isNSFW, textSlides }) =>
-    set({
+    set((s) => {
+      if (s.hydratedId === hydratedId &&
+          (s.caption !== s.originalCaption || s.location !== s.originalLocation ||
+          s.isNSFW !== s.originalIsNSFW || s.removal ||
+          s.textSlides.length !== s.originalTextSlides.length ||
+          s.textSlides.some((slide, i) => slide !== s.originalTextSlides[i]))) return s;
+      return {
       hydratedId,
       caption,
       originalCaption: caption,
@@ -67,6 +77,8 @@ export const useEditPostStore = create<EditPostState>((set) => ({
       textSlides,
       originalTextSlides: textSlides,
       activeSlideIndex: 0,
+      removal: null,
+      };
     }),
   setCaption: (caption) => set({ caption }),
   setLocation: (location) => set({ location }),
@@ -78,5 +90,6 @@ export const useEditPostStore = create<EditPostState>((set) => ({
       next[index] = content;
       return { textSlides: next };
     }),
+  toggleRemoval: (ids, id) => set((s) => ({ removal: toggleMediaRemoval(ids, s.removal, id) })),
   reset: () => set({ ...initial }),
 }));

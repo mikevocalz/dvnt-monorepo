@@ -135,7 +135,10 @@
       if (busy && message.type === 'checkout') { post('error', message.requestId, { error: 'Checkout is already opening. Please wait.' }); return; }
       try {
         if (message.type === 'quote') { const result = await api('quote', message.payload); post('quote', message.requestId, { result }); }
-        else { busy = true; const result = await api('checkout', { ...message.payload, ...newAttempt() }); await openPayment(result); }
+        else { busy = true; const result = await api('checkout', { ...message.payload, ...newAttempt() });
+          if (message.payload.checkout_contact_version === 1 && result.webTicketContactVersion !== 1)
+            throw new Error('Could not verify ticket contact. Refresh to recover the same checkout.');
+          await openPayment(result); }
       } catch (error) {
         post('error', message.requestId, { error: error.message, code: error.code });
         if (frame.hidden) { heading(error.message); button('Resume secure checkout', () => resume()); }

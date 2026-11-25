@@ -59,11 +59,20 @@ async function deliverClaimed(db: any, row: any): Promise<ReceiptResult> {
       (event.end_date && Date.parse(event.end_date) < Date.now())) {
       await finish("suppressed", "tickets_no_longer_owned_or_valid"); return result("not_available", "Tickets are no longer available to this recipient");
     }
+    if (row.source_kind === "web_member_purchase") {
+      const { data: order, error: orderError } = await db.from("orders")
+        .select("status,refunded_at,user_id,event_id").eq("id", row.source_id).maybeSingle();
+      if (orderError) throw new Error("Receipt order unavailable");
+      if (!row.recipient_auth_id || order?.status !== "paid" || order.refunded_at ||
+        order.user_id !== row.recipient_auth_id || order.event_id !== row.event_id) {
+        await finish("suppressed", "purchase_no_longer_eligible"); return result("not_available", "Purchase is no longer eligible for this receipt");
+      }
+    }
     let to = row.guest_email;
     if (row.recipient_auth_id) {
       const {data: account, error: accountError} = await db.from("user").select("email,emailVerified").eq("id", row.recipient_auth_id).maybeSingle();
       if (accountError) throw new Error("Recipient lookup unavailable");
-      if (!account?.emailVerified || !account.email) {
+      if (account?.emailVerified !== true || !account.email) {
         await finish("not_available", "verified_email_unavailable"); return result("not_available", "Recipient has no verified email address");
       }
       to = account.email;
@@ -89,6 +98,8 @@ async function deliverClaimed(db: any, row: any): Promise<ReceiptResult> {
         location: event.location, toEmail: to, guestNudge: !row.recipient_auth_id,
         ...(row.recipient_auth_id ? {claimUrl: null, manageUrl: `${SITE}/my-tickets`} : {}),
         greeting: row.source_kind === "transfer" ? `A ticket for ${event.title || "this event"} was transferred to you. Open your ticket below.` :
+          row.source_kind === "web_member_purchase" ?
+          `Your purchase for ${event.title || "this event"} is confirmed. Open ${ids.length === 1 ? "your ticket" : "your tickets"} below.` :
           `You received ${ids.length} complimentary ticket${ids.length === 1 ? "" : "s"} for ${event.title || "this event"}. Open ${ids.length === 1 ? "your ticket" : "each ticket"} below.`,
         tickets: ordered.map((t: any) => ({tierLabel: (Array.isArray(t.ticket_type) ? t.ticket_type[0] : t.ticket_type)?.name || "Ticket",
           lookupUrl: row.recipient_auth_id ? `${SITE}/ticket/${encodeURIComponent(t.id)}` : `${SITE}/public/tickets/guest/${encodeURIComponent(t.guest_lookup_token)}`})),

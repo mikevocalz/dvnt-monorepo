@@ -188,14 +188,14 @@ export function useProfilePosts(userId: string) {
 //   media subtree in post detail does NOT rebuild on no-op refetches.
 //   (The post detail screen also memoizes `stableMedia` by URL signature
 //   as a second line of defense for the GIF-flicker case.)
-export function usePost(id: string) {
+export function usePost(id: string, editor = false) {
   const queryClient = useQueryClient();
 
   return useQuery({
-    queryKey: postKeys.detail(id),
+    queryKey: editor ? [...postKeys.detail(id), "web-editor"] : postKeys.detail(id),
     queryFn: async () => {
       if (__DEV__) console.log("[usePost] Fetching post:", id);
-      const fetchedPost = await withServerLikeSync(queryClient, () => postsApi.getPostById(id), (post) => [post]);
+      const fetchedPost = await withServerLikeSync(queryClient, () => postsApi.getPostById(id, editor), (post) => [post]);
       return fetchedPost; // A server denial/deletion must clear a previously authorized snapshot.
     },
     // STRICT VALIDATION: Only enable query if ID is valid format (numeric or UUID)

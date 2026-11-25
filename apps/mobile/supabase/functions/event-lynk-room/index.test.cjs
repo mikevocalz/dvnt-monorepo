@@ -129,6 +129,7 @@ function harness({ actor = 'host-auth', failTables = [], event = {}, room = {}, 
   };
   const shared = {
     'sales-cutoff.ts': loadShared('sales-cutoff.ts'),
+    'checkout-profile-fields.ts': loadShared('checkout-profile-fields.ts'),
     'event-access.ts': loadShared('event-access.ts'),
     'event-lynk-host.ts': loadShared('event-lynk-host.ts'),
     'event-lynk-start.ts': loadShared('event-lynk-start.ts'),

@@ -12,6 +12,7 @@ import {
   PHONE_REQUIRED_CODE,
   PHONE_REQUIRED_MESSAGE,
   checkPhone,
+  checkEmail,
 } from "./checkout-profile-fields.ts";
 
 export type MemberPhoneResult =
@@ -55,4 +56,24 @@ export async function requireMemberPhone(
   }
   console.error(`${logPrefix} ensure_member_phone refused:`, result?.error);
   return { ok: false, status: 409, code: String(result?.error ?? "unknown"), message: "Couldn't save that number. Contact support." };
+}
+
+/** Auth is already verified by each Edge caller. Checkout reads canonical
+ * member identity and can only fill the caller's existing private phone slot. */
+export async function requireWebMemberTicketContact(
+  db: Db, authId: string, rawPhone: unknown, logPrefix: string,
+): Promise<MemberPhoneResult> {
+  const [account, profile] = await Promise.all([
+    db.from("user").select("email").eq("id", authId).maybeSingle(),
+    db.from("users").select("username").eq("auth_id", authId).maybeSingle(),
+  ]);
+  if (account.error || profile.error) {
+    return { ok: false, status: 503, code: "unavailable", message: "Couldn't check your account. Try again." };
+  }
+  if (!checkEmail(account.data?.email).ok || typeof profile.data?.username !== "string" ||
+      profile.data.username.trim() === "") {
+    return { ok: false, status: 400, code: "ticket_account_required",
+      message: "Add a valid email and username to your DVNT account before getting a ticket." };
+  }
+  return requireMemberPhone(db, authId, rawPhone, logPrefix);
 }

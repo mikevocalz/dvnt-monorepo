@@ -28,14 +28,20 @@ function fixture(options={}){
  const tables={events:[{id:1,title:'Fixture event',visibility:'public',status:'active',ticketing_enabled:true,
  nsfw:false,host_id:'host',fee_mode:options.feeMode||'pass',attendee_name_requirement:'off',start_date:'2099-01-01T20:00:00Z',...options.event}],
  ticket_types:[{id:TIER,event_id:1,name:'Admission',price_cents:3000,is_active:true,status:'on_sale',tier_visibility:'public',
- quantity_total:100,quantity_sold:0,max_per_user:10,...options.tier}],orders:[],tickets:[],ticket_holds:[],order_timeline:[],
+ quantity_total:100,quantity_sold:0,max_per_user:10,...options.tier}],orders:[],tickets:[],web_ticket_order_contacts:[],ticket_holds:[],order_timeline:[],
  organizer_accounts:[{host_id:'host',stripe_account_id:'acct_fixture',charges_enabled:true}],
  promo_codes:options.promos||[],event_promoters:options.promoters||[],promoter_attributions:[]};
  const writes=[],stripe=[],emails=[],usage=[],logs=[],profileCalls=[],qr=[];let serial=0;
  const db={rpc:async(fn,args)=>{
   writes.push({table:'rpc',fn,args});
   if(fn==='ticket_purchase_hold_atomic')return {data:{ok:true,holdId:'hold-fixture'},error:null};
-  if(fn==='guest_free_checkout_atomic'){
+  if(fn==='set_web_ticket_order_contact'){
+   if(options.contactError)return {data:null,error:{code:'fixture_contact_error'}};
+   tables.web_ticket_order_contacts.push({order_id:args.p_order_id,guest_email:args.p_guest_email,
+    guest_username:args.p_guest_username,guest_phone:args.p_guest_phone});
+   return {data:null,error:null};
+  }
+  if(fn==='guest_free_checkout_atomic'||fn==='guest_free_checkout_with_contact'){
    if(options.atomicError)return{data:null,error:options.atomicError};
    if(options.atomicResult)return{data:options.atomicResult,error:null};
    if(options.ticketInsertError)return{data:null,error:{message:'fixture atomic ticket insert failure'}};
@@ -45,6 +51,9 @@ function fixture(options={}){
    delete order.expected_unit_price_cents;
    const rows=args.p_ticket_rows.map((t,i)=>({...t,order_id:order.id,order_index:i+1,order_count:order.quantity}));
    tables.orders.push(order);tables.tickets.push(...rows);
+   if (fn==='guest_free_checkout_with_contact') tables.web_ticket_order_contacts.push({
+    order_id:order.id,guest_email:order.guest_email,guest_username:args.p_guest_username,guest_phone:args.p_guest_phone});
+
    tables.ticket_holds.push({id:'hold-'+serial,ticket_type_id:args.p_ticket_type_id,quantity:order.quantity,status:'converted'});
    tables.ticket_types.find(t=>t.id===args.p_ticket_type_id).quantity_sold+=order.quantity;
    tables.order_timeline.push({order_id:order.id,type:'created'},{order_id:order.id,type:'payment_captured'});
@@ -94,7 +103,7 @@ function fixture(options={}){
   const code=ts.transpileModule(fs.readFileSync(full,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
   vm.runInNewContext(code,{exports,Request,Response,URL,URLSearchParams,TextEncoder,
    Date:options.now==null?Date:class extends Date{constructor(...args){super(...(args.length?args:[options.now]))}static now(){return options.now}},crypto,console:{...console,error:(...args)=>logs.push(args)},
-   Deno:{env:{get:k=>k==='STRIPE_SECRET_KEY'?(options.noStripe?'':'fixture-not-a-provider-key'):''},serve:fn=>{handler=fn}},
+   Deno:{env:{get:k=>k==='STRIPE_SECRET_KEY'?(options.noStripe?'':'fixture-not-a-provider-key'):k==='DVNT_REQUIRE_WEB_TICKET_CONTACT'&&options.enforceContact?'true':''},serve:fn=>{handler=fn}},
    fetch:async(url,opts)=>{
     assert.equal(new URL(url).hostname,'api.stripe.com');
     stripe.push({url,params:Object.fromEntries(new URLSearchParams(opts.body))});
@@ -111,7 +120,7 @@ function fixture(options={}){
  load(options.entrypoint || path.join(__dirname,'index.ts'));
  const selection={event_id:1,ticket_type_id:TIER,quantity:1,guest_email:EMAIL};
  async function call(body,method='POST'){
-  const res=await handler(new Request('https://fixture.invalid/guest-checkout',{method,...(method==='POST'?{body:JSON.stringify(body)}:{})}));
+  const res=await handler(new Request('https://fixture.invalid/guest-checkout',{method,headers:options.origin?{Origin:options.origin}:{},...(method==='POST'?{body:JSON.stringify(body)}:{})}));
   return {status:res.status,headers:res.headers,data:await res.json()};
  }
  return{tables,writes,stripe,emails,usage,logs,profileCalls,qr,load,call,

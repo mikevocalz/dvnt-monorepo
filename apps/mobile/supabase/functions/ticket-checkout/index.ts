@@ -55,7 +55,8 @@ import {
   provisionCheckoutProfile,
   recordCheckoutProfileIntake,
 } from "../_shared/checkout-profile.ts";
-import { requireMemberPhone } from "../_shared/member-phone.ts";
+import { requireMemberPhone, requireWebMemberTicketContact } from "../_shared/member-phone.ts";
+import { unwrapWebTicketContactRequest, isWebTicketContactRequest } from "../_shared/checkout-profile-fields.ts";
 import { checkRateLimit } from "../_shared/rate-limit.ts";
 import { checkoutTicketLines } from "../_shared/checkout-line-items.ts";
 import { withSentry } from "../_shared/sentry.ts";
@@ -127,7 +128,12 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       global: { headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } },
     });
 
-    const requestBody = await req.json();
+    const requestBody: any = unwrapWebTicketContactRequest(await req.json());
+    if (requestBody.action === "contact_capability") {
+      return new Response(JSON.stringify({ webTicketContactVersion: 1 }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
     const {
       event_id,
       ticket_type_id,
@@ -180,6 +186,12 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
 
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedGuestEmail);
     const isGuest = !user_id && !!trimmedGuestEmail && isValidEmail;
+    const webContact = isWebTicketContactRequest(requestBody.checkout_contact_version, req.headers.get("origin"), Deno.env.get("DVNT_REQUIRE_WEB_TICKET_CONTACT") === "true");
+    if (isGuest && webContact) {
+      return new Response(JSON.stringify({
+        error: "Use guest checkout to add your ticket contact details.", code: "use_guest_checkout",
+      }), { status: 400, headers: { "Content-Type": "application/json" } });
+    }
     // Profile fields only matter for guests: a signed-in buyer already has
     // the account, so whatever a client sends for them is ignored.
     let profileFields: CheckoutProfileFields | null = null;
@@ -227,6 +239,15 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       });
     }
 
+    if (webContact && user_id) {
+      const memberPhone = await requireWebMemberTicketContact(supabase, user_id, requestBody.phone, "[ticket-checkout]");
+      if (!memberPhone.ok) {
+        return new Response(JSON.stringify({ error: memberPhone.message, code: memberPhone.code }), {
+          status: memberPhone.status, headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // Replay is allowed before caps/cutoff, but only for this buyer's exact
     // completed free purchase. An attempt key is never authentication.
     const replayRequest = {
@@ -237,7 +258,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
     if (idemKey) {
       const replay = await readCheckoutReplay(supabase, replayRequest);
       if (replay) {
-        return new Response(JSON.stringify(replay.body), {
+        return new Response(JSON.stringify({ ...replay.body, ...(webContact && replay.status === 200 ? { webTicketContactVersion: 1 } : {}) }), {
           status: replay.status, headers: { "Content-Type": "application/json" },
         });
       }
@@ -248,7 +269,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
     // ticket is used for (joining a Lynk room, posting), not on the purchase.
     // Signed-in buyers still need a phone on file before inventory moves.
     // Guest checkout keeps its own identity rules.
-    if (user_id) {
+    if (user_id && !webContact) {
       const memberPhone = await requireMemberPhone(
         supabase, user_id, requestBody?.phone, "[ticket-checkout]",
       );
@@ -531,7 +552,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
       const issued = freeResult.tickets;
       if (freeResult.idempotent) {
         const replay = await readCheckoutReplay(supabase, replayRequest);
-        return new Response(JSON.stringify(replay?.body ?? CHECKOUT_REPLAY_UNAVAILABLE), {
+        return new Response(JSON.stringify({ ...(replay?.body ?? CHECKOUT_REPLAY_UNAVAILABLE), ...(webContact && replay?.status === 200 ? { webTicketContactVersion: 1 } : {}) }), {
           status: replay?.status ?? 409, headers: { "Content-Type": "application/json" },
         });
       }
@@ -582,7 +603,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
         }
       }
 
-      return new Response(JSON.stringify({ tickets: issued, free: true }), {
+      return new Response(JSON.stringify({ tickets: issued, free: true, ...(webContact ? { webTicketContactVersion: 1 } : {}) }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -805,7 +826,7 @@ Deno.serve(withSentry("ticket-checkout", async (req: Request) => {
     }
 
     return new Response(
-      JSON.stringify({ url: session.url, session_id: session.id }),
+      JSON.stringify({ url: session.url, session_id: session.id, ...(webContact ? { webTicketContactVersion: 1 } : {}) }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
   } catch (err: any) {

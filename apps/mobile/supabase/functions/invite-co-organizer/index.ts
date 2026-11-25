@@ -41,16 +41,18 @@ function json(data: unknown, status = 200, req?: Request) {
 async function lookupAppUser(
   supabase: any,
   authId: string,
+  requiredRead = false,
 ): Promise<{
   id: number;
   username: string | null;
   avatar: string | null;
 } | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("users")
     .select("id, username, avatar_id(url)")
     .eq("auth_id", authId)
     .maybeSingle();
+  if (requiredRead && error) throw error;
   if (!data) return null;
   return {
     id: data.id,
@@ -60,6 +62,21 @@ async function lookupAppUser(
         ? (data as any).avatar_id[0]?.url
         : (data as any).avatar_id?.url) ?? null,
   };
+}
+
+/** Retire the exact actionable notification, not other event/actor activity. */
+async function clearAcceptedInviteNotification(
+  supabase: any, inviteId: string, recipientId: number, inviterId: number,
+): Promise<void> {
+  const { error } = await supabase
+    .from("notifications")
+    .delete()
+    .eq("recipient_id", recipientId)
+    .eq("actor_id", inviterId)
+    .eq("type", "event_co_organizer_invited")
+    .eq("entity_type", "event")
+    .eq("entity_id", inviteId);
+  if (error) throw error;
 }
 
 async function notify(
@@ -333,26 +350,79 @@ Deno.serve(async (req: Request) => {
         typeof body.invite_id === "string" ? body.invite_id : "";
       if (!inviteId) return json({ error: "invite_id required" }, 400, req);
 
-      const { data: invite } = await supabase
+      const { data: invite, error: inviteErr } = await supabase
         .from("event_co_organizers")
         .select("id, event_id, user_id, role, invited_by, accepted")
         .eq("id", inviteId)
         .maybeSingle();
+      if (inviteErr) return json({ error: "Could not verify invite. Try again." }, 503, req);
       if (!invite) return json({ error: "Invite not found" }, 404, req);
       if (String(invite.user_id) !== String(authId)) {
         return json({ error: "Not your invite" }, 403, req);
       }
-      if (invite.accepted && body.action === "accept") {
-        return json({ ok: true, alreadyAccepted: true }, 200, req);
-      }
-
       if (body.action === "accept") {
-        const { error: updErr } = await supabase
-          .from("event_co_organizers")
-          .update({ accepted: true })
-          .eq("id", inviteId)
-          .eq("accepted", false);
-        if (updErr) return json({ error: "Failed to accept" }, 500, req);
+        let changed = false;
+        if (!invite.accepted) {
+          // Bind acceptance to the exact pending offer seen by this recipient.
+          // A revoke or changed offer must not be acknowledged as an acceptance.
+          let update = supabase.from("event_co_organizers")
+            .update({ accepted: true })
+            .eq("id", inviteId)
+            .eq("event_id", invite.event_id)
+            .eq("user_id", authId)
+            .eq("role", invite.role)
+            .eq("accepted", false);
+          update = invite.invited_by ? update.eq("invited_by", invite.invited_by) : update.is("invited_by", null);
+          const { data: updated, error: updErr } = await update.select("id").maybeSingle();
+          if (updErr) return json({ error: "Failed to accept. Try again." }, 503, req);
+          if (!updated) {
+            return json({ error: "Invite changed. Refresh your activity and try again." }, 409, req);
+          }
+          changed = true;
+        }
+
+        let accepter;
+        let inviterApp;
+        let cleanup: "cleared" | "unresolved" | "retry" = "retry";
+        try {
+          accepter = await lookupAppUser(supabase, authId, true);
+          inviterApp = invite.invited_by
+            ? await lookupAppUser(supabase, invite.invited_by, true)
+            : null;
+          if (accepter && inviterApp) {
+            await clearAcceptedInviteNotification(supabase, inviteId, accepter.id, inviterApp.id);
+            cleanup = "cleared";
+          } else {
+            // The numeric actor and recipient IDs are required to identify
+            // this notification. A missing profile is not proof it is gone.
+            cleanup = "unresolved";
+          }
+        } catch {
+          // Membership is already committed. A retry runs the same narrowly
+          // scoped cleanup without re-granting access or notifying twice.
+          console.warn("[invite-co-organizer] Could not clear accepted invite activity");
+        }
+        if (changed && accepter && inviterApp) {
+          const handle = accepter.username ? `@${accepter.username}` : "Your invitee";
+          await notify(supabase, {
+            recipientIntId: inviterApp.id,
+            senderIntId: accepter.id,
+            senderUsername: accepter.username,
+            senderAvatar: accepter.avatar,
+            title: "Staff invite accepted",
+            body: `${handle} accepted your ${invite.role} invite.`,
+            notificationType: "event_co_organizer_accepted",
+            entityId: inviteId,
+            eventId: invite.event_id,
+          });
+        }
+        if (cleanup === "unresolved") {
+          return json({ error: "Staff access was accepted, but the notification couldn’t be safely matched. Refresh Activity and try again." }, 409, req);
+        }
+        if (cleanup === "retry") {
+          return json({ error: "Staff access was accepted, but the notification couldn’t be cleared. Tap Accept again to retry." }, 503, req);
+        }
+        return json(changed ? { ok: true } : { ok: true, alreadyAccepted: true }, 200, req);
       } else {
         await supabase
           .from("event_co_organizers")
@@ -374,18 +444,9 @@ Deno.serve(async (req: Request) => {
           senderIntId: accepter.id,
           senderUsername: accepter.username,
           senderAvatar: accepter.avatar,
-          title:
-            body.action === "accept"
-              ? "Staff invite accepted"
-              : "Staff invite declined",
-          body:
-            body.action === "accept"
-              ? `${handle} accepted your ${invite.role} invite.`
-              : `${handle} declined your ${invite.role} invite.`,
-          notificationType:
-            body.action === "accept"
-              ? "event_co_organizer_accepted"
-              : "event_co_organizer_declined",
+          title: "Staff invite declined",
+          body: `${handle} declined your ${invite.role} invite.`,
+          notificationType: "event_co_organizer_declined",
           entityId: inviteId,
           eventId: invite.event_id,
         });

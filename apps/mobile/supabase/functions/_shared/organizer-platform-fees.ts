@@ -14,7 +14,8 @@ export type PlatformFeeOrder = {
 export type PlatformFeeGroup = { paymentIntentId: string; orderIds: string[]; orders: PlatformFeeOrder[];
   recordedFeeCents: number; currency: string; monthStart: string; monthEnd: string; through: string };
 export type PlatformFeeSnapshot = {status:"ready";amountCents:number;refundedCents:number;currency:string;verifiedAt:string}
-  | {status:"pending"|"unavailable";reason?:string};
+  | {status:"pending";reason?:string}
+  | {status:"unavailable";reason?:string};
 /** Authoritative whole-payment snapshot; never allocate a payment across excluded orders. */
 export type PlatformFeeRefundResolver = (group: PlatformFeeGroup) => Promise<PlatformFeeSnapshot>;
 const SELECT = "id,event_id,type,status,currency,paid_at,total_cents,platform_fee_cents,dvnt_total_fee_cents,stripe_payment_intent_id,stripe_checkout_session_id,cart_id,charge_model";

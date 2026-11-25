@@ -11,6 +11,8 @@ function fixture() {
   const viewport = Object.assign(new EventTarget(), {
     height: 852, width: 393, offsetTop: 0, scale: 1, pageTop: 0,
   });
+  let navTop = Infinity;
+  const nav = {getBoundingClientRect: () => ({top: navTop, bottom: navTop + 78, width: 393, height: 78}), querySelectorAll: () => []};
   let scrollY = 0;
   let pickerOpen = true;
   let focused = true;
@@ -53,13 +55,14 @@ function fixture() {
   });
   Object.defineProperties(globalThis, {
     window: { configurable: true, value: windowMock },
-    document: { configurable: true, value: { get activeElement() { return focusedTextarea ? textarea : {}; } } },
+    document: { configurable: true, value: { querySelector: () => Number.isFinite(navTop) ? nav : null, get activeElement() { return focusedTextarea ? textarea : {}; } } },
     ResizeObserver: { configurable: true, value: class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() { resize = () => {}; } } },
   });
   const flush = () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach((callback) => callback(0)); };
   const dispose = watchCommentComposerViewport(composer as unknown as HTMLElement);
   return {
     styles, viewport, scrolls, picker, textarea, frames, flush,
+    setNavTop: (top: number) => { navTop = top; resize(); },
     focusTextarea: () => { focusedTextarea = true; },
     setFocused: (value: boolean) => { focused = value; },
     setPickerOpen: (value: boolean) => { pickerOpen = value; resize(); },
@@ -141,5 +144,28 @@ test("result expansion stays visible without scrolling an unfocused composer", (
     const before = f.scrolls.length;
     f.viewport.height = 280; f.event("resize"); f.flush();
     assert.equal(f.scrolls.length, before);
+  } finally { f.restore(); }
+});
+
+
+test("input and GIF picker stay above fixed navigation including its raised control", () => {
+  const f = fixture();
+  try {
+    f.setPickerOpen(false); f.focusTextarea();
+    Object.assign(f.viewport, { height: 400, offsetTop: 0 });
+    f.setNavTop(322); f.event("resize"); f.flush();
+    assert(f.textarea.parentElement.getBoundingClientRect().bottom <= 314);
+    assert.equal(f.styles.get("--comment-tabbar-clearance"), "78px");
+    // Browser moves navigation with its resized viewport. Repeated focus/resize
+    // must keep both textarea and the send button's row clear.
+    f.setNavTop(242); f.viewport.height = 320; f.event("resize"); f.flush();
+    assert(f.textarea.parentElement.getBoundingClientRect().bottom <= 234);
+    f.setPickerOpen(true); f.setFocused(true); f.flush();
+    // Focus remains on textarea, so the row remains the correction target.
+    assert(f.textarea.parentElement.getBoundingClientRect().bottom <= 234);
+    // Bar below the keyboard must not be subtracted from usable height again.
+    f.setNavTop(774); f.flush();
+    assert.equal(f.styles.get("--comment-keyboard-clearance"), "532px");
+    f.dispose(); assert.equal(f.styles.size, 0);
   } finally { f.restore(); }
 });
