@@ -25,6 +25,7 @@ jobs:
             printf '%s %s\n' "$f" "$code"
             case "$f" in
               rsvp-issue-guest) test "$code" = 200; jq -e '.ok == true and .webTicketContactVersion==1' "$d/$f" ;;
+              update-post-web) test "$code" = 200; jq -e '.ok == false and .error.code == "unauthorized"' "$d/$f" ;;
               stripe-webhook) case "$code" in 400|401|403) ;; *) exit 1;; esac ;;
               *) case "$code" in 401|403) ;; *) exit 1;; esac ;;
             esac
