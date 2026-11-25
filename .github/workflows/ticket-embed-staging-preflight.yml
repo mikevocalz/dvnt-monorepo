@@ -30,13 +30,17 @@ jobs:
           }
           (async()=>{
            const account=await get('/v1/account');
+           console.log("payout preflight: exact platform",account.id===platform);
            assert.equal(account.id,platform,'Dedicated sandbox identity does not match; no subsequent request');
            const bal=await get('/v1/balance');
+           console.log("payout preflight: test mode",bal.livemode===false);
            assert.equal(bal.livemode,false);
            const hooks=await get('/v1/webhook_endpoints?limit=100');
+           console.log("payout preflight: zero webhooks",hooks.has_more===false&&Array.isArray(hooks.data)&&hooks.data.length===0);
            assert(hooks.has_more===false&&Array.isArray(hooks.data)&&hooks.data.length===0,'Not an isolated webhook configuration');
            const existing=await get('/v1/accounts/'+historicalOrganizer);
            assert.equal(existing.id,historicalOrganizer);
+           console.log("payout preflight: fixture transfers active",existing.capabilities?.transfers==="active");
            assert.equal(existing.capabilities?.transfers,'active');
            const bucket=bal.available?.find(x=>x.currency==='usd')?.source_types?.bank_account??null;
            const verdict={exactSandbox:true,testMode:true,noWebhooks:true,previousFixtureVerified:true,
