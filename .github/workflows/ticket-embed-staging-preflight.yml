@@ -1,54 +1,57 @@
-name: Ticket embed staging preflight
-on:
-  pull_request:
-    paths:
-      - '.github/workflows/ticket-embed-staging-preflight.yml'
-      - 'scripts/check-ticket-embed-test-key.py'
-      - 'scripts/test-ticket-embed-test-key.py'
-  workflow_dispatch:
+name: DVNT read-only isolated payout sandbox preflight
+on: workflow_dispatch
 permissions:
   contents: read
-concurrency:
-  group: ticket-embed-staging-preflight-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
-  test-key-authentication:
-    name: Stripe TEST key authentication only (not purchase acceptance)
-    if: >-
-      github.repository == 'mikevocalz/dvnt-monorepo' &&
-      ((github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'feat/ticket-embed-commerce') ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/ticket-embed-commerce'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  verify-payout-sandbox:
+    if: github.repository == 'mikevocalz/dvnt-monorepo' && github.ref == 'refs/heads/qa/dvnt-payout-sandbox-preflight'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Unit tests for redaction and test-mode rejection
-        run: python scripts/test-ticket-embed-test-key.py
-      - name: Read-only Stripe test-key authentication
+      - name: Read only; never contact live Stripe or transfer funds
         env:
           STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
-          STRIPE_TEST_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
-          TICKET_EMBED_SANDBOX_HOST_URL: ${{ vars.TICKET_EMBED_SANDBOX_HOST_URL }}
-          TICKET_EMBED_SANDBOX_ID: ${{ vars.TICKET_EMBED_SANDBOX_ID }}
-          TICKET_EMBED_SANDBOX_EMAIL: ${{ secrets.TICKET_EMBED_SANDBOX_EMAIL }}
-        run: python scripts/check-ticket-embed-test-key.py
-      - name: Package committed source for isolated staging diagnosis
-        if: always()
         run: |
-          git archive --format=tar.gz HEAD -o ticket-embed-source.tar.gz
-          git rev-parse HEAD > ticket-embed-source-commit.txt
-      - name: Upload sanitized result and committed source (no runtime secrets)
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: ticket-embed-staging-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            stripe-test-key-check.json
-            ticket-embed-source.tar.gz
-            ticket-embed-source-commit.txt
-          retention-days: 1
-          if-no-files-found: error
+          node - <<'NODE'
+          'use strict';
+          // Read-only preflight for this exact dedicated sandbox. Does not use CLI
+          // profile fallback, send a transfer, access production, or print credentials.
+          const k=process.env.STRIPE_TEST_SECRET_KEY;
+          const platform='acct_1UGumFCqSKa9QmBo';
+          const historicalOrganizer='acct_1UHSj8CYFZsttMGi';
+          const separateRecipient=process.env.DVNT_SYNTHETIC_PROMOTER_ACCOUNT;
+          const assert=require('node:assert/strict');
+          assert.match(k??'',/^(?:sk|rk|rkcs)_test_[A-Za-z0-9]+$/);
+          async function get(path){
+           const r=await fetch(new URL(path,'https://api.stripe.com'),{method:'GET',redirect:'error',
+            headers:{Authorization:'Bearer '+k,'Stripe-Version':'2026-09-30.endive'},signal:AbortSignal.timeout(12000)});
+           if(!r.ok)throw Error('Stripe test preflight GET refused ('+r.status+')');
+           return r.json();
+          }
+          (async()=>{
+           const account=await get('/v1/account');
+           assert.equal(account.id,platform,'Dedicated sandbox identity does not match; no subsequent request');
+           const bal=await get('/v1/balance');
+           assert.equal(bal.livemode,false);
+           const hooks=await get('/v1/webhook_endpoints?limit=100');
+           assert(hooks.has_more===false&&Array.isArray(hooks.data)&&hooks.data.length===0,'Not an isolated webhook configuration');
+           const existing=await get('/v1/accounts/'+historicalOrganizer);
+           assert.equal(existing.id,historicalOrganizer);
+           assert.equal(existing.capabilities?.transfers,'active');
+           const bucket=bal.available?.find(x=>x.currency==='usd')?.source_types?.bank_account??null;
+           const verdict={exactSandbox:true,testMode:true,noWebhooks:true,previousFixtureVerified:true,
+             permittedBankBucketPositive:Number.isSafeInteger(bucket)&&bucket>0,
+             independentlyBoundSyntheticPromoterReady:false,transferAuthorizedByThisTest:false};
+           if(separateRecipient){
+            assert.match(separateRecipient,/^acct_[A-Za-z0-9]+$/);
+            assert.notEqual(separateRecipient,platform);
+            assert.notEqual(separateRecipient,historicalOrganizer);
+            const a=await get('/v2/core/accounts/'+separateRecipient+'?include%5B0%5D=configuration.recipient');
+            assert.equal(a.livemode,false);
+            assert.equal(a.id,separateRecipient);
+            assert.equal(a.metadata?.dvnt_fixture_role,'synthetic_promoter','Fixture consent/identity not verified');
+            verdict.independentlyBoundSyntheticPromoterReady=a.configuration?.recipient?.capabilities?.stripe_balance?.stripe_transfers?.status==='active';
+           }
+           console.log(JSON.stringify(verdict));
+          })().catch(e=>{console.error(e.code==='ERR_ASSERTION'?'Exact dedicated sandbox fixture preflight failed.':e.message);process.exitCode=1;});
+          NODE
