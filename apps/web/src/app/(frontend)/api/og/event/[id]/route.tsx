@@ -11,6 +11,7 @@ import {
   pickShareImage,
   shareVenue,
 } from "../_lib/event-og";
+import { loadFlyerImage } from "../_lib/flyer-image";
 
 /**
  * Per-event themed OG card (WS-7 share moment) — 1200×630, dark-luxury per
@@ -353,11 +354,26 @@ export async function GET(
     });
   }
 
+  // Load the flyer bytes here instead of letting satori fetch the URL: satori
+  // has no timeout or retry and silently drops the image on failure (see
+  // ../_lib/flyer-image.ts). A miss renders the gradient card instead.
+  const flyerSrc = pickShareImage(event);
+  const flyer = flyerSrc ? await loadFlyerImage(flyerSrc) : null;
+  if (flyer && !flyer.ok) {
+    console.warn(
+      `[og/event] flyer unavailable for event ${event.id}: ${flyer.reason}`,
+    );
+  }
+  const flyerMissing = flyerSrc !== null && !flyer?.ok;
+
   // Versioned URLs (v = updated_at, set by generateMetadata) are immutable;
-  // bare URLs revalidate hourly so event edits propagate.
-  const cacheControl = versioned
-    ? "public, s-maxage=31536000, immutable"
-    : "public, s-maxage=3600, stale-while-revalidate=86400";
+  // bare URLs revalidate hourly so event edits propagate. A card drawn
+  // without its flyer is never cached long, so the next request retries.
+  const cacheControl = flyerMissing
+    ? "public, s-maxage=300, stale-while-revalidate=300"
+    : versioned
+      ? "public, s-maxage=31536000, immutable"
+      : "public, s-maxage=3600, stale-while-revalidate=86400";
 
   return new ImageResponse(
     (
@@ -365,7 +381,7 @@ export async function GET(
         title={event.title || "DVNT event"}
         dateLine={formatShareDate(event)}
         venue={shareVenue(event)}
-        flyer={pickShareImage(event)}
+        flyer={flyer?.ok ? flyer.dataUri : null}
       />
     ),
     {
