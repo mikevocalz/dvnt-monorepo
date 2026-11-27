@@ -98,3 +98,45 @@ test("rejects formats satori can't decode, HTTP errors and oversize bodies", asy
   });
   assert.ok(!huge.ok && /too large/.test(huge.reason));
 });
+
+test("times out a body that stalls after the headers", async () => {
+  const r = await loadFlyerImage("https://example.com/a.png", {
+    timeoutMs: 20,
+    fetchImpl: async (_u, init) => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      arrayBuffer: () =>
+        new Promise<ArrayBuffer>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    }),
+  });
+  assert.ok(!r.ok && /timeout after 20ms/.test(r.reason) && r.transient);
+});
+
+test("doesn't retry failures a retry can't fix, and marks them permanent", async () => {
+  let n = 0;
+  const r = await loadFlyerImage("https://example.com/a.png", {
+    fetchImpl: async () => (n++, res(new Uint8Array(), 404)),
+  });
+  assert.equal(n, 1);
+  assert.ok(!r.ok && r.transient === false);
+
+  const webp = await loadFlyerImage("https://example.com/a.webp", {
+    fetchImpl: async () => res(WEBP),
+  });
+  assert.ok(!webp.ok && webp.transient === false);
+});
+
+test("marks network failures transient after the retry", async () => {
+  let n = 0;
+  const r = await loadFlyerImage("https://example.com/a.png", {
+    fetchImpl: async () => {
+      n += 1;
+      throw new TypeError("fetch failed");
+    },
+  });
+  assert.equal(n, 2);
+  assert.ok(!r.ok && r.transient === true);
+});

@@ -368,9 +368,13 @@ export async function GET(
 
   // Versioned URLs (v = updated_at, set by generateMetadata) are immutable;
   // bare URLs revalidate hourly so event edits propagate. A card drawn
-  // without its flyer is never cached long, so the next request retries.
+  // without its flyer is never cached immutably.
+  // Transient misses retry within minutes; permanent ones (404, oversize,
+  // a format satori can't draw) hourly, since a retry won't change them.
   const cacheControl = flyerMissing
-    ? "public, s-maxage=300, stale-while-revalidate=300"
+    ? flyer && !flyer.ok && !flyer.transient
+      ? "public, s-maxage=3600, stale-while-revalidate=3600"
+      : "public, s-maxage=300, stale-while-revalidate=300"
     : versioned
       ? "public, s-maxage=31536000, immutable"
       : "public, s-maxage=3600, stale-while-revalidate=86400";

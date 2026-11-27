@@ -19,8 +19,9 @@ const OPTIMIZER_HOSTS = new Set(["dvnt.b-cdn.net"]);
 /** OG cards are 1200 wide; anything bigger is wasted bytes for satori. */
 export const OG_FLYER_WIDTH = 1200;
 
-/** Per-attempt budget. Two attempts stay well inside crawler patience. */
-export const FLYER_ATTEMPT_TIMEOUT_MS = 4000;
+/** Per-attempt budget. Two attempts (~6s worst case) stay inside
+ *  link-preview crawler patience. */
+export const FLYER_ATTEMPT_TIMEOUT_MS = 3000;
 
 /** Larger originals are skipped: decode + raster cost, and slow transfers. */
 export const FLYER_MAX_BYTES = 8 * 1024 * 1024;
@@ -29,7 +30,13 @@ export type FlyerMime = "image/png" | "image/jpeg" | "image/gif";
 
 export type FlyerResult =
   | { ok: true; dataUri: string; mime: FlyerMime; bytes: number; url: string }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      /** Network error or timeout: worth retrying soon. False for 4xx,
+       *  oversize or an undecodable format, which won't fix themselves. */
+      transient: boolean;
+    };
 
 type FetchLike = (
   input: string,
@@ -106,18 +113,20 @@ async function attempt(
       headers: { Accept: "image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.1" },
       signal: controller.signal,
     });
-    if (!res.ok) return { ok: false, reason: `http ${res.status}` };
+    if (!res.ok) {
+      return { ok: false, reason: `http ${res.status}`, transient: res.status >= 500 };
+    }
     const declared = Number(res.headers.get("content-length") ?? "");
     if (Number.isFinite(declared) && declared > FLYER_MAX_BYTES) {
-      return { ok: false, reason: `too large (${declared} bytes)` };
+      return { ok: false, reason: `too large (${declared} bytes)`, transient: false };
     }
     const buf = new Uint8Array(await res.arrayBuffer());
-    if (buf.byteLength === 0) return { ok: false, reason: "empty body" };
+    if (buf.byteLength === 0) return { ok: false, reason: "empty body", transient: true };
     if (buf.byteLength > FLYER_MAX_BYTES) {
-      return { ok: false, reason: `too large (${buf.byteLength} bytes)` };
+      return { ok: false, reason: `too large (${buf.byteLength} bytes)`, transient: false };
     }
     const mime = sniffImageMime(buf);
-    if (!mime) return { ok: false, reason: "unsupported format" };
+    if (!mime) return { ok: false, reason: "unsupported format", transient: false };
     const dataUri = `data:${mime};base64,${Buffer.from(buf).toString("base64")}`;
     return { ok: true, dataUri, mime, bytes: buf.byteLength, url };
   } catch (err) {
@@ -126,7 +135,7 @@ async function attempt(
       : err instanceof Error
         ? err.message
         : String(err);
-    return { ok: false, reason };
+    return { ok: false, reason, transient: true };
   } finally {
     clearTimeout(timer);
   }
@@ -143,16 +152,21 @@ export async function loadFlyerImage(
   const fetchImpl = opts.fetchImpl ?? (fetch as unknown as FetchLike);
   const timeoutMs = opts.timeoutMs ?? FLYER_ATTEMPT_TIMEOUT_MS;
   const reasons: string[] = [];
-  for (const url of flyerCandidateUrls(src)) {
+  let transient = false;
+  const candidates = flyerCandidateUrls(src);
+  for (const url of candidates) {
     const result = await attempt(url, fetchImpl, timeoutMs);
     if (result.ok) return result;
     reasons.push(result.reason);
+    transient = result.transient;
   }
-  // A single-candidate URL still deserves one retry for a network blip.
-  if (reasons.length === 1) {
+  // A single-candidate URL still deserves one retry, for a network blip only.
+  if (candidates.length === 1 && transient) {
     const retry = await attempt(src, fetchImpl, timeoutMs);
     if (retry.ok) return retry;
     reasons.push(retry.reason);
+    transient = retry.transient;
   }
-  return { ok: false, reason: reasons.join("; ") };
+  // `transient` reflects the last attempt, which is the original URL.
+  return { ok: false, reason: reasons.join("; "), transient };
 }
