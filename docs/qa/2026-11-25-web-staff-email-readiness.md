@@ -42,3 +42,34 @@ have a stage event owner send one pending invitation to that recipient, and
 verify the on-device banner, its Activity click target and role after taking
 action. Use only consented stage identities, a stage-matched VAPID record and
 a separate browser profile; never call this with a production destination.
+
+## Private scheduler and browser regression
+
+The external scheduler entry point is
+`node scripts/dvnt-private-staff-email-tick.mjs`. It is off unless
+`DVNT_PRIVATE_STAFF_EMAIL_SCHEDULER=true` and
+`DVNT_ENVIRONMENT=private-staging` are set on the private runner. Configure
+`DVNT_STAFF_EMAIL_WEB_ORIGIN` and `DVNT_STAFF_EMAIL_WORKER_ORIGIN` to the
+same approved protected HTTPS origin, and provide the dedicated worker token
+through the runner's secret store. It sends one bodyless POST, never follows
+redirects, and treats any response other than 204 as a failed tick. Use a
+single-run schedule with overlap disabled and monitor failures. Nothing here
+installs a scheduled job or enables delivery on any host.
+
+The SQL integration invokes that scheduler entry point twice against the
+actual worker handler. One queued message produces one simulated provider
+acceptance. An optional Chromium regression opens the claim page at the
+invitation URL, checks there is no automatic redemption, rejects a wrong
+session, and verifies explicit acceptance with the eligible test identity and
+one persisted Manager role. It exercises the rendered page, actual claim
+handler and isolated database with fixture sessions, not hosted sign-up.
+For local browser coverage, use Node 24 with Playwright and PGlite on
+`NODE_PATH`, set `DVNT_STAFF_CLAIM_BROWSER` to the Chromium executable,
+and run:
+
+```sh
+node --test scripts/test-dvnt-private-staff-email-tick.mjs \
+  scripts/test-web-staff-email-invite-foundation.cjs \
+  scripts/test-web-staff-email-worker.mjs \
+  scripts/test-web-staff-email-route-runtime.mjs
+```
