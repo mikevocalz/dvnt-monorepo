@@ -109,17 +109,36 @@ self.addEventListener("notificationclick", (event) => {
   const target =
     data.type === "call" && data.roomId ? `/feed/call/${data.roomId}` : data.url || "/";
 
-  event.waitUntil(
-    self.clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then((clientList) => {
-        for (const client of clientList) {
-          if ("focus" in client) {
-            if ("navigate" in client) client.navigate(target);
-            return client.focus();
-          }
-        }
-        if (self.clients.openWindow) return self.clients.openWindow(target);
-      }),
-  );
+  event.waitUntil(focusOrOpenNotification(target));
 });
+
+async function focusOrOpenNotification(target) {
+  const destination = new URL(target, self.location.href).href;
+  // Don't use an uncontrolled tab as a substitute for opening the target.
+  const windows = await self.clients.matchAll({ type: "window" });
+  const atDestination = windows.find((client) => client.url === destination);
+  if (atDestination) {
+    try {
+      await atDestination.focus();
+      return;
+    } catch {
+      // The tab may have closed after matchAll.
+    }
+  }
+
+  for (const client of windows) {
+    if (client === atDestination || typeof client.navigate !== "function") continue;
+    try {
+      // Navigation can replace the WindowClient or return null if it cannot
+      // produce a client we can focus. Keep both operations in waitUntil.
+      const navigated = await client.navigate(target);
+      if (!navigated) continue;
+      await navigated.focus();
+      return;
+    } catch {
+      // Try the next controlled window, then the cold-open path.
+    }
+  }
+
+  if (self.clients.openWindow) await self.clients.openWindow(target);
+}
