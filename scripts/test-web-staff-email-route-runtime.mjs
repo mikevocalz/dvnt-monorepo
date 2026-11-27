@@ -8,6 +8,10 @@ const env={
   DVNT_STAFF_EMAIL_ENABLED:'true',DVNT_STAFF_EMAIL_WEB_ORIGIN:origin,
   DVNT_STAFF_EMAIL_RPC_ORIGIN:rpc,DVNT_STAFF_EMAIL_RPC_SERVICE_KEY:'fixture-key',
   DVNT_STAFF_EMAIL_FROM:'Fixture <sender@example.invalid>',
+  DVNT_STAFF_EMAIL_WORKER_ENABLED:'true',DVNT_STAFF_EMAIL_TRACKING_VERIFIED_OFF:'true',
+  DVNT_STAFF_EMAIL_WORKER_ORIGIN:origin,DVNT_STAFF_EMAIL_WORKER_TOKEN:'A'.repeat(43),
+  DVNT_STAFF_EMAIL_WORKER_RESEND_KEY:'fixture-resend',DVNT_STAFF_EMAIL_WORKER_SENDER_DOMAIN:'example.invalid',
+
   DVNT_STAFF_EMAIL_ACTIVE_KEY_ID:'fixture',DVNT_STAFF_EMAIL_KEYS:'fixture:'+'02'.repeat(32),
 };
 const requestId='fca4de13-9a6c-4b5b-9f70-9b664296e1cc';
@@ -44,7 +48,7 @@ test('routes are dark by default; unconfigured or noncanonical origins do not se
   assert.equal(selectStaffEmailRuntime({...env,DVNT_STAFF_EMAIL_ENABLED:'false'},forbid),null);
   assert.equal(selectStaffEmailRuntime({...env,DVNT_STAFF_EMAIL_WEB_ORIGIN:'http://127.0.0.1:38437'},forbid),null);
   assert.equal(selectStaffEmailRuntime({...env,DVNT_STAFF_EMAIL_RPC_ORIGIN:rpc+'/wrong'},forbid),null);
-  assert.equal(selectStaffEmailRuntime({...env,DVNT_STAFF_EMAIL_KEYS:'invalid'},forbid),null);
+  assert.equal(selectStaffEmailRuntime({...env,DVNT_STAFF_EMAIL_KEYS:'invalid'},forbid).issuanceReady,false);
   const routes=staffEmailRoutes(null);
   assert.equal((await routes.claimPage(req('/public/staff/claim'))).status,404);
   assert.equal((await routes.issuePage(req('/staff-email/invite/1'))).status,404);
@@ -95,4 +99,32 @@ test('budget denial never invokes a mutation RPC',async()=>{
   const routes=staffEmailRoutes(selectStaffEmailRuntime(env,f.fetcher));
   assert.equal((await routes.mutate(req('/public/staff/claim',{payload:{token:'a'.repeat(64)}}),'claim')).status,429);
   assert.deepEqual(f.calls.map(c=>c[0]),['session','take_event_staff_email_budget']);
+});
+
+test('partial worker configuration hides issuance without breaking existing invite claims or revocation',async()=>{
+  for (const overrides of [
+    {DVNT_STAFF_EMAIL_WORKER_ENABLED:'false'},
+    {DVNT_STAFF_EMAIL_TRACKING_VERIFIED_OFF:'false'},
+    {DVNT_STAFF_EMAIL_WORKER_ORIGIN:'https://wrong.example.invalid'},
+    {DVNT_STAFF_EMAIL_WORKER_TOKEN:'bad'},
+    {DVNT_STAFF_EMAIL_WORKER_RESEND_KEY:''},
+    {DVNT_STAFF_EMAIL_WORKER_SENDER_DOMAIN:'wrong.example.invalid'},
+    {DVNT_STAFF_EMAIL_FROM:'not-an-address'},
+    {DVNT_STAFF_EMAIL_FROM:''},
+    {DVNT_STAFF_EMAIL_KEYS:''},
+    {DVNT_STAFF_EMAIL_KEYS:'invalid'},
+  ]) {
+    const f=fake();
+    const runtime=selectStaffEmailRuntime({...env,...overrides},f.fetcher);
+    assert.equal(runtime.issuanceReady,false);
+    const routes=staffEmailRoutes(runtime);
+    assert.equal((await routes.issuePage(req('/staff-email/invite/1'))).status,404);
+    const issueRequest=req('/staff-email/invite/1',{payload:{eventId:1,requestId,email:'member@example.invalid',role:'admin'}});
+    assert.equal((await routes.mutate(issueRequest.clone(),'issue')).status,404);
+    assert.equal((await runtime.dispatch(issueRequest,{kind:'issue',eventId:1},'owner')).status,503);
+    assert.deepEqual(f.calls,[]);
+    assert.equal((await routes.mutate(req('/public/staff/claim',{payload:{token:'a'.repeat(64)}}),'claim')).status,200);
+    assert.equal((await routes.mutate(req('/staff-email/invite/1',{payload:{eventId:1,requestId}}),'revoke')).status,200);
+    assert.ok(!f.calls.some(c=>c[0]==='queue_event_staff_email_invite'));
+  }
 });

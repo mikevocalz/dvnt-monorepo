@@ -1,4 +1,5 @@
 import { keyring, prepareIssue } from "./transport.mjs";
+import { staffEmailIssuanceReady } from "./worker-runtime.mjs";
 import type { StaffEmailRuntime } from "./routes";
 
 type RuntimeEnv = Readonly<Record<string, string | undefined>>;
@@ -61,19 +62,24 @@ export function selectStaffEmailRuntime(
   const origin=exactOrigin(env.DVNT_STAFF_EMAIL_WEB_ORIGIN,allowLoopback);
   const supabase=exactOrigin(env.DVNT_STAFF_EMAIL_RPC_ORIGIN,allowLoopback);
   const key=env.DVNT_STAFF_EMAIL_RPC_SERVICE_KEY;
-  const sender=env.DVNT_STAFF_EMAIL_FROM;
-  const active=env.DVNT_STAFF_EMAIL_ACTIVE_KEY_ID;
-  if (!origin || !supabase || !key || /\s/.test(key) || key.length>4096 ||
-      !sender || sender.length>320 || /[\r\n]/.test(sender) || !active || !keyIdPattern.test(active)) return null;
-  const materials=new Map<string,Uint8Array>();
-  const encoded=env.DVNT_STAFF_EMAIL_KEYS;
-  if (!encoded || encoded.length>500) return null;
-  for (const item of encoded.split(",")) {
-    const [k,value,extra]=item.split(":");
-    if (extra!==undefined || !keyIdPattern.test(k ?? "") || !hexKey.test(value ?? "") || materials.has(k!)) return null;
-    materials.set(k!,Uint8Array.from(Buffer.from(value!,"hex")));
-  }
-  if (!materials.has(active) || materials.size>4) return null;
+  if (!origin || !supabase || !key || /\s/.test(key) || key.length>4096) return null;
+
+  // Issuance needs the sender and encryption keys; existing links only need
+  // the authenticated claim and revoke RPCs, even while sending is paused.
+  const issueConfig=(() => {
+    if (!staffEmailIssuanceReady(env)) return null;
+    const sender=env.DVNT_STAFF_EMAIL_FROM;
+    const active=env.DVNT_STAFF_EMAIL_ACTIVE_KEY_ID;
+    const encoded=env.DVNT_STAFF_EMAIL_KEYS;
+    if (!sender || !active || !keyIdPattern.test(active) || !encoded || encoded.length>500) return null;
+    const materials=new Map<string,Uint8Array>();
+    for (const item of encoded.split(",")) {
+      const [k,value,extra]=item.split(":");
+      if (extra!==undefined || !keyIdPattern.test(k ?? "") || !hexKey.test(value ?? "") || materials.has(k!)) return null;
+      materials.set(k!,Uint8Array.from(Buffer.from(value!,"hex")));
+    }
+    return materials.has(active) && materials.size<=4 ? {sender,active,materials} : null;
+  })();
   let keysPromise: ReturnType<typeof keyring> | undefined;
 
   async function actor(request:Request) {
@@ -100,8 +106,10 @@ export function selectStaffEmailRuntime(
 
   return {
     origin, actor,
+    issuanceReady: issueConfig !== null,
     mayIssue:async(id,eventId)=>await rpc("can_issue_event_staff_email_invite",{p_event_id:eventId,p_actor:id})===true,
     async dispatch(request,operation,actorId) {
+      if (operation.kind==="issue" && !issueConfig) return outcome(503,"unavailable");
       const permitted=await rpc("take_event_staff_email_budget",{p_actor:actorId,p_operation:operation.kind});
       if (permitted!==true) return outcome(429,"retry_later");
       const input=await boundedJson(request);
@@ -120,9 +128,11 @@ export function selectStaffEmailRuntime(
       const email=typeof input.email==="string"?input.email.trim(): "";
       if (email.length>254 || !addressPattern.test(email) || typeof input.role!=="string" ||
           !["admin","editor"].includes(input.role)) return outcome(400,"invalid");
-      const keys=await (keysPromise ??= keyring(active!,materials));
+      if (!issueConfig) return outcome(503,"unavailable");
+      const {active,materials,sender}=issueConfig;
+      const keys=await (keysPromise ??= keyring(active,materials));
       const envelope=await prepareIssue({
-        eventId:operation.eventId,actor:actorId,requestId:input.requestId,email,role:input.role,from:sender!,
+        eventId:operation.eventId,actor:actorId,requestId:input.requestId,email,role:input.role,from:sender,
         webOrigin:allowLoopback && origin!.startsWith("http:") ? "https://fixture.invalid" : origin!,
       },keys,claim=>({
         subject:"DVNT event staff invitation",

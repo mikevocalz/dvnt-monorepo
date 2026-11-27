@@ -47,7 +47,7 @@ export function validateLivePhotoFiles(still: File | null, motion: File | null):
 }
 
 /** Metadata alone does not prove the browser can decode an Apple HEVC clip. */
-export function readPlayableLivePhotoSource(uri: string): Promise<number | null> {
+export function readPlayableLivePhotoSource(uri: string, timeoutMs = 10_000): Promise<number | null> {
   return new Promise(resolve => {
     if (typeof document === "undefined") return resolve(null);
     const video = document.createElement("video");
@@ -67,15 +67,15 @@ export function readPlayableLivePhotoSource(uri: string): Promise<number | null>
     };
     video.onloadeddata = ready; video.oncanplay = ready;
     video.onerror = () => done(null);
-    timeout = setTimeout(() => done(null), 10_000);
+    timeout = setTimeout(() => done(null), timeoutMs);
     video.preload = "auto"; video.muted = true; video.playsInline = true;
     video.src = uri;
   });
 }
 
-export async function readPlayableLivePhotoDuration(file: File): Promise<number | null> {
+export async function readPlayableLivePhotoDuration(file: File, timeoutMs?: number): Promise<number | null> {
   const url = URL.createObjectURL(typedOriginal(file, fileMime(file)));
-  try { return await readPlayableLivePhotoSource(url); }
+  try { return await readPlayableLivePhotoSource(url, timeoutMs); }
   finally { URL.revokeObjectURL(url); }
 }
 

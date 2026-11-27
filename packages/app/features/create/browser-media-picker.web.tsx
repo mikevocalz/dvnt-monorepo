@@ -131,8 +131,8 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     const operation = ++version.current;
     const commit = beginUpdate();
     const original = selectedMedia;
-    changePending("Checking selected files…");
-    const deadline = expire(operation, "Checking those files timed out. Your existing items are unchanged. Choose the files again to retry.");
+    changePending("Adding media…");
+    const deadline = expire(operation, "Couldn’t add those files in time. Your draft is unchanged.");
     try {
       const result = await readBrowserMediaFiles(files, { isCurrent: () => operation === version.current });
       if (operation !== version.current) { releaseUnselectedBrowserMedia(result.assets, original); return; }
@@ -169,7 +169,7 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
       return;
     }
     const operation = ++version.current;
-    changePending("Checking motion for this photo…");
+    changePending("Adding Live Photo motion…");
     const deadline = expire(operation, "Checking that motion timed out. The files remain separate. Choose the motion again to retry.");
     try {
       const result = await associateBrowserMedia(selectedMedia, stillId, motionId);
@@ -210,7 +210,7 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
   return <section className="mt-3" aria-label="Post media">
     <input ref={input} type="file" multiple hidden accept={BROWSER_MEDIA_ACCEPT} aria-label="Choose photos or videos" onChange={e => void pick(e)} />
     <button type="button" onClick={() => input.current?.click()} disabled={disabled || selectedMedia.length >= MAX_BROWSER_REVIEW_FILES}
-      aria-describedby="browser-media-help" className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 py-3.5 font-semibold text-white disabled:opacity-40">
+      aria-describedby="browser-media-help" aria-busy={pending !== null} className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 py-3.5 font-semibold text-white disabled:opacity-40">
       <ImagePlus size={20} />Add Photos or Videos
     </button>
     <p className="mt-2 text-xs text-white/45">{videoLimitsLabel("post-video")}. Up to {MAX_BROWSER_POST_MEDIA} items per post.</p>
@@ -227,9 +227,6 @@ export function BrowserMediaPicker({ selectedMedia, draftIdentity, disabled, beg
     {selectedMedia.length > MAX_BROWSER_POST_MEDIA ? <p role="alert" className="mt-2 text-sm text-amber-200">
       {selectedMedia.length} files are in review. Pair matching photo and motion files, or remove items, to reach {MAX_BROWSER_POST_MEDIA} or fewer before sharing.
     </p> : null}
-    {pending ? <div className="mt-3 flex items-center justify-between gap-3 text-sm text-cyan-200" data-browser-media-pending>
-      <span role="status">{pending}</span><button type="button" onClick={() => { invalidate(); setError(null); }} className="underline">Cancel checking</button>
-    </div> : null}
     {error ? <p role="alert" className="mt-3 whitespace-pre-line text-sm text-red-300">{error}</p> : null}
     {selectedMedia.length ? <div className="mt-4 grid gap-4" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
       {selectedMedia.map((media, index) => {

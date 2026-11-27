@@ -1,5 +1,6 @@
 import type { MediaAsset } from "../../lib/hooks/use-media-picker";
 import { sizeLimitForKind } from "../../lib/media/upload-policy.ts";
+import { readVideoDurationSec } from "../../lib/media/video-duration.web.ts";
 import { validateVideoPick } from "../../lib/media/video-pick-policy.ts";
 import { browserFileMime } from "../../lib/media/browser-file-mime.ts";
 import { readAppleContentId } from "../../lib/media/apple-content-id.ts";
@@ -74,10 +75,13 @@ export async function readBrowserMediaFiles(
       if (video) {
         const formatCheck = validateVideoPick({ kind: "post-video", mimeType: mime, fileName: file.name, sizeBytes: file.size });
         if (!formatCheck.ok) { errors.push(`${file.name}: ${formatCheck.message}`); continue; }
-        duration = await (options.readDuration ?? readPlayableLivePhotoDuration)(file);
+        // A standalone clip only needs a readable timeline at pick time.
+        // iOS may defer decoding frames until the member plays a visible video.
+        const typedClip = file.type === mime ? file : new File([file], file.name, { type: mime, lastModified: file.lastModified });
+        duration = await (options.readDuration ? options.readDuration(typedClip) : readVideoDurationSec(typedClip, { requireVideo: true }));
         if (options.isCurrent && !options.isCurrent()) break;
         if (duration == null || !Number.isFinite(duration) || duration <= 0) {
-          errors.push(`${file.name}: this browser could not play the motion. Choose a compatible MOV or MP4, or try a compatible browser.`); continue;
+          errors.push(`${file.name}: DVNT couldn’t read this video. Try exporting it as an MP4.`); continue;
         }
         const check = validateVideoPick({ kind: "post-video", mimeType: mime, fileName: file.name, sizeBytes: file.size, durationSec: duration });
         if (!check.ok) { errors.push(`${file.name}: ${check.message}`); continue; }
@@ -91,9 +95,16 @@ export async function readBrowserMediaFiles(
           errors.push(`${file.name}: photos can be up to ${Math.round(sizeLimitForKind("post-image") / (1024 * 1024))}MB.`); continue;
         }
       }
-      const contentId = mime === "image/gif" ? null
+      let contentId = mime === "image/gif" ? null
         : await (options.readContentId ?? readAppleContentId)(file, video ? "motion" : "still");
       if (options.isCurrent && !options.isCurrent()) break;
+      if (video && contentId) {
+        // Only identified Live Photo companion clips need a frame probe for
+        // auto-pair. If it is unavailable, keep the clip as a separate item.
+        const playable = await (options.readDuration ?? ((clip: File) => readPlayableLivePhotoDuration(clip, 2_500)))(file);
+        if (options.isCurrent && !options.isCurrent()) break;
+        if (playable == null || !Number.isFinite(playable) || playable <= 0) contentId = null;
+      }
       if (motionPhoto) {
         // One file holds both halves, so this pair is read from the file's own bytes, never by name.
         const uri = URL.createObjectURL(motionPhoto.still);
