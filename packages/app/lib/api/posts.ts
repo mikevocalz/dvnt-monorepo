@@ -539,7 +539,9 @@ export const postsApi = {
             firstPostEventId: data.firstPostEventId,
           },
           headers: { Authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(60_000),
+          // React Native 0.86 ships an AbortSignal without static timeout().
+          // The Functions client uses an AbortController and clears its timer.
+          timeout: 60_000,
         });
 
       if (error) {
