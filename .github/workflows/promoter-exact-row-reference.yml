@@ -1,0 +1,21 @@
+name: Promoter exact-row offline reference
+on:
+  pull_request:
+    paths:
+      - scripts/fixtures/payments/exact-row-claim.mjs
+      - scripts/test-promoter-exact-row-claim.mjs
+      - docs/payments/promoter-exact-row-reference.md
+      - .github/workflows/promoter-exact-row-reference.yml
+permissions:
+  contents: read
+jobs:
+  offline-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test scripts/test-promoter-exact-row-claim.mjs
