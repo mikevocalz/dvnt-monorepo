@@ -176,7 +176,9 @@ test('no-account invite runs queue → synthetic provider acceptance → verifie
   };
   const routes=staffEmailRoutes(selectStaffEmailRuntime(env,fixtureFetch));
   const worker=selectStaffEmailWorker(env,fixtureFetch);
-  const workerRequest=()=>new Request(web+'/staff-email/worker',{method:'POST',headers:{authorization:'Bearer '+workerToken}});
+  const { runPrivateStaffEmailTick } = await import('./dvnt-private-staff-email-tick.mjs');
+  const schedulerEnv={...env,DVNT_ENVIRONMENT:'private-staging',DVNT_PRIVATE_STAFF_EMAIL_SCHEDULER:'true'};
+  const tick=()=>runPrivateStaffEmailTick(schedulerEnv,(url,init)=>worker(new Request(url,init)));
   const req=(path,actor,payload)=>new Request(web+path,{
     method:payload===undefined?'GET':'POST',
     headers:{host:new URL(web).host,origin:web,cookie:'fixture-session='+actor,'content-type':'application/json'},
@@ -187,8 +189,8 @@ test('no-account invite runs queue → synthetic provider acceptance → verifie
   assert.equal((await routes.mutate(req(invitePath,'host',{eventId:1,requestId:crypto.randomUUID(),email,role:'editor'}),'issue')).status,202);
   assert.equal(issued,1);
   assert.equal(providerCalls,0);
-  assert.equal((await worker(workerRequest())).status,204);
-  assert.equal((await worker(workerRequest())).status,204);
+  assert.equal(await tick(),'completed');
+  assert.equal(await tick(),'completed');
   assert.equal(providerCalls,1);
   assert.deepEqual(mail.to,[email]);
   const token=mail.html.match(/\/public\/staff\/claim#([a-f0-9]{64})/)?.[1];
@@ -199,6 +201,50 @@ test('no-account invite runs queue → synthetic provider acceptance → verifie
   assert.equal((await routes.mutate(req(claimPath,'joiner',{token}),'claim')).status,404);
   await db.exec(`UPDATE public."user" SET "emailVerified"=true WHERE id='joiner';
     INSERT INTO public.identity_verifications VALUES ('joiner','passed','1990-01-01',NULL,NULL)`);
+  await t.test('explicit acceptance from the real browser page', {
+    skip: !process.env.DVNT_STAFF_CLAIM_BROWSER,
+  }, async () => {
+    const { chromium } = require('playwright');
+    const browser = await chromium.launch({
+      executablePath: process.env.DVNT_STAFF_CLAIM_BROWSER,
+      headless: true,
+    });
+    try {
+      const context=await browser.newContext({serviceWorkers:'block'});
+      let postCount=0;
+      await context.route('**/*',async route => {
+        const inbound=route.request(), actual=new URL(inbound.url());
+        if(actual.origin!==web || actual.pathname!==claimPath) return route.abort();
+        const get=inbound.method()==='GET';
+        assert.ok(!actual.hash);
+        const headers=await inbound.allHeaders();
+        const request=new Request(actual,{method:inbound.method(),headers:{...headers,host:actual.host},
+          ...(!get&&{body:inbound.postData()})});
+        if(!get) postCount++;
+        const response=get ? await routes.claimPage(request) : await routes.mutate(request,'claim');
+        await route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:await response.text()});
+      });
+      const page=await context.newPage();
+      const open=async()=>{
+        await page.goto(web+claimPath+'#'+token);
+        await page.waitForURL(web+claimPath);
+      };
+      await open();
+      await page.getByRole('link',{name:'Create an account'}).waitFor();
+      assert.equal((await page.getByRole('link',{name:'Create an account'}).getAttribute('href')).includes(token),false);
+      assert.equal(postCount,0);
+      await context.addCookies([{name:'fixture-session',value:'wrong',url:web}]);
+      await open();
+      await page.getByRole('button',{name:'Accept with this account'}).click();
+      await page.getByText('This invitation is not available to this account.',{exact:false}).waitFor();
+      await context.addCookies([{name:'fixture-session',value:'joiner',url:web}]);
+      await open();
+      assert.equal(postCount,1);
+      await page.getByRole('button',{name:'Accept with this account'}).click();
+      await page.getByText('Staff invitation accepted.',{exact:true}).waitFor();
+      assert.equal(postCount,2);
+    } finally { await browser.close(); }
+  });
   assert.equal((await routes.mutate(req(claimPath,'joiner',{token}),'claim')).status,200);
   assert.equal((await routes.mutate(req(claimPath,'joiner',{token}),'claim')).status,200);
   assert.deepEqual((await db.query('SELECT event_id,user_id,role,accepted FROM public.event_co_organizers')).rows,
