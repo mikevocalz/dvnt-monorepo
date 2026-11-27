@@ -7,6 +7,7 @@ const AUTH_RETURN = encodeURIComponent(CLAIM_PATH);
 export type StaffEmailRuntime = {
   // A fixed configured origin, never inferred from the inbound Host header.
   origin: string;
+  issuanceReady: boolean;
   actor: (request: Request) => Promise<string | null>;
   mayIssue: (actor: string, eventId: number, request: Request) => Promise<boolean>;
   // The staged entry repeats session, rate-limit, owner/verified-email checks
@@ -175,7 +176,7 @@ export function staffEmailRoutes(runtime: StaffEmailRuntime | null) {
         claimScript);
     },
     async issuePage(request: Request) {
-      if (!runtime || !hostAllowed(request)) return unavailable();
+      if (!runtime || !runtime.issuanceReady || !hostAllowed(request)) return unavailable();
       const eventId = eventIdFrom(request);
       if (eventId === null) return unavailable();
       try {
@@ -193,6 +194,7 @@ export function staffEmailRoutes(runtime: StaffEmailRuntime | null) {
     async mutate(request: Request, operation: "issue" | "claim" | "revoke") {
       if (!runtime) return unavailable();
       if (!originAllowed(request)) return plain("Not allowed", 403);
+      if (operation==="issue" && !runtime.issuanceReady) return unavailable();
       try {
         const actor = await runtime.actor(request);
         if (!actor) return plain("Sign in required", 401);
