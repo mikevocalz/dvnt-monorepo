@@ -4,9 +4,9 @@ const {readFileSync}=require("node:fs");
 const {join}=require("node:path");
 const {PGlite}=require("@electric-sql/pglite");
 const source=name=>readFileSync(join(__dirname,name),"utf8");
-const config={enabled:true,environment:"private-staging",path:"/internal/setup-reminder",bearer:"abc_".repeat(12),hostId:21,eventId:431,
+const config={enabled:true,environment:"private-staging",origin:"https://fixture.invalid",path:"/internal/setup-reminder",bearer:"abc_".repeat(12),hostId:21,eventId:431,
   stagingInbox:"staging@example.invalid",testPlatformAccountId:"acct_mockTestPlatform"};
-const request=(options={},path=config.path)=>new Request("https://fixture.invalid"+path,{method:"POST",headers:{Authorization:"Bearer "+config.bearer},...options});
+const request=(options={},path=config.path)=>new Request(config.origin+path,{method:"POST",headers:{Authorization:"Bearer "+config.bearer},...options});
 async function fixture(t,overrides={}) {
   const db=new PGlite();t.after(()=>db.close());
   await db.exec(`
@@ -54,11 +54,16 @@ test("one authorized bodyless stage invocation through restricted SQL records on
   assert.equal(effects.mail.length,1);
   assert.equal(effects.mail[0].to,config.stagingInbox);
   assert.ok(!effects.mail[0].text.includes("fixture-auth"));
+  assert.ok(effects.mail[0].text.endsWith(config.origin+"/feed/events/organizer-setup"));
+  assert.ok(!effects.mail[0].text.includes("dvntapp.live"));
 });
 test("disabled, production, wrong bearer, URL, method or body touch no dependencies",async t=>{
   const {effects,create}=await fixture(t);
   for(const [handler,input,status] of [
     [create({enabled:undefined}),request(),404],[create({environment:"production"}),request(),404],
+    [create({origin:"https://dvntapp.live"}),request(),404],
+    [create({origin:"https://fixture.invalid/path"}),request(),404],
+    [create(),new Request("https://wrong.invalid"+config.path,{method:"POST",headers:{Authorization:"Bearer "+config.bearer}}),404],
     [create(),request({headers:{Authorization:"Bearer "+config.bearer.slice(1)+"x"}}),401],
     [create(),request({method:"GET"}),405],[create(),request({body:"{}"}),400],
     [create(),request({},config.path+"?host=22"),404],
@@ -101,4 +106,52 @@ test("actionable Stripe evidence must match both pinned sandbox platform and org
   const handler=create();
   assert.deepEqual(await (await handler(request())).json(),{outcome:"accepted"});
   assert.equal(effects.mail[0].subject,"Finish your DVNT payout setup");
+});
+
+test("scoped staging Resend transport only sends to the exact test inbox and never links to production",async()=>{
+  const {createPrivateHostSetupResend}=await import("./host-payout-setup-email-staging.ts");
+  const env={...config, key:"re_fixture_key",from:"notifications@dvntapp.live",trackingVerifiedOff:true};
+  const mail={to:config.stagingInbox,subject:"Set up Stripe for your DVNT payouts",
+    text:"Synthetic staging test\n\n"+config.origin+"/feed/events/organizer-setup",idempotencyKey:"host-payout-setup:v1:21"};
+  const calls=[], signal=new AbortController().signal;
+  const transport=async(url,init)=>{calls.push([url,init]);return Response.json({id:"synthetic-provider-receipt"});};
+  const send=createPrivateHostSetupResend(env,transport);
+  for(const other of [
+    {...mail,to:"other@example.invalid"}, {...mail,idempotencyKey:"host-payout-setup:v1:22"},
+    {...mail,text:mail.text.replace(config.origin,"https://dvntapp.live")}, {...mail,subject:"Other subject"},
+  ]) await assert.rejects(send(other,signal),/refused/);
+  for(const updates of [{trackingVerifiedOff:false},{from:"sender@elsewhere.invalid"},{environment:"production"},
+    {origin:"https://dvntapp.live"}]) {
+    await assert.rejects(createPrivateHostSetupResend({...env,...updates},transport)(mail,signal),/refused/);
+  }
+  assert.equal(calls.length,0);
+  assert.deepEqual(await send(mail,signal),{id:"synthetic-provider-receipt"});
+  assert.equal(calls.length,1);
+  assert.equal(calls[0][0],"https://api.resend.com/emails");
+  const init=calls[0][1];
+  assert.equal(init.signal,signal);
+  assert.equal(init.method,"POST");
+  assert.equal(init.redirect,"error");
+  assert.equal(init.headers["Idempotency-Key"],mail.idempotencyKey);
+  assert.deepEqual(JSON.parse(init.body),{from:env.from,to:[mail.to],subject:"[DVNT staging QA] "+mail.subject,text:mail.text});
+});
+
+test("stage handler uses the scoped Resend request once even when the scheduler retries",async t=>{
+  const {createPrivateHostSetupResend}=await import("./host-payout-setup-email-staging.ts");
+  const requests=[];
+  const sendPrivate=createPrivateHostSetupResend({
+    ...config,key:"re_fixture_key",from:"notifications@dvntapp.live",trackingVerifiedOff:true,
+  },async (url,init)=>{
+    requests.push({url,mail:JSON.parse(init.body),key:init.headers["Idempotency-Key"]});
+    return Response.json({id:"synthetic-integrated-receipt"});
+  });
+  const {db,create}=await fixture(t,{sendPrivate});
+  await db.exec("set role fixture_dispatcher");
+  const handler=create();
+  assert.deepEqual(await (await handler(request())).json(),{outcome:"accepted"});
+  assert.deepEqual(await (await handler(request())).json(),{outcome:"already_claimed"});
+  assert.equal(requests.length,1);
+  assert.deepEqual(requests[0].mail.to,[config.stagingInbox]);
+  assert.equal(requests[0].key,"host-payout-setup:v1:21");
+  assert.ok(requests[0].mail.text.endsWith(config.origin+"/feed/events/organizer-setup"));
 });

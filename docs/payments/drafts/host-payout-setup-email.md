@@ -20,7 +20,7 @@ not delivered. The checked-in local ledger draft reserves durably without expiry
 access to unrelated roles. It has no service grants or production binding.
 
 **No runtime activation:** There is no route, database migration, schedule,
-credential, provider adapter, app import, or payment operation here. The draft
+credential, application import, or payment operation here. The private staging Resend binding exists but is not invoked by the app or configured with a real key. The draft
 is disabled by default. Tests use a fake mailer, in-memory ports and a local
 PostgreSQL engine. Run with Node 24 and PGlite in NODE_PATH for the ledger suite:
 
@@ -38,7 +38,7 @@ reconciles the external Dre payment, or initiates a payout.
 ## Restricted private staging adapter (manual invocation only)
 
 `host-payout-setup-email-staging.ts` accepts a bodyless POST to a fixed private
-path with a dedicated long bearer. It is disabled unless explicitly marked
+path with a dedicated long bearer and an exact HTTPS staging origin. The staging message points to that same origin, never the public DVNT site. It is disabled unless explicitly marked
 private staging, and is limited to one configured test host, event and exact
 verified test inbox. Neither the browser/session nor request body can select a
 recipient. Each provider/RPC dependency is bounded, and a timed-out mail attempt
@@ -60,7 +60,7 @@ For a future approved private staging smoke, independently confirm the actual
 schema and dedicated restricted role, set the pinned host/event/inbox, connect
 the approved suppression source and read-only Stripe sandbox account lookup
 (the adapter rejects a different platform, account, or live evidence), and
-allowlist only the authorized test inbox in the delivery transport. Inject
+use the staging-only Resend binding with one exact recipient, a domain-scoped sending key, and click tracking verified off. It uses Resend’s idempotency header in addition to the existing durable reservation. Inject
 adapters that honor the supplied abort signal. Then invoke one bodyless POST
 with the dedicated stage bearer, confirm exactly one provider acceptance and
 actual authorized inbox receipt, and verify replay returns `already_claimed`.

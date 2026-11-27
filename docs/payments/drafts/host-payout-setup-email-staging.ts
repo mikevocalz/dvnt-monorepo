@@ -6,7 +6,7 @@ type Query = <T extends Record<string, unknown>>(sql: string, args: unknown[], s
 type Source = { host_id: number | string; event_id: number | string; app_auth_id: string; auth_id: string;
   email: string; email_verified: boolean; stripe_account_id: string | null };
 type StripeEvidence = LiveConnectState & { accountId: string; platformAccountId: string; mode: "test" | "live" };
-type Config = { enabled?: boolean; environment: string; path: string; bearer: string; hostId: number; eventId: number;
+type Config = { enabled?: boolean; environment: string; origin: string; path: string; bearer: string; hostId: number; eventId: number;
   stagingInbox: string; testPlatformAccountId: string };
 type Adapters = { query: Query; readStripeTestAccount: (id: string, signal: AbortSignal) => Promise<StripeEvidence | null>;
   isSuppressed: (verifiedAddress: string, signal: AbortSignal) => Promise<boolean>;
@@ -15,6 +15,13 @@ type Adapters = { query: Query; readStripeTestAccount: (id: string, signal: Abor
 const accountPattern = /^acct_[A-Za-z0-9]{12,}$/;
 const numericMatch = (actual: unknown, expected: number) => actual === expected || actual === String(expected);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function privateOrigin(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.origin === value &&
+      !/(^|\.)(dvntapp|deviant)\.live$/i.test(url.hostname);
+  } catch { return false; }
+}
 function positive(id: number) { return Number.isSafeInteger(id) && id > 0; }
 function authorized(header: string | null, bearer: string) {
   const value = header ?? "";
@@ -37,7 +44,7 @@ async function bounded<T>(call: (signal:AbortSignal) => Promise<T>): Promise<T> 
 
 export function createPrivateHostSetupReminder(input: Config, deps: Adapters) {
   const config={...input};
-  const allowed = config.enabled === true && config.environment === "private-staging" &&
+  const allowed = config.enabled === true && config.environment === "private-staging" && privateOrigin(config.origin) &&
     /^\/[A-Za-z0-9/_-]{1,120}$/.test(config.path) && /^[A-Za-z0-9_-]{43,128}$/.test(config.bearer) &&
     positive(config.hostId) && positive(config.eventId) && /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(config.stagingInbox) &&
     accountPattern.test(config.testPlatformAccountId);
@@ -91,15 +98,51 @@ export function createPrivateHostSetupReminder(input: Config, deps: Adapters) {
   });
   return async (request: Request) => {
     const url = new URL(request.url);
-    if (!allowed || url.pathname !== config.path || url.search) return respond(404,"unavailable");
+    if (!allowed || url.origin !== config.origin || url.pathname !== config.path || url.search) return respond(404,"unavailable");
     if (request.method !== "POST") return respond(405,"method_not_allowed");
     if (!authorized(request.headers.get("Authorization"), config.bearer)) return respond(401,"unauthorized");
     if (request.body !== null) return respond(400,"body_not_allowed");
     try {
-      const result=await dispatchHostPayoutSetupEmail({enabled:true},host,ports);
+      const result=await dispatchHostPayoutSetupEmail({enabled:true,linkOrigin:config.origin},host,ports);
       return respond(result === "uncertain" ? 503 : 200,result);
     } catch {
       return respond(503,"unavailable");
     }
+  };
+}
+
+
+// Preview-only provider binding: keep query and suppression ports explicit and
+// independently checked. No deployment, secrets or outbound call at import.
+export function createPrivateHostSetupResend(
+  config: Pick<Config,"environment"|"origin"|"hostId"|"stagingInbox"> & {
+    key: string; from: string; trackingVerifiedOff: boolean;
+  },
+  requestFetch: typeof fetch=fetch,
+): Adapters["sendPrivate"] {
+  const { environment, origin, hostId, stagingInbox, key, from, trackingVerifiedOff }=config;
+  const enabled=environment==="private-staging" && privateOrigin(origin) &&
+    positive(hostId) && trackingVerifiedOff===true && /^re_[A-Za-z0-9_-]{8,256}$/.test(key) &&
+    /^[a-zA-Z0-9._+-]+@dvntapp\.live$/.test(from) &&
+    /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(stagingInbox) && stagingInbox.length<=254;
+  const expectedKey="host-payout-setup:v1:"+hostId;
+  const expectedLink=origin+"/feed/events/organizer-setup";
+  return async (mail,signal)=>{
+    if (!enabled || mail.to!==stagingInbox || mail.idempotencyKey!==expectedKey ||
+        !mail.text.endsWith("\n\n"+expectedLink) ||
+        !["Set up Stripe for your DVNT payouts","Finish your DVNT payout setup"].includes(mail.subject)) {
+      throw Error("Private payout reminder transport refused delivery");
+    }
+    const res=await requestFetch("https://api.resend.com/emails",{
+      method:"POST", redirect:"error", cache:"no-store", signal,
+      headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json","Idempotency-Key":expectedKey},
+      body:JSON.stringify({from,to:[stagingInbox],subject:"[DVNT staging QA] "+mail.subject,text:mail.text}),
+    });
+    if (!res.ok) throw Error("Private payout reminder was not acknowledged");
+    const result=await res.json();
+    if (!result || typeof result.id!=="string" || !/^[A-Za-z0-9_-]{1,128}$/.test(result.id)) {
+      throw Error("Private payout reminder acknowledgment was invalid");
+    }
+    return {id:result.id};
   };
 }

@@ -46,11 +46,12 @@ export interface HostPayoutSetupEmailPorts {
 }
 
 export async function dispatchHostPayoutSetupEmail(
-  config: { enabled?: boolean },
+  config: { enabled?: boolean; linkOrigin?: string },
   hostId: number,
   ports: HostPayoutSetupEmailPorts,
 ): Promise<Result> {
   if (config.enabled !== true) return "disabled";
+  const linkOrigin = config.linkOrigin ?? "https://dvntapp.live";
   const evidence = await ports.readFresh(hostId);
   const before = planHostPayoutSetupEmail(hostId, evidence);
   if (!before) return "ineligible";
@@ -71,7 +72,7 @@ export async function dispatchHostPayoutSetupEmail(
     const response = await ports.send({
       to: after.to,
       subject: after.state === "setup" ? "Set up Stripe for your DVNT payouts" : "Finish your DVNT payout setup",
-      text: "Sign in to DVNT to set up or update your Stripe payout details. DVNT will never ask for financial details in an email.\n\nhttps://dvntapp.live" + after.route,
+      text: "Sign in to DVNT to set up or update your Stripe payout details. DVNT will never ask for financial details in an email.\n\n" + linkOrigin + after.route,
       idempotencyKey: key,
     });
     if (!response || typeof response.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(response.id)) throw new Error("Missing provider acceptance");
