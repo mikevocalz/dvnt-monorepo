@@ -399,7 +399,7 @@ export function CreatePostScreen() {
               <button type="button" onClick={handleCrop} disabled={busy || pendingMedia || handoffPending}
                 className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/6 px-3 text-sm font-semibold text-white focus-visible:outline-2 focus-visible:outline-cyan-400 disabled:opacity-45">
                 <Crop size={17} aria-hidden="true" />
-                Crop photos
+                Edit photos
               </button>
             ) : null}
           </>

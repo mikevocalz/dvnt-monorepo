@@ -7,30 +7,34 @@ const assert = require("node:assert/strict");
 const source = readFileSync(require.resolve("./index.ts"), "utf8")
   .replace(/^import\s+[\s\S]*?from\s+["'][^"']+["'];\n/gm, "");
 const wire = new Function("Deno", "createClient", "verifySession", "corsHeaders",
-  "optionsResponse", "checkRateLimit", "fetch", "console", stripTypeScriptTypes(source));
+  "optionsResponse", "checkRateLimit", "fetch", "console", "webpush", stripTypeScriptTypes(source));
 const inviteId = "11111111-2222-4333-8444-555555555555";
 const exact = { recipient_id: 10, actor_id: 20, type: "event_co_organizer_invited", entity_type: "event", entity_id: inviteId };
 
 function fixture({ accepted = false, cleanupFails = false, acceptRaces = false,
-  memberReadFails = false, profileReadFails = false } = {}) {
+  memberReadFails = false, profileReadFails = false, accountReadFails = false, tokens = [], keys = true, expoStatus = 200, webFailure = false } = {}) {
   const db = {
     event_co_organizers: [{ id: inviteId, event_id: 11, user_id: "invitee", invited_by: "inviter", role: "editor", accepted }],
     users: [{ auth_id: "invitee", id: 10, username: "guest" }, { auth_id: "inviter", id: 20, username: "host" }],
+    user: [{ id: "invitee" }, { id: "inviter" }],
     notifications: [
       exact, { ...exact },
       { ...exact, recipient_id: 99 }, { ...exact, actor_id: 99 },
       { ...exact, entity_id: "another-invite" }, { ...exact, entity_type: "room" },
       { ...exact, type: "like" },
     ],
-    push_tokens: [],
+    push_tokens: tokens,
+    web_push_keys: keys ? [{ id: 1, public_key: "fixture-pub", private_key: "fixture-priv", subject: "mailto:fixture@example.invalid" }] : [],
+    events: [{ id: 11, host_id: "inviter", title: "Fixture event" }],
   };
   let deletes = 0, updates = 0, handler;
+  const pushes = [], warnings = [];
   const supabase = { from(table) {
     let op = "read", payload, returning = false;
     const conditions = [];
     function execute(single = false) {
       if (op === "read" && ((table === "event_co_organizers" && memberReadFails) ||
-        (table === "users" && profileReadFails))) return { error: { message: "transient" } };
+        (table === "users" && profileReadFails) || (table === "user" && accountReadFails))) return { error: { message: "transient" } };
       if (op === "update" && table === "event_co_organizers" && acceptRaces) db[table][0].role = "scanner";
       const matches = db[table].filter(row => conditions.every(([key, val]) => row[key] === val));
       if (op === "update") { updates++; matches.forEach(row => Object.assign(row, payload)); }
@@ -45,6 +49,7 @@ function fixture({ accepted = false, cleanupFails = false, acceptRaces = false,
     return {
       select() { returning = true; return this; },
       eq(k, v) { conditions.push([k, v]); return this; },
+      ilike(k, v) { conditions.push([k, v.replace(/\\([\\%_])/g, "$1")]); return this; },
       is(k, v) { conditions.push([k, v]); return this; },
       delete() { op = "delete"; return this; },
       insert(data) { op = "insert"; payload = data; return this; },
@@ -55,12 +60,25 @@ function fixture({ accepted = false, cleanupFails = false, acceptRaces = false,
   }};
   wire({ env: { get() {} }, serve(fn) { handler = fn; } }, () => supabase,
     async (_, req) => req.headers.get("x-fixture-session"), () => ({}), () => new Response(),
-    () => ({ allowed: true }), () => assert.fail("Do not send notifications to external push in tests"), { warn() {}, error() {} });
+    () => ({ allowed: true }), async (url, init) => {
+      assert.equal(url, "https://exp.host/--/api/v2/push/send");
+      pushes.push({ channel: "expo", messages: JSON.parse(init.body) });
+      return new Response(null, { status: expoStatus });
+    }, { warn(message) { warnings.push(message); }, error() {} }, {
+      async sendNotification(subscription, payload, options) {
+        pushes.push({ channel: "web", subscription, payload: JSON.parse(payload), options });
+        if (webFailure) throw Error("provider failure with redacted fixture endpoint");
+      },
+    });
   const unrelated = () => db.notifications.filter(row => ![exact.type, "event_co_organizer_accepted"].includes(row.type) ||
     row.recipient_id !== 10 || row.actor_id !== 20 || row.entity_id !== inviteId || row.entity_type !== "event");
   const untouched = unrelated().length;
   return {
-    db, unrelated, untouched,
+    db, unrelated, untouched, pushes, warnings,
+    invite: (user = "inviter", username = "guest", role = "editor") => handler(new Request("https://fixture.invalid/invite-co-organizer", {
+      method: "POST", headers: { "x-fixture-session": user },
+      body: JSON.stringify({ action: "invite", event_id: 11, username, role }),
+    })),
     updateCount: () => updates, deleteCount: () => deletes,
     newlyAcceptedMessages: () => db.notifications.filter(r => r.type === "event_co_organizer_accepted").length,
     pending: () => db.notifications.filter(r => Object.keys(exact).every(k => r[k] === exact[k])).length,
@@ -161,4 +179,82 @@ test("a concurrent change to the offered role cannot accept, clean or notify", a
   assert.equal(f.pending(), 2);
   assert.equal(f.deleteCount(), 0);
   assert.equal(f.newlyAcceptedMessages(), 0);
+});
+
+const subscription=(endpoint)=>JSON.stringify({endpoint,keys:{p256dh:"A".repeat(87),auth:"B".repeat(22)}});
+const webToken={user_id:10,platform:"web",token:subscription("https://web.push.apple.com/fixture")};
+const nativeToken={user_id:10,platform:"ios",token:"ExponentPushToken[fixture_ios]"};
+
+test("staff invitation separates native Expo and valid browser VAPID subscriptions", async () => {
+  const f=fixture({tokens:[
+    webToken,nativeToken,
+    {user_id:10,platform:"web",token:subscription("https://fcm.googleapis.com/fcm/send/fixture")},
+    {user_id:10,platform:"web",token:subscription("https://updates.push.services.mozilla.com/wpush/v2/fixture")},
+    {user_id:10,platform:"web",token:subscription("https://fcm.googleapis.com.evil.invalid/fixture")},
+    {user_id:10,platform:"web",token:subscription("https://user@web.push.apple.com/fixture")},
+    {user_id:10,platform:"web",token:subscription("https://web.push.apple.com:8443/fixture")},
+    {user_id:10,platform:"web",token:subscription("https://127.0.0.1/fixture")},
+    {user_id:10,platform:"web",token:"{}"},
+    {user_id:10,platform:"ios_voip",token:"ExpoPushToken[not-a-staff-destination]"},
+    {user_id:99,platform:"ios",token:"ExpoPushToken[other-account]"},
+  ]});
+  assert.equal((await f.invite()).status,200);
+  assert.equal(f.db.event_co_organizers[0].accepted,false);
+  const expo=f.pushes.filter(row=>row.channel==="expo");
+  assert.equal(expo.length,1);
+  assert.equal(expo[0].messages.length,1);
+  assert.equal(expo[0].messages[0].to,nativeToken.token);
+  assert.equal(expo[0].messages[0].data.url,"https://dvntapp.live/e/11");
+  assert.equal(expo[0].messages[0].data.type,"event_co_organizer_invited");
+  const web=f.pushes.filter(row=>row.channel==="web");
+  assert.deepEqual(web.map(row=>new URL(row.subscription.endpoint).hostname),
+    ["web.push.apple.com","fcm.googleapis.com","updates.push.services.mozilla.com"]);
+  for(const row of web){
+    assert.equal(row.payload.title,"Event staff invite");
+    assert.equal(row.payload.data.type,"event_co_organizer_invited");
+    assert.equal(row.payload.data.entityId,inviteId);
+    assert.equal(row.payload.data.url,"/feed/activity");
+    assert.equal(row.options.vapidDetails.privateKey,"fixture-priv");
+  }
+  assert.equal(f.warnings.length,0);
+});
+
+test("one push channel cannot suppress the other or undo a staff invitation", async () => {
+  for(const settings of [{keys:false},{webFailure:true},{expoStatus:503}]){
+    const f=fixture({tokens:[webToken,nativeToken],...settings});
+    const original=f.pending();
+    assert.equal((await f.invite()).status,200);
+    assert.equal(f.pending(),original+1);
+    assert.equal(f.pushes.some(row=>row.channel==="expo"),true);
+    assert.equal(f.pushes.some(row=>row.channel==="web"),settings.keys!==false);
+    assert.deepEqual(f.warnings,["[invite-co-organizer] push failed (non-fatal)"]);
+  }
+  const f=fixture({tokens:[webToken,nativeToken]});
+  assert.equal((await f.invite("other")).status,403);
+  assert.deepEqual(f.pushes,[]);
+});
+
+test("staff and co-host invites reject missing accounts and orphaned profiles before any write", async () => {
+  for (const role of ["scanner", "editor", "admin"]) {
+    const f = fixture();
+    f.db.user = f.db.user.filter(row => row.id !== "invitee");
+    const before = JSON.stringify(f.db);
+    assert.equal((await f.invite("inviter","absent",role)).status,404);
+    assert.equal((await f.invite("inviter","guest",role)).status,404);
+    assert.equal(JSON.stringify(f.db),before);
+    assert.equal(f.pushes.length,0);
+  }
+});
+test("the existing-account co-host path still works for literal usernames with underscores", async () => {
+  const f = fixture();
+  f.db.users[0].username = "staff_member";
+  assert.equal((await f.invite("inviter","STAFF_MEMBER","admin")).status,200);
+  assert.equal(f.db.event_co_organizers[0].role,"admin");
+  assert.equal(f.db.event_co_organizers[0].accepted,false);
+});
+test("account lookup errors leave staff membership and notifications untouched", async () => {
+  const f = fixture({accountReadFails:true});
+  const before = JSON.stringify(f.db);
+  assert.equal((await f.invite()).status,503);
+  assert.equal(JSON.stringify(f.db),before);
 });

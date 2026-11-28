@@ -10,6 +10,6 @@ const EventStaffScreen = dynamic(
   { ssr: false },
 );
 
-export function StaffClient({ staffEmailEnabled }: { staffEmailEnabled: boolean }) {
-  return <EventStaffScreen staffEmailEnabled={staffEmailEnabled} />;
+export function StaffClient() {
+  return <EventStaffScreen />;
 }

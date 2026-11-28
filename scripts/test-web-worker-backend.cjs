@@ -150,3 +150,94 @@ test('service worker makes no mutation when local configuration is missing, malf
     assert.deepEqual(calls, ['/api/pwa/backend']);
   }
 });
+
+function loadClickWorker(clients, fetch = () => assert.fail('Unexpected decline request')) {
+  const listeners = new Map();
+  const filename = path.join(root, 'apps/web/public/sw.js');
+  vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
+    self: {
+      addEventListener: (name, callback) => listeners.set(name, callback),
+      clients,
+      location: { href: 'https://dvnt.test/sw.js' },
+    },
+    fetch, URL, AbortSignal,
+  }, { filename });
+  return (data, action = '') => {
+    let pending;
+    let closed = false;
+    listeners.get('notificationclick')({
+      action, notification: { data, close() { closed = true; } },
+      waitUntil(value) { pending = value; },
+    });
+    assert.equal(closed, true);
+    assert.equal(typeof pending?.then, 'function');
+    return pending;
+  };
+}
+
+const activity = { type: 'staff_invite', url: '/feed/activity' };
+
+test('staff notification waits for existing-window navigation and focuses the returned client', async () => {
+  let finishNavigation;
+  const actions = [];
+  const navigation = new Promise(resolve => { finishNavigation = resolve; });
+  const original = {
+    url: 'https://dvnt.test/feed',
+    navigate(target) { actions.push(['navigate', target]); return navigation; },
+    focus() { actions.push(['focus', 'original']); return Promise.resolve(this); },
+  };
+  const destination = { focus() { actions.push(['focus', 'destination']); } };
+  const click = loadClickWorker({
+    matchAll: async options => {
+      actions.push(['include uncontrolled', options.includeUncontrolled === true]);
+      return [original];
+    },
+    openWindow: async () => assert.fail('A controlled window navigated successfully'),
+  })(activity);
+  let settled = false;
+  click.then(() => { settled = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  const snapshot = [[...actions], settled];
+  finishNavigation(destination);
+  await click;
+  assert.deepEqual(snapshot, [[['include uncontrolled', false], ['navigate', '/feed/activity']], false]);
+  assert.deepEqual(actions.at(-1), ['focus', 'destination']);
+});
+
+test('staff notification falls back to opening Activity if navigation is rejected or returns null', async () => {
+  for (const nav of [() => null, () => { throw new Error('Cannot navigate'); }]) {
+    const calls = [];
+    await loadClickWorker({
+      matchAll: async () => [{
+        url: 'https://dvnt.test/feed', navigate: nav,
+        focus: async () => { calls.push('focused wrong page'); },
+      }],
+      openWindow: async url => { calls.push(url); },
+    })(activity);
+    assert.deepEqual(calls, ['/feed/activity']);
+  }
+});
+
+test('notification focuses an existing Activity window without reloading or opening another', async () => {
+  let focused = 0;
+  await loadClickWorker({
+    matchAll: async () => [{
+      url: 'https://dvnt.test/feed/activity',
+      navigate: () => assert.fail('Already at target'),
+      focus: async () => { focused++; },
+    }],
+    openWindow: async () => assert.fail('Already at target'),
+  })(activity);
+  assert.equal(focused, 1);
+});
+
+test('cold staff click opens Activity; cold call accept still opens its call route', async () => {
+  const opened = [];
+  const click = loadClickWorker({
+    matchAll: async () => [],
+    openWindow: async url => { opened.push(url); },
+  });
+  await click(activity);
+  await click({ type: 'call', roomId: 'room-3', url: '/elsewhere' }, 'accept');
+  assert.deepEqual(opened, ['/feed/activity', '/feed/call/room-3']);
+});
