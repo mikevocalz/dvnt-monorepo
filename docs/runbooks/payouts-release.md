@@ -67,3 +67,25 @@ balances), and Stripe account capabilities. Existing durable claim/intent and
 prior settlement guards remain intact. Do not requeue an existing generic hold
 or configure this exception as a workaround for those checks. Deployment,
 configuration, migration, reconciliation and fund movement are outside this PR.
+
+### Promoter scheduling in the integrated draft (not live)
+
+A reviewed event can opt in to promoter eligibility at local midnight on the
+second business date after its explicit, reviewed end. Count weekdays, excluding
+reviewed observed holidays and other closed dates; the calendar must cover the
+full span. The organizer keeps its existing release window and cannot claim
+while any promoter obligation for the event remains unresolved. The transfer
+worker still requires verified source, funding, fulfillment, recipient capability
+and no applicable hold. Eligibility is not a bank deposit guarantee.
+
+An opt-in applies only where the event starts and the original checkout is
+created on or after the reviewed effective timestamp. No policies are seeded.
+A changed end time, revoked review or incomplete calendar does not open the
+promoter window. A later reviewed date can delay a frozen window; an earlier
+one cannot accelerate it. An explicit later payout floor remains respected.
+A replacement does not opt an older checkout in or remove its frozen floor.
+
+Do not populate legacy `events.payout_release_at` to backfill promoter dates.
+Historical reconciliation is separate: dry-run exact unpaid obligations,
+exclude verified external payments, and keep held events out. Neither this
+draft nor its tests enable production payouts or migrate historical rows.

@@ -71,23 +71,27 @@ CREATE FUNCTION public.settlement_health() RETURNS jsonb LANGUAGE sql SECURITY D
  'last_error_at',c.last_worker_error_at,'last_summary',c.last_worker_summary,
  'worker_never_completed',c.last_worker_completed_at IS NULL,
  'oldest_due_at',(SELECT min(due_at) FROM (
-  SELECT greatest(s.release_at,coalesce(dvnt_settlement.event_release_at(o.event_id),s.release_at)) AS due_at
+  SELECT dvnt_settlement.allocation_release_at(o.id,a.role,
+   greatest(s.release_at,dvnt_settlement.event_release_at(o.event_id))) AS due_at
   FROM dvnt_settlement.orders s JOIN public.orders o ON o.id=s.order_id
   JOIN dvnt_settlement.allocations a ON a.order_id=s.order_id JOIN dvnt_settlement.deliveries d ON d.allocation_id=a.id
   WHERE d.state IN ('held','reserved','uncertain') AND a.amount_cents>0
    AND NOT (a.role='promoter' AND dvnt_settlement.promoter_obligation_satisfied(a.id))
   UNION ALL
-  SELECT greatest(c.release_not_before,coalesce(dvnt_settlement.event_release_at(o.event_id),c.release_not_before))
+  SELECT least(greatest(c.release_not_before,dvnt_settlement.event_release_at(o.event_id)),
+   dvnt_settlement.checkout_promoter_release_at(o.event_id,c.promoter_release_not_before,c.created_at))
   FROM dvnt_settlement.checkouts c JOIN public.orders o ON o.id=c.order_id
   WHERE o.status IN ('paid','partially_refunded','refunded','disputed')
    AND NOT EXISTS(SELECT 1 FROM dvnt_settlement.orders s WHERE s.order_id=c.order_id)
  ) obligations WHERE due_at<=now()),
  -- Separate operational observation: a provider outcome is unknown, not a
  -- declaration that payment or a debt exists. Future events remain quiet.
- 'oldest_checkout_outcome_unknown_at',(SELECT min(greatest(c.outcome_unknown_since,c.release_not_before,dvnt_settlement.event_release_at(o.event_id)))
+ 'oldest_checkout_outcome_unknown_at',(SELECT min(greatest(c.outcome_unknown_since,least(greatest(c.release_not_before,dvnt_settlement.event_release_at(o.event_id)),
+   dvnt_settlement.checkout_promoter_release_at(o.event_id,c.promoter_release_not_before,c.created_at))))
   FROM dvnt_settlement.checkouts c JOIN public.orders o ON o.id=c.order_id
   WHERE c.outcome_unknown_since IS NOT NULL AND c.retired_at IS NULL
-   AND greatest(c.release_not_before,dvnt_settlement.event_release_at(o.event_id))<=now()
+   AND least(greatest(c.release_not_before,dvnt_settlement.event_release_at(o.event_id)),
+    dvnt_settlement.checkout_promoter_release_at(o.event_id,c.promoter_release_not_before,c.created_at))<=now()
    AND NOT EXISTS(SELECT 1 FROM dvnt_settlement.orders s WHERE s.order_id=c.order_id)),
  'blocked_order_count',(SELECT count(*) FROM dvnt_settlement.checkouts WHERE last_error IS NOT NULL),
  'onboarding_or_account_blocked',(SELECT count(*) FROM dvnt_settlement.deliveries WHERE last_error IN ('onboarding_required','recipient_restricted')),

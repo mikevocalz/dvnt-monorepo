@@ -219,7 +219,7 @@ export async function processSettlementOrder(db:SettlementDatabase,provider:Sett
  const allocations=[...(fresh.allocations||[])].sort((a:any,b:any)=>
   (a.role==='promoter'?0:1)-(b.role==='promoter'?0:1));
  for(const a of allocations) {
-  if(a.state!=='held'||a.obligation_satisfied===true)continue;
+  if(a.state!=='held'||a.obligation_satisfied===true||a.release_due===false)continue;
   const destination=a.candidate_destination;
   try {
    if(a.role==='organizer') {

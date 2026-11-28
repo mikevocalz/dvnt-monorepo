@@ -6,7 +6,7 @@ vm.runInNewContext(ts.transpileModule(readFileSync(resolve(root,'apps/mobile/sup
 const {processSettlementOrder}=exportsObject;
 const {sourceSchemaSql}=require('./fixtures/settlement/replacement-source-schema.cjs');
 const {issuePaidOrder,fixtureTier}=require('./fixtures/settlement/issuance.cjs');
-async function setup({link=true,onboard=true,defaultGrants=false,issue=true,installGate=true}={}){
+async function setup({link=true,onboard=true,defaultGrants=false,issue=true,installGate=true,beforePrepare}={}){
  const pg=new PGlite();
  await pg.exec(readFileSync(resolve(root,'scripts/fixtures/settlement/schema.sql'),'utf8'));
  if(defaultGrants)await pg.exec('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon,authenticated,service_role; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon,authenticated,service_role');
@@ -23,6 +23,7 @@ async function setup({link=true,onboard=true,defaultGrants=false,issue=true,inst
  await pg.exec("insert into dvnt_settlement.funding_policy values(true,'acct_platform_fixture',false,0,'synthetic fixture only'); update dvnt_settlement.controls set checkout_enabled=true,transfers_enabled=true,release_delay_seconds=86400; insert into dvnt_settlement.currency_reserves values('usd',0,'synthetic fixture only')");
  if(onboard)await pg.exec("update event_promoters set stripe_account_id='acct_promoter'");
  const snapshot={rail:'create-payment-intent',selection:{ticket_type_id:fixtureTier},order:{user_id:'fixture-buyer',event_id:1,quantity:1,currency:'usd',total_cents:11000,subtotal_cents:10000,organizer_fee_cents:500,platform_fee_cents:1000,dvnt_total_fee_cents:1000,promoter_code:'FIXTURE',promoter_commission_amount_cents:1000,promoter_commission_bps:1000,promoter_customer_discount_bps:0}};
+ if(beforePrepare)await beforePrepare(pg);
  const p=await call('prepare_settlement_checkout',{p_snapshot:snapshot,p_request_key:'fixture-request-engine'});
  await call('claim_settlement_checkout',{p_order_id:p.order_id,p_params:{amount:'11000'}});
  if(link)await call('finalize_settlement_checkout',{p_order_id:p.order_id,p_payment_intent_id:'pi_fixture',p_checkout_session_id:null});
@@ -94,3 +95,37 @@ test('legacy v1 recipient rejected by v2 stays held with no fallback, reservatio
  assert.equal(reads.some(p=>p.startsWith('/v1/accounts')),false);assert.equal(calls.includes('settlement_reserve'),false);
  assert.equal(f.requests.filter(r=>r[0]==='POST').length,0);assert.equal(f.transfers.length,0);
 }finally{await f.pg.close()}});
+
+test('worker discovers day-two promoter only, honors the event hold, and pays organizer only at its own release',async()=>{
+ const f=await setup({beforePrepare:pg=>pg.exec(`
+   UPDATE events SET end_date=(current_date-4)::timestamp AT TIME ZONE 'UTC',
+     start_date=(current_date-5)::timestamp AT TIME ZONE 'UTC',payout_release_at=NULL;
+   INSERT INTO dvnt_settlement.promoter_release_policies
+   SELECT id,now()-interval '20 days',end_date,'UTC',current_date-20,current_date+20,
+     '{}'::date[],'synthetic timing review' FROM events;
+ `)});
+ try{
+  await f.run(false); // Source can be verified independently of either payee's release.
+  const candidate=await f.candidate();
+  const promoter=candidate.allocations.find(a=>a.role==='promoter');
+  const organizer=candidate.allocations.find(a=>a.role==='organizer');
+  assert.equal(promoter.release_due,true);assert.equal(organizer.release_due,false);
+  assert.ok((await f.call('settlement_candidates',{p_limit:10})).some(o=>o.order_id===f.p.order_id));
+  await f.pg.exec("update events set end_date=end_date+interval '1 hour'");
+  await f.run();assert.equal(f.transfers.length,0);
+  assert.equal((await f.candidate()).allocations.find(a=>a.role==='promoter').release_due,false);
+  await f.pg.exec("update events set end_date=end_date-interval '1 hour'");
+  await f.pg.exec("update events set payout_status='on_hold'");
+  await f.run();assert.equal(f.transfers.length,0);
+  await f.pg.exec("update events set payout_status='pending'");
+  await f.run();assert.deepEqual(f.transfers.map(t=>t.destination),['acct_promoter']);
+  assert.equal((await f.call('settlement_candidates',{p_limit:10})).length,0);
+  // Move only the test clock's organizer floor into the past; the normal
+  // worker still performs all provider evidence and priority checks.
+  await f.pg.exec(`CREATE OR REPLACE FUNCTION dvnt_settlement.event_release_at(p_event int) RETURNS timestamptz
+   LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$ SELECT now()-interval '1 hour' $$;
+   UPDATE dvnt_settlement.checkouts SET release_not_before=now()-interval '1 hour';
+   UPDATE dvnt_settlement.orders SET release_at=now()-interval '1 hour'`);
+  await f.run();await f.run();assert.deepEqual(f.transfers.map(t=>t.destination),['acct_promoter','acct_host']);
+ }finally{await f.pg.close();}
+});

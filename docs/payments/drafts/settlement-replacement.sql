@@ -477,9 +477,10 @@ BEGIN
    SELECT successor.id,id,coalesce(rev_share_bps,0),customer_discount_bps,promoter_commission_bps,
     successor.promoter_discount_amount_cents,successor.promoter_commission_amount_cents FROM public.event_promoters WHERE id=successor.promoter_id;
   END IF;
-  INSERT INTO dvnt_settlement.checkouts(order_id,request_scope,snapshot,release_not_before,organizer_user_id,promoter_id,promoter_user_id)
-   VALUES(successor.id,'replacement:'||original.id::text,fresh,dvnt_settlement.event_release_at(original.event_id),parent_c.organizer_user_id,
-    parent_c.promoter_id,parent_c.promoter_user_id) RETURNING * INTO checkout;
+  INSERT INTO dvnt_settlement.checkouts(order_id,request_scope,snapshot,release_not_before,promoter_release_not_before,organizer_user_id,promoter_id,promoter_user_id)
+   VALUES(successor.id,'replacement:'||original.id::text,fresh,
+    greatest(parent_c.release_not_before,dvnt_settlement.event_release_at(original.event_id)),
+    parent_c.promoter_release_not_before,parent_c.organizer_user_id,parent_c.promoter_id,parent_c.promoter_user_id) RETURNING * INTO checkout;
   INSERT INTO dvnt_settlement.checkout_replacements(original_order_id,successor_order_id,quote_id,proof,original_cart_id,successor_cart_id,line_map)
    VALUES(original.id,successor.id,q.id,proof,original.cart_id,new_cart,line_map);
   -- Outstanding/unknown provider outcomes retain inventory indefinitely.

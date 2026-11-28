@@ -152,6 +152,11 @@ $$;
 
 -- No release/unblock API in this foundation: release and funds verification
 -- must be built and audited before any integration can enable transfers.
+-- Integrated runtime replaces this default with a role-aware calculation.
+CREATE FUNCTION dvnt_settlement.allocation_release_at(p_order uuid,p_role text,p_organizer_at timestamptz)
+RETURNS timestamptz LANGUAGE sql STABLE SET search_path='' AS $$ SELECT p_organizer_at $$;
+REVOKE ALL ON FUNCTION dvnt_settlement.allocation_release_at(uuid,text,timestamptz)
+ FROM PUBLIC,anon,authenticated,service_role;
 CREATE FUNCTION dvnt_settlement.reserve(p_allocation uuid, p_destination text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE a dvnt_settlement.allocations%ROWTYPE; o dvnt_settlement.orders%ROWTYPE;
@@ -163,7 +168,7 @@ BEGIN
   SELECT * INTO STRICT o FROM dvnt_settlement.orders WHERE order_id=a.order_id FOR UPDATE;
   SELECT * INTO STRICT d FROM dvnt_settlement.deliveries WHERE allocation_id=a.id FOR UPDATE;
   IF NOT (SELECT transfers_enabled FROM dvnt_settlement.controls WHERE singleton)
-    OR o.blocked OR o.release_at > now() OR EXISTS(SELECT 1 FROM dvnt_settlement.holds WHERE order_id=o.order_id)
+    OR o.blocked OR dvnt_settlement.allocation_release_at(o.order_id,a.role,o.release_at)>now() OR EXISTS(SELECT 1 FROM dvnt_settlement.holds WHERE order_id=o.order_id)
     OR NOT EXISTS(SELECT 1 FROM public.orders WHERE id=a.order_id AND status='paid'
       AND charge_model='separate_charges_and_transfers') THEN
     RAISE EXCEPTION 'settlement held';

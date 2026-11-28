@@ -25,7 +25,8 @@ CREATE TABLE dvnt_settlement.checkouts (
  -- Scheduling/observation only. None of these fields reduces a liability.
  outcome_unknown_since timestamptz, reconciliation_attempts int NOT NULL DEFAULT 0 CHECK(reconciliation_attempts BETWEEN 0 AND 20),
  next_check_at timestamptz, retired_at timestamptz,
- last_error text, last_checked_at timestamptz, release_not_before timestamptz NOT NULL, organizer_user_id text NOT NULL, promoter_id uuid, promoter_user_id text
+ last_error text, last_checked_at timestamptz, release_not_before timestamptz NOT NULL,
+ promoter_release_not_before timestamptz, organizer_user_id text NOT NULL, promoter_id uuid, promoter_user_id text
 );
 ALTER TABLE dvnt_settlement.checkouts ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON dvnt_settlement.checkouts FROM PUBLIC,anon,authenticated,service_role;
@@ -117,7 +118,8 @@ BEGIN
   UPDATE dvnt_settlement.checkouts SET outcome_unknown_since=NULL,reconciliation_attempts=attempts,
    retired_at=CASE WHEN retire THEN now() ELSE NULL END,
    next_check_at=least(now()+make_interval(secs=>least(21600,300*power(2,least(attempts-1,7)))::int),
-    greatest(now(),greatest(c.release_not_before,dvnt_settlement.event_release_at(o.event_id)))+interval '1 hour')
+    greatest(now(),least(greatest(c.release_not_before,dvnt_settlement.event_release_at(o.event_id)),
+     dvnt_settlement.checkout_promoter_release_at(o.event_id,c.promoter_release_not_before,c.created_at)))+interval '1 hour')
    WHERE order_id=p_order_id;
  END IF;
  RETURN jsonb_build_object('ok',true,'retired',retire);
@@ -269,7 +271,10 @@ BEGIN
    VALUES(o.id,promoter.id,coalesce(promoter.rev_share_bps,0),promoter.customer_discount_bps,promoter.promoter_commission_bps,
     o.promoter_discount_amount_cents,o.promoter_commission_amount_cents);
   END IF;
-  INSERT INTO dvnt_settlement.checkouts(order_id,request_scope,snapshot,release_not_before,organizer_user_id,promoter_id,promoter_user_id) VALUES(o.id,scope,p_snapshot,release_at,host,promoter.id,promoter.user_id) RETURNING * INTO c;
+  INSERT INTO dvnt_settlement.checkouts(order_id,request_scope,snapshot,release_not_before,promoter_release_not_before,organizer_user_id,promoter_id,promoter_user_id)
+   VALUES(o.id,scope,p_snapshot,release_at,
+    CASE WHEN o.promoter_commission_amount_cents>0 THEN dvnt_settlement.freeze_promoter_release_at(o.event_id,now()) END,
+    host,promoter.id,promoter.user_id) RETURNING * INTO c;
  END IF;
  RETURN jsonb_build_object('ok',true,'order_id',o.id,'charge_model',o.charge_model,
   'idempotency_key','dvnt:checkout:v1:'||o.id::text,'created_at',c.created_at,
@@ -331,14 +336,15 @@ BEGIN
     CASE WHEN EXISTS(SELECT 1 FROM dvnt_settlement.allocations a JOIN dvnt_settlement.deliveries d ON d.allocation_id=a.id
       WHERE a.order_id=o.id AND d.state IN ('reserved','uncertain','recovery_required')) THEN 1
      WHEN s.order_id IS NOT NULL THEN 2
-     WHEN greatest(c.release_not_before,r.release_at)<=now()
+     WHEN least(greatest(c.release_not_before,r.release_at),
+       dvnt_settlement.checkout_promoter_release_at(o.event_id,c.promoter_release_not_before,c.created_at))<=now()
       AND (c.outcome_unknown_since IS NOT NULL OR o.status IN ('paid','partially_refunded','refunded','disputed')) THEN 3 ELSE 4 END AS bucket
    FROM dvnt_settlement.checkouts c JOIN public.orders o ON o.id=c.order_id LEFT JOIN dvnt_settlement.orders s ON s.order_id=o.id JOIN releases r ON r.id=o.event_id
    WHERE o.charge_model='separate_charges_and_transfers' AND c.attempted_at IS NOT NULL
     AND ((s.order_id IS NULL AND c.retired_at IS NULL AND (c.next_check_at IS NULL OR c.next_check_at<=now()))
      OR EXISTS(SELECT 1 FROM dvnt_settlement.allocations a JOIN dvnt_settlement.deliveries d ON d.allocation_id=a.id
       WHERE a.order_id=o.id AND (d.state IN ('reserved','uncertain','recovery_required')
-       OR (d.state='held' AND greatest(s.release_at,r.release_at)<=now()
+       OR (d.state='held' AND dvnt_settlement.allocation_release_at(o.id,a.role,greatest(s.release_at,r.release_at))<=now()
         AND NOT (a.role='promoter' AND dvnt_settlement.promoter_obligation_satisfied(a.id))))))
   ), ranked AS (
    SELECT *,row_number() OVER(PARTITION BY bucket ORDER BY last_checked_at NULLS FIRST,created_at,order_id) AS rank FROM eligible
@@ -359,6 +365,8 @@ BEGIN
   coalesce((SELECT jsonb_agg(jsonb_build_object('id',a.id,'role',a.role,'recipient_id',a.recipient_id,'recipient_user_id',a.recipient_user_id,
    'amount_cents',a.amount_cents,'state',d.state,'destination',d.destination,'stripe_transfer_id',d.stripe_transfer_id,
    'idempotency_key',d.idempotency_key,'charge_id',s.charge_id,'currency',s.currency,
+   'release_due',dvnt_settlement.allocation_release_at(o.id,a.role,
+    greatest(s.release_at,c.release_not_before,dvnt_settlement.event_release_at(e.id)))<=now(),
    'obligation_satisfied',CASE WHEN a.role='promoter' THEN dvnt_settlement.promoter_obligation_satisfied(a.id) ELSE false END,
    'candidate_destination',CASE WHEN a.role='organizer' THEN
      (SELECT oa.stripe_account_id FROM public.organizer_accounts oa WHERE oa.host_id=a.recipient_id LIMIT 1)
@@ -419,14 +427,18 @@ DECLARE a dvnt_settlement.allocations%ROWTYPE; o public.orders%ROWTYPE;
 BEGIN
  SELECT * INTO STRICT a FROM dvnt_settlement.allocations WHERE id=p_allocation;
  SELECT * INTO STRICT o FROM public.orders WHERE id=a.order_id FOR UPDATE;
- SELECT * INTO STRICT e FROM public.events WHERE id=o.event_id;
+ SELECT * INTO STRICT e FROM public.events WHERE id=o.event_id FOR SHARE NOWAIT;
  SELECT * INTO STRICT c FROM dvnt_settlement.checkouts WHERE order_id=o.id;
  -- Global budget mutex serializes reservations against the caller's verified
  -- balance snapshot. Uncertain/reserved amounts remain fully reserved.
  PERFORM 1 FROM dvnt_settlement.controls WHERE singleton FOR UPDATE;
  IF e.status IN ('cancelled','canceled') OR e.payout_status='disabled' OR EXISTS(SELECT 1 FROM dvnt_settlement.event_stops WHERE event_id=e.id AND reason<>'dispute_only')
  OR (e.payout_status='on_hold' AND NOT(c.organizer_user_id=ANY(ARRAY(SELECT unnest(owner_host_ids) FROM dvnt_settlement.controls WHERE singleton)) AND EXISTS(SELECT 1 FROM dvnt_settlement.event_stops WHERE event_id=e.id AND reason='dispute_only'))) THEN RAISE EXCEPTION 'event dispute or operational hold'; END IF;
- IF greatest(c.release_not_before,dvnt_settlement.event_release_at(e.id))>now() THEN RAISE EXCEPTION 'release window pending'; END IF;
+ IF a.role='promoter' AND c.promoter_release_not_before IS NOT NULL THEN
+  PERFORM 1 FROM dvnt_settlement.promoter_release_policies WHERE event_id=e.id FOR SHARE NOWAIT;
+ END IF;
+ IF dvnt_settlement.allocation_release_at(o.id,a.role,
+  greatest(c.release_not_before,dvnt_settlement.event_release_at(e.id)))>now() THEN RAISE EXCEPTION 'release window pending'; END IF;
  IF NOT EXISTS(SELECT 1 FROM dvnt_settlement.checkouts WHERE order_id=o.id AND source_verified_at>now()-interval '60 seconds') THEN
   RAISE EXCEPTION 'source verification stale'; END IF;
  IF a.role='organizer' THEN SELECT stripe_account_id INTO expected FROM public.organizer_accounts WHERE host_id=a.recipient_id;
