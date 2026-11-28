@@ -27,24 +27,33 @@ function maskEmail(email: string): string {
 
 // ─── URL Redaction ───────────────────────────────────────────────────────────
 
+/** URL fragments are never useful telemetry, and may be bearer credentials.
+ * Relative navigation URLs and mixed-case/encoded query keys are included. */
 function redactUrl(url: string): string {
   try {
-    const parsed = new URL(url);
-    // Remove query params that look sensitive
-    const sensitiveParams = ['token', 'key', 'secret', 'signature', 'sig', 'auth'];
-    for (const param of sensitiveParams) {
-      if (parsed.searchParams.has(param)) {
+    const absolute = /^https?:\/\//i.test(url);
+    const parsed = new URL(url, 'https://telemetry.invalid');
+    parsed.hash = '';
+    for (const param of [...parsed.searchParams.keys()]) {
+      if (/token|secret|password|signature|authorization|^(key|sig|auth)$/i.test(param)) {
         parsed.searchParams.set(param, REDACTED);
       }
     }
-    // Redact signed storage URLs
     if (parsed.hostname.includes('supabase') && parsed.searchParams.has('token')) {
       return `${parsed.origin}${parsed.pathname}?[SIGNED_URL_REDACTED]`;
     }
-    return parsed.toString();
-  } catch {
-    return url;
+    return absolute ? parsed.toString() : parsed.pathname + parsed.search;
+  } catch { return REDACTED; }
+}
+
+/** Also covers URL text embedded in exception messages/recording metadata. */
+function redactString(value: string): string {
+  if (/["']?(?:recovery[_-]?session|capability|access[_-]?token|refresh[_-]?token|token|client[_-]?secret)["']?\s*[:=]/i.test(value)) return REDACTED;
+  if (/(?:[?#&]|%23|%3f|%26)(?:[^=\s&]*token|[^=\s&]*secret|password|signature|authorization|key|sig|auth)(?:=|%3d)/i.test(value)) {
+    return REDACTED;
   }
+  if (/^(https?:\/\/|\/|#|\?)/i.test(value) && /[?#]/.test(value)) return redactUrl(value);
+  return value.replace(/https?:\/\/[^\s<>"']+/gi, (url) => redactUrl(url));
 }
 
 // ─── Key-Level Redaction ─────────────────────────────────────────────────────
@@ -53,7 +62,7 @@ function isSensitiveKey(key: string): boolean {
   if (REDACTED_KEYS.has(key)) return true;
   const lower = key.toLowerCase();
   // Exact match patterns — avoid false positives on container keys like 'tokens'
-  return lower.includes('password') ||
+  return /recovery.?session|capability/.test(lower) || lower.includes('password') ||
     (lower.includes('token') && lower !== 'tokens') ||
     lower.includes('secret') ||
     lower.includes('authorization') ||
@@ -100,13 +109,8 @@ export function sanitizeValue(key: string, value: unknown, depth = 0): unknown {
   if (isSensitiveKey(key)) return REDACTED;
 
   if (typeof value === 'string') {
-    if (value.length > MAX_STRING_LENGTH) return value.slice(0, MAX_STRING_LENGTH) + '…[TRUNCATED]';
-    // Redact URLs that look like signed storage URLs
-    if ((value.startsWith('http://') || value.startsWith('https://')) &&
-        (value.includes('token=') || value.includes('X-Amz-Signature'))) {
-      return redactUrl(value);
-    }
-    return value;
+    const clean = redactString(value);
+    return clean.length > MAX_STRING_LENGTH ? clean.slice(0, MAX_STRING_LENGTH) + '…[TRUNCATED]' : clean;
   }
 
   if (typeof value === 'number' || typeof value === 'boolean') return value;
@@ -149,7 +153,7 @@ export function sanitizeHeaders(headers: Record<string, string>): Record<string,
     if (sensitiveHeaders.has(key.toLowerCase())) {
       result[key] = REDACTED;
     } else {
-      result[key] = value;
+      result[key] = redactString(value);
     }
   }
   return result;
@@ -262,12 +266,11 @@ export function createBeforeSend(options?: BeforeSendOptions) {
 
     // Sanitize request data
     if (event.request) {
+      if (typeof event.request.url === 'string') event.request.url = redactString(event.request.url);
       if (event.request.headers) {
         event.request.headers = sanitizeHeaders(event.request.headers);
       }
-      if (event.request.data && typeof event.request.data === 'object') {
-        event.request.data = sanitizeForSentry(event.request.data);
-      }
+      if (event.request.data) event.request.data = sanitizeValue('requestData', event.request.data);
       if (event.request.cookies) {
         event.request.cookies = REDACTED;
       }
@@ -279,7 +282,7 @@ export function createBeforeSend(options?: BeforeSendOptions) {
         if (crumb.data && typeof crumb.data === 'object') {
           crumb.data = sanitizeForSentry(crumb.data);
         }
-        return crumb;
+        return sanitizeForSentry(crumb);
       });
     }
 
@@ -301,6 +304,13 @@ export function createBeforeSend(options?: BeforeSendOptions) {
       event.user.email = maskEmail(event.user.email);
     }
 
+    if (typeof event.message === 'string') event.message = redactString(event.message);
+    if (event.exception?.values) event.exception.values = event.exception.values.map((value: any) => ({
+      ...value, value: typeof value.value === 'string' ? redactString(value.value) : value.value,
+      ...(value.stacktrace ? {stacktrace: {...value.stacktrace, frames: value.stacktrace.frames?.map((frame: any) => ({...frame,
+        filename: typeof frame.filename === 'string' ? redactString(frame.filename) : frame.filename,
+        abs_path: typeof frame.abs_path === 'string' ? redactString(frame.abs_path) : frame.abs_path}))}} : {}),
+    }));
     return event;
   };
 }
@@ -309,12 +319,15 @@ export function createBeforeSend(options?: BeforeSendOptions) {
 
 export function createBeforeSendTransaction() {
   return function beforeSendTransaction(event: any): any {
+    if (event.request) event.request = sanitizeForSentry(event.request);
+    if (typeof event.transaction === 'string') event.transaction = redactString(event.transaction);
     // Strip sensitive span data
     if (event.spans) {
       event.spans = event.spans.map((span: any) => {
         if (span.data && typeof span.data === 'object') {
           span.data = sanitizeForSentry(span.data);
         }
+        if (typeof span.description === 'string') span.description = redactString(span.description);
         return span;
       });
     }

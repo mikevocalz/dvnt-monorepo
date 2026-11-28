@@ -18,13 +18,14 @@ function harness(actor, membership, status = 'published') {
         if (table === 'events' && !call.update) data = { id: 42, host_id: 'owner', status, title: 'Fixture' };
         if (table === 'event_co_organizers') data = membership && call.filters.every(([key, value]) =>
           Array.isArray(value) ? value.includes(membership[key]) : membership[key] === value) ? membership : null;
-        if (table === 'orders') data = [{ id: 'order-fixture', status: 'paid', stripe_payment_intent_id: 'pi_fixture', total_cents: 1000 }];
+        if (table === 'orders') data = [{ id: 'order-fixture', status: 'paid', charge_model:'destination_charge', stripe_payment_intent_id: 'pi_fixture', total_cents: 1000 }];
         return Promise.resolve({ data, error: null }).then(resolve);
       },
     };
     for (const op of ['eq', 'neq', 'in', 'is', 'ilike']) q[op] = (key, value) => { call.filters.push([key, value]); return q; };
     return q;
   }};
+  const recovery={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(__dirname+'/../_shared/settlement-recovery.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:recovery,console,Date,Set,URLSearchParams,encodeURIComponent});
   const source = ts.transpileModule(fs.readFileSync(`${__dirname}/index.ts`, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -33,6 +34,7 @@ function harness(actor, membership, status = 'published') {
     fetch: async (url, options) => { refunds.push({ url, options }); return new Response(JSON.stringify({ id: 're_fixture' })); },
     Deno: { env: { get: () => 'fixture' }, serve: fn => { handler = fn; } },
     require: name => name.includes('supabase-js') ? { createClient: () => db }
+      : name.includes('settlement-recovery') ? recovery
       : name.includes('rate-limit') ? { checkRateLimit: () => ({ allowed: true }) }
       : name.includes('send-resend') ? { broadcast: () => ({}), sendResendEmail: async () => {} }
       : { verifySession: async () => actor, corsHeaders: () => ({}), optionsResponse: () => new Response(null, { status: 204 }) },

@@ -36,10 +36,12 @@ function harness(config = {}) {
       upsert: p => { payload = p; operation = 'upsert'; return q; },
       update: p => { payload = p; operation = 'update'; return q; },
       single: async () => result(), maybeSingle: async () => result(),
-      then: (resolve, reject) => Promise.resolve(result()).then(resolve, reject) };
+      then: (resolve, reject) => { const r = result(); if (table === 'orders' && !operation && r.data && !Array.isArray(r.data)) r.data = [r.data]; return Promise.resolve(r).then(resolve, reject); } };
     return q;
   }, async rpc(name, args) {
     calls.push({ name, args });
+    if (name === 'settlement_checkout_route') return Object.hasOwn(config,'checkoutRoute') ? config.checkoutRoute : {data:{ok:true,charge_model:'destination_charge'}};
+    if (name === 'lookup_settlement_checkout') return {data:{exists:false}};
     if (name === 'door_free_sale_atomic') return config.rpcError
       ? { error: { message: 'RPC unavailable' } }
       : { data: config.soldOut ? { ok: false } : { ok: true, order_id: 'order', tickets: args.p_ticket_rows } };

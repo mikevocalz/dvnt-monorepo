@@ -1,3 +1,4 @@
+import { executeSettlementRefund } from "../_shared/settlement-recovery.ts";
 /**
  * Buyer-Initiated Ticket Refund
  *
@@ -42,16 +43,19 @@ function json(data: unknown, status = 200) {
   });
 }
 
-async function stripeRefund(params: Record<string, string>): Promise<any> {
+async function stripeRefund(db: any, params: Record<string, string>): Promise<any> {
+  return executeSettlementRefund(db, params, undefined, async (params, refundKey) => {
   const res = await fetch("https://api.stripe.com/v1/refunds", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       "Content-Type": "application/x-www-form-urlencoded",
+      ...(refundKey ? { "Idempotency-Key": refundKey } : {}),
     },
     body: new URLSearchParams(params).toString(),
   });
   return res.json();
+  });
 }
 
 Deno.serve(withSentry("ticket-refund", async (req: Request) => {
@@ -234,7 +238,7 @@ Deno.serve(withSentry("ticket-refund", async (req: Request) => {
 
     let stripeRefundId: string | null = null;
     if (isPaid) {
-      const refund = await stripeRefund({
+      const refund = await stripeRefund(supabase, {
         payment_intent: ticket.stripe_payment_intent_id,
         amount: String(paidCents),
         reason: "requested_by_customer",

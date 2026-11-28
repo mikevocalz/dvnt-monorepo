@@ -1,3 +1,4 @@
+import { executeSettlementRefund } from "../_shared/settlement-recovery.ts";
 /**
  * event-cancel Edge Function — WS-9 cancel-with-auto-refund orchestrator.
  *
@@ -74,21 +75,24 @@ function json(data: unknown, status = 200, req?: Request) {
 }
 
 async function stripeRefund(
+  db: any,
   body: Record<string, string>,
   idempotencyKey: string,
 ): Promise<{ id?: string; status?: string; error?: any }> {
+  return executeSettlementRefund(db, body, idempotencyKey, async (body, refundKey) => {
   const res = await fetch("https://api.stripe.com/v1/refunds", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
       "Content-Type": "application/x-www-form-urlencoded",
-      "Idempotency-Key": idempotencyKey,
+      ...(refundKey ? { "Idempotency-Key": refundKey } : {}),
     },
     body: new URLSearchParams(body).toString(),
   });
   const data = await res.json();
   if (!res.ok) return { error: data?.error ?? data };
   return data;
+  });
 }
 
 /** Whole-PI already fully refunded is a success for our purposes. */
@@ -300,7 +304,7 @@ Deno.serve(async (req: Request) => {
 
       let refundId: string | null = null;
       if (pi && amount > 0) {
-        const result = await stripeRefund(
+        const result = await stripeRefund(supabase,
           {
             payment_intent: pi,
             refund_application_fee: "true",
@@ -400,7 +404,7 @@ Deno.serve(async (req: Request) => {
     }
     for (const pi of legacyPis) {
       if (legacyPiRefunds + batch.length >= ORDER_BATCH) break; // shared budget
-      const result = await stripeRefund(
+      const result = await stripeRefund(supabase,
         {
           payment_intent: pi,
           refund_application_fee: "true",

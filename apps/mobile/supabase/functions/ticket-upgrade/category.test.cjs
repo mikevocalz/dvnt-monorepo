@@ -6,6 +6,10 @@ const ts = require('typescript');
 const source = ts.transpileModule(fs.readFileSync(path.join(__dirname, 'index.ts'), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
+const routing = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../_shared/legacy-event-checkout-route.ts'), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: routing });
 function fixture({ ticket = {}, sourceTier = {}, targetTier = {}, actor = 'fixture-buyer', missingSource = false } = {}) {
   let handler;
   const calls = [], stripe = [], writes = [];
@@ -20,7 +24,11 @@ function fixture({ ticket = {}, sourceTier = {}, targetTier = {}, actor = 'fixtu
     stripe_customers: [{ user_id: 'fixture-buyer', stripe_customer_id: 'cus_synthetic' }],
   };
   const before = JSON.stringify(credential);
-  const db = { from(table) {
+  const db = { async rpc(name, args) {
+    assert.equal(name, 'settlement_checkout_route');
+    assert.deepEqual(JSON.parse(JSON.stringify(args)), { p_event_id: 7 });
+    return { data: { ok: true, charge_model: 'destination_charge' }, error: null };
+  }, from(table) {
     const predicates = [];
     const q = {
       select(columns) { calls.push({ table, columns }); return q; },
@@ -40,6 +48,7 @@ function fixture({ ticket = {}, sourceTier = {}, targetTier = {}, actor = 'fixtu
       return { json: async () => url.endsWith('/ephemeral_keys') ? { secret: 'synthetic-ephemeral' } : { id: 'pi_synthetic', client_secret: 'synthetic-secret' } };
     },
     require(name) {
+      if (name.endsWith('legacy-event-checkout-route.ts')) return routing;
       if (name.includes('supabase-js')) return { createClient: () => db };
       if (name.endsWith('verify-session.ts')) return { verifySession: async () => actor };
       if (name.endsWith('fee-calculator.ts')) return { computeFees: amount => ({ customer_charge_amount: amount + 100, buyer_fee: 100, fee_policy_version: 'fixture' }) };

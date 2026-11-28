@@ -1,6 +1,14 @@
 import * as Sentry from "@sentry/nextjs";
-import { createBeforeSend, createBeforeSendTransaction, isEventClamped } from "@dvnt/observability/sanitize";
+import { createBeforeSend, createBeforeSendTransaction, isEventClamped, sanitizeForSentry } from "@dvnt/observability/sanitize";
+import { captureRecoveryCapability, installRecoveryPrivacy, isRecoveryNavigation, markRecoveryNavigation, recoveryTelemetryBlocked } from "@dvnt/observability/recovery-privacy";
 import { dvntTracesSampler } from "@dvnt/observability/sampling";
+
+// Remove email bearer fragments before Sentry can inspect the initial URL.
+// A recovery document never records telemetry or replay, even after navigation.
+captureRecoveryCapability();
+installRecoveryPrivacy(() => { void Sentry.getReplay()?.stop(); });
+const beforeSend = createBeforeSend();
+const beforeSendTransaction = createBeforeSendTransaction();
 
 // Noise that must never spend quota (DVNT-WEB-A: Safari extension bridge).
 const IGNORED_ERROR_PATTERNS = [/webkit\.messageHandlers/];
@@ -22,7 +30,7 @@ function isLoggedOutLandingSession(): boolean {
 // Browser init — runs once per pageload (Next instrumentation-client convention).
 Sentry.init({
   // Opt-in local artifact verification only; rejected by next.config on Vercel.
-  enabled: process.env.NEXT_PUBLIC_DVNT_LOCAL_BUILD_ONLY !== "1",
+  enabled: process.env.NEXT_PUBLIC_DVNT_LOCAL_BUILD_ONLY !== "1" && !recoveryTelemetryBlocked(),
   // DSN is a publishable client key (same committed-fallback pattern as the
   // Supabase anon key) so a missing Vercel env var can't silently disable telemetry.
   dsn:
@@ -36,16 +44,18 @@ Sentry.init({
   // Structured logging — funnel logs (logs.ts). Verified: enableLogs,
   // @sentry/core options.d.ts:530.
   enableLogs: true,
-  integrations: [
+  integrations: recoveryTelemetryBlocked() ? [] : [
     // §2.4: full masking, no unmask lists.
     Sentry.replayIntegration({
       maskAllText: true,
       blockAllMedia: true,
+      networkCaptureBodies: false,
+      beforeAddRecordingEvent: (event) => recoveryTelemetryBlocked() ? null : sanitizeForSentry(event as unknown as Record<string, unknown>) as any,
       // Gate which errors may trigger an error-replay at all; returning false
       // skips replaysOnErrorSampleRate for that error
       // (verified: @sentry-internal/replay build/npm/types/types/replay.d.ts:186).
       beforeErrorSampling: (event) => {
-        if (isEventClamped(event)) return false;
+        if (recoveryTelemetryBlocked() || isEventClamped(event)) return false;
         const msg = String(event.exception?.values?.[0]?.value ?? event.message ?? "");
         if (IGNORED_ERROR_PATTERNS.some((p) => p.test(msg))) return false;
         if (isLoggedOutLandingSession()) return false;
@@ -69,9 +79,15 @@ Sentry.init({
   // Dropped by eventFiltersIntegration before any quota spend
   // (verified: @sentry/core build/types/types/options.d.ts:314).
   ignoreErrors: IGNORED_ERROR_PATTERNS,
-  beforeSend: createBeforeSend(),
-  beforeSendTransaction: createBeforeSendTransaction(),
+  beforeBreadcrumb: (breadcrumb) => recoveryTelemetryBlocked() ? null : sanitizeForSentry(breadcrumb as unknown as Record<string, unknown>),
+  beforeSend: (event, hint) => recoveryTelemetryBlocked() ? null : beforeSend(event, hint),
+  beforeSendTransaction: (event) => recoveryTelemetryBlocked() ? null : beforeSendTransaction(event),
+  beforeSendSpan: (span) => sanitizeForSentry(span as unknown as Record<string, unknown>) as any,
+  beforeSendLog: (log) => recoveryTelemetryBlocked() ? null : sanitizeForSentry(log as unknown as Record<string, unknown>) as any,
 });
 
 // App Router navigation transactions.
-export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
+export const onRouterTransitionStart: typeof Sentry.captureRouterTransitionStart = (...args) => {
+  if (isRecoveryNavigation(String(args[0]))) markRecoveryNavigation();
+  if (!recoveryTelemetryBlocked()) Sentry.captureRouterTransitionStart(...args);
+};

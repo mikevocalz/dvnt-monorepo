@@ -27,6 +27,7 @@
  *    metadata.type "event_ticket" + is_door_sale).
  */
 
+import { legacyEventCheckoutAllowed, LEGACY_EVENT_CHECKOUT_PAUSED } from "../_shared/legacy-event-checkout-route.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computeFeesWithMode } from "../_shared/fee-calculator.ts";
 import {
@@ -551,6 +552,10 @@ Deno.serve(withSentry("door-sell", async (req: Request) => {
     }
 
     if (!fees) throw new Error("Missing paid-sale fees");
+
+    if (!(await legacyEventCheckoutAllowed(supabase, event_id))) {
+      return json(LEGACY_EVENT_CHECKOUT_PAUSED, 409);
+    }
 
     // ── Paid: organizer account must be live ──────────────────────────
     const { data: organizer } = await supabase

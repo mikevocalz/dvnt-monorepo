@@ -616,11 +616,20 @@ verify_jwt = false
 [functions.post-media-lease]
 verify_jwt = false
 
+# Internal worker authenticates SETTLEMENT_WORKER_SECRET. No schedule installed.
+[functions.settlements-process]
+verify_jwt = false
+
 # Better Auth opaque-session validation is mandatory inside these handlers.
-# This is NOT an unauthenticated payment or administration surface.
 [functions.record-external-promoter-payment]
 verify_jwt = false
 [functions.report-external-promoter-payment]
 verify_jwt = false
 [functions.external-promoter-payment-status]
+verify_jwt = false
+
+# Default-off recovery verifies Better Auth or a hashed, single-use guest capability.
+[functions.checkout-recovery]
+verify_jwt = false
+[functions.checkout-replacement]
 verify_jwt = false

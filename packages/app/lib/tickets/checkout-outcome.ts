@@ -1,16 +1,6 @@
-/**
- * What a member is told after paying.
- *
- * `get-cart-status` already returns the two facts this needs — `cart.status`
- * and the issued `tickets` — and the success screen ignored both, rendering
- * "Tickets Ready" under a green check the moment it mounted. It said the same
- * thing while issuance was still processing and while the cart had been
- * abandoned.
- *
- * Payment and fulfilment are separate. So are "we know this failed" and "we do
- * not yet know" — and the difference between those two is the difference
- * between a member relaxing and a member paying twice.
- */
+/** A checkout can celebrate only a fresh, verified complete usable set.
+ * Current credentials and historical purchase units are separate: a transfer,
+ * refund or redemption never becomes a new successful checkout. */
 
 /** `carts.status` — `migrations/20260516150000_mixed_cart_checkout.sql:74-75`. */
 export type CartStatus =
@@ -37,6 +27,10 @@ export type CheckoutOutcome =
   | { kind: "issued-empty" }
   /** The cart ended without completing. */
   | { kind: "not-completed" }
+  /** Fully accounted historical units, not a newly issued usable bundle. */
+  | { kind: "history" }
+  /** Some units need checking; usable remaining items can still be opened. */
+  | { kind: "partial" }
   /**
    * We could not establish what happened. Never says "you were not charged" —
    * we do not know that.
@@ -44,7 +38,14 @@ export type CheckoutOutcome =
   | { kind: "unresolved" };
 
 export interface CheckoutTicketLike {
-  category?: string | null;
+  id?: string; cart_line_item_id?: string | null; status?: string | null;
+  usable?: boolean; category?: string | null;
+}
+export interface CheckoutFulfillment {
+  state: string; paymentVerified: boolean; complete: boolean;
+  expectedTickets: number; expectedAddons: number; usableTickets: number; usableAddons: number;
+  historicalTickets: number; historicalAddons: number;
+  lines: readonly {lineId:string;kind:string;expected:number;observed:number;usable:number;historical:number}[];
 }
 
 /**
@@ -53,16 +54,17 @@ export interface CheckoutTicketLike {
  * ticket) issues zero tickets and one or more of these.
  */
 export interface CheckoutAddonLike {
+  id?: string; cart_line_item_id?: string | null; usable?: boolean;
   quantity: number;
   status?: string | null;
 }
 
-/** Add-on units that count as issued. A refunded row delivered nothing. */
+/** Current usable add-on units. Consumed/refunded rows remain receipt history. */
 export function issuedAddonCount(
   addons: readonly CheckoutAddonLike[] | undefined,
 ): number {
   return (addons ?? []).reduce(
-    (sum, addon) => (addon.status === "refunded" ? sum : sum + addon.quantity),
+    (sum, addon) => (addon.usable === true && ["unfulfilled","fulfilled"].includes(addon.status || "") && Number.isSafeInteger(addon.quantity) && addon.quantity > 0 ? sum + addon.quantity : sum),
     0,
   );
 }
@@ -74,60 +76,60 @@ export function issuedAddonCount(
  */
 export const ISSUANCE_GRACE_MS = 90_000;
 
+/** Both the server's exact per-line proof and the returned usable set must agree.
+ * Older endpoints without this proof cannot promote a row into a success claim. */
+function fullUsableSet(proof: CheckoutFulfillment | undefined, tickets: readonly CheckoutTicketLike[], addons: readonly CheckoutAddonLike[]): boolean {
+  if (!proof || proof.state !== "ready" || proof.paymentVerified !== true || proof.complete !== true ||
+      proof.historicalTickets !== 0 || proof.historicalAddons !== 0 || !Array.isArray(proof.lines) || !proof.lines.length) return false;
+  const ids = new Set<string>(), lines = new Set<string>();
+  let expectedTickets = 0, expectedAddons = 0;
+  for (const line of proof.lines) {
+    if (!line.lineId || lines.has(line.lineId) || !["ticket","addon"].includes(line.kind) ||
+        !Number.isSafeInteger(line.expected) || line.expected <= 0 || line.observed !== line.expected ||
+        line.usable !== line.expected || line.historical !== 0) return false;
+    lines.add(line.lineId);
+    if (line.kind === "ticket") {
+      expectedTickets += line.expected;
+      if (tickets.filter(t => t.cart_line_item_id === line.lineId).length !== line.expected) return false;
+    } else {
+      expectedAddons += line.expected;
+      if (addons.filter(a => a.cart_line_item_id === line.lineId).reduce((sum,a)=>sum+a.quantity,0) !== line.expected) return false;
+    }
+  }
+  for (const ticket of tickets) {
+    if (!ticket.id || ids.has(ticket.id) || ticket.usable !== true || ticket.status !== "active" || !lines.has(ticket.cart_line_item_id || "")) return false;
+    ids.add(ticket.id);
+  }
+  for (const addon of addons) {
+    if (!addon.id || ids.has(addon.id) || addon.usable !== true || !["unfulfilled","fulfilled"].includes(addon.status || "") ||
+        !Number.isSafeInteger(addon.quantity) || addon.quantity <= 0 || !lines.has(addon.cart_line_item_id || "")) return false;
+    ids.add(addon.id);
+  }
+  return expectedTickets === tickets.length && expectedTickets === proof.expectedTickets && expectedTickets === proof.usableTickets &&
+    expectedAddons === issuedAddonCount(addons) && expectedAddons === proof.expectedAddons && expectedAddons === proof.usableAddons;
+}
 export function resolveCheckoutOutcome(input: {
   status: CartStatus | null | undefined;
   tickets: readonly CheckoutTicketLike[] | undefined;
-  /** Issued add-ons. Optional because older function versions omit them. */
   addons?: readonly CheckoutAddonLike[] | undefined;
-  /** True before the first successful status read. */
+  fulfillment?: CheckoutFulfillment;
   isLoading: boolean;
-  /** True when the status read itself failed. */
   isError: boolean;
-  /** Milliseconds since the screen started waiting. */
   elapsedMs: number;
 }): CheckoutOutcome {
-  const tickets = input.tickets ?? [];
-  const addonCount = issuedAddonCount(input.addons);
-
-  // Credentials in hand outrank everything. If the server issued them, the
-  // purchase completed whatever else is in flight. An issued add-on is a
-  // credential too: an add-on-only cart never produces a ticket row.
-  if (tickets.length > 0 || addonCount > 0) {
-    return {
-      kind: "issued",
-      admissionCount: tickets.filter((t) => t.category !== "coat_check").length,
-      coatCheckCount: tickets.filter((t) => t.category === "coat_check").length,
-      addonCount,
-    };
+  // Cached rows never outrank a failed/in-flight current status read.
+  if (input.isError || input.isLoading || !input.status) return input.elapsedMs >= ISSUANCE_GRACE_MS ? {kind:"unresolved"} : {kind:"checking"};
+  const tickets=input.tickets??[],addons=input.addons??[];
+  if (input.status === "completed") {
+    if (fullUsableSet(input.fulfillment,tickets,addons)) return {kind:"issued",
+      admissionCount:tickets.filter(t=>t.category!=="coat_check").length,
+      coatCheckCount:tickets.filter(t=>t.category==="coat_check").length,addonCount:issuedAddonCount(addons)};
+    if (input.fulfillment?.state === "history" && input.fulfillment.complete === true) return {kind:"history"};
+    if (input.fulfillment?.state === "partial") return {kind:"partial"};
+    return input.elapsedMs >= ISSUANCE_GRACE_MS ? {kind:"unresolved"} : {kind:"checking"};
   }
-
-  if (input.isError) {
-    return input.elapsedMs >= ISSUANCE_GRACE_MS
-      ? { kind: "unresolved" }
-      : { kind: "checking" };
-  }
-
-  if (input.isLoading || !input.status) return { kind: "checking" };
-
-  switch (input.status) {
-    case "completed":
-      // Paid and closed, but nothing came back. Real, and not the member's
-      // problem to diagnose.
-      return input.elapsedMs >= ISSUANCE_GRACE_MS
-        ? { kind: "issued-empty" }
-        : { kind: "issuing" };
-    case "paying":
-      return input.elapsedMs >= ISSUANCE_GRACE_MS
-        ? { kind: "unresolved" }
-        : { kind: "issuing" };
-    case "abandoned":
-      return { kind: "not-completed" };
-    case "draft":
-    case "holding":
-      return input.elapsedMs >= ISSUANCE_GRACE_MS
-        ? { kind: "unresolved" }
-        : { kind: "checking" };
-  }
+  if (input.status === "abandoned") return {kind:"not-completed"};
+  return input.elapsedMs >= ISSUANCE_GRACE_MS ? {kind:"unresolved"} : {kind:"checking"};
 }
 
 /** Should the screen still be polling? */
@@ -193,9 +195,13 @@ export function checkoutCopy(outcome: CheckoutOutcome): CheckoutCopy {
     case "not-completed":
       return {
         title: "Checkout didn't finish",
-        body: "This order was not completed. Nothing was issued.",
+        body: "This checkout is no longer active. Check your order history before making another purchase.",
         tone: "attention",
       };
+    case "history":
+      return { title: "Order history", body: "This order includes items that were transferred, used, refunded or canceled. Any available items are listed below.", tone: "attention" };
+    case "partial":
+      return { title: "Some items need checking", body: "Available items are listed below. Please don't pay again. Check My Tickets or contact support for the rest of this order.", tone: "attention" };
     case "unresolved":
       // Deliberately does not say "you were not charged". We do not know that,
       // and guessing wrong sends someone to pay a second time.

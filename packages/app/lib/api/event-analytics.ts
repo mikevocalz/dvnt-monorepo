@@ -1,3 +1,4 @@
+import type { SettlementSummary } from "../payments/settlement-status";
 /**
  * Event Analytics API
  *
@@ -77,6 +78,7 @@ export interface EventPromoCodeAnalytics {
 }
 
 export interface EventAnalyticsSummary {
+  settlement?: SettlementSummary;
   eventId: string;
   title: string;
   revenue: EventRevenueSummary;

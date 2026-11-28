@@ -15,6 +15,7 @@
  * ticket row to the new tier.
  */
 
+import { legacyEventCheckoutAllowed, LEGACY_EVENT_CHECKOUT_PAUSED } from "../_shared/legacy-event-checkout-route.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifySession } from "../_shared/verify-session.ts";
 import { computeFees } from "../_shared/fee-calculator.ts";
@@ -252,6 +253,10 @@ Deno.serve(async (req: Request) => {
 
     // Compute buyer fees: 2.5% + $1 on top of the price difference
     const fees = computeFees(diffCents, 1);
+
+    if (!(await legacyEventCheckoutAllowed(supabase, ticket.event_id))) {
+      return json(LEGACY_EVENT_CHECKOUT_PAUSED, 409);
+    }
 
     // Stripe Customer + ephemeral key for PaymentSheet
     const customerId = await getOrCreateCustomer(supabase, authId);

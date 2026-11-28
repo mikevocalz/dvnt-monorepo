@@ -84,3 +84,15 @@ test('comments cannot manufacture a public grant', () => {
   `);
   assert.equal(result.exit, 1);
 });
+
+test('a private same-name grant cannot cover one of several public tables', () => {
+  const result = verify(`
+    CREATE TABLE public.one(id uuid); CREATE TABLE "public" . "two"(id uuid); CREATE TABLE three(id uuid);
+    GRANT SELECT ON public.one TO service_role;
+    GRANT SELECT ON "public" . "two" TO service_role;
+    GRANT SELECT ON dvnt_settlement.three TO service_role;
+  `);
+  assert.equal(result.exit, 1);
+  assert.equal(result.summary.tablesCreated, 3);
+  assert.deepEqual(result.failures.map(x => x.where.split('public.')[1]), ['three']);
+});

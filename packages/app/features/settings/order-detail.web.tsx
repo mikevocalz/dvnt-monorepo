@@ -375,6 +375,11 @@ export function OrderDetailScreen() {
             }
           />
 
+          {process.env.NEXT_PUBLIC_CHECKOUT_REPLACEMENT_ENABLED === "true" &&
+            order.canReviewCheckoutReplacement === true ? (
+            <ActionButton icon={<RotateCcw size={18} color="#fff" />} label="Review replacement checkout"
+              onClick={() => router.push(`/feed/checkout/retry?order_id=${encodeURIComponent(order.id)}`)} />
+          ) : null}
           {canRequestOrderRefund(order) ? (
             <ActionButton
               icon={<RotateCcw size={18} color="#F97316" />}

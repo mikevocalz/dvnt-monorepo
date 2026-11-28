@@ -1,0 +1,32 @@
+name: Promoter self-service summary
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/supabase/functions/promoter-self/**'
+      - 'apps/mobile/supabase/functions/_shared/read-all-rows*'
+      - '.github/workflows/promoter-self-summary.yml'
+  push:
+    branches: [master, main]
+    paths:
+      - 'apps/mobile/supabase/functions/promoter-self/**'
+      - 'apps/mobile/supabase/functions/_shared/read-all-rows*'
+      - '.github/workflows/promoter-self-summary.yml'
+permissions:
+  contents: read
+jobs:
+  promoter-summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test tools
+        run: npm install --prefix "$RUNNER_TEMP/promoter-tests" --ignore-scripts --no-audit --no-fund --no-save typescript@5.9.2
+      - name: Summary and pagination regressions
+        env:
+          NODE_PATH: ${{ runner.temp }}/promoter-tests/node_modules
+        run: node --test apps/mobile/supabase/functions/promoter-self/index.test.cjs apps/mobile/supabase/functions/_shared/read-all-rows.test.cjs

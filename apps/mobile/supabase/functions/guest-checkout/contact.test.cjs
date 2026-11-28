@@ -68,3 +68,43 @@ test('new web envelope has no legacy purchase fields and requires explicit final
  const r=await f.call(envelope);assert.equal(r.data.ok,true,JSON.stringify(r.data));
  assert.equal(r.data.webTicketContactVersion,1);
 });
+
+test('reviewed separate-charge guest checkout binds contact before any provider attempt',async()=>{
+ const orderId='00000000-0000-4000-8000-000000000100';
+ const key='fixture-settlement-guest';
+ for(const contactError of [false,true]){
+  const timeline=[]; let chargeCents;
+  const f=fixture({
+   contactError,env:{TICKET_SEPARATE_CHARGES_ENABLED:'true'},
+   settlementRpc(fn,args){
+    timeline.push(fn);
+    if(fn==='settlement_checkout_route') return {data:{ok:true,charge_model:'separate_charges_and_transfers'}};
+    if(fn==='prepare_settlement_checkout'){
+     assert.equal(args.p_snapshot.order.guest_phone,null);
+     chargeCents=args.p_snapshot.order.total_cents;
+     return {data:{ok:true,order_id:orderId,charge_model:'separate_charges_and_transfers',idempotency_key:key,created_at:new Date().toISOString()}};
+    }
+    if(fn==='claim_settlement_checkout')return {data:{ok:true,claimed:true,idempotency_key:key}};
+    if(fn==='finalize_settlement_checkout')return {data:{ok:true}};
+    assert.fail('Unexpected settlement call '+fn);
+   },
+   stripeResponse:()=>Response.json({
+    id:'cs_fixture_separate',status:'open',url:'https://checkout.stripe.com/c/pay/fixture',currency:'usd',
+    amount_subtotal:chargeCents,amount_total:chargeCents,total_details:{amount_tax:0,amount_discount:0,amount_shipping:0},
+    metadata:{charge_model:'separate_charges_and_transfers',settlement_order_id:orderId},
+   }),
+  });
+  const r=await f.pay({...webContact,idempotency_key:key});
+  assert.equal(f.writes.find(w=>w.fn==='set_web_ticket_order_contact').args.p_order_id,orderId);
+  if(contactError){
+   assert.equal(r.status,503);assert.equal(f.stripe.length,0);assert.ok(!timeline.includes('claim_settlement_checkout'));
+  }else{
+   assert.equal(r.data.webTicketContactVersion,1,JSON.stringify(r.data));assert.equal(f.stripe.length,1);
+   assert.equal(f.tables.orders.length,0,'prepared order must not be duplicated');
+   const rpc=f.writes.filter(w=>w.table==='rpc').map(w=>w.fn);
+   assert.ok(rpc.indexOf('set_web_ticket_order_contact')<rpc.indexOf('claim_settlement_checkout'));
+   assert.equal(Object.hasOwn(f.stripe[0].params,'payment_intent_data[transfer_data][destination]'),false);
+   assert.doesNotMatch(JSON.stringify(f.stripe),/door\.test|2125550123/);
+  }
+ }
+});

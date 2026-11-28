@@ -369,6 +369,11 @@ export default function OrderDetailScreen() {
             />
           </View>
 
+          {process.env.EXPO_PUBLIC_CHECKOUT_REPLACEMENT_ENABLED === "true" &&
+            activeOrder.canReviewCheckoutReplacement === true && (
+            <ActionButton icon={<RotateCcw size={18} color="#fff" />} label="Review replacement checkout"
+              onPress={() => router.push(`/(protected)/checkout/retry?order_id=${encodeURIComponent(activeOrder.id)}` as never)} />
+          )}
           {/* Refund + Support */}
           {canRequestOrderRefund(activeOrder) && (
             <ActionButton

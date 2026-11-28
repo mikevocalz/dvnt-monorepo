@@ -1,181 +1,22 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import {
-  ISSUANCE_GRACE_MS,
-  checkoutCopy,
-  resolveCheckoutOutcome,
-  shouldPollCheckout,
-} from "./checkout-outcome.ts";
-
-const base = { isLoading: false, isError: false, elapsedMs: 0 };
-
-test("issued credentials win, whatever the cart status says", () => {
-  const out = resolveCheckoutOutcome({
-    ...base,
-    status: "paying",
-    tickets: [{ category: "admission" }, { category: "coat_check" }],
-  });
-  assert.deepEqual(out, {
-    kind: "issued",
-    admissionCount: 1,
-    coatCheckCount: 1,
-    addonCount: 0,
-  });
-});
-
-test("a cart that is still paying is 'issuing', never 'Tickets ready'", () => {
-  const out = resolveCheckoutOutcome({ ...base, status: "paying", tickets: [] });
-  assert.equal(out.kind, "issuing");
-  assert.equal(checkoutCopy(out).tone, "working");
-  assert.notEqual(checkoutCopy(out).title, "Tickets ready");
-});
-
-test("only a real issuance is allowed to celebrate", () => {
-  const tones = (["checking", "issuing", "issued-empty", "not-completed", "unresolved"] as const).map(
-    (kind) => checkoutCopy({ kind } as never).tone,
-  );
-  assert.equal(tones.includes("success"), false, "no non-issued state may read as success");
-  assert.equal(
-    checkoutCopy({ kind: "issued", admissionCount: 1, coatCheckCount: 0, addonCount: 0 }).tone,
-    "success",
-  );
-});
-
-test("polling stops once the outcome is terminal", () => {
-  assert.equal(shouldPollCheckout({ kind: "checking" }), true);
-  assert.equal(shouldPollCheckout({ kind: "issuing" }), true);
-  assert.equal(shouldPollCheckout({ kind: "issued", admissionCount: 1, coatCheckCount: 0, addonCount: 0 }), false);
-  assert.equal(shouldPollCheckout({ kind: "unresolved" }), false);
-  assert.equal(shouldPollCheckout({ kind: "not-completed" }), false);
-  assert.equal(shouldPollCheckout({ kind: "issued-empty" }), false);
-});
-
-test("waiting past the grace window resolves to a real answer, not an endless spinner", () => {
-  const late = ISSUANCE_GRACE_MS + 1;
-  assert.equal(
-    resolveCheckoutOutcome({ ...base, status: "paying", tickets: [], elapsedMs: late }).kind,
-    "unresolved",
-  );
-  assert.equal(
-    resolveCheckoutOutcome({ ...base, status: "completed", tickets: [], elapsedMs: late }).kind,
-    "issued-empty",
-  );
-});
-
-test("a failed status read is 'checking' then 'unresolved' — never 'not completed'", () => {
-  assert.equal(
-    resolveCheckoutOutcome({ ...base, status: null, tickets: [], isError: true }).kind,
-    "checking",
-  );
-  assert.equal(
-    resolveCheckoutOutcome({
-      ...base,
-      status: null,
-      tickets: [],
-      isError: true,
-      elapsedMs: ISSUANCE_GRACE_MS,
-    }).kind,
-    "unresolved",
-  );
-});
-
-test("no copy anywhere claims the member was not charged", () => {
-  const kinds = [
-    { kind: "checking" },
-    { kind: "issuing" },
-    { kind: "issued", admissionCount: 2, coatCheckCount: 0, addonCount: 0 },
-    { kind: "issued-empty" },
-    { kind: "not-completed" },
-    { kind: "unresolved" },
-  ] as const;
-  for (const outcome of kinds) {
-    const { title, body } = checkoutCopy(outcome as never);
-    const text = `${title} ${body}`.toLowerCase();
-    assert.equal(/not (been )?charged/.test(text), false, `"${text}" claims no charge`);
-    assert.equal(/no charge/.test(text), false, `"${text}" claims no charge`);
-  }
-});
-
-test("an abandoned cart is stated plainly", () => {
-  const out = resolveCheckoutOutcome({ ...base, status: "abandoned", tickets: [] });
-  assert.equal(out.kind, "not-completed");
-  assert.match(checkoutCopy(out).body, /not completed/i);
-});
-
-test("a completed add-on-only cart is issued, and its copy never says tickets", () => {
-  const out = resolveCheckoutOutcome({
-    ...base,
-    status: "completed",
-    tickets: [],
-    addons: [{ quantity: 1, status: "unfulfilled" }],
-  });
-  assert.deepEqual(out, {
-    kind: "issued",
-    admissionCount: 0,
-    coatCheckCount: 0,
-    addonCount: 1,
-  });
-  const copy = checkoutCopy(out);
-  assert.equal(copy.tone, "success");
-  assert.equal(copy.body, "1 add-on");
-  assert.equal(/ticket/i.test(`${copy.title} ${copy.body}`), false, copy.title);
-});
-
-test("a mixed cart is issued with both counts", () => {
-  const out = resolveCheckoutOutcome({
-    ...base,
-    status: "completed",
-    tickets: [{ category: "admission" }],
-    addons: [{ quantity: 2, status: "unfulfilled" }],
-  });
-  assert.deepEqual(out, {
-    kind: "issued",
-    admissionCount: 1,
-    coatCheckCount: 0,
-    addonCount: 2,
-  });
-  assert.equal(checkoutCopy(out).title, "Tickets ready");
-  assert.equal(checkoutCopy(out).body, "1 admission · 2 add-ons");
-});
-
-test("a completed cart with nothing issued is still issued-empty after the grace window", () => {
-  const out = resolveCheckoutOutcome({
-    ...base,
-    status: "completed",
-    tickets: [],
-    addons: [],
-    elapsedMs: ISSUANCE_GRACE_MS + 1,
-  });
-  assert.equal(out.kind, "issued-empty");
-});
-
-test("refunded add-on rows are not counted as issued", () => {
-  const out = resolveCheckoutOutcome({
-    ...base,
-    status: "completed",
-    tickets: [],
-    addons: [{ quantity: 1, status: "refunded" }],
-    elapsedMs: ISSUANCE_GRACE_MS + 1,
-  });
-  assert.equal(out.kind, "issued-empty");
-});
-
-test("waiting copy does not promise tickets the cart may not contain", () => {
-  for (const kind of ["issuing", "issued-empty"] as const) {
-    const { title, body } = checkoutCopy({ kind });
-    // "My Tickets" is the screen's name, not a claim about the order.
-    const text = `${title} ${body}`.replaceAll("My Tickets", "");
-    assert.equal(/ticket/i.test(text), false, `${kind}: ${body}`);
-  }
-});
-
-test("counts pluralise", () => {
-  assert.equal(
-    checkoutCopy({ kind: "issued", admissionCount: 1, coatCheckCount: 0, addonCount: 0 }).body,
-    "1 admission",
-  );
-  assert.equal(
-    checkoutCopy({ kind: "issued", admissionCount: 2, coatCheckCount: 3, addonCount: 0 }).body,
-    "2 admissions · 3 coat checks",
-  );
-});
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {ISSUANCE_GRACE_MS,checkoutCopy,resolveCheckoutOutcome,shouldPollCheckout,type CheckoutFulfillment} from './checkout-outcome.ts';
+const base={status:'completed' as const,isLoading:false,isError:false,elapsedMs:0};
+const ticket=(id='ticket-a',line='line-a',patch={})=>({id,cart_line_item_id:line,status:'active',usable:true,category:'admission',...patch});
+const addon=(quantity=1,patch={})=>({id:'addon-a',cart_line_item_id:'line-b',status:'unfulfilled',quantity,usable:true,...patch});
+const proof=(tickets=1,addons=0):CheckoutFulfillment=>({state:'ready',paymentVerified:true,complete:true,expectedTickets:tickets,expectedAddons:addons,usableTickets:tickets,usableAddons:addons,historicalTickets:0,historicalAddons:0,lines:[...(tickets?[{lineId:'line-a',kind:'ticket',expected:tickets,observed:tickets,usable:tickets,historical:0}]:[]),...(addons?[{lineId:'line-b',kind:'addon',expected:addons,observed:addons,usable:addons,historical:0}]:[])]});
+test('only verified completed cart with exact usable per-line credentials celebrates',()=>{const out=resolveCheckoutOutcome({...base,tickets:[ticket()],fulfillment:proof()});assert.equal(out.kind,'issued');assert.equal(checkoutCopy(out).title,'Tickets ready');});
+test('ticket presence never proves completion for unconfirmed abandoned or unknown cart',()=>{for(const status of ['paying','holding','draft','abandoned',undefined] as const){const out=resolveCheckoutOutcome({...base,status,tickets:[ticket()],fulfillment:proof()});assert.notEqual(out.kind,'issued');assert.notEqual(checkoutCopy(out).tone,'success');}});
+test('stale cached full proof cannot outrank failed or in-flight current status read',()=>{for(const flags of [{isError:true},{isLoading:true}])for(const elapsedMs of [0,ISSUANCE_GRACE_MS+1]){const out=resolveCheckoutOutcome({...base,...flags,elapsedMs,tickets:[ticket()],fulfillment:proof()});assert.equal(out.kind,elapsedMs?'unresolved':'checking');}});
+test('older responses without fulfillment proof never claim payment confirmed or ready',()=>{for(const elapsedMs of [0,ISSUANCE_GRACE_MS+1]){const out=resolveCheckoutOutcome({...base,elapsedMs,tickets:[ticket()]});assert.equal(out.kind,elapsedMs?'unresolved':'checking');assert.doesNotMatch(checkoutCopy(out).title,/confirmed|ready/i);}});
+test('refunded void scanned transfer-pending unknown and missing status never become ready',()=>{for(const status of ['refunded','void','scanned','transfer_pending','unexpected',undefined]){assert.notEqual(resolveCheckoutOutcome({...base,tickets:[ticket('ticket-a','line-a',{status})],fulfillment:proof()}).kind,'issued');}});
+test('partial response cannot satisfy a two-unit expected line',()=>{const out=resolveCheckoutOutcome({...base,tickets:[ticket()],fulfillment:proof(2)});assert.notEqual(out.kind,'issued');});
+test('equal total on wrong line is not complete and duplicate IDs never count twice',()=>{for(const tickets of [[ticket('a','wrong')],[ticket('a'),ticket('a')]]){assert.notEqual(resolveCheckoutOutcome({...base,tickets,fulfillment:proof(tickets.length)}).kind,'issued');}});
+test('payment and complete evidence must be explicit and true',()=>{for(const patch of [{paymentVerified:false},{complete:false},{historicalTickets:1},{expectedTickets:2},{usableTickets:2},{lines:[]}]){assert.notEqual(resolveCheckoutOutcome({...base,tickets:[ticket()],fulfillment:{...proof(),...patch}}).kind,'issued');}});
+test('full historical transferred/refunded/consumed set is history, not missing fulfillment',()=>{const out=resolveCheckoutOutcome({...base,tickets:[],fulfillment:{...proof(),state:'history',historicalTickets:1,usableTickets:0}});assert.equal(out.kind,'history');assert.match(checkoutCopy(out).body,/transferred, used, refunded or canceled/);assert.doesNotMatch(checkoutCopy(out).body,/never issued|not charged|Payment confirmed/);assert.equal(shouldPollCheckout(out),false);});
+test('partial known snapshot keeps available items without claiming whole order ready',()=>{const out=resolveCheckoutOutcome({...base,tickets:[ticket()],fulfillment:{...proof(2),state:'partial',complete:false}});assert.equal(out.kind,'partial');assert.match(checkoutCopy(out).body,/Available items/);assert.match(checkoutCopy(out).body,/don't pay again/);});
+test('exact add-on-only and mixed counts are supported',()=>{for(const tickets of [[],[ticket()]]){const out=resolveCheckoutOutcome({...base,tickets,addons:[addon(2)],fulfillment:proof(tickets.length,2)});assert.equal(out.kind,'issued');assert.equal(checkoutCopy(out).title,tickets.length?'Tickets ready':'Add-ons ready');}});
+test('refunded redeemed unknown negative fractional or unusable add-ons cannot celebrate',()=>{for(const patch of [{status:'refunded'},{status:'redeemed'},{status:'unknown'},{usable:false},{quantity:-1},{quantity:0.5},{cart_line_item_id:'wrong'}]){assert.notEqual(resolveCheckoutOutcome({...base,tickets:[],addons:[addon(1,patch)],fulfillment:proof(0,1)}).kind,'issued');}});
+test('unconfirmed paying expires to unresolved without claiming payment',()=>{for(const elapsedMs of [0,ISSUANCE_GRACE_MS]){const out=resolveCheckoutOutcome({...base,status:'paying',tickets:[],elapsedMs});assert.equal(out.kind,elapsedMs?'unresolved':'checking');assert.doesNotMatch(checkoutCopy(out).title,/confirmed|ready/i);}});
+test('abandoned copy does not assert nothing was issued or no charge occurred',()=>{const out=resolveCheckoutOutcome({...base,status:'abandoned',tickets:[]});assert.equal(out.kind,'not-completed');assert.doesNotMatch(checkoutCopy(out).body,/nothing was issued|not charged/i);});
+test('only issued celebrates and only pending states poll',()=>{for(const kind of ['checking','issuing','issued-empty','not-completed','unresolved','history','partial'] as const){assert.notEqual(checkoutCopy({kind}).tone,'success');assert.equal(shouldPollCheckout({kind}),['checking','issuing'].includes(kind));assert.doesNotMatch(checkoutCopy({kind}).body,/not (been )?charged|no charge/i);}});

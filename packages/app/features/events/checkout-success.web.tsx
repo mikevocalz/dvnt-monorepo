@@ -50,8 +50,10 @@ function ticketLabel(ticket: MixedTicket): string {
 function IssuedTicketRow({
   ticket,
   onPress,
+  available,
 }: {
   ticket: MixedTicket;
+  available: boolean;
   onPress: (ticket: MixedTicket) => void;
 }) {
   const isCoatCheck = ticket.category === "coat_check";
@@ -60,7 +62,8 @@ function IssuedTicketRow({
   return (
     <button
       type="button"
-      onClick={() => onPress(ticket)}
+      disabled={!available}
+      onClick={() => { if (available) onPress(ticket); }}
       className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
         isCoatCheck
           ? "border-purple-500/20 bg-slate-950 active:bg-slate-900"
@@ -89,7 +92,7 @@ function IssuedTicketRow({
         {isCoatCheck ? (
           <Shirt size={18} color="#94A3B8" />
         ) : (
-          <QrCode size={18} color="#94A3B8" />
+          available ? <QrCode size={18} color="#94A3B8" /> : <Info size={18} color="#94A3B8" />
         )}
       </span>
     </button>
@@ -125,6 +128,7 @@ export function CheckoutSuccessScreen() {
         status: query.state.data?.cart?.status as CartStatus | undefined,
         tickets: query.state.data?.tickets,
         addons: query.state.data?.addons,
+        fulfillment: query.state.data?.fulfillment,
         isLoading: !query.state.data,
         isError: query.state.status === "error",
         elapsedMs: Date.now() - startedAt.current,
@@ -141,22 +145,25 @@ export function CheckoutSuccessScreen() {
     status: statusQuery.data?.cart?.status as CartStatus | undefined,
     tickets: statusQuery.data?.tickets,
     addons: statusQuery.data?.addons,
-    isLoading: statusQuery.isLoading,
+    fulfillment: statusQuery.data?.fulfillment,
+    isLoading: statusQuery.isLoading || statusQuery.isFetching || statusQuery.dataUpdatedAt < startedAt.current,
     isError: statusQuery.isError,
     elapsedMs: lastAnswerAt > 0 ? lastAnswerAt - startedAt.current : 0,
   });
   const copy = checkoutCopy(outcome);
+  const credentialsCurrent = !statusQuery.isError && !statusQuery.isFetching && statusQuery.dataUpdatedAt >= startedAt.current;
 
   useEffect(() => {
     // A return URL can point to an older paid order while a newer cart is
     // already active. Complete only the cart whose status was actually read.
     if (
-      statusQuery.data?.completed &&
+      credentialsCurrent && statusQuery.data?.completed &&
       useCartStore.getState().cart?.cartId === effectiveCartId
     ) {
       markCompleted();
     }
   }, [
+    credentialsCurrent,
     effectiveCartId,
     storeCart?.cartId,
     markCompleted,
@@ -257,6 +264,7 @@ export function CheckoutSuccessScreen() {
               <IssuedTicketRow
                 key={ticket.id}
                 ticket={ticket}
+                available={credentialsCurrent && ticket.usable === true && ticket.status === "active"}
                 onPress={handleTicketPress}
               />
             ))}
@@ -285,6 +293,8 @@ export function CheckoutSuccessScreen() {
                   <p className="text-xs text-white/45">
                     {addon.status === "refunded"
                       ? "Refunded"
+                      : addon.status === "redeemed" ? "Redeemed"
+                      : !credentialsCurrent || addon.usable !== true ? `Order history · ${addon.status}`
                       : addon.is_redeemable
                         ? "Show its code at the door. Find it on your ticket."
                         : "Pick up / fulfillment at the event"}
@@ -299,10 +309,19 @@ export function CheckoutSuccessScreen() {
         ) : null}
 
         {/* First-post retention code is split from the common /feed chunk. */}
-        {effectiveCartId && tickets.length > 0 ? (
+        {effectiveCartId && outcome.kind === "issued" && tickets.length > 0 ? (
           <Suspense fallback={null}>
             <FirstPostOfferCard cartId={effectiveCartId} tickets={tickets} />
           </Suspense>
+        ) : null}
+
+        {(outcome.kind === "history" || outcome.kind === "partial") && statusQuery.data?.lineItems?.length ? (
+          <section className="mt-4 space-y-2"><h2 className="font-semibold">Original order</h2>
+            {statusQuery.data.lineItems.map(line => <p key={line.id} className="text-sm text-white/70">{line.tierName} × {line.quantity}</p>)}
+          </section>
+        ) : null}
+        {outcome.kind !== "issued" && tickets.length > 0 ? (
+          <button type="button" onClick={() => statusQuery.refetch()} className="mt-4 rounded-xl bg-white/8 px-6 py-2.5">Check again</button>
         ) : null}
 
         {/* CTAs */}
