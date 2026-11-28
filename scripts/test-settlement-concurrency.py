@@ -103,9 +103,9 @@ class Database:
                         p_platform_account="acct_platform_fixture",p_livemode=False,p_audit_from=0,
                         p_transactions=transactions)
 
-    def paid(self, suffix, settle_promoter=True):
-        snapshot = {"rail": "create-payment-intent", "selection": {"ticket_type_id": TIER}, "order": {
-            "user_id": "fixture-buyer", "event_id": 1, "quantity": 1, "currency": "usd",
+    def paid(self, suffix, settle_promoter=True, event_id=1, tier=TIER):
+        snapshot = {"rail": "create-payment-intent", "selection": {"ticket_type_id": tier}, "order": {
+            "user_id": "fixture-buyer", "event_id": event_id, "quantity": 1, "currency": "usd",
             "total_cents": 11000, "subtotal_cents": 10000, "organizer_fee_cents": 500,
             "platform_fee_cents": 1000, "dvnt_total_fee_cents": 1000, "promoter_code": "FIXTURE",
             "promoter_commission_amount_cents": 1000, "promoter_commission_bps": 1000,
@@ -422,7 +422,17 @@ def refund_debit_start_invalidates_concurrent_host_balance():
 def refund_debit_completion_invalidates_concurrent_host_balance():
     with Database() as db:
         refund_order, _ = db.paid("debitfinish")
-        _, host = db.paid("debitnext")
+        # The refund opens a recovery obligation for event 1's promoter.
+        # Event 2 is not subject to that priority gate, but shares the same
+        # funding audit and must still wait for the refund debit to be booked.
+        db.sql("""INSERT INTO events(id,host_id,payout_release_at,payout_status,end_date,status,start_date)
+            SELECT 2,host_id,payout_release_at,payout_status,end_date,status,start_date FROM events WHERE id=1;
+            INSERT INTO dvnt_settlement.release_policies
+            SELECT 2,policy,timezone,review_reference FROM dvnt_settlement.release_policies WHERE event_id=1;
+            INSERT INTO event_promoters(id,event_id,user_id,stripe_account_id,code,status,rev_share_bps,customer_discount_bps,promoter_commission_bps)
+            SELECT '00000000-0000-4000-8000-000000000003',2,user_id,stripe_account_id,code,status,rev_share_bps,customer_discount_bps,promoter_commission_bps
+            FROM event_promoters WHERE event_id=1;""")
+        _, host = db.paid("debitnext", event_id=2, tier="00000000-0000-4000-8000-0000000000ab")
         intent = db.rpc("settlement_refund_outflow_begin", p_order_id=refund_order,
                         p_request_key="fixture-refund-finish", p_body={"payment_intent":"pi_debitfinish","amount":"3000"})
         db.rpc("settlement_refund_outflow_observe", p_intent=intent["id"], p_refund_id=None)
