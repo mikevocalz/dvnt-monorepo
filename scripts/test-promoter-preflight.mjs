@@ -78,3 +78,42 @@ test('no guessed calendar, timezone, invalid date, or UTC-to-local coercion', ()
     assert.throws(() => previewTwoBusinessDays(date, c));
   }
 });
+
+import { evaluateFuturePromoterSchedule } from './payments/promoter-preflight.mjs';
+const futureEvent = {
+  id: 123, status: 'active', payoutStatus: 'pending', disputesClear: true,
+  startAt: '2030-01-04T21:00:00-05:00', endAt: '2030-01-05T03:00:00Z', timeZone: calendar.timeZone,
+};
+const futurePolicy = { effectiveAt: '2030-01-04T00:00:00Z', calendar };
+test('uses event-local dates and waits until the second local business day', () => {
+  const scheduled = evaluateFuturePromoterSchedule(futureEvent,futurePolicy,Date.parse('2030-01-08T04:59:59Z'));
+  assert.deepEqual(scheduled, {status:'scheduled', blocker:null, localEndDate:'2030-01-04',
+    localReleaseDate:'2030-01-08', timeZone:'America/New_York', executionAllowed:false});
+  const due=evaluateFuturePromoterSchedule(futureEvent,futurePolicy,Date.parse('2030-01-08T05:00:00Z'));
+  assert.deepEqual(due, {...scheduled,status:'due_for_checks'});
+});
+test('reviewed holidays and DST do not shift the release to the prior calendar day', () => {
+  const event={...futureEvent,startAt:'2030-03-08T21:00:00-05:00',endAt:'2030-03-09T07:00:00Z'};
+  const policy={...futurePolicy,calendar:{...calendar,holidays:['2030-03-11']}};
+  const check=now=>evaluateFuturePromoterSchedule(event,policy,Date.parse(now));
+  assert.equal(check('2030-03-13T03:59:59Z').status,'scheduled');
+  assert.equal(check('2030-03-13T04:00:00Z').status,'due_for_checks');
+});
+test('historical events, existing holds and unknown inputs never become due automatically', () => {
+  const when=Date.parse('2030-02-01T00:00:00Z');
+  for (const [changes, policy, blocker] of [
+    [{}, {...futurePolicy,effectiveAt:'2030-01-05T02:30:00Z'}, 'historical_event_requires_review'],
+    [{payoutStatus:'on_hold'}, futurePolicy, 'event_not_pending'],
+    [{status:'canceled'}, futurePolicy, 'event_not_pending'],
+    [{disputesClear:false}, futurePolicy, 'dispute_review_required'],
+    [{endAt:null}, futurePolicy, 'event_times_not_verified'],
+    [{endAt:'2030-01-04T22:00:00'}, futurePolicy, 'event_times_not_verified'],
+    [{timeZone:'America/Los_Angeles'}, futurePolicy, 'event_time_zone_not_verified'],
+    [{}, {...futurePolicy,calendar:{...calendar,through:'2030-01-05'}}, 'reviewed_calendar_coverage_required'],
+  ]) {
+    const result=evaluateFuturePromoterSchedule({...futureEvent,...changes},policy,when);
+    assert.equal(result.status,'blocked');
+    assert.equal(result.blocker,blocker);
+    assert.equal(result.executionAllowed,false);
+  }
+});

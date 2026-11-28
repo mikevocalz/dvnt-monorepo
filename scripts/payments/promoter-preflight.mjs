@@ -90,3 +90,50 @@ export function previewTwoBusinessDays(localEndDate, calendar) {
   }
   throw new Error('calendar coverage exhausted');
 }
+
+/**
+ * Date eligibility for a future automated promoter scheduler. This is not a
+ * transfer decision. Use the reviewed event time zone and end timestamp, never
+ * the UTC date, start time, current venue offset, or a guessed end time.
+ */
+export function evaluateFuturePromoterSchedule(event, policy, now) {
+  const result = { status: 'blocked', blocker: null, localEndDate: null,
+    localReleaseDate: null, timeZone: null, executionAllowed: false };
+  const block = reason => ({ ...result, blocker: reason });
+  const parseInstant = value => {
+    if (typeof value !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return NaN;
+    const d = new Date(value.slice(0, 10) + 'T12:00:00Z');
+    if (!Number.isFinite(+d) || d.toISOString().slice(0, 10) !== value.slice(0, 10)) return NaN;
+    return Date.parse(value);
+  };
+  const cutover = parseInstant(policy?.effectiveAt);
+  if (!Number.isFinite(now) || !Number.isFinite(cutover)) return block('schedule_policy_not_configured');
+  if (!Number.isSafeInteger(event?.id) || event.id < 1) return block('event_required');
+  if (event.status !== 'active' || event.payoutStatus !== 'pending') return block('event_not_pending');
+  if (event.disputesClear !== true) return block('dispute_review_required');
+  const starts = parseInstant(event.startAt);
+  const ends = parseInstant(event.endAt);
+  if (!Number.isFinite(starts) || !Number.isFinite(ends) || ends <= starts) return block('event_times_not_verified');
+  // Never make an event that already started before the approved cutover
+  // automatically due, including an overnight event that ends after cutover.
+  if (starts < cutover) return block('historical_event_requires_review');
+  if (typeof event.timeZone !== 'string' || event.timeZone !== policy.calendar?.timeZone ||
+      !/^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)+$/.test(event.timeZone)) return block('event_time_zone_not_verified');
+
+  try {
+    const format = new Intl.DateTimeFormat('en-US', { timeZone: event.timeZone, calendar: 'iso8601',
+      numberingSystem: 'latn', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const localDate = value => {
+      const parts = Object.fromEntries(format.formatToParts(value).map(p => [p.type, p.value]));
+      return [parts.year.padStart(4, '0'), parts.month, parts.day].join('-');
+    };
+    const localEndDate = localDate(ends);
+    const release = previewTwoBusinessDays(localEndDate, policy.calendar);
+    return { status: now >= ends && localDate(now) >= release.localReleaseDate ? 'due_for_checks' : 'scheduled',
+      blocker: null, localEndDate, localReleaseDate: release.localReleaseDate,
+      timeZone: event.timeZone, executionAllowed: false };
+  } catch {
+    return block('reviewed_calendar_coverage_required');
+  }
+}

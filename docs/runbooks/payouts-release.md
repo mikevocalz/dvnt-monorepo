@@ -79,3 +79,17 @@ It never backfills old events, activates a schedule or overrides holds, source
 reconciliation, receipts, funding or recipient capability. The policy preview is
 not implemented production payment scheduling. Actual transfer execution remains
 blocked until the recovery contract above is implemented and proved.
+
+Use `evaluateFuturePromoterSchedule` to hand a reviewed per-event schedule
+to a future scheduler. It derives the event's local end date from the verified
+timestamp and IANA zone, checks an explicit start-of-policy cutoff and holiday
+coverage, and returns `due_for_checks` on or after the second local business
+day. That label is calendar eligibility only. It cannot authorize transfers
+or specify when money arrives at the recipient's bank. Events that started
+before the cutoff are excluded, as are nonpending events and events with
+unresolved dispute checks.
+
+Production wiring must source a verified event zone and end time, use the
+reviewed calendar, and call a separately verified promoter-first worker, not
+the legacy aggregate endpoint. Keep claims, hold checks, historical receipt
+reconciliation and provider idempotency at the actual payment boundary.
