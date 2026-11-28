@@ -137,3 +137,38 @@ export function evaluateFuturePromoterSchedule(event, policy, now) {
     return block('reviewed_calendar_coverage_required');
   }
 }
+
+/**
+ * Read-only event-level ordering check. A complete, reconciled snapshot is
+ * required; an individual order's completed transfers cannot clear the event.
+ */
+export function assessOrganizerPayoutOrder(snapshot, eventId, now) {
+  const result = (blocker) => ({ promoterFirstSatisfied: blocker === null, executionAllowed: false, blocker });
+  if (!Number.isSafeInteger(eventId) || eventId < 1 || snapshot?.eventId !== eventId) return result('event_scope_mismatch');
+  if (snapshot.payoutStatus !== 'pending' || snapshot.disputesClear !== true) return result('event_not_clear');
+  const observed = Date.parse(snapshot.observedAt);
+  if (!Number.isFinite(now) || !Number.isFinite(observed) || observed > now || now - observed > 300_000) {
+    return result('fresh_snapshot_required');
+  }
+  if (snapshot.completePromoterLedger !== true || !Array.isArray(snapshot.obligations)) {
+    return result('complete_event_ledger_required');
+  }
+  const payees = new Set();
+  const receipts = new Set();
+  for (const row of snapshot.obligations) {
+    if (row?.eventId !== eventId || typeof row.promoterId !== 'string' || !row.promoterId ||
+        typeof row.accountingCurrency !== 'string' || !/^[a-z]{3}$/.test(row.accountingCurrency) ||
+        !Number.isSafeInteger(row.netCents) || row.netCents < 0 || payees.has(row.promoterId)) {
+      return result('invalid_promoter_obligation');
+    }
+    payees.add(row.promoterId);
+    if (row.netCents === 0 && row.status === 'verified_no_balance_due') continue;
+    if (row.netCents === 0 || !['verified_transfer','verified_external_payment'].includes(row.status) ||
+        row.settledCents !== row.netCents || row.settledCurrency !== row.accountingCurrency ||
+        typeof row.verifiedReceiptId !== 'string' || !row.verifiedReceiptId || receipts.has(row.verifiedReceiptId)) {
+      return result('promoter_settlement_unresolved');
+    }
+    receipts.add(row.verifiedReceiptId);
+  }
+  return result(null);
+}

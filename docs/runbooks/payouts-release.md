@@ -93,3 +93,16 @@ Production wiring must source a verified event zone and end time, use the
 reviewed calendar, and call a separately verified promoter-first worker, not
 the legacy aggregate endpoint. Keep claims, hold checks, historical receipt
 reconciliation and provider idempotency at the actual payment boundary.
+
+## Promoters before the organizer
+
+This ordering applies to the whole event, not just the organizer's current
+order. Two business days is the promoter eligibility window; it does not
+override a hold or reserve the organizer's remainder ahead of promoters.
+Keep the organizer release blocked while a promoter payment is unresolved,
+including missing payout setup, partial funding, an ambiguous transfer, or
+an external payment not matched to a verified receipt. An event with a
+complete, reconciled ledger and no promoter balance does not get a new
+promoter hold. The read-only `assessOrganizerPayoutOrder` checks this contract;
+enforce the same ordering with an atomic event-wide check in the actual worker
+before allowing an organizer transfer.

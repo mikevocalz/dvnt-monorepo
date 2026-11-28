@@ -117,3 +117,33 @@ test('historical events, existing holds and unknown inputs never become due auto
     assert.equal(result.executionAllowed,false);
   }
 });
+
+import { assessOrganizerPayoutOrder } from './payments/promoter-preflight.mjs';
+const settledPromoter = { eventId:1001, promoterId:'first', netCents:1000, accountingCurrency:'usd',
+  status:'verified_transfer', settledCents:1000, settledCurrency:'usd', verifiedReceiptId:'first-receipt' };
+const otherPromoter = { ...settledPromoter, promoterId:'second', status:'verified_external_payment', verifiedReceiptId:'second-receipt' };
+const orderSnapshot = { eventId:1001, payoutStatus:'pending', disputesClear:true,
+  completePromoterLedger:true, observedAt:new Date(now).toISOString(), obligations:[settledPromoter,otherPromoter] };
+test('organizer ordering clears only after all event promoter obligations are verified', () => {
+  assert.deepEqual(assessOrganizerPayoutOrder(orderSnapshot,1001,now),
+    { promoterFirstSatisfied:true,executionAllowed:false,blocker:null });
+  for (const patch of [{status:'pending'},{status:'awaiting_stripe_setup'},
+      {status:'uncertain'},{settledCents:999},{verifiedReceiptId:'first-receipt'},{settledCurrency:'eur'}]) {
+    const evidence={...orderSnapshot,obligations:[settledPromoter,{...otherPromoter,...patch}]};
+    assert.equal(assessOrganizerPayoutOrder(evidence,1001,now).blocker,'promoter_settlement_unresolved');
+  }
+});
+test('a missing ledger, hold or stale snapshot cannot make organizer money eligible', () => {
+  for (const patch of [{completePromoterLedger:false,obligations:[]},{payoutStatus:'on_hold'},
+      {disputesClear:false},{observedAt:new Date(now-300_001).toISOString()},{eventId:1002},
+      {obligations:[settledPromoter,{...otherPromoter,eventId:1002}]}]) {
+    const result=assessOrganizerPayoutOrder({...orderSnapshot,...patch},1001,now);
+    assert.equal(result.promoterFirstSatisfied,false);
+    assert.equal(result.executionAllowed,false);
+  }
+});
+test('verified absence of a promoter balance does not invent a hold', () => {
+  for (const obligations of [[],[{...settledPromoter,netCents:0,status:'verified_no_balance_due'}]]) {
+    assert.equal(assessOrganizerPayoutOrder({...orderSnapshot,obligations},1001,now).promoterFirstSatisfied,true);
+  }
+});
