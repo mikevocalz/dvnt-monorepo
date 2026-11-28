@@ -603,7 +603,23 @@ END $$;
 -- No client JWT may read or invoke these internal financial operations.
 DO $$ DECLARE f record; BEGIN
  FOR f IN SELECT p.oid::regprocedure AS signature FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-  WHERE n.nspname='public' AND (p.proname LIKE 'settlement_%' OR p.proname IN ('prepare_settlement_checkout','claim_settlement_checkout','finalize_settlement_checkout')) LOOP
+  WHERE n.nspname='public' AND p.oid::regprocedure=ANY(ARRAY[
+   to_regprocedure('public.settlement_checkout_observation(uuid,text,jsonb,jsonb)'),
+   to_regprocedure('public.prepare_settlement_checkout(jsonb,text)'),
+   to_regprocedure('public.claim_settlement_checkout(uuid,jsonb)'),
+   to_regprocedure('public.finalize_settlement_checkout(uuid,text,text)'),
+   to_regprocedure('public.settlement_candidates(integer,uuid)'),
+   to_regprocedure('public.settlement_order(uuid)'),
+   to_regprocedure('public.settlement_verify_source(uuid,text,text,text,bigint,bigint)'),
+   to_regprocedure('public.settlement_balance_checkpoint()'),
+   to_regprocedure('public.settlement_reserve(uuid,text,bigint,bigint)'),
+   to_regprocedure('public.settlement_hold(uuid,text,text)'),
+   to_regprocedure('public.settlement_uncertain(uuid,text)'),
+   to_regprocedure('public.settlement_reconcile_transfer(uuid,text,text,text,text,bigint)'),
+   to_regprocedure('public.lookup_settlement_checkout(text,text,text,text)'),
+   to_regprocedure('public.settlement_legacy_event_eligible(integer)'),
+   to_regprocedure('public.settlement_actor_summary(text,integer)'),
+   to_regprocedure('public.settlement_processing_error(uuid,text,uuid)')]) LOOP
   EXECUTE 'REVOKE ALL ON FUNCTION '||f.signature||' FROM PUBLIC,anon,authenticated';
   EXECUTE 'GRANT EXECUTE ON FUNCTION '||f.signature||' TO service_role';
  END LOOP;
