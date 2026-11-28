@@ -24,7 +24,7 @@ test("fresh sample enables both controls then publishes only coarse point", asyn
   assert.deepEqual(f.calls, ["settings", "enable", "publish"]);
 });
 test("an existing grant cannot be automatically renewed", async () => {
-  const f = fixture(); f.deps.settings = async () => f.on;
+  const f = fixture(); f.deps.settings = async () => ({...f.on,consentVersion:"events-map-account-v3",sessionExpiresAt:"2099-01-01T00:00:00Z",shareUntil:null});
   await assert.rejects(commitMapConsent(f.deps), /already have an active/);
   assert.deepEqual(f.calls, []);
 });

@@ -276,7 +276,7 @@ if (require.main === module) (async () => {
         const guidance = node.textContent.replace(/\s+/g, " ");
         assert.match(
           guidance,
-          /Approve new follow requests to let members see your private posts\./,
+          /Approve new follow requests to unlock your Spicy posts and private profile posts\./,
         );
         assert.match(
           guidance,

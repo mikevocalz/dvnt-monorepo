@@ -3,17 +3,14 @@
  * GuestRsvpSheet (web) — signed-out free-RSVP flow (Phase 5.6.3b). Three steps in
  * a BottomSheet: contact form → OTP code → confirmed. Calls the deployed edge
  * functions (rsvp-verify issue/verify → rsvp-issue-guest). The form also takes
- * username, full name and mobile number, which set up the guest's restricted
- * DVNT profile. State lives in useGuestRsvpStore and useCheckoutProfileStore
- * (Zustand, no useState).
+ * ticket username, full name and mobile number. This does not create an account.
  */
 import { useEffect } from "react";
 import { Minus, Plus, Mail, CheckCircle2 } from "lucide-react";
 import { supabase } from "@dvnt/app/lib/supabase/client";
 import { useGuestRsvpStore } from "@dvnt/app/lib/stores/guest-rsvp-store";
 import { BottomSheet } from "@dvnt/app/components/bottom-sheet.web";
-import { useCheckoutProfileStore } from "@dvnt/app/lib/stores/checkout-profile-store";
-import { CheckoutProfileFields } from "./checkout-profile-fields.web";
+import { checkFullName, parseWebGuestTicketContact } from "@dvnt/app/lib/checkout/profile-fields";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -41,15 +38,9 @@ async function callFn(
 
 export function GuestRsvpSheet() {
   const s = useGuestRsvpStore();
-  const profile = useCheckoutProfileStore();
-  const resetProfile = profile.reset;
   const patch = s.patch;
   const open = s.open;
   const eventId = s.eventId;
-  // Fresh profile fields each time the sheet opens.
-  useEffect(() => {
-    if (open) resetProfile();
-  }, [open, eventId, resetProfile]);
   // Fetch this event's attendee-name requirement (anon can read public events).
   useEffect(() => {
     if (!open || !eventId) return;
@@ -80,7 +71,9 @@ export function GuestRsvpSheet() {
       return;
     }
     // Checked before the code is sent, so a bad phone never costs a code.
-    const fields = profile.validate(email);
+    const fields = parseWebGuestTicketContact(s);
+    const name = checkFullName(s.name);
+    if (!name.ok) { s.patch({ error: name.message }); return; }
     if (!fields.ok) {
       s.patch({ error: fields.message });
       return;
@@ -94,6 +87,11 @@ export function GuestRsvpSheet() {
       }
     }
     s.patch({ loading: true, error: null });
+    const capability = await callFn("rsvp-issue-guest", { action: "contact_capability" });
+    if (!capability.ok || capability.data?.webTicketContactVersion !== 1) {
+      s.patch({ loading: false, error: "Ticket checkout is updating. Please refresh and retry." });
+      return;
+    }
     const r = await callFn("rsvp-verify", {
       action: "issue",
       event_id: Number(s.eventId),
@@ -125,25 +123,26 @@ export function GuestRsvpSheet() {
       s.patch({ loading: false, error: v.error || "Incorrect code." });
       return;
     }
-    const fields = profile.validate(s.email.trim().toLowerCase());
+    const fields = parseWebGuestTicketContact(s);
+    const name = checkFullName(s.name);
+    if (!name.ok) { s.patch({ loading: false, step: "form", error: name.message }); return; }
     if (!fields.ok) {
       s.patch({ loading: false, step: "form", error: fields.message });
       return;
     }
-    const issue = await callFn("rsvp-issue-guest", {
+    const issue = await callFn("rsvp-issue-guest", { checkout_contact_version: 1, web_ticket_checkout: {
       grant: v.data.grant,
       event_id: Number(s.eventId),
       quantity: s.quantity,
       // The full name doubles as the name on the door list.
-      guest_name: fields.fields.fullName,
-      username: fields.fields.username,
-      full_name: fields.fields.fullName,
-      phone: fields.fields.phoneE164,
+      guest_name: name.value,
+      guest_username: fields.username,
+      guest_phone: fields.phone,
       attendee_names: collectNames ? s.attendeeNames.slice(0, s.quantity) : undefined,
-    });
+    } });
     s.patch({ loading: false });
-    if (!issue.ok) {
-      s.patch({ error: issue.error });
+    if (!issue.ok || issue.data?.webTicketContactVersion !== 1) {
+      s.patch({ error: issue.error || "Could not verify your ticket contact. Refresh before retrying." });
       return;
     }
     s.patch({ step: "done", resultCount: issue.data?.count ?? s.quantity, error: null });
@@ -171,7 +170,18 @@ export function GuestRsvpSheet() {
               className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white placeholder:text-white/30 outline-none focus:border-[#3FDCFF]"
             />
           </Field>
-          <CheckoutProfileFields onEdit={() => s.patch({ error: null })} />
+          {([
+            { key: "name", label: "Full name", maxLength: 120, type: "text" },
+            { key: "username", label: "Ticket username", maxLength: 31, type: "text" },
+            { key: "phone", label: "Phone number", maxLength: 32, type: "tel" },
+          ] as const).map(({ key, label, maxLength, type }) =>
+            <Field key={key} label={label}>
+              <input type={type} required maxLength={maxLength} value={s[key]}
+                onChange={(e) => s.patch({ [key]: e.target.value, error: null })}
+                className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-white outline-none focus:border-[#3FDCFF]" />
+              {key === "username" ? <span className="text-xs text-white/50">A ticket lookup label, not a DVNT account.</span> : null}
+            </Field>
+          )}
 
           <div className="flex items-center justify-between">
             <span className="text-sm text-white/70">How many?</span>

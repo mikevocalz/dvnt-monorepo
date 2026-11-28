@@ -1,3 +1,4 @@
+import { webTicketContactBody, requireWebTicketContactAck } from "@dvnt/app/lib/checkout/web-ticket-contact";
 import {
   CartCheckoutResponseDTO,
   CartHoldResponseDTO,
@@ -55,13 +56,14 @@ export const cartApi = {
         resolvedPromoterCode = getPendingPromoterRef(activeCart.eventId) || "";
       }
     }
-    const { data, error } = await invokeEdge("cart-checkout", {
+    const { data, error } = await invokeEdge("cart-checkout", await webTicketContactBody("cart-checkout", {
       cartId,
       ...(promoCode?.trim() ? { promoCode: promoCode.trim() } : {}),
       ...(resolvedPromoterCode ? { promoterCode: resolvedPromoterCode } : {}),
       ...(phone ? { phone } : {}),
-    });
+    }));
     if (error) throw new Error(error.message);
+    requireWebTicketContactAck(data);
     return parseDTO(CartCheckoutResponseDTO, data);
   },
 

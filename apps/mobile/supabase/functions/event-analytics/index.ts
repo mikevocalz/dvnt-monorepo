@@ -7,7 +7,7 @@ import { readSettlementSummary } from "../_shared/settlement-status.ts";
  *   { event_id }                              → analytics summary
  *   { event_id, action: "attendees" }         → flat attendee list for CSV
  *
- * Both actions are host-only (events.host_id === authId).
+ * Both actions require the host or an accepted event administrator.
  *
  * The summary action returns:
  *   - revenue       : gross / dvnt fee / stripe fee / net cents (from event_financials)
@@ -42,6 +42,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return optionsResponse();
   if (req.method !== "POST") return errorResponse("Method not allowed", 405);
 
+  let privateExport = false;
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -51,7 +52,7 @@ Deno.serve(async (req: Request) => {
     const authId = await verifySession(supabase, req);
     if (!authId) return errorResponse("Unauthorized", 401);
 
-    let body: { event_id?: string | number; action?: string; month?: string } = {};
+    let body: { event_id?: string | number; action?: string; month?: string; include_phone?: boolean } = {};
     try {
       body = await req.json();
     } catch {
@@ -64,6 +65,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const action = (body.action || "summary").toString();
+    privateExport = action === "attendees" && body.include_phone === true;
 
     // Host check — only the event owner can see analytics
     const { data: event, error: eventErr } = await supabase
@@ -109,6 +111,98 @@ Deno.serve(async (req: Request) => {
     };
 
     const issueOrder = (a: any, b: any) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || String(a.id).localeCompare(String(b.id));
+
+    // Browser spreadsheet opt-in only. Don't add phone numbers to the
+    // existing native response. Read current contacts exclusively for ticket
+    // holders already scoped to this event and checked against owner/admin.
+    if (privateExport) {
+      const ticketFields = "id, order_id, user_id, status, purchase_amount_cents, checked_in_at, created_at, guest_email, guest_phone, guest_phone_e164";
+      let result = await readEventRows("tickets", ticketFields + ", ticket_type:ticket_types(name, price_cents)");
+      if (result.error) result = await readEventRows("tickets", ticketFields);
+      if (result.error) return errorResponse("Could not fetch attendees", 500);
+
+      const rows: any[] = result.data ?? [];
+      const ids = [...new Set(rows.map((row) => row.user_id).filter((id): id is string => typeof id === "string" && id.length > 0))];
+      const profiles = new Map<string, { username?: string; first_name?: string; last_name?: string }>();
+      const emails = new Map<string, string>();
+      const phones = new Map<string, string>();
+      for (let start = 0; start < ids.length; start += 100) {
+        const batch = ids.slice(start, start + 100);
+        const [publicProfiles, accounts, privateProfiles] = await Promise.all([
+          supabase.from("users").select("auth_id, username, first_name, last_name").in("auth_id", batch),
+          supabase.from("user").select("id, email").in("id", batch),
+          supabase.from("user_private_profile").select("auth_id, phone_e164").in("auth_id", batch),
+        ]);
+        // Don't silently return a misleading partial roster or leak query values
+        // through database error bodies/logs.
+        if (publicProfiles.error || accounts.error || privateProfiles.error) return errorResponse("Could not fetch attendee contacts", 500);
+        const requested = new Set(batch);
+        for (const profile of publicProfiles.data ?? []) {
+          if (requested.has(profile.auth_id)) profiles.set(profile.auth_id, profile);
+        }
+        for (const account of accounts.data ?? []) {
+          if (requested.has(account.id) && typeof account.email === "string") emails.set(account.id, account.email);
+        }
+        for (const profile of privateProfiles.data ?? []) {
+          if (requested.has(profile.auth_id) && typeof profile.phone_e164 === "string") {
+            phones.set(profile.auth_id, profile.phone_e164);
+          }
+        }
+      }
+
+      // New checkout captures guest handles in a service-only table. Never
+      // join it into public ticket rows or match to a registered holder.
+      const normalizeEmail = (value: unknown) => typeof value === "string" ? value.trim().toLowerCase() : "";
+      const guests = new Map(rows.filter((row) => row.user_id == null && row.order_id && normalizeEmail(row.guest_email))
+        .map((row) => [String(row.id), row]));
+      const guestIds = [...guests.keys()];
+      const guestContacts = new Map<string, { guest_username: string | null; guest_phone: string | null }>();
+      for (let start = 0; start < guestIds.length; start += 100) {
+        const batch = guestIds.slice(start, start + 100);
+        const { data, error } = await supabase.from("web_ticket_guest_contacts")
+          .select("ticket_id, order_id, guest_email, guest_username, guest_phone").in("ticket_id", batch);
+        if (error) {
+          // Edge-first rollout and rollback may temporarily have the old schema.
+          if (start === 0 && (error.code === "42P01" || error.code === "PGRST205") &&
+              error.message.includes("web_ticket_guest_contacts")) break;
+          return errorResponse("Could not fetch attendee contacts", 500);
+        }
+        const requested = new Set(batch);
+        for (const contact of data ?? []) {
+          const ticket = guests.get(contact.ticket_id);
+          if (requested.has(contact.ticket_id) && ticket &&
+              ticket.order_id === contact.order_id &&
+              normalizeEmail(ticket.guest_email) === normalizeEmail(contact.guest_email)) {
+            guestContacts.set(contact.ticket_id, contact);
+          }
+        }
+      }
+
+      const attendees = rows.sort(issueOrder).map((ticket) => {
+        const member = ticket.user_id == null ? undefined : profiles.get(ticket.user_id);
+        const isGuest = ticket.user_id == null;
+        const guestContact = isGuest ? guestContacts.get(String(ticket.id)) : undefined;
+        const historicalE164 = typeof ticket.guest_phone_e164 === "string" &&
+          /^\+[1-9][0-9]{7,14}$/.test(ticket.guest_phone_e164) ? ticket.guest_phone_e164 : null;
+        const tier = Array.isArray(ticket.ticket_type) ? ticket.ticket_type[0] : ticket.ticket_type;
+        return {
+          ticketId: String(ticket.id),
+          buyerUsername: isGuest ? guestContact?.guest_username ?? null : member?.username ?? null,
+          buyerEmail: isGuest ? ticket.guest_email ?? null : emails.get(ticket.user_id) ?? null,
+          buyerPhone: isGuest ? guestContact?.guest_phone || historicalE164 || ticket.guest_phone || null : phones.get(ticket.user_id) ?? null,
+          buyerName: [member?.first_name, member?.last_name].filter(Boolean).join(" ") || null,
+          tierName: tier?.name ?? null,
+          tierPriceCents: tier?.price_cents == null ? null : Number(tier.price_cents),
+          status: ticket.status,
+          purchaseAmountCents: Number(ticket.purchase_amount_cents || 0),
+          checkedInAt: ticket.checked_in_at ?? null,
+          createdAt: ticket.created_at,
+        };
+      });
+      const response = jsonResponse({ ok: true, eventId: String(eventIdNum), title: event.title || "", includesPhone: true, attendees });
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
 
     // ── action: attendees ────────────────────────────────────
     // Returns the flat attendee list for CSV export. Joined with the
@@ -364,6 +458,7 @@ Deno.serve(async (req: Request) => {
       promoCodes,
     });
   } catch (err: any) {
+    if (privateExport) return errorResponse("Could not fetch attendees", 500);
     console.error("[event-analytics] Unexpected error:", err);
     return errorResponse("Internal error", 500);
   }

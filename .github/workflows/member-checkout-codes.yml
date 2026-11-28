@@ -28,7 +28,7 @@ jobs:
   member-code-contract:
     # Pinned Playwright releases support 24.04, not ubuntu-latest (26.04).
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -39,7 +39,11 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Real validation handler plus guest regression (fixture auth/database)
         run: node --test apps/mobile/supabase/functions/validate-promo-code/index.test.cjs apps/mobile/supabase/functions/guest-checkout/discounts.test.cjs
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium webkit
       - name: Real member sheet, handoff, review and cart API (fixture transport)
+        run: node scripts/test-member-checkout-code.cjs
+      - name: Repeat the checkout flow in mobile WebKit (fixture transport)
+        env:
+          DVNT_CHECKOUT_TEST_BROWSER: webkit
         run: node scripts/test-member-checkout-code.cjs
       - run: pnpm --filter web exec tsc --noEmit

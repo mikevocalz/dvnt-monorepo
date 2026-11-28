@@ -83,11 +83,11 @@ async function scan(media: MediaAsset[], signal: AbortSignal): Promise<NudityRev
             if (Math.abs(element.currentTime - time) > 0.01) {
               await mediaReady(element, "seeked", signal, () => { element.currentTime = time; });
             }
-            if (needsSpicyReview(await classify(model, element, signal))) result.flagged = true;
+            if (needsSpicyReview(await classify(model, element, signal))) return { ...result, flagged: true };
           }
         } else {
           await mediaReady(element, "load", signal, () => { element.src = source.uri; });
-          if (needsSpicyReview(await classify(model, element, signal))) result.flagged = true;
+          if (needsSpicyReview(await classify(model, element, signal))) return { ...result, flagged: true };
           // A still decode doesn't check every frame of animated images.
           if (asset.mimeType === "image/gif" || /\.gif$/i.test(asset.fileName ?? "")) result.incomplete = true;
         }

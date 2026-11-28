@@ -272,15 +272,16 @@ export function EventAnalyticsScreen() {
           (fresh.data !== "owner" && fresh.data !== "admin")) {
         throw new Error("Your event access changed. Reopen analytics before exporting.");
       }
-      const result = await eventAnalyticsApi.getAttendees(eventId);
+      const result = await eventAnalyticsApi.getAttendees(eventId, { includePhone: true });
       assertSession();
-      if (!result || result.attendees.length === 0) {
+      if (result?.includesPhone !== true) throw new Error("Attendee export unavailable");
+      if (result.attendees.length === 0) {
         if (typeof window !== "undefined") {
           window.alert("No attendees yet. Once tickets are sold, you can export the list here.");
         }
         return;
       }
-      const csv = attendeesToCsv(result.attendees);
+      const csv = attendeesToCsv(result.attendees, { includePhone: true });
       const safeTitle = (result.title || "event")
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")

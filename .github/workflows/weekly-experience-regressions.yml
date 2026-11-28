@@ -110,6 +110,7 @@ jobs:
           node scripts/test-protected-post-engagement.cjs
           node scripts/test-weekly-post-share-metadata.cjs
           node scripts/test-private-follow-requests-sql.cjs
+          node scripts/test-all-follow-owner-approval.cjs
           node scripts/test-profile-effective-privacy-sql.cjs
           node scripts/test-profile-effective-privacy-api.cjs
           node --test packages/app/lib/profile/effective-profile-privacy.test.ts

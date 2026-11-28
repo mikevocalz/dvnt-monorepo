@@ -25,7 +25,7 @@ const mocks = {
   '@dvnt/app/lib/hooks/use-places-autocomplete': `export const usePlacesAutocomplete=()=>({predictions:[],isLoading:false,input:'Test venue',setInput:()=>{},setShowDropdown:()=>{},clear:()=>{},selectPrediction:()=>{}});`,
   '@dvnt/app/lib/hooks/use-event-media-preupload': `export const useEventMediaPreupload=()=>{};`,
   '@dvnt/app/lib/media/use-event-flyer-preparation.web': `export const useEventFlyerPreparation=()=>({isPreparing:false,isBusy:()=>false,prepare:async()=>null,cancel:()=>{}});`,
-  '@dvnt/app/lib/api/ticket-types': `${options('packages/app/lib/api/ticket-types.ts')} import {state,tier} from 'fixture';export const ticketTypesApi={getByEvent:async()=>[{...tier}],create:async x=>{state.creates.push(x);return {id:'fixture-new-tier'}},update:async(id,x)=>{state.updates.push({id,...x});return x},deactivate:async()=>{}};`,
+  '@dvnt/app/lib/api/ticket-types': `${options('packages/app/lib/api/ticket-types.ts')} import {state,tier} from 'fixture';export const ticketTypesApi={getByEvent:async()=>[{...tier}],create:async x=>{state.creates.push(x);return {id:'fixture-new-tier'}},update:async(eventId,id,x)=>{state.updates.push({eventId,id,...x});return true},deactivate:async()=>{}};`,
   '@dvnt/app/lib/api/addons': `${options('packages/app/lib/api/addons.ts')} ${read('packages/app/lib/api/addons.ts').match(/export const VARIANT_ADDON_TYPES[^;]+;/)[0]} ${read('packages/app/lib/api/addons.ts').match(/export const REDEEMABLE_DEFAULTS[^=]+= \{[\s\S]*?\n\};/)[0]} export const addonsApi={getByEvent:async()=>[]};`,
   '@dvnt/app/lib/api/organizer': `export const organizerApi={getStatus:async()=>({connected:true,charges_enabled:true,payouts_enabled:true})};`,
   '@dvnt/app/features/sneaky-lynk/api/supabase': `export const sneakyLynkApi={};`,
@@ -75,7 +75,7 @@ const mocks = {
   await click('Service');assertService();
   await click('Admission');assert.ok(button('GA'));assert.ok(button('ga'));
   await click('Service');assertService();await click('Save changes');await flush();
-  assert.equal(f.state.updates.length,1);assert.equal(f.state.updates[0].category,'service');assert.equal(f.state.updates[0].price_cents,1000);assert.equal(f.state.updates[0].max_per_user,10);assert.equal(f.state.updates[0].tier_type,'ga');
+  assert.equal(f.state.updates.length,1);assert.equal(f.state.updates[0].eventId,'fixture-event');assert.equal(f.state.updates[0].category,'service');assert.equal(f.state.updates[0].price_cents,1000);assert.equal(f.state.updates[0].max_per_user,10);assert.equal(f.state.updates[0].tier_type,'ga');
   assert.deepEqual(f.state.invalidations,[{queryKey:['tickets','types','fixture-event']},{queryKey:['events']}],'successful tier edits refresh public tiers and event lists');
   await flush(()=>renderer.render(null));
   await flush(()=>{

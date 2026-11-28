@@ -4,6 +4,9 @@ BEGIN;
 DO $$
 DECLARE required record;
 BEGIN
+ IF to_regnamespace('dvnt_settlement') IS NOT NULL THEN
+  RAISE EXCEPTION 'existing settlement namespace requires reviewed adoption; offline artifact cannot be applied';
+ END IF;
  FOR required IN SELECT * FROM (VALUES
   ('events','id','integer'),('events','host_id','text'),('events','start_date','timestamp with time zone'),
   ('events','end_date','timestamp with time zone'),('events','payout_release_at','timestamp with time zone'),
@@ -42,8 +45,5 @@ BEGIN
    RAISE EXCEPTION 'settlement source function contract mismatch: %',required.signature;
   END IF;
  END LOOP;
- IF to_regclass('dvnt_settlement.controls') IS NOT NULL THEN
-  RAISE EXCEPTION 'settlement runtime already exists; reconcile migration history before applying';
- END IF;
 END $$;
 COMMIT;

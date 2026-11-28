@@ -304,19 +304,18 @@ Deno.serve(withSentry("payouts-release", async (req: Request) => {
 
     for (const event of events) {
       try {
-        // Durable atomic claim using a schema-supported state. Never reset this
-        // claim on timeout/error: Stripe keys expire and are NOT a durable ledger.
-        // A held event needs reconciliation before any operator requeues it.
-        const { data: claim, error: claimError } = await supabase.rpc(
+        // Receipt-aware durable claim before any Stripe request. Never reset
+        // it automatically: Stripe keys expire and are not a durable ledger.
+        const { data: claimed, error: claimError } = await supabase.rpc(
           "settlement_claim_legacy_event", { p_event_id: event.id },
         );
 
         if (claimError) throw claimError;
-        if (claim?.claimed !== true) {
+        if (claimed?.claimed !== true) {
           results.push({
             event_id: event.id,
             status: "skipped",
-            reason: "already_claimed",
+            reason: "claim_not_authorized",
           });
           continue;
         }

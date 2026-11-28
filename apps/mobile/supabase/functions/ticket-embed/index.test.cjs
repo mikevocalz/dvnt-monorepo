@@ -27,7 +27,7 @@ const EMBED='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TIER='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const PROMOTER='cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const ORIGIN='https://events.example.com';
-const buyer={tierId:TIER,quantity:1,email:'test@example.com',name:'Test Guest',attendeeNames:[],promoterCode:''};
+const buyer={tierId:TIER,quantity:1,email:'test@example.com',name:'Test Guest',username:'@Door.Test',phone:'(212) 555-0123',attendeeNames:[],promoterCode:''};
 function harness(options={}) {
   let clock=Date.parse('2026-10-11T12:00:00Z');
   const log=[], sessions=new Map(), stripeKeys=new Map();
@@ -39,7 +39,7 @@ function harness(options={}) {
     event_ticket_widgets:[{id:EMBED,event_id:90,allowed_origin:ORIGIN,revision:2,published:true,...options.setting}],
     organizer_accounts:[{host_id:'owner',stripe_account_id:'acct_fixture',charges_enabled:true,...options.organizer}],
     event_promoters:[{id:PROMOTER,event_id:90,code:'TRE_1',customer_discount_bps:1000,promoter_commission_bps:2000,status:'active'}],
-    ticket_embed_checkout_attempts:[],orders:[],ticket_holds:[],tickets:[],order_timeline:[],
+    ticket_embed_checkout_attempts:[],web_ticket_order_contacts:[],orders:[],ticket_holds:[],tickets:[],order_timeline:[],
   };
   const copy=(value)=>value==null?value:JSON.parse(JSON.stringify(value));
   const db={from(table){
@@ -49,6 +49,7 @@ function harness(options={}) {
       select(c){columns=c;return query;},
       eq(k,v){filters.push(r=>r[k]===v);return query;},
       in(k,values){filters.push(r=>values.includes(r[k]));return query;},
+      limit(){return query;},
       ilike(k,v){filters.push(r=>String(r[k]).toUpperCase()===v.replace(/\\([%_\\])/g,'$1').toUpperCase());return query;},
       update(value){patch=value;return query;},
       insert(value){insertRows=Array.isArray(value)?value:[value];return query;},
@@ -72,12 +73,14 @@ function harness(options={}) {
     if(name==='check_rate_limit')return {data:!faults.limited,error:null};
     if(name==='record_rate_limit')return {data:null,error:null};
     if(faults[name])return {data:null,error:{message:faults[name]}};
-    if(name==='ticket_embed_prepare_checkout'){
+    if(name==='ticket_embed_prepare_checkout_with_contact'||name==='ticket_embed_prepare_checkout'){
       const found=tables.ticket_embed_checkout_attempts.find(a=>a.id===args.p_id);
       if(found)return {data:copy(found),error:null};
       const order={id:randomUUID(),status:'payment_pending',ticket_email_status:'pending'};
       const hold={id:randomUUID(),status:'active'};
       tables.orders.push(order);tables.ticket_holds.push(hold);
+      assert.equal(args.p_quote.username,undefined); assert.equal(args.p_quote.phone,undefined);
+      if(name==='ticket_embed_prepare_checkout_with_contact') tables.web_ticket_order_contacts.push({order_id:order.id,guest_username:args.p_guest_username,guest_phone:args.p_guest_phone});
       const a={id:args.p_id,embed_id:args.p_embed_id,origin:args.p_origin,proof_hash:args.p_proof_hash,request_hash:args.p_request_hash,
         state:'pending',quote:args.p_quote,order_id:order.id,hold_id:hold.id,created_at:new Date(clock).toISOString(),expires_at:new Date(args.p_quote.expiresAt*1000).toISOString(),stripe_session_id:null};
       tables.ticket_embed_checkout_attempts.push(a);return {data:copy(a),error:null};
@@ -109,7 +112,7 @@ function harness(options={}) {
     }
     throw Error(`Unexpected RPC ${name}`);
   }};
-  const handler=createTicketEmbedHandler({db,enabled:options.enabled!==false,publishableKey:'pk_test_fixture',livemode:false,siteOrigin:'https://dvntapp.live',now:()=>clock,
+  const handler=createTicketEmbedHandler({db,enabled:options.enabled!==false,requireWebContact:options.requireWebContact,publishableKey:'pk_test_fixture',livemode:false,siteOrigin:'https://dvntapp.live',now:()=>clock,
     stripe:async(method,url,params,key)=>{
       log.push(`stripe:${method}:${url}`);
       if(faults.stripe)throw Error('Do not leak provider errors');
@@ -145,6 +148,33 @@ function harness(options={}) {
   }
   return {call,open,tables,identity,log,sessions,stripeKeys,faults,advance:(ms)=>{clock+=ms;}};
 }
+test('fresh embed checkout validates contact before holds and stores it privately before Stripe', async () => {
+  const h = harness();
+  assert.equal((await h.call('describe')).body.webTicketContactVersion,1);
+  const quote = await h.call('quote',buyer);
+  for (const fields of [{username:undefined},{phone:'bad'}]) {
+    const invalid = await h.call('checkout',{...buyer,...fields,...h.identity,quoteHash:quote.body.quoteHash});
+    assert.equal(invalid.status,400);
+  }
+  assert.equal(h.tables.orders.length,0); assert.equal(h.sessions.size,0);
+  const result = await h.call('checkout',{...buyer,...h.identity,quoteHash:quote.body.quoteHash});
+  assert.equal(result.status,200,JSON.stringify(result.body));
+  assert.deepEqual(h.tables.web_ticket_order_contacts,[{order_id:h.tables.orders[0].id,guest_username:'door.test',guest_phone:'+12125550123'}]);
+  const provider = [...h.stripeKeys.values()][0].params;
+  assert.equal(JSON.stringify(provider).includes('door.test'),false);
+  assert.equal(JSON.stringify(provider).includes('+12125550123'),false);
+});
+test('embed rolling cutover preserves old checkout only before browser enforcement',async()=>{
+  const old={...buyer,username:undefined,phone:undefined};
+  for (const requireWebContact of [false,true]) {
+    const h=harness({requireWebContact});
+    const quote=await h.call('quote',old);
+    const result=await h.call('checkout',{...old,...h.identity,quoteHash:quote.body.quoteHash});
+    assert.equal(result.status,requireWebContact?400:200);
+    assert.equal(h.sessions.size,requireWebContact?0:1);
+    assert.equal(h.tables.web_ticket_order_contacts.length,0);
+  }
+});
 test('disabled embed touches no Stripe or database state',async()=>{
   const h=harness({enabled:false});assert.equal((await h.call('describe')).status,404);assert.equal(h.log.length,0);
 });
@@ -192,7 +222,7 @@ test('changing price after quoted total refuses checkout before any reservation'
 });
 test('prepare precedes Stripe; attachment precedes secret disclosure',async()=>{
   const h=harness();const {result}=await h.open();assert.equal(result.status,200);assert.equal(result.body.state,'payment_open');
-  const prepare=h.log.indexOf('rpc:ticket_embed_prepare_checkout'),stripe=h.log.indexOf('stripe:POST:/checkout/sessions'),attach=h.log.indexOf('rpc:ticket_embed_attach_session');
+  const prepare=h.log.indexOf('rpc:ticket_embed_prepare_checkout_with_contact'),stripe=h.log.indexOf('stripe:POST:/checkout/sessions'),attach=h.log.indexOf('rpc:ticket_embed_attach_session');
   assert.ok(prepare<stripe && stripe<attach);const a=h.tables.ticket_embed_checkout_attempts[0];
   assert.equal(h.tables.orders[0].stripe_checkout_session_id,a.stripe_session_id);assert.equal(h.tables.ticket_holds[0].payment_intent_id,a.stripe_session_id);
 });
@@ -221,7 +251,7 @@ test('attachment failure never exposes a client secret and retry uses the same s
 });
 for(const error of ['sold_out','buyer_limit','selection_changed','embed_unavailable','promoter_changed','organizer_changed']){
   test('atomic prepare rejection cannot create a payable session: '+error,async()=>{
-    const h=harness({faults:{ticket_embed_prepare_checkout:error}});const r=await h.open();
+    const h=harness({faults:{ticket_embed_prepare_checkout_with_contact:error}});const r=await h.open();
     assert.equal(r.result.status,409);assert.equal(r.result.body.code,error);assert.equal(h.sessions.size,0);
   });
 }

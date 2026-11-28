@@ -19,6 +19,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import webpush from "npm:web-push@3.6.7";
 import {
   verifySession,
   corsHeaders,
@@ -41,16 +42,18 @@ function json(data: unknown, status = 200, req?: Request) {
 async function lookupAppUser(
   supabase: any,
   authId: string,
+  requiredRead = false,
 ): Promise<{
   id: number;
   username: string | null;
   avatar: string | null;
 } | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("users")
     .select("id, username, avatar_id(url)")
     .eq("auth_id", authId)
     .maybeSingle();
+  if (requiredRead && error) throw error;
   if (!data) return null;
   return {
     id: data.id,
@@ -60,6 +63,39 @@ async function lookupAppUser(
         ? (data as any).avatar_id[0]?.url
         : (data as any).avatar_id?.url) ?? null,
   };
+}
+
+/** Retire the exact actionable notification, not other event/actor activity. */
+async function clearAcceptedInviteNotification(
+  supabase: any, inviteId: string, recipientId: number, inviterId: number,
+): Promise<void> {
+  const { error } = await supabase
+    .from("notifications")
+    .delete()
+    .eq("recipient_id", recipientId)
+    .eq("actor_id", inviterId)
+    .eq("type", "event_co_organizer_invited")
+    .eq("entity_type", "event")
+    .eq("entity_id", inviteId);
+  if (error) throw error;
+}
+
+// Browser subscriptions are user-controlled rows. Do not allow an arbitrary
+// network destination or an internal URL through the staff push sender.
+function parseStaffWebSubscription(raw: unknown): { endpoint: string; keys: { p256dh: string; auth: string } } | null {
+  if (typeof raw !== "string" || raw.length > 4096) return null;
+  try {
+    const { endpoint, keys } = JSON.parse(raw);
+    if (typeof endpoint !== "string" || !keys ||
+        typeof keys.p256dh !== "string" || !/^[A-Za-z0-9_-]{87}={0,1}$/.test(keys.p256dh) ||
+        typeof keys.auth !== "string" || !/^[A-Za-z0-9_-]{22}={0,2}$/.test(keys.auth)) return null;
+    const url = new URL(endpoint);
+    if (url.protocol !== "https:" || url.port || url.username || url.password || url.hash ||
+        !/^(fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|(?:[a-z0-9-]+\.)+push\.apple\.com|(?:[a-z0-9-]+\.)+notify\.windows\.com)$/.test(url.hostname)) return null;
+    return { endpoint: url.href, keys: { p256dh: keys.p256dh, auth: keys.auth } };
+  } catch {
+    return null;
+  }
 }
 
 async function notify(
@@ -85,40 +121,74 @@ async function notify(
       entity_id: params.entityId,
     });
 
-    const { data: tokens } = await supabase
+    const { data: tokens, error: tokenError } = await supabase
       .from("push_tokens")
-      .select("token")
+      .select("token, platform")
       .eq("user_id", params.recipientIntId);
+    if (tokenError) throw tokenError;
+    if (!Array.isArray(tokens) || tokens.length === 0) return;
 
-    if (tokens && tokens.length > 0) {
-      const messages = tokens.map((t: { token: string }) => ({
-        to: t.token,
-        title: params.title,
-        body: params.body,
-        data: {
-          type: params.notificationType,
-          senderId: String(params.senderIntId),
-          senderUsername: params.senderUsername ?? undefined,
-          senderAvatar: params.senderAvatar ?? undefined,
-          entityType: "event_co_organizer",
-          entityId: params.entityId,
-          eventId: String(params.eventId),
-          url: `https://dvntapp.live/e/${params.eventId}`,
-        },
-        sound: "default",
-        channelId: "default",
+    const data = {
+      type: params.notificationType,
+      senderId: String(params.senderIntId),
+      senderUsername: params.senderUsername ?? undefined,
+      senderAvatar: params.senderAvatar ?? undefined,
+      entityType: "event_co_organizer",
+      entityId: params.entityId,
+      eventId: String(params.eventId),
+      url: `https://dvntapp.live/e/${params.eventId}`,
+    };
+    // Keep the previous Expo payload for valid native destinations. A browser
+    // subscription is structured JSON, not an Expo token. VoIP is call-only.
+    const expo = tokens.filter((row) =>
+      row?.platform !== "web" && row?.platform !== "ios_voip" &&
+      typeof row?.token === "string" && /^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]{1,256}\]$/.test(row.token),
+    );
+    const subscriptions = tokens.filter((row) => row?.platform === "web")
+      .map((row) => parseStaffWebSubscription(row?.token)).filter((sub) => sub !== null);
+    const sendExpo = async () => {
+      if (!expo.length) return;
+      const messages = expo.map((row) => ({
+        to: row.token, title: params.title, body: params.body,
+        data, sound: "default", channelId: "default",
       }));
-      await fetch("https://exp.host/--/api/v2/push/send", {
+      const response = await fetch("https://exp.host/--/api/v2/push/send", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(messages),
+        signal: AbortSignal.timeout(5000),
       });
+      if (!response.ok) throw new Error("Expo push unavailable");
+    };
+    const sendWeb = async () => {
+      if (!subscriptions.length) return;
+      const { data: keys, error } = await supabase.from("web_push_keys")
+        .select("public_key, private_key, subject").eq("id", 1).maybeSingle();
+      if (error || !keys?.public_key || !keys?.private_key || !keys?.subject) {
+        throw new Error("Web push unavailable");
+      }
+      const payload = JSON.stringify({
+        title: params.title, body: params.body,
+        // Activity is where staff can act on a pending invitation.
+        data: { ...data, url: "/feed/activity" },
+      });
+      const outcomes = await Promise.allSettled(subscriptions.map((subscription) =>
+        webpush.sendNotification(subscription, payload, {
+          TTL: 86400, timeout: 5000,
+          vapidDetails: { subject: keys.subject, publicKey: keys.public_key, privateKey: keys.private_key },
+        }),
+      ));
+      if (outcomes.some((outcome) => outcome.status === "rejected")) {
+        throw new Error("One or more web push deliveries failed");
+      }
+    };
+    const outcomes = await Promise.allSettled([sendExpo(), sendWeb()]);
+    if (outcomes.some((outcome) => outcome.status === "rejected")) {
+      console.warn("[invite-co-organizer] push failed (non-fatal)");
     }
-  } catch (err) {
-    console.warn("[invite-co-organizer] notify failed (non-fatal):", err);
+  } catch {
+    // Never log subscription endpoints, keys, or provider errors containing recipients.
+    console.warn("[invite-co-organizer] notify failed (non-fatal)");
   }
 }
 
@@ -220,20 +290,24 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Usernames live on the PROFILE table, not on Better Auth's `user`.
-      // Only 69 of 1188 auth rows carry one, while all 1190 profiles do — so
-      // looking the recipient up in `user` returned "User not found" for 1135
-      // real accounts, which is every staff invite anyone has tried to send by
-      // username. `users.auth_id` is the same id `user.id` would have given.
-      //
-      // Case-insensitive to match: the caller already lowercases the input,
-      // and stored usernames are mixed case.
-      const { data: profile } = await supabase
+      // Resolve an exact username, then make sure it belongs to an existing
+      // account. A profile left behind after account removal is not enough.
+      const handlePattern = username.replace(/[\\%_]/g, "\\$&");
+      const { data: profile, error: profileError } = await supabase
         .from("users")
-        .select("auth_id")
-        .ilike("username", username)
+        .select("auth_id, username")
+        .ilike("username", handlePattern)
         .maybeSingle();
-      const recipient = profile?.auth_id ? { id: profile.auth_id } : null;
+      if (profileError) return json({ error: "Could not look up that account" }, 503, req);
+      if (!profile?.auth_id || profile.username?.toLowerCase() !== username) {
+        return json({ error: "User not found" }, 404, req);
+      }
+      const { data: recipient, error: accountError } = await supabase
+        .from("user")
+        .select("id")
+        .eq("id", profile.auth_id)
+        .maybeSingle();
+      if (accountError) return json({ error: "Could not look up that account" }, 503, req);
       if (!recipient) return json({ error: "User not found" }, 404, req);
       if (recipient.id === authId) {
         return json({ error: "You're already on this event" }, 400, req);
@@ -333,26 +407,79 @@ Deno.serve(async (req: Request) => {
         typeof body.invite_id === "string" ? body.invite_id : "";
       if (!inviteId) return json({ error: "invite_id required" }, 400, req);
 
-      const { data: invite } = await supabase
+      const { data: invite, error: inviteErr } = await supabase
         .from("event_co_organizers")
         .select("id, event_id, user_id, role, invited_by, accepted")
         .eq("id", inviteId)
         .maybeSingle();
+      if (inviteErr) return json({ error: "Could not verify invite. Try again." }, 503, req);
       if (!invite) return json({ error: "Invite not found" }, 404, req);
       if (String(invite.user_id) !== String(authId)) {
         return json({ error: "Not your invite" }, 403, req);
       }
-      if (invite.accepted && body.action === "accept") {
-        return json({ ok: true, alreadyAccepted: true }, 200, req);
-      }
-
       if (body.action === "accept") {
-        const { error: updErr } = await supabase
-          .from("event_co_organizers")
-          .update({ accepted: true })
-          .eq("id", inviteId)
-          .eq("accepted", false);
-        if (updErr) return json({ error: "Failed to accept" }, 500, req);
+        let changed = false;
+        if (!invite.accepted) {
+          // Bind acceptance to the exact pending offer seen by this recipient.
+          // A revoke or changed offer must not be acknowledged as an acceptance.
+          let update = supabase.from("event_co_organizers")
+            .update({ accepted: true })
+            .eq("id", inviteId)
+            .eq("event_id", invite.event_id)
+            .eq("user_id", authId)
+            .eq("role", invite.role)
+            .eq("accepted", false);
+          update = invite.invited_by ? update.eq("invited_by", invite.invited_by) : update.is("invited_by", null);
+          const { data: updated, error: updErr } = await update.select("id").maybeSingle();
+          if (updErr) return json({ error: "Failed to accept. Try again." }, 503, req);
+          if (!updated) {
+            return json({ error: "Invite changed. Refresh your activity and try again." }, 409, req);
+          }
+          changed = true;
+        }
+
+        let accepter;
+        let inviterApp;
+        let cleanup: "cleared" | "unresolved" | "retry" = "retry";
+        try {
+          accepter = await lookupAppUser(supabase, authId, true);
+          inviterApp = invite.invited_by
+            ? await lookupAppUser(supabase, invite.invited_by, true)
+            : null;
+          if (accepter && inviterApp) {
+            await clearAcceptedInviteNotification(supabase, inviteId, accepter.id, inviterApp.id);
+            cleanup = "cleared";
+          } else {
+            // The numeric actor and recipient IDs are required to identify
+            // this notification. A missing profile is not proof it is gone.
+            cleanup = "unresolved";
+          }
+        } catch {
+          // Membership is already committed. A retry runs the same narrowly
+          // scoped cleanup without re-granting access or notifying twice.
+          console.warn("[invite-co-organizer] Could not clear accepted invite activity");
+        }
+        if (changed && accepter && inviterApp) {
+          const handle = accepter.username ? `@${accepter.username}` : "Your invitee";
+          await notify(supabase, {
+            recipientIntId: inviterApp.id,
+            senderIntId: accepter.id,
+            senderUsername: accepter.username,
+            senderAvatar: accepter.avatar,
+            title: "Staff invite accepted",
+            body: `${handle} accepted your ${invite.role} invite.`,
+            notificationType: "event_co_organizer_accepted",
+            entityId: inviteId,
+            eventId: invite.event_id,
+          });
+        }
+        if (cleanup === "unresolved") {
+          return json({ error: "Staff access was accepted, but the notification couldn’t be safely matched. Refresh Activity and try again." }, 409, req);
+        }
+        if (cleanup === "retry") {
+          return json({ error: "Staff access was accepted, but the notification couldn’t be cleared. Tap Accept again to retry." }, 503, req);
+        }
+        return json(changed ? { ok: true } : { ok: true, alreadyAccepted: true }, 200, req);
       } else {
         await supabase
           .from("event_co_organizers")
@@ -374,18 +501,9 @@ Deno.serve(async (req: Request) => {
           senderIntId: accepter.id,
           senderUsername: accepter.username,
           senderAvatar: accepter.avatar,
-          title:
-            body.action === "accept"
-              ? "Staff invite accepted"
-              : "Staff invite declined",
-          body:
-            body.action === "accept"
-              ? `${handle} accepted your ${invite.role} invite.`
-              : `${handle} declined your ${invite.role} invite.`,
-          notificationType:
-            body.action === "accept"
-              ? "event_co_organizer_accepted"
-              : "event_co_organizer_declined",
+          title: "Staff invite declined",
+          body: `${handle} declined your ${invite.role} invite.`,
+          notificationType: "event_co_organizer_declined",
           entityId: inviteId,
           eventId: invite.event_id,
         });

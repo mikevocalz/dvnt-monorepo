@@ -29,7 +29,8 @@ import {
   optionsResponse,
 } from "../_shared/verify-session.ts";
 import { withSentry } from "../_shared/sentry.ts";
-import { requireMemberPhone } from "../_shared/member-phone.ts";
+import { requireMemberPhone, requireWebMemberTicketContact } from "../_shared/member-phone.ts";
+import { unwrapWebTicketContactRequest, isWebTicketContactRequest } from "../_shared/checkout-profile-fields.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
 import {
   CART_LINE_PRICING_SELECT,
@@ -171,17 +172,23 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
 
     let parsed: unknown;
     try {
-      parsed = await req.json();
+      parsed = unwrapWebTicketContactRequest(await req.json());
     } catch {
       return errorResponse("Invalid JSON", 400);
     }
 
+    if (parsed && typeof parsed === "object" && (parsed as Record<string, unknown>).action === "contact_capability") {
+      return jsonResponse({ webTicketContactVersion: 1 });
+    }
     const cartId = parseCartId(parsed);
     if (!cartId) return errorResponse("Invalid cartId", 400);
 
     // A buyer with no phone on file gives one before paying. Stored
     // server-side; a number already on file is never replaced.
-    const memberPhone = await requireMemberPhone(
+    const contactVersion = parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>).checkout_contact_version : undefined;
+    const webContact = isWebTicketContactRequest(contactVersion, req.headers.get("origin"), Deno.env.get("DVNT_REQUIRE_WEB_TICKET_CONTACT") === "true");
+    const memberPhone = await (webContact ? requireWebMemberTicketContact : requireMemberPhone)(
       supabase,
       authId,
       parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).phone : undefined,
@@ -544,6 +551,16 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
       return errorResponse("Could not save order", 500);
     }
 
+    // Mark only the server-validated v1 browser rail, bound to the saved cart,
+    // order, buyer and PI. Do not change the pre-existing Stripe idempotency
+    // request body: an older retry may already have reserved that exact key.
+    if (webContact) {
+      const { data: marked, error: markerError } = await supabase.rpc("mark_v1_web_member_purchase_receipt", {
+        p_cart_id: cartId, p_payment_intent_id: pi.id, p_buyer_id: authId,
+      });
+      if (markerError || marked !== true) return errorResponse("Could not prepare ticket receipt", 500);
+    }
+
     console.log("[cart-checkout] PaymentIntent ready", {
       cartId,
       paymentIntentId: pi.id,
@@ -551,6 +568,7 @@ Deno.serve(withSentry("cart-checkout", async (req: Request) => {
 
     return jsonResponse({
       ok: true,
+      ...(webContact ? { webTicketContactVersion: 1 } : {}),
       cartId,
       clientSecret: pi.client_secret,
       paymentIntent: pi.client_secret,

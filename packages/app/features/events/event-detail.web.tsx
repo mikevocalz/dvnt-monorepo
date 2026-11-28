@@ -106,6 +106,8 @@ import { resolveGuestPurchase } from "@dvnt/app/lib/tickets/guest-purchase-state
 import { eventDetailIsResolving } from "@dvnt/app/lib/events/event-detail-state";
 import { useTicketCheckout } from "@dvnt/app/lib/hooks/use-ticket-checkout";
 import { CheckoutPhoneField } from "./checkout-phone-field.web";
+import { useCheckoutPhoneStore } from "@dvnt/app/lib/stores/checkout-phone-store";
+import { isPhoneRequiredError } from "@dvnt/app/lib/checkout/member-phone";
 import {
   useTicketUpgradeOptions,
   useInitiateUpgrade,
@@ -572,6 +574,17 @@ export function EventDetailScreen() {
   const { checkout, isLoading: isCheckingOut } = useTicketCheckout();
   // Authed RSVP for free, tier-less events (no checkout sheet to open).
   const rsvpMutation = useRsvpEvent();
+  const confirmWebRsvp = () => {
+    const phone = useCheckoutPhoneStore.getState().forRequest();
+    if (!phone.ok) { showToast("error", "Couldn't RSVP", phone.message); return; }
+    rsvpMutation.mutate({ eventId, status: "going", webContact: { phone: phone.phone } }, {
+      onSuccess: () => useCheckoutPhoneStore.getState().reset(),
+      onError: (error) => {
+        if (isPhoneRequiredError(error)) useCheckoutPhoneStore.getState().markNeeded();
+        showToast("error", "Couldn't RSVP", error instanceof Error ? error.message : "Please try again.");
+      },
+    });
+  };
   const { setTicket } = useTicketStore();
   // Who is reading this page, per the auth store — `"anon"` when signed out.
   // Native's `(protected)/events/[id]/index.tsx` holds the same value.
@@ -1660,6 +1673,18 @@ export function EventDetailScreen() {
               const isFreeRsvp = guestPurchase.kind === "rsvp";
               const isGoing = e.userRsvpStatus === "going";
 
+              // Old "going" rows can be missing a pass. Offer the same checked
+              // issuance path rather than making the buyer cancel first.
+              if (isAuthenticated && isFreeRsvp && isGoing && !hasTicket && !ownershipUnknown) {
+                return <div className="mt-4 flex flex-col gap-2">
+                  <CheckoutPhoneField />
+                  <button type="button" onClick={confirmWebRsvp} disabled={rsvpMutation.isPending}
+                    className="h-12 w-full rounded-xl bg-linear-to-r from-[#379ED8] to-[#874E9F] font-bold text-white">Get RSVP ticket</button>
+                  <button type="button" onClick={() => rsvpMutation.mutate({ eventId, status: "not_going" })}
+                    disabled={rsvpMutation.isPending} className="text-sm text-white/65">Cancel RSVP</button>
+                </div>;
+              }
+
               // Authed "going" → show a toggle to cancel the RSVP.
               if (isAuthenticated && isFreeRsvp && isGoing) {
                 return (
@@ -1767,6 +1792,8 @@ export function EventDetailScreen() {
                 setCheckoutOpen(true);
               };
               return (
+                <>
+                {isAuthenticated && isFreeRsvp ? <div className="mt-4"><CheckoutPhoneField /></div> : null}
                 <button
                   onClick={() => {
                     // Public events, logged out → guest flow, NEVER /login.
@@ -1789,7 +1816,7 @@ export function EventDetailScreen() {
                     }
                     // Authed: free tier-less event → RSVP; else open checkout.
                     if (isFreeRsvp) {
-                      rsvpMutation.mutate({ eventId, status: "going" });
+                      confirmWebRsvp();
                       return;
                     }
                     gateAuth(openCheckout);
@@ -1810,6 +1837,7 @@ export function EventDetailScreen() {
                             ? "Get free ticket"
                             : "Get tickets"}
                 </button>
+                </>
               );
             })()}
 

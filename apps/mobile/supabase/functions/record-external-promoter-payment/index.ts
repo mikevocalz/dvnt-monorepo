@@ -3,7 +3,9 @@
  * Event owners/co-organizers are NOT payment operators unless explicitly granted.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verifySession, corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
+import { corsHeaders, optionsResponse } from "../_shared/verify-session.ts";
+
+import { verifyExternalPaymentSession, readExternalPaymentBody } from "../_shared/external-payment-session.ts";
 
 const fields = ["request_key", "event_id", "promoter_id", "recipient_binding_id",
   "ledger_entry_ids", "amount_cents", "currency", "provider", "transaction_reference",
@@ -21,15 +23,15 @@ Deno.serve(async (req: Request) => {
   if (!url || !key) return reply({ error: "not_configured" }, 503);
   try {
     const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-    const actor = await verifySession(db, req);
-    if (!actor) return reply({ error: "unauthorized" }, 401);
+    const session = await verifyExternalPaymentSession(db, req);
+    const actor = session?.actor;
+    if (!actor || !session) return reply({ error: "unauthorized" }, 401);
     const permission = await db.rpc("settlement_external_operator_allowed", { p_actor: actor });
     if (permission.error || permission.data !== true) return reply({ error: "forbidden" }, 403);
     // No receipt body/PII uploads. Bounded structured reference + explicit manual
     // attestation only. A hash proves integrity, not that a provider paid anyone.
-    if (Number(req.headers.get("Content-Length")) > 65536) return reply({ error: "request_too_large" }, 413);
-    const raw = await req.text();
-    if (raw.length > 65536) return reply({ error: "request_too_large" }, 413);
+    const raw = await readExternalPaymentBody(req);
+    if (raw === null) return reply({ error: "request_too_large" }, 413);
     let input: any;
     try { input = JSON.parse(raw); } catch { return reply({ error: "invalid_request" }, 400); }
     if (!input || typeof input !== "object" || Array.isArray(input)
@@ -41,9 +43,9 @@ Deno.serve(async (req: Request) => {
       || !input.ledger_entry_ids.every((v: unknown) => typeof v === "string" && uuid.test(v))) {
       return reply({ error: "invalid_request" }, 400);
     }
-    const args: Record<string, unknown> = { p_actor: actor };
+    const args: Record<string, unknown> = { p_actor: actor, p_session_id: session.id };
     for (const field of fields) args[`p_${field}`] = input[field];
-    const result = await db.rpc("settlement_record_external_promoter_payment", args);
+    const result = await db.rpc("settlement_record_external_promoter_payment_session", args);
     if (result.error || result.data?.recorded !== true) return reply({ error: "recording_rejected_review_required" }, 409);
     return reply(result.data);
   } catch {

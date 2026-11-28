@@ -827,7 +827,14 @@ Deno.serve(withSentry("reconcile-orders", async (req: Request) => {
     }
 
     // Same existing authenticated cron, separate future-only receipt queue.
-    // No enqueue/backfill here and never any ticket/payment mutation from retries.
+    // Recover only explicitly marked recent v1 web member receipts. No historic
+    // backfill or ticket/payment mutation from retries.
+    try {
+      const { error } = await supabase.rpc("recover_v1_web_member_purchase_receipts", { p_limit: 25 });
+      if (error) throw error;
+    } catch {
+      console.warn("[reconcile] purchase receipt recovery unavailable");
+    }
     try {
       await deliverTicketReceipts(supabase, undefined, 25);
     } catch {

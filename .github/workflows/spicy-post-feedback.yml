@@ -18,15 +18,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install pinned Node fixture dependencies
+        run: npm install --prefix "$RUNNER_TEMP/spicy-feedback" --ignore-scripts --no-audit --no-fund --no-save typescript@6.0.3 zod@4.5.0
       - name: Real handler and editor callbacks with explicit fixture dependencies
+        env:
+          NODE_PATH: ${{ runner.temp }}/spicy-feedback/node_modules
         run: node --test scripts/test-spicy-post-feedback.cjs scripts/test-spicy-native-draft.cjs
       - name: Existing adult policy and ticket campaign regressions
+        env:
+          NODE_PATH: ${{ runner.temp }}/spicy-feedback/node_modules
         run: node --test apps/mobile/supabase/functions/_shared/adult-gate-personas.test.cjs apps/mobile/supabase/functions/_shared/first-post-gate.test.cjs
   anonymous-runtime-smoke:
     name: Anonymous posting boot smoke (no user session or content writes)

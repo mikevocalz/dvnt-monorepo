@@ -1,3 +1,4 @@
+import { eventLocationUpdate } from "../events/event-location-update";
 import { eventPublishError } from "@dvnt/app/lib/events/event-publish-error";
 import { canShowEventAttendees } from "../events/event-attendee-visibility";
 import { getSessionLifecycle } from "../auth/session-lifecycle";
@@ -816,6 +817,7 @@ export const eventsApi = {
         locationLng:
           ev.location_lng != null ? Number(ev.location_lng) : undefined,
         locationName: ev.location_name || undefined,
+        locationAddress: ev.location_address || ev.location || undefined,
         locationType: ev.location_type || undefined,
         visibility: ev.visibility || undefined,
         ticketingEnabled: ev.ticketing_enabled || false,
@@ -1103,8 +1105,7 @@ export const eventsApi = {
         updateData[DB.events.description] = updates.description;
       if (updates.startDate || updates.date)
         updateData[DB.events.startDate] = updates.startDate || updates.date;
-      if (updates.location !== undefined)
-        updateData[DB.events.location] = updates.location;
+      Object.assign(updateData, eventLocationUpdate(updates, beforeEvent?.location));
       if (hosted(updates.coverImage))
         updateData[DB.events.coverImageUrl] = updates.coverImage;
       if (updates.price !== undefined)
@@ -1145,12 +1146,7 @@ export const eventsApi = {
         updateData.youtube_video_url = updates.youtubeVideoUrl || null;
       if (updates.lynkRoomId !== undefined)
         updateData.lynk_room_id = updates.lynkRoomId || null;
-      if (updates.locationLat !== undefined)
-        updateData.location_lat = updates.locationLat;
-      if (updates.locationLng !== undefined)
-        updateData.location_lng = updates.locationLng;
-      if (updates.locationName !== undefined)
-        updateData.location_name = updates.locationName || null;
+
       if (updates.ticketingEnabled !== undefined)
         updateData.ticketing_enabled = updates.ticketingEnabled;
       if (updates.isOnline !== undefined)

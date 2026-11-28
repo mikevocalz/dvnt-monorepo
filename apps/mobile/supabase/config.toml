@@ -47,6 +47,9 @@ verify_jwt = false
 [functions.update-post]
 verify_jwt = false
 
+[functions.update-post-web]
+verify_jwt = false
+
 [functions.delete-post]
 verify_jwt = false
 
@@ -613,19 +616,20 @@ verify_jwt = false
 [functions.post-media-lease]
 verify_jwt = false
 
-# Internal worker authenticates SETTLEMENT_WORKER_SECRET itself. No schedule installed.
+# Internal worker authenticates SETTLEMENT_WORKER_SECRET. No schedule installed.
 [functions.settlements-process]
 verify_jwt = false
 
-# Draft operator-only endpoint: verifies the Better Auth session and a private
-# payment-operator allowlist itself. EXTERNAL_PROMOTER_RECORDING_ENABLED defaults off.
+# Better Auth opaque-session validation is mandatory inside these handlers.
 [functions.record-external-promoter-payment]
 verify_jwt = false
-
-# Default-off order-scoped recovery and explicit replacement. Each verifies
-# Better Auth or its own hashed, single-use guest recovery capability.
-[functions.checkout-recovery]
+[functions.report-external-promoter-payment]
+verify_jwt = false
+[functions.external-promoter-payment-status]
 verify_jwt = false
 
+# Default-off recovery verifies Better Auth or a hashed, single-use guest capability.
+[functions.checkout-recovery]
+verify_jwt = false
 [functions.checkout-replacement]
 verify_jwt = false

@@ -1,0 +1,56 @@
+name: External receipt guard
+on:
+  pull_request:
+    paths:
+      - 'docs/payments/drafts/external-receipt-guard.sql'
+      - 'apps/mobile/supabase/migrations/*external*guard*'
+      - 'apps/mobile/supabase/functions/record-external-promoter-payment/**'
+      - 'apps/mobile/supabase/functions/report-external-promoter-payment/**'
+      - 'apps/mobile/supabase/functions/external-promoter-payment-status/**'
+      - 'apps/mobile/supabase/functions/_shared/external-payment-session.ts'
+      - 'scripts/test-external-receipt-endpoints.cjs'
+      - 'scripts/verify-issuance-invariants.mjs'
+      - 'scripts/verify-issuance-invariants.test.cjs'
+      - 'docs/payments/external-receipt-guard-rollout.md'
+      - 'apps/mobile/supabase/functions/payouts-release/**'
+      - 'apps/mobile/supabase/config.toml'
+      - 'scripts/test-external-receipt-guard*'
+      - 'scripts/fixtures/external-receipt-guard/**'
+      - '.github/workflows/external-receipt-guard.yml'
+permissions:
+  contents: read
+jobs:
+  offline-and-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test dependencies
+        run: npm install --prefix /tmp/external-receipt-test --no-package-lock --ignore-scripts @electric-sql/pglite@0.3.14 typescript@5.9.3
+      - name: Offline SQL and endpoint regressions
+        env:
+          NODE_PATH: /tmp/external-receipt-test/node_modules
+        run: node --test --test-concurrency=1 scripts/test-external-receipt-guard*.cjs scripts/test-external-receipt-endpoints.cjs scripts/verify-issuance-invariants.test.cjs
+      - name: Refuse unsafe database targets before SQL
+        run: python3 scripts/test-external-receipt-guard-target-safety.py
+      - name: Start network-isolated disposable PostgreSQL 17
+        run: |
+          set -euo pipefail
+          docker --context default run --detach --rm --name dvnt-external-receipt-ci --network none --label com.dvnt.test-purpose=external-receipt-guard-ci --env POSTGRES_HOST_AUTH_METHOD=trust postgres:17
+          ready=false
+          for attempt in $(seq 1 30); do
+            if docker --context default exec --user postgres dvnt-external-receipt-ci sh -c '[ "$(cat /proc/1/comm)" = postgres ] && pg_isready -h /var/run/postgresql -d postgres'; then ready=true; break; fi
+            sleep 1
+          done
+          test "$ready" = true
+          docker --context default exec --user postgres dvnt-external-receipt-ci psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -d postgres -c "DO \$\$ BEGIN IF current_setting('server_version_num')::int NOT BETWEEN 170000 AND 179999 THEN RAISE EXCEPTION 'Expected disposable PostgreSQL 17'; END IF; END \$\$;"
+      - name: Native cross-process locking and restrictive privileges
+        run: python3 scripts/test-external-receipt-guard-concurrency.py --disposable-ci-postgres
+      - name: Remove only generated test container and anonymous data
+        if: always()
+        run: docker --context default rm --force --volumes dvnt-external-receipt-ci || true

@@ -33,6 +33,7 @@ import {
   Type as TypeIcon,
   Image as ImageIcon,
   CalendarPlus,
+  Crop,
 } from "lucide-react";
 import { useCreatePostStore } from "@dvnt/app/lib/stores/create-post-store";
 import { useVerifiedGate } from "@dvnt/app/lib/hooks/use-verified-gate";
@@ -47,6 +48,7 @@ import {
   TEXT_POST_MAX_SLIDES,
 } from "@dvnt/app/lib/posts/text-post";
 import type { MediaAsset } from "@dvnt/app/lib/hooks/use-media-picker";
+import { canCropMedia } from "@dvnt/app/lib/media/live-photo-original";
 import { useCameraResultStore } from "@dvnt/app/lib/stores/camera-result-store";
 // Resolves to `use-responsive-grid.web.ts` (webpack `.web.ts` extension order):
 // a `resize` listener instead of react-native's `useWindowDimensions`, feeding
@@ -62,6 +64,7 @@ import {
 } from "./browser-live-photo-import";
 
 import { reviewFingerprint, type NudityReview } from "./nudity-review-policy";
+import { runNudityReviewTask } from "./nudity-review-task";
 import { NudityReviewDialog } from "./nudity-review-dialog.web";
 
 const MAX_PHOTOS = MAX_BROWSER_POST_MEDIA;
@@ -144,7 +147,6 @@ export function CreatePostScreen() {
   const guardVerified = useVerifiedGate();
   const submittingRef = useRef(false);
   const scanAbort = useRef<AbortController | null>(null);
-  const [checkingMedia, setCheckingMedia] = useState(false);
   const [nudityReview, setNudityReview] = useState<(NudityReview & { fingerprint: string }) | null>(null);
   useEffect(() => () => scanAbort.current?.abort(), []);
 
@@ -198,6 +200,15 @@ export function CreatePostScreen() {
     );
   };
 
+  const handleCrop = () => {
+    if (submittingRef.current || pendingMediaRef.current || handoffPendingRef.current) return;
+    const draft = useCreatePostStore.getState();
+    if (draft.postKind !== "media" || !draft.selectedMedia.some(canCropMedia)) return;
+    // Invalidate any Share callback waiting on an account verification prompt.
+    filePickVersion.current += 1;
+    router.push("/feed/crop-preview");
+  };
+
   const handleSetPostKind = (nextKind: "media" | "text") => {
     if (nextKind === postKind || submittingRef.current) return;
     filePickVersion.current += 1;
@@ -248,19 +259,25 @@ export function CreatePostScreen() {
       if (draft.postKind === "media" && !draft.isNSFW && fingerprint !== reviewedFingerprint) {
         const controller = new AbortController();
         scanAbort.current = controller;
-        setCheckingMedia(true);
         let result: NudityReview;
         try {
-          const { scanPostMedia } = await import("./nudity-scan.web");
-          result = await withLeasedHandoffScan(draft.selectedMedia, controller.signal, media => scanPostMedia(media, controller.signal));
+          result = await runNudityReviewTask(async (signal) => {
+            const { scanPostMedia } = await import("./nudity-scan.web");
+            if (signal.aborted) return { flagged: false, incomplete: true };
+            return withLeasedHandoffScan(draft.selectedMedia, signal, media => scanPostMedia(media, signal));
+          }, controller.signal);
         } catch { result = { flagged: false, incomplete: true }; }
-        finally { if (mounted.current) setCheckingMedia(false); }
+        finally {
+          if (scanAbort.current === controller) scanAbort.current = null;
+        }
         if (!stillCurrent() || controller.signal.aborted) return;
         if (reviewFingerprint(useCreatePostStore.getState()) !== fingerprint) {
           showToast("warning", "Draft changed", "Review your changes and tap Share again.");
           return;
         }
-        if (result.flagged || result.incomplete) {
+        // Only a positive detection interrupts Share. A missing advisory result
+        // leaves the user's label unchanged; all normal publish checks still run.
+        if (result.flagged) {
           setNudityReview({ ...result, fingerprint });
           return;
         }
@@ -317,16 +334,12 @@ export function CreatePostScreen() {
         setNudityReview(null);
         guardVerified("post", () => void submitPost(reviewed));
       }} />}
-      {checkingMedia && <div role="status" className="px-4 py-3 text-sm text-white/70">
-        Checking media privately in your browser…
-        <button className="ml-3 underline" onClick={() => scanAbort.current?.abort()}>Cancel check</button>
-      </div>}
       {/* Header */}
       <div
         className="sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-white/8 bg-[#06070d]/85 backdrop-blur"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 12px)" }}
       >
-        <button onClick={() => { filePickVersion.current += 1; clearReviewReturn(); ui.setIsSubmitLocked(false); router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
+        <button onClick={() => { filePickVersion.current += 1; scanAbort.current?.abort(); clearReviewReturn(); ui.setIsSubmitLocked(false); router.back(); }} className="text-white/80 active:opacity-60" aria-label="Close">
           <X size={22} />
         </button>
         <h1 className="text-[17px] font-semibold">New Post</h1>
@@ -379,8 +392,17 @@ export function CreatePostScreen() {
         </div>
 
         {!isTextPost ? (
-          <BrowserMediaPicker selectedMedia={selectedMedia} draftIdentity={textSlides} disabled={busy}
-            beginUpdate={beginMediaUpdate} onPendingChange={onPendingMediaChange} columns={mediaColumns} />
+          <>
+            <BrowserMediaPicker selectedMedia={selectedMedia} draftIdentity={textSlides} disabled={busy}
+              beginUpdate={beginMediaUpdate} onPendingChange={onPendingMediaChange} columns={mediaColumns} />
+            {selectedMedia.some(canCropMedia) ? (
+              <button type="button" onClick={handleCrop} disabled={busy || pendingMedia || handoffPending}
+                className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/6 px-3 text-sm font-semibold text-white focus-visible:outline-2 focus-visible:outline-cyan-400 disabled:opacity-45">
+                <Crop size={17} aria-hidden="true" />
+                Edit photos
+              </button>
+            ) : null}
+          </>
         ) : null}
 
         {!isTextPost && process.env.NEXT_PUBLIC_ENABLE_NATIVE_LIVE_PHOTO_HANDOFF === "true" ? (
@@ -570,7 +592,7 @@ export function CreatePostScreen() {
             disabled={!isValid || busy || pendingMedia || handoffPending}
             className="min-h-12 w-full rounded-xl px-4 py-3 text-[16px] font-bold bg-cyan-500 text-white disabled:bg-white/8 disabled:text-white/30"
           >
-            {checkingMedia ? "Checking media…" : busy ? "Posting…" : "Share"}
+            {busy ? "Posting…" : "Share"}
           </button>
         </div>
       </div>

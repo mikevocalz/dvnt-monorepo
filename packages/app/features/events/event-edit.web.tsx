@@ -177,6 +177,9 @@ export function EventEditScreen() {
   const [tierLoadFailed, setTierLoadFailed] = useState(false);
   const [addonLoadFailed, setAddonLoadFailed] = useState(false);
   const [catalogPending, setCatalogPending] = useState(true);
+  // The shared store can retain the last draft after navigation. A reopened
+  // editor must fetch fresh catalog rows, even for the same event ID.
+  const hydrationScope = useRef<string | null>(null);
   // A flyer video upload can run for minutes; a bare "Saving…" for that long
   // reads as a hung app, which is what "it won't let me upload" looks like.
   const [uploadPct, setUploadPct] = useState<number | null>(null);
@@ -184,7 +187,12 @@ export function EventEditScreen() {
 
   // ── Prefill from the fetched event (mirrors native fetchEvent) ──
   useEffect(() => {
-    if (!event || !mayEdit || s.hydratedId === id) return;
+    if (!event || !mayEdit || String(event.id) !== id) return;
+    const hydrationAuthId = getAuthIdFromStore();
+    const hydrationEpoch = getSessionLifecycle().epoch;
+    const scope = JSON.stringify([id, hydrationAuthId, hydrationEpoch]);
+    if (hydrationScope.current === scope && s.hydratedId === id) return;
+    hydrationScope.current = scope;
     setCatalogPending(true);
     setTierLoadFailed(false);
     setAddonLoadFailed(false);
@@ -250,9 +258,9 @@ export function EventEditScreen() {
       eventImages: images,
     });
 
-    const hydrationAuthId = getAuthIdFromStore();
-    const hydrationEpoch = getSessionLifecycle().epoch;
     const hydrationCurrent = () => screenMounted.current &&
+      hydrationScope.current === scope &&
+      editAccess.current.id === id && editAccess.current.mayEdit &&
       useEventEditStore.getState().hydratedId === id &&
       getAuthIdFromStore() === hydrationAuthId && getSessionLifecycle().epoch === hydrationEpoch;
     let remainingLoads = 2;
@@ -331,7 +339,9 @@ export function EventEditScreen() {
   const saveLock = useRef(false);
   const handleSave = async () => {
     if (!mayEdit || !id || saveLock.current || updateEventMutation.isPending || uploadPct != null || flyerPreparation.isBusy()) return;
-    if (catalogPending || tierLoadFailed || addonLoadFailed) {
+    // Read the latest Remove action from Zustand, not a prior render snapshot.
+    const s = useEventEditStore.getState();
+    if (s.hydratedId !== id || catalogPending || tierLoadFailed || addonLoadFailed) {
       showToast("error", "Catalog not ready", "Reload the existing tickets and add-ons before saving to avoid duplicate or missing items.");
       return;
     }
@@ -362,7 +372,8 @@ export function EventEditScreen() {
     }
     const saving = saveSession.current.begin(
       JSON.stringify([id, expectedAuthId, expectedSessionEpoch]),
-      () => screenMounted.current && editAccess.current.id === id && editAccess.current.mayEdit && getAuthIdFromStore() === expectedAuthId &&
+      () => screenMounted.current && editAccess.current.id === id && editAccess.current.mayEdit &&
+        useEventEditStore.getState().hydratedId === id && getAuthIdFromStore() === expectedAuthId &&
         getSessionLifecycle().epoch === expectedSessionEpoch && getSessionLifecycle().ready,
     );
     saveLock.current = true;
@@ -508,7 +519,7 @@ export function EventEditScreen() {
           }));
         } else {
           await withTimeout(
-            ticketTypesApi.update(tier.id, {
+            ticketTypesApi.update(id, tier.id, {
               name: tier.name,
               category: tier.category || "admission",
               description: tier.description || null,
@@ -536,7 +547,8 @@ export function EventEditScreen() {
       );
       const removedIds = s.originalTierIds.filter((tid) => !currentIds.has(tid));
       const deactivatePromises = removedIds.map(async (tid) => {
-        await withTimeout(ticketTypesApi.deactivate(tid), 15000, "ticket-type-deactivate");
+        saving.assertCurrent();
+        await withTimeout(ticketTypesApi.deactivate(id, tid), 15000, "ticket-type-deactivate");
         if (saving.current()) useEventEditStore.setState((current) => ({ originalTierIds: current.originalTierIds.filter((value) => value !== tid) }));
       });
 
@@ -564,16 +576,16 @@ export function EventEditScreen() {
         onRemoved: (addonId) => useEventEditStore.setState((current) => ({ originalAddonIds: current.originalAddonIds.filter((value) => value !== addonId) })),
       });
 
+      const outcomes = await Promise.allSettled([
+        ...tierPromises, ...deactivatePromises, addonPromise,
+      ]);
       try {
-        const outcomes = await Promise.allSettled([
-          ...tierPromises, ...deactivatePromises, addonPromise,
-        ]);
         const failed = outcomes.find((outcome) => outcome.status === "rejected");
         if (failed?.status === "rejected") throw failed.reason;
       } catch (err: any) {
         if (!saving.current()) return;
         console.error("[EditEvent] Tier/add-on sync error:", err);
-        const uncertain = catalogSaveNeedsReload(err);
+        const uncertain = outcomes.some((outcome) => outcome.status === "rejected" && catalogSaveNeedsReload(outcome.reason));
         if (uncertain) { setTierLoadFailed(true); setAddonLoadFailed(true); }
         showToast(
           "warning",

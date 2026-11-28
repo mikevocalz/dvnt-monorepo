@@ -5,6 +5,7 @@ import { salesCutoffAt } from './sales-cutoff.ts';
 import { validateAndApplyPromoterCode } from './apply-promoter-code.ts';
 import { legacyEventCheckoutAllowed, LEGACY_EVENT_CHECKOUT_PAUSED } from './legacy-event-checkout-route.ts';
 import { consumeDbRateLimit } from './db-rate-limit.ts';
+import { parseWebGuestTicketContact, unwrapWebTicketContactRequest } from './checkout-profile-fields.ts';
 
 export const EMBED_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const PROOF = /^[a-f0-9]{64}$/;
@@ -21,7 +22,7 @@ function requireId(value: unknown): string {
   if (typeof value !== 'string' || !EMBED_UUID.test(value)) throw new EmbedError('invalid_request','Invalid request.',400);
   return value.toLowerCase();
 }
-export function parseEmbedBuyer(body: Record<string, unknown>) {
+export function parseEmbedBuyer(body: Record<string, unknown>, requireContact = false) {
   const quantity = body.quantity;
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
   const name = typeof body.name === 'string' ? body.name.trim() : '';
@@ -37,7 +38,12 @@ export function parseEmbedBuyer(body: Record<string, unknown>) {
   const attendeeNames = Array.isArray(body.attendeeNames) ? body.attendeeNames.map((n) => typeof n==='string' ? n.trim() : '') : [];
   if (attendeeNames.length>(quantity as number) || attendeeNames.some((n)=>n.length>40) || JSON.stringify(attendeeNames).length>500)
     throw new EmbedError('invalid_names','Enter attendee names of at most 40 characters.',400);
-  return { tierId: requireId(body.tierId), quantity: quantity as number, email, name, promoterCode, attendeeNames };
+  const contact = requireContact || body.username !== undefined || body.phone !== undefined
+    ? parseWebGuestTicketContact({ email, username: body.username, phone: body.phone }) : null;
+  if (contact && !contact.ok) throw new EmbedError(contact.code, contact.message, 400);
+  return { tierId: requireId(body.tierId), quantity: quantity as number, email, name, promoterCode, attendeeNames,
+    ...(contact ? { username: contact.username, phone: contact.phone } : {}) };
+
 }
 export function isEmbedEventAvailable(event: any, now = Date.now()): boolean {
   const cutoff = salesCutoffAt(event)?.getTime();
@@ -74,6 +80,7 @@ function checked(result: any) {
 export interface EmbedCommerceDependencies {
   db: any;
   enabled: boolean;
+  requireWebContact?: boolean;
   publishableKey: string;
   livemode: boolean;
   siteOrigin: string;
@@ -158,6 +165,8 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
       try {body=JSON.parse(raw); if(!body || typeof body!=='object' || Array.isArray(body)) throw new Error();}
       catch {throw new EmbedError('invalid_request','Invalid request.',400);}
       const embedId=requireId(body.embedId),action=String(body.action);
+      const contactAck = action === 'checkout' && body.checkout_contact_version === 1
+        ? { webTicketContactVersion: 1 } : {};
       if(!['describe','quote','checkout','resume','status','cancel'].includes(action)) throw new EmbedError('invalid_action','Invalid action.',400);
       let attempt:any=null;
       let proofHash='';
@@ -181,6 +190,7 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
         if(!isEmbedEventAvailable(event,now())) throw new EmbedError('event_unavailable','This event is not currently selling embedded tickets.',404);
       }
       if(action==='describe') {
+        const { error: contactSchemaError } = await db.from('web_ticket_order_contacts').select('order_id').limit(0);
         const tiers=checked(await db.from('ticket_types').select(TIER_FIELDS).eq('event_id',event.id));
         return json({embedId,testMode:!deps.livemode,allowedOrigin:setting.allowed_origin,revision:setting.revision,
           event:{id:event.id,title:event.title,startDate:event.start_date,timeZone:event.event_tz,
@@ -188,7 +198,7 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
             attendeeNamesRequired:event.attendee_name_requirement==='required'},
           tiers:tiers.filter((t:any)=>publicTier(t,now())).map((t:any)=>({id:t.id,name:t.name,priceCents:t.price_cents,
             maxQuantity:Math.min(10,t.max_per_user || 10),available:t.quantity_total==null ? null:Math.max(0,t.quantity_total-(t.quantity_sold || 0))})),
-          siteOrigin:deps.siteOrigin});
+          siteOrigin:deps.siteOrigin,...(contactSchemaError ? {} : { webTicketContactVersion:1 })});
       }
       // Status/cancellation remain recoverable; no new session or payable
       // capability can be created/resumed through this unsupported cutover rail.
@@ -197,7 +207,7 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
         throw new EmbedError(LEGACY_EVENT_CHECKOUT_PAUSED.code,LEGACY_EVENT_CHECKOUT_PAUSED.error);
       }
       if(action==='quote' || action==='checkout') {
-        const buyer=parseEmbedBuyer(body), requestHash=await embedHash(JSON.stringify({buyer,quoteHash:body.quoteHash ?? null}));
+        const buyer=parseEmbedBuyer(unwrapWebTicketContactRequest(body), action === 'checkout' && (deps.requireWebContact === true || body.checkout_contact_version === 1)), requestHash=await embedHash(JSON.stringify({buyer,quoteHash:body.quoteHash ?? null}));
         if(attempt && attempt.request_hash!==requestHash) throw new EmbedError('attempt_conflict','Resume or cancel the existing checkout before changing tickets.');
         if(!attempt) {
           const limiter=await consumeDbRateLimit(db,await embedHash(`${origin}:${buyer.email}`),'ticket-embed-checkout',30,3600);
@@ -219,15 +229,18 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
           const fees=computeFeesWithMode(subtotal,buyer.quantity,event.fee_mode);
           const expiry=Math.floor(Math.min(now()+35*60_000,salesCutoffAt(event)!.getTime(),tier.sale_end?Date.parse(tier.sale_end):Infinity)/1000);
           if(expiry*1000<now()+31*60_000) throw new EmbedError('sales_closing','Sales close soon. Please purchase through the full DVNT event page.');
-          const quote={...buyer,eventId:event.id,revision:setting.revision,title:event.title,tierName:tier.name,unitPrice:tier.price_cents,
+          const { username, phone, ...nonContactBuyer } = buyer;
+          const quote={...nonContactBuyer,eventId:event.id,revision:setting.revision,title:event.title,tierName:tier.name,unitPrice:tier.price_cents,
             requestedFeeMode:event.fee_mode || 'pass',destination:organizer.stripe_account_id,fees,promoter:promo.result,expiresAt:expiry};
           const totals={subtotal:fees.subtotal,serviceFee:fees.buyer_fee,total:fees.customer_charge_amount,
             discount:promo.result?.discount_cents ?? 0,currency:'usd'};
           const quoteHash=await embedHash(JSON.stringify({revision:setting.revision,tierId:tier.id,unitPrice:tier.price_cents,quantity:buyer.quantity,fees,promoter:promo.result,destination:organizer.stripe_account_id}));
           if(action==='quote') return json({totals,quoteHash});
           if(body.quoteHash!==quoteHash) throw new EmbedError('quote_changed','Your price or selection changed. Review the new total before paying.');
-          attempt=checked(await db.rpc('ticket_embed_prepare_checkout',{p_id:body.attemptId,p_embed_id:embedId,p_origin:origin,
-            p_proof_hash:proofHash,p_request_hash:requestHash,p_quote:quote}));
+          const hasContact = username !== undefined && phone !== undefined;
+          attempt=checked(await db.rpc(hasContact ? 'ticket_embed_prepare_checkout_with_contact' : 'ticket_embed_prepare_checkout',{
+            p_id:body.attemptId,p_embed_id:embedId,p_origin:origin,p_proof_hash:proofHash,p_request_hash:requestHash,p_quote:quote,
+            ...(hasContact ? {p_guest_username:username,p_guest_phone:phone} : {}) }));
         }
       }
       if(attempt && !attempt.stripe_session_id && (action==='cancel' || attempt.quote.expiresAt*1000<=now())) {
@@ -235,7 +248,7 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
       }
       if(attempt?.state==='cancelled') {
         if(action==='cancel') await recordExplicitCancellation(attempt.order_id);
-        return json({state:'expired'});
+        return json({...contactAck,state:'expired'});
       }
       if(action==='checkout' || action==='resume') {
         // An old request never starts another provider session after Stripe's
@@ -246,10 +259,10 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
           : await stripe('POST','/checkout/sessions',stripeEmbedParameters(attempt),`dvnt-embed-${attempt.id}`);
         verifySession(session,attempt,deps.livemode);
         if(!attempt.stripe_session_id) attempt=checked(await db.rpc('ticket_embed_attach_session',{p_id:attempt.id,p_session:session.id}));
-        if(session.status==='expired') return json({state:'expired'});
+        if(session.status==='expired') return json({...contactAck,state:'expired'});
         if(session.status==='complete') return await status(attempt,session);
         if(!session.client_secret || session.status!=='open') throw new EmbedError('processing','Checkout is processing. Retry to recover it.');
-        return json({state:'payment_open',clientSecret:session.client_secret,publishableKey:deps.publishableKey,
+        return json({...contactAck,state:'payment_open',clientSecret:session.client_secret,publishableKey:deps.publishableKey,
           expiresAt:attempt.quote.expiresAt,totals:{subtotal:attempt.quote.fees.subtotal,serviceFee:attempt.quote.fees.buyer_fee,total:attempt.quote.fees.customer_charge_amount,currency:'usd'}});
       }
       if(!attempt.stripe_session_id) return json({state:'preparing',message:'Checkout is being prepared. Retry the same request.'});
@@ -266,17 +279,17 @@ export function createTicketEmbedHandler(deps: EmbedCommerceDependencies) {
         // a timeout, decline, closing the dialog, or a client-reported success.
         checked(await db.from('ticket_holds').update({status:'expired'}).eq('id',attempt.hold_id).eq('status','active'));
         if(explicitlyCancelled) await recordExplicitCancellation(attempt.order_id);
-        return json({state:'expired'});
+        return json({...contactAck,state:'expired'});
       }
       return await status(attempt,session);
       async function status(a:any,s:any) {
         const order=checked(await db.from('orders').select('id,status,ticket_email_status').eq('id',a.order_id).maybeSingle());
         if(!order) throw new EmbedError('order_unavailable','Order details are temporarily unavailable.',503);
-        if(['refunded','partially_refunded','cancelled','failed','payment_failed','disputed'].includes(order.status)) return json({state:order.status});
-        if(s.payment_status!=='paid') return json({state:s.status==='complete'?'payment_processing':'payment_open'});
+        if(['refunded','partially_refunded','cancelled','failed','payment_failed','disputed'].includes(order.status)) return json({...contactAck,state:order.status});
+        if(s.payment_status!=='paid') return json({...contactAck,state:s.status==='complete'?'payment_processing':'payment_open'});
         const tickets=checked(await db.from('tickets').select('id,guest_lookup_token').eq('order_id',a.order_id).in('status',['active','scanned']));
-        if(order.status!=='paid' || tickets.length!==a.quote.quantity || tickets.some((t:any)=>!EMBED_UUID.test(t.guest_lookup_token || ''))) return json({state:'paid_issuing',message:'Payment received. Preparing your tickets.'});
-        return json({state:'fulfilled',orderId:order.id,emailStatus:order.ticket_email_status,
+        if(order.status!=='paid' || tickets.length!==a.quote.quantity || tickets.some((t:any)=>!EMBED_UUID.test(t.guest_lookup_token || ''))) return json({...contactAck,state:'paid_issuing',message:'Payment received. Preparing your tickets.'});
+        return json({...contactAck,state:'fulfilled',orderId:order.id,emailStatus:order.ticket_email_status,
           tickets:tickets.map((t:any)=>({url:`${deps.siteOrigin}/public/tickets/guest/${t.guest_lookup_token}`}))});
       }
     } catch(error) {

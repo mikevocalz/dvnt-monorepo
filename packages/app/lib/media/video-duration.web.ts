@@ -16,15 +16,19 @@ import { MAX_VIDEO_DURATION_SEC } from "./upload-policy.ts";
 /** media-upload's MAX_VIDEO_DURATION_SEC, read from the pinned policy table. */
 export const MAX_VIDEO_SECONDS = MAX_VIDEO_DURATION_SEC;
 
-export function readVideoDurationSec(file: File): Promise<number | null> {
+export function readVideoDurationSec(file: File, { requireVideo = false } = {}): Promise<number | null> {
   return new Promise((resolve) => {
     if (typeof document === "undefined") return resolve(null);
     const url = URL.createObjectURL(file);
     const video = document.createElement("video");
     let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
     const done = (value: number | null) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
+      video.onloadedmetadata = null;
+      video.onerror = null;
       URL.revokeObjectURL(url);
       video.removeAttribute("src");
       resolve(value);
@@ -32,9 +36,10 @@ export function readVideoDurationSec(file: File): Promise<number | null> {
     // A codec the browser cannot read gives no metadata. Unknown is not "too
     // long" — let the server be the one to refuse it.
     video.onloadedmetadata = () =>
-      done(Number.isFinite(video.duration) ? video.duration : null);
+      done(Number.isFinite(video.duration) && (!requireVideo || (video.videoWidth > 0 && video.videoHeight > 0)) ? video.duration : null);
     video.onerror = () => done(null);
-    window.setTimeout(() => done(null), 4000);
+    timer = setTimeout(() => done(null), 4000);
+    video.playsInline = true;
     video.preload = "metadata";
     video.src = url;
   });

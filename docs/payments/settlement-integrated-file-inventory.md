@@ -93,7 +93,7 @@ Complete payout-only diff against the verified master tree `a153580fb21436a3abd5
 ## Database artifacts
 
 - A `apps/mobile/supabase/migrations/20261111010000_payout_readiness_observability.sql`
-- A `apps/mobile/supabase/migrations/20261111040111_settlement_runtime_v1.sql`
+- A `docs/payments/drafts/settlement-runtime-v1.generated.sql`
 - A `docs/payments/drafts/settlement-external.sql`
 - A `docs/payments/drafts/settlement-funding.sql`
 - A `docs/payments/drafts/settlement-ledger.sql`

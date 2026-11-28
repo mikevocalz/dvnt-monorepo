@@ -9,7 +9,7 @@ export function MapSharingConsent({ active, promptOnly = false }: { active: bool
   return owner ? <OwnedConsent key={owner} owner={owner} active={active} promptOnly={promptOnly} /> : null;
 }
 function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: boolean; promptOnly: boolean }) {
-  // Only Home/Events entry instances auto-prompt once per sign-in. The map keeps manual controls.
+  // Only Home/Events entry instances auto-prompt once per account on this device. The map keeps manual controls.
   const flow = useMapSharingPrompt(owner, active, promptOnly);
   const shareAndOpenMap = useMapSharingNavigation(owner, flow.share);
   const dialogId = useId();
@@ -22,13 +22,15 @@ function OwnedConsent({ owner, active, promptOnly }: { owner: string; active: bo
     return () => { if (node?.open) node.close(); };
   }, [flow.open, active]);
   const busy = flow.consent.busy || flow.location.busy;
+  const checking = flow.location.loading || (!flow.location.settings && !flow.location.error);
   return <section aria-label="Map sharing" className={promptOnly ? "" : "rounded-xl border border-white/15 p-4 space-y-3"}>
     {!promptOnly ? <>
-      {flow.location.sharing ? <>
-      <p className="text-sm">Avatar sharing is enabled for this sign-in, until {new Date(flow.location.settings!.shareUntil!).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. This is your sharing preference, not confirmation of a current location. Your avatar appears only while a fresh permitted location is available.</p>
+      {checking ? <p role="status" className="text-sm text-white/70">Checking your saved sharing preference…</p> : flow.location.sharing ? <>
+      <p className="text-sm">{flow.location.settings?.consentVersion === "events-map-account-v3" ? "Avatar sharing is enabled across your account until you turn it off" : "Your previous sign-in-only sharing choice is still active"}. This is your sharing preference, not confirmation of a current location. Your avatar appears only while a fresh permitted location is available.</p>
+      {flow.location.settings?.consentVersion !== "events-map-account-v3" ? <button type="button" disabled={!flow.available || busy} onClick={flow.show} className="min-h-11 underline">Use across devices</button> : null}
       <button type="button" disabled={flow.location.busy} onClick={flow.stop} className="min-h-11 rounded-xl border border-white/30 px-4">Stop sharing</button>
     </> : <>
-      <p className="text-sm text-white/70">Show your avatar for this sign-in. Sharing stops when you sign out or your sign-in expires. Sharing is optional.</p>
+      <p className="text-sm text-white/70">Show your avatar across devices and future sign-ins until you turn sharing off. Each device still needs location permission.</p>
       <button type="button" disabled={!flow.available || busy} onClick={flow.show} className="min-h-11 rounded-xl bg-[#379ED8] px-4 font-semibold text-black disabled:opacity-40">Show my avatar</button>
     </>}
     {flow.success && flow.location.sharing ? <p role="status">Your approximate location was shared. Your avatar will appear as the map refreshes.</p> : null}

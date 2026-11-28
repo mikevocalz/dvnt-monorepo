@@ -22,7 +22,7 @@ const { build } = require('esbuild');
   const mockState = `
     import { create } from 'zustand';
     const initial = () => ({ selectedMedia: [], caption: '', textSlides: [{ id: 'slide', content: '', order: 0 }], activeTextSlideIndex: 0, isNSFW: false, tags: [], postKind: 'media', textTheme: 'graphite' });
-    export const fixture = { published: [], toasts: [], routes: [], deferGate: false, gate: null, progress: [], failPublish: false, deferPublish: false, finishPublish: null };
+    export const fixture = { route: null, cropExports: [], publishFiles: [], invalidCrop: false, deferCrop: false, finishCrop: null, published: [], toasts: [], routes: [], deferGate: false, gate: null, progress: [], failPublish: false, deferPublish: false, finishPublish: null, scanResult: {flagged:false,incomplete:false}, publishLabels: [] };
     export const store = create((set) => ({ ...initial(), setSelectedMedia: selectedMedia => set({selectedMedia}), setCaption: caption => set({caption}), setPostKind: postKind => set({postKind}), setIsNSFW: isNSFW => set({isNSFW}), reset: () => set(initial()), setTextTheme: textTheme => set({textTheme}), setActiveTextSlideIndex: () => {}, updateTextSlide: () => {}, addTextSlide: () => {}, removeTextSlide: () => {}, addTag: () => {}, removeTag: () => {} }));
     export const ui = create(set => ({ isSubmitLocked: false, tagInput: '', setTagInput: tagInput => set({tagInput}), setIsSubmitLocked: isSubmitLocked => set({isSubmitLocked}) }));
     export const camera = create(() => ({ result: null, clear: () => {} }));
@@ -33,13 +33,29 @@ const { build } = require('esbuild');
     '@dvnt/app/lib/media/handoff-upload-lease': `export const withLeasedHandoffScan=async(media,_signal,scan)=>scan(media);`,
     '@dvnt/app/lib/media/use-handoff-upload-lease': `export const useHandoffUploadLease=asset=>asset;`,
     // This suite isolates import, publication and auth-return behavior.
-    './nudity-scan.web': `export const scanPostMedia=async()=>({flagged:false,incomplete:false});`,
+    './nudity-scan.web': `import {fixture} from 'composer-fixture'; export const scanPostMedia=async()=>fixture.scanResult;`,
     './native-live-photo-handoff.web': `export const NativeLivePhotoHandoff = () => null;`,
     'next/dynamic': `export default () => () => null;`,
-    'solito/navigation': `import {fixture} from 'composer-fixture'; export const useRouter = () => ({ back: () => fixture.routes.push('back'), push: route => fixture.routes.push(route), replace: route => fixture.routes.push(route) });`,
+    'solito/navigation': `import {fixture} from 'composer-fixture';
+      const goto = route => { fixture.routes.push(route); fixture.route?.(route); };
+      export const useRouter = () => ({ back: () => goto('back'), push: goto, replace: goto });`,
+    '@dvnt/ui': `import {useEffect} from 'react'; import {fixture} from 'composer-fixture';
+      export function ImageCropper({src, aspect, onCropComplete}) {
+        useEffect(()=>{ onCropComplete({x:100,y:200,width:720,height:Math.round(720/aspect)}); },[src,aspect]);
+        return null;
+      }
+      export async function getCroppedDataUrl(src,area,transform) {
+        const pixels=new Uint8ClampedArray([200,75,25,255]);
+        transform?.({canvas:{width:1,height:1},getImageData:()=>({data:pixels}),putImageData:()=>{}});
+        fixture.cropExports.push({src,area,...(transform?{pixels:[...pixels]}:{})});
+        if(fixture.deferCrop) await new Promise(resolve=>{ fixture.finishCrop=resolve; });
+        if(fixture.invalidCrop) return src;
+        return 'data:image/jpeg;base64,/9j/2Q==';
+      }`,
+    'heic-to/next': `export const heicTo=()=>{throw Error('HEIC decoder is not part of the DOM fixture')};`,
     '@dvnt/app/lib/stores/create-post-store': `export {store as useCreatePostStore} from 'composer-fixture';`,
     '@dvnt/app/lib/hooks/use-verified-gate': `import {fixture} from 'composer-fixture'; export const useVerifiedGate = () => (_action, callback) => { if(fixture.deferGate) fixture.gate = callback; else callback(); };`,
-    '@dvnt/app/lib/hooks/use-publish-post': `import {fixture} from 'composer-fixture'; export const usePublishPost = () => draft => { fixture.published.push(draft.selectedMedia.map(item => ({...item}))); return 'fixture'; };`,
+    '@dvnt/app/lib/hooks/use-publish-post': `import {fixture} from 'composer-fixture'; import {publishMediaFile} from '@dvnt/app/lib/media/live-photo-original'; export const usePublishPost = () => draft => { fixture.publishFiles.push(draft.selectedMedia.map(publishMediaFile)); fixture.publishLabels.push(draft.isNSFW); fixture.published.push(draft.selectedMedia.map(item => ({...item}))); return 'fixture'; };`,
     '@dvnt/app/lib/posts/publish-queue': `import {fixture} from 'composer-fixture'; export const postPublishQueue = { whenFinished: async () => { if(fixture.failPublish) throw Error('fixture publication failed'); if(fixture.deferPublish) await new Promise(resolve=>{fixture.finishPublish=resolve}); } };`,
     '@dvnt/app/lib/profile/new-member-progress': `import {fixture} from 'composer-fixture'; export const fetchNewMemberProgress = async () => fixture.progress.shift() || ({step:'complete',hasPost:true});`,
     '@dvnt/app/lib/posts/first-post-event': `export const assertFirstPostPublishable = async () => {};`,
@@ -55,8 +71,9 @@ const { build } = require('esbuild');
     await build({ stdin: { contents: `
       import React, { act } from 'react'; import { createRoot } from 'react-dom/client';
       import { CreatePostScreen } from './packages/app/features/create/create-post.web';
+      import { CropPreviewScreen } from './packages/app/features/create/crop-preview.web';
       export { fixture, store } from 'composer-fixture'; export { act };
-      export function mount(node) { const root = createRoot(node); root.render(<React.StrictMode><CreatePostScreen/></React.StrictMode>); return () => root.unmount(); }
+      export function mount(node) { const root = createRoot(node); return { render(crop = false) { root.render(<React.StrictMode>{crop ? <CropPreviewScreen/> : <CreatePostScreen/>}</React.StrictMode>); }, unmount() { root.unmount(); } }; }
     `, resolveDir: root, loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', outfile: path.join(dir, 'fixture.cjs'), alias: { '@dvnt/app': path.join(root, 'packages/app') }, plugins: [{ name: 'isolated-composer', setup(build) {
       build.onResolve({ filter: /.*/ }, args => {
         if (args.path === 'composer-fixture') return { path: args.path, namespace: 'fixture' };
@@ -69,8 +86,10 @@ const { build } = require('esbuild');
     const { act, mount, fixture, store } = require(path.join(dir, 'fixture.cjs'));
     const image = (name = 'Photo.jpg') => new File([new Uint8Array([255, 216, 1])], name, { type: 'image/jpeg' });
     const movie = (name = 'Photo.mov') => new File([new Uint8Array([0, 1, 2, 3])], name, { type: 'video/quicktime' });
-    const node = document.createElement('div'); document.body.append(node); let unmount;
-    await act(async () => { unmount = mount(node); });
+    const node = document.createElement('div'); document.body.append(node);
+    const mounted = mount(node);
+    const unmount = () => mounted.unmount();
+    await act(async () => { mounted.render(); });
     const button = text => [...node.querySelectorAll('button')].find(el => el.textContent.trim() === text);
     const share = () => button('Share');
     const assets = () => store.getState().selectedMedia;
@@ -80,14 +99,14 @@ const { build } = require('esbuild');
       const input = node.querySelector('input[type=file]'); Object.defineProperty(input, 'files', { configurable: true, value: files });
       input.dispatchEvent(new window.Event('change', { bubbles: true }));
     });
-    const probes = () => videos.filter(video => !video.isConnected && video.onloadeddata && video.getAttribute('src'));
-    const ready = video => { Object.defineProperties(video, { duration: { configurable: true, value: 3 }, readyState: { configurable: true, value: 3 } }); video.dispatchEvent(new window.Event('loadeddata')); };
+    const probes = () => videos.filter(video => !video.isConnected && (video.onloadeddata || video.onloadedmetadata) && video.getAttribute('src'));
+    const ready = video => { Object.defineProperties(video, { duration: { configurable: true, value: 3 }, videoWidth: { configurable: true, value: 640 }, videoHeight: { configurable: true, value: 480 }, readyState: { configurable: true, value: video.onloadedmetadata ? 1 : 3 } }); video.dispatchEvent(new window.Event(video.onloadedmetadata ? 'loadedmetadata' : 'loadeddata')); };
     const finish = async () => act(async () => { const active = probes(); assert.equal(active.length, 1); ready(active[0]); });
     const finishBatch = async () => { for (let i = 0; probes().length && i < 30; i++) await finish(); assert.equal(probes().length, 0); };
     const chooseMotion = async (imageId, motionId) => act(async () => {
       const select = card(imageId).querySelector('select'); select.value = motionId; select.dispatchEvent(new window.Event('change', { bubbles: true }));
     });
-    const cancel = async () => act(async () => button('Cancel checking').click());
+    const replacePendingWithoutChangingDraft = () => pick([new File([1], 'unsupported.webm', { type: 'video/webm' })]);
 
     assert.equal(node.querySelectorAll('input[type=file]').length, 1, 'exactly one unified file entry');
     assert.equal(node.querySelector('input[type=file]').multiple, true);
@@ -95,7 +114,7 @@ const { build } = require('esbuild');
     await pick([image('ordinary.jpg')]); assert.equal(assets().length, 1); assert.equal(share().disabled, false);
     const original = assets()[0];
     await pick([movie('cancel.mov')]); assert.equal(share().disabled, true); const canceled = probes()[0];
-    await cancel(); assert.equal(share().disabled, false);
+    await replacePendingWithoutChangingDraft(); assert.equal(share().disabled, false);
     await act(async () => ready(canceled)); assert.equal(assets().length, 1, 'cancelled intake cannot append late');
 
     await pick([image('never-half.jpg'), new File([1], 'unsupported.webm', { type: 'video/webm' })]);
@@ -106,7 +125,10 @@ const { build } = require('esbuild');
     assert.equal(assets().length, 1, 'undecodable motion also rejects complete batch');
     assert.equal(share().disabled, false);
 
-    await pick([image('duplicate.jpg'), movie('duplicate.mov'), image('duplicate.jpg')]); await finishBatch();
+    await pick([image('duplicate.jpg'), movie('duplicate.mov'), image('duplicate.jpg')]);
+    assert.ok(probes()[0]?.onloadedmetadata && !probes()[0].onloadeddata, 'standalone MOV waits for metadata, never a decoded frame');
+    assert.doesNotMatch(node.textContent, /Checking|Adding media/);
+    await finishBatch();
     assert.equal(assets().length, 4); assert.ok(assets().every(item => item.kind !== 'livePhoto'), 'filenames never imply pairing');
     const photo = assets()[1]; const clip = assets()[2]; const other = assets()[3];
     await chooseMotion(photo.id, clip.id); assert.equal(share().disabled, true);
@@ -132,7 +154,7 @@ const { build } = require('esbuild');
     await pick([movie('late.mov')]); assert.equal(share().disabled, true);
     await act(async () => fixture.gate()); assert.equal(fixture.published.length, 0);
     assert.match(fixture.toasts.at(-1)[1], /still being checked/);
-    const late = probes()[0]; await cancel(); await act(async () => ready(late));
+    const late = probes()[0]; await replacePendingWithoutChangingDraft(); await act(async () => ready(late));
     fixture.deferGate = false;
     window.sessionStorage.setItem('dvnt:review-return', JSON.stringify({userId:'fixture-member',target:'/feed/events/42/reviews',savedAt:Date.now()}));
     fixture.progress = [{step:'first_post',hasPost:false}]; fixture.failPublish = true;
@@ -160,6 +182,121 @@ const { build } = require('esbuild');
     assert.equal(window.sessionStorage.getItem('dvnt:review-return'), null);
     fixture.deferPublish = false; fixture.progress = [];
     await act(async () => store.getState().reset());
+
+    const originalShowModal = window.HTMLDialogElement.prototype.showModal;
+    try {
+      // Exercise the actual composer plus production review UI; inference and
+      // publish transport stay synthetic. No label is selected by the fixture
+      // until a real review action is fired.
+      window.HTMLDialogElement.prototype.showModal = undefined;
+      fixture.scanResult = {flagged:true,incomplete:false};
+      await pick([image('review-first.jpg')]);
+      const before = fixture.published.length;
+      await act(async () => share().click());
+      let dialog = document.querySelector('[role="dialog"]');
+      assert.ok(dialog, 'missing native modal still offers explicit choices');
+      assert.equal(fixture.published.length,before);
+      const choice = (label) => [...document.querySelectorAll('[role="dialog"] button')].find(el => el.textContent.trim() === label);
+      await act(async () => choice('Review draft').click());
+      assert.equal(fixture.published.length,before); assert.equal(assets().length,1);
+      await act(async () => share().click());
+      await act(async () => choice('This is a mistake: share as Sweet').click());
+      assert.equal(fixture.published.length,before+1); assert.equal(fixture.publishLabels.at(-1),false);
+      window.HTMLDialogElement.prototype.showModal = () => { throw Error('fixture unavailable modal'); };
+      fixture.scanResult = {flagged:true,incomplete:true};
+      await pick([image('review-second.jpg')]);
+      await act(async () => share().click());
+      assert.equal(fixture.published.length,before+1);
+      await act(async () => choice('Mark Spicy and share').click());
+      assert.equal(fixture.published.length,before+2); assert.equal(fixture.publishLabels.at(-1),true);
+      fixture.scanResult = {flagged:false,incomplete:true};
+      await pick([image('unavailable-scan.jpg')]);
+      await act(async () => share().click());
+      assert.equal(fixture.published.length,before+3, 'unavailable advisory does not prompt again');
+      assert.equal(fixture.publishLabels.at(-1),false, 'original Sweet label is preserved');
+      assert.equal(document.querySelector('[role="dialog"]'),null);
+    } finally {
+      window.HTMLDialogElement.prototype.showModal = originalShowModal;
+      fixture.scanResult = {flagged:false,incomplete:false};
+      await act(async () => store.getState().reset());
+    }
+
+    // Enter the actual web crop screen via the regular mounted composer.
+    assert.equal(button('Edit photos'), undefined, 'empty draft has no crop entry');
+    fixture.route = route => mounted.render(route === '/feed/crop-preview');
+    fixture.progress = [];
+    fixture.routes.length = 0;
+    const cropInput = image('crop-source.jpg');
+    await pick([new File([1,2,3], 'animated.gif', {type:'image/gif'})]);
+    assert.equal(button('Edit photos'), undefined, 'animated-only draft has no crop entry');
+    await pick([cropInput]);
+    const originalCropDraft = assets();
+    const animatedOriginal = assets()[0], cropOriginal = assets()[1];
+    await pick([movie('pending-entry.mov')]);
+    assert.equal(button('Edit photos').disabled, true, 'crop waits for pending file checks');
+    const pendingCropProbe = probes()[0];
+    await replacePendingWithoutChangingDraft();
+    await act(async () => ready(pendingCropProbe));
+    fixture.deferGate = true;
+    await act(async () => share().click());
+    const staleShare = fixture.gate;
+    await act(async () => button('Edit photos').click());
+    assert.equal(fixture.routes.at(-1), '/feed/crop-preview'); assert.ok(button('Apply crop'));
+    const publishedBefore = fixture.published.length;
+    await act(async () => staleShare());
+    assert.equal(fixture.published.length, publishedBefore);
+    await act(async () => node.querySelector('button[aria-label="Cancel crop"]').click());
+    assert.equal(fixture.routes.at(-1), '/feed/create'); assert.equal(assets(), originalCropDraft);
+    fixture.deferGate = false;
+
+    // A decoder completing after the editor goes away must not change the draft.
+    fixture.deferCrop = true;
+    await act(async () => button('Edit photos').click());
+    await act(async () => button('Apply crop').click());
+    await act(async () => mounted.render());
+    await act(async () => fixture.finishCrop());
+    assert.equal(assets(), originalCropDraft, 'late canvas output cannot overwrite after navigation');
+    fixture.deferCrop = false;
+
+    fixture.invalidCrop = true;
+    await act(async () => button('Edit photos').click());
+    await act(async () => button('Apply crop').click());
+    assert.match(node.textContent, /couldn’t export the crop/);
+    assert.equal(assets(), originalCropDraft, 'unsupported encoder output leaves real original unchanged');
+    fixture.invalidCrop = false;
+    await act(async () => button('Apply crop').click());
+    assert.equal(fixture.routes.at(-1), '/feed/create');
+    assert.equal(assets()[0], animatedOriginal);
+    assert.deepEqual(fixture.cropExports.at(-1), {src:cropOriginal.uri,area:{x:100,y:200,width:720,height:900}});
+    assert.equal(assets()[1].originalUri, cropOriginal.uri);
+    assert.equal(assets()[1].mimeType, 'image/jpeg');
+    assert.equal(assets()[1].width, 720);
+    assert.equal(assets()[1].height, 900);
+    const derivative = assets()[1].uri;
+    assert.match(derivative, /^data:image\/jpeg;base64,/);
+    await act(async () => share().click());
+    assert.equal(fixture.published.length, publishedBefore + 1);
+    const published = fixture.published.at(-1);
+    assert.equal(published[0].uri, animatedOriginal.uri);
+    assert.equal(published[1].uri, derivative);
+    assert.equal(fixture.publishFiles.at(-1)[1].uri, derivative, 'real publish mapper chooses the cropped JPEG');
+    await act(async () => store.getState().setSelectedMedia([animatedOriginal, cropOriginal]));
+    await act(async () => button('Edit photos').click());
+    assert.equal(node.querySelectorAll('input[type="range"]').length,3, 'photo controls are in the existing editor');
+    await act(async () => button('Mono').click());
+    assert.equal(button('Mono').getAttribute('aria-pressed'),'true');
+    await act(async () => button('Reset adjustments').click());
+    assert.equal(button('Original').getAttribute('aria-pressed'),'true');
+    await act(async () => button('Mono').click());
+    await act(async () => button('Apply edits').click());
+    const result=fixture.cropExports.at(-1);
+    assert.deepEqual(result.pixels,[98,98,98,255], 'selected filter is baked into exported pixels');
+    assert.equal(assets()[0], animatedOriginal,'animation is unchanged by still edits');
+    assert.equal(assets()[1].width,720);
+    await act(async () => store.getState().reset());
+
+    fixture.route = null;
+    console.log('PASS normal composer crop: eligibility, route entry, pending and stale guards, cancellation, saved derivative and unchanged animation');
 
     const allFiles = Array.from({ length: 10 }, (_, i) => [image(`still-${i}.jpg`), movie(`clip-${i}.mov`)]).flat();
     await pick(allFiles); await finishBatch(); assert.equal(assets().length, 20); assert.equal(share().disabled, true);

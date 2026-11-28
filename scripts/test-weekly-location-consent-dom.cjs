@@ -5,7 +5,7 @@ const { build } = require('esbuild');
   const { Window } = await import(require.resolve('happy-dom'));
   const root = path.resolve(__dirname, '..');
   const mocks = {
-    'react-native': `import React from 'react';export const View=({children})=><div>{children}</div>;export const ScrollView=View;export const Text=({children})=><p>{children}</p>;export const Pressable=({children,onPress,disabled})=><button disabled={disabled} onClick={onPress}>{children}</button>;export const Modal=({visible,children})=>visible?<div role="dialog">{children}</div>:null;`,
+    'react-native': `import React from 'react';export const Platform={OS:'ios'};export const View=({children})=><div>{children}</div>;export const ScrollView=View;export const Text=({children})=><p>{children}</p>;export const Pressable=({children,onPress,disabled})=><button disabled={disabled} onClick={onPress}>{children}</button>;export const Modal=({visible,children})=>visible?<div role="dialog">{children}</div>:null;`,
     '@dvnt/app/lib/mmkv-zustand': `export const mmkvStorage={getItem:k=>window.fixture.storage[k]||null,setItem:(k,v)=>{window.fixture.storage[k]=v}};`,
     '@dvnt/app/lib/stores/auth-store': `import {useSyncExternalStore} from 'react';export const useAuthStore=s=>useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>s({user:window.fixture.owner?{authId:window.fixture.owner}:null}));`,
     '@dvnt/app/lib/hooks/use-member-map': `import {useSyncExternalStore} from 'react';function tick(){useSyncExternalStore(cb=>{addEventListener('fixturechange',cb);return()=>removeEventListener('fixturechange',cb)},()=>window.fixture.version)}export function useLocationSettings(){tick();return {...window.fixture.location,setSharing:async()=>{},refresh:async()=>{}}}export function useMapSharingConsent(){tick();return {busy:false,error:null,share:async()=>{window.fixture.shares++;return false},cancel:()=>{}}}`,
@@ -23,7 +23,8 @@ const { build } = require('esbuild');
     await wait(()=>!!dialog());
     assert.equal(win.document.querySelectorAll('[role=dialog]').length,1);
     assert.equal(win.fixture.shares,0,'expired grants get an invitation, not silent renewal');
-    assert.match(dialog().textContent,/this sign-in/);
+    assert.match(dialog().textContent,/across devices and future sign-ins until you turn sharing off/);
+    assert.match(dialog().textContent,/Each device still needs its own location permission/);
     button('Not now').click();
     await wait(()=>!dialog());
     win.fixture.mounted=false;tick();await wait(()=>!button('Show my avatar'));
@@ -37,8 +38,11 @@ const { build } = require('esbuild');
     assert.equal(win.fixture.shares,1,'account switch never reuses another owner consent');
     button('Not now').click();await wait(()=>!dialog());
     win.fixture.location.settings={...win.fixture.location.settings,sessionKey:'new-signin'};
-    tick();await wait(()=>!!dialog());
-    assert.equal(win.fixture.shares,1,'same-account new sign-in asks again without sharing silently');
-    console.log('PASS: mounted native disclosure renews only by explicit action, preserves cooldown, cancels on inactivity, isolates accounts, and keeps session-bound disclosure');
+    tick();await new Promise(r=>setTimeout(r,50));
+    assert.equal(dialog(),null,'same-account new sign-in preserves the device dismissal');
+    assert.equal(win.fixture.shares,1,'new sign-in never shares silently');
+    button('Show my avatar').click();await wait(()=>!!dialog());
+    assert.equal(win.fixture.shares,1,'manual disclosure remains available without granting location');
+    console.log('PASS: mounted native disclosure renews only by explicit action, preserves cooldown, cancels on inactivity, isolates accounts, and discloses account-wide scope without silently upgrading expired grants');
   } finally {win.fixture.unmount?.();await win.happyDOM.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

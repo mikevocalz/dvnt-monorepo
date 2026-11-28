@@ -22,7 +22,7 @@ import {
   ticketConfirmation,
 } from "../_shared/send-resend-email.ts";
 import { isSalesClosed } from "../_shared/sales-cutoff.ts";
-import { parseCheckoutProfileFields } from "../_shared/checkout-profile-fields.ts";
+import { unwrapWebTicketContactRequest, isWebTicketContactRequest, parseCheckoutProfileFields, parseWebGuestTicketContact } from "../_shared/checkout-profile-fields.ts";
 import { provisionCheckoutProfile } from "../_shared/checkout-profile.ts";
 
 const corsHeaders = {
@@ -108,7 +108,12 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
       { auth: { persistSession: false } },
     );
-    const body = await req.json().catch(() => ({}));
+    const body = unwrapWebTicketContactRequest(await req.json().catch(() => ({})));
+    if (body.action === "contact_capability") {
+      const { error } = await supabase.from("web_ticket_order_contacts").select("order_id").limit(0);
+      if (error) return err("checkout_unavailable", "Ticket checkout is updating. Please retry.", 503);
+      return json({ ok: true, webTicketContactVersion: 1 });
+    }
     const eventId = Number(body.event_id);
     const quantity = Math.max(1, Math.min(10, Number(body.quantity) || 1));
     const guestName = body.guest_name ? String(body.guest_name) : null;
@@ -122,7 +127,12 @@ Deno.serve(async (req) => {
     if (grant.event_id !== eventId)
       return err("grant_mismatch", "Verification doesn't match this event.", 401);
     // The email is the one the grant proved, never a body field.
-    const profile = parseCheckoutProfileFields({ ...body, guest_email: grant.destination });
+    const webContact = isWebTicketContactRequest(body.checkout_contact_version, req.headers.get("origin"), Deno.env.get("DVNT_REQUIRE_WEB_TICKET_CONTACT") === "true") ||
+        Object.prototype.hasOwnProperty.call(body, "guest_username")
+      ? parseWebGuestTicketContact({ email: grant.destination, username: body.guest_username, phone: body.guest_phone }) : null;
+    if (webContact && !webContact.ok) return err(webContact.code, webContact.message, 400);
+    const profile = webContact ? { ok: true as const, fields: null }
+      : parseCheckoutProfileFields({ ...body, guest_email: grant.destination });
     if (!profile.ok) return err(profile.code, profile.message);
 
     // Idempotency: the grant's hash is the order's dedupe key — a
@@ -145,7 +155,9 @@ Deno.serve(async (req) => {
       .single();
     if (isSalesClosed(ev)) return err("sales_closed", "Ticket sales have ended for this event.");
 
-    const { data, error } = await supabase.rpc("issue_guest_rsvp_tickets", {
+    const { data, error } = await supabase.rpc(
+      webContact ? "issue_guest_rsvp_with_contact" : "issue_guest_rsvp_tickets", {
+      ...(webContact ? { p_guest_username: webContact.username, p_guest_phone: webContact.phone } : {}),
       p_event_id: eventId,
       p_guest_email: grant.destination,
       p_guest_name: guestName,
@@ -209,6 +221,7 @@ Deno.serve(async (req) => {
 
     return json({
       ok: true,
+      ...(webContact ? { webTicketContactVersion: 1 } : {}),
       order_id: result.order_id,
       count: result.count,
       tickets,
