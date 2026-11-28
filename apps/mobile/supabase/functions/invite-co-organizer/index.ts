@@ -290,20 +290,24 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Usernames live on the PROFILE table, not on Better Auth's `user`.
-      // Only 69 of 1188 auth rows carry one, while all 1190 profiles do — so
-      // looking the recipient up in `user` returned "User not found" for 1135
-      // real accounts, which is every staff invite anyone has tried to send by
-      // username. `users.auth_id` is the same id `user.id` would have given.
-      //
-      // Case-insensitive to match: the caller already lowercases the input,
-      // and stored usernames are mixed case.
-      const { data: profile } = await supabase
+      // Resolve an exact username, then make sure it belongs to an existing
+      // account. A profile left behind after account removal is not enough.
+      const handlePattern = username.replace(/[\\%_]/g, "\\$&");
+      const { data: profile, error: profileError } = await supabase
         .from("users")
-        .select("auth_id")
-        .ilike("username", username)
+        .select("auth_id, username")
+        .ilike("username", handlePattern)
         .maybeSingle();
-      const recipient = profile?.auth_id ? { id: profile.auth_id } : null;
+      if (profileError) return json({ error: "Could not look up that account" }, 503, req);
+      if (!profile?.auth_id || profile.username?.toLowerCase() !== username) {
+        return json({ error: "User not found" }, 404, req);
+      }
+      const { data: recipient, error: accountError } = await supabase
+        .from("user")
+        .select("id")
+        .eq("id", profile.auth_id)
+        .maybeSingle();
+      if (accountError) return json({ error: "Could not look up that account" }, 503, req);
       if (!recipient) return json({ error: "User not found" }, 404, req);
       if (recipient.id === authId) {
         return json({ error: "You're already on this event" }, 400, req);
