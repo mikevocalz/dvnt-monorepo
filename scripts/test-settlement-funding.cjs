@@ -18,7 +18,7 @@ async function other(f,suffix,{commission=1000,currency='usd'}={}){
 async function enroll(f,o){await issuePaidOrder(f.pg,o.order_id);await f.call('settlement_verify_source',{p_order_id:o.order_id,p_charge:o.charge.id,p_pi:o.charge.payment_intent,p_currency:o.charge.currency,p_gross:11000,p_tax:0});await f.call('settlement_record_funding_source',{p_order_id:o.order_id,p_platform_account:'acct_platform_fixture',p_proof:funding.fundingSourceProof(o.charge,0)});}
 async function audit(f,transactions,{currency='usd',available=100000,checkpoint}={}){const c=checkpoint||await f.call('settlement_balance_checkpoint',{});return f.call('settlement_record_funding_audit',{p_currency:currency,p_available:available,p_balance_epoch:c.epoch,p_started_at:c.observed_at,p_platform_account:'acct_platform_fixture',p_livemode:false,p_audit_from:0,p_transactions:transactions.map(t=>funding.fundingTransaction(t,0))});}
 
-test('paid at Stripe but DB pending contributes no host funding; later verified enrollment protects its commission',async()=>{
+test('paid at Stripe but DB pending contributes no host funding; the host still waits after the other promoter is enrolled',async()=>{
  const f=await setup();try{
  const b=await other(f,'missing_webhook');f.extraTransactions.push(b.charge.balance_transaction,tx('prior_payout',-2000,{type:'payout',source:'po_prior'}));
  await f.run();assert.deepEqual(f.transfers.map(t=>t.destination),['acct_promoter']);
@@ -27,19 +27,20 @@ test('paid at Stripe but DB pending contributes no host funding; later verified 
  await f.run();assert.equal(f.transfers.length,1); // Missing webhook/retry never recognizes another inflow.
  const checkpoint=await f.call('settlement_balance_checkpoint',{});await enroll(f,b);
  await assert.rejects(audit(f,[f.charge.balance_transaction,b.charge.balance_transaction],{checkpoint}),/stale/);
- await f.run();assert.deepEqual(f.transfers.map(t=>t.destination),['acct_promoter','acct_host']);
+ await f.run();assert.deepEqual(f.transfers.map(t=>t.destination),['acct_promoter']);
+ const host=(await f.candidate()).allocations.find(a=>a.role==='organizer');assert.equal(host.state,'held');
  const a=(await f.call('settlement_order',{p_order_id:b.order_id})).allocations.find(a=>a.role==='promoter');assert.equal(a.state,'held');
  const balance=(await f.pg.query('select available_cents from dvnt_settlement.funding_audits')).rows[0].available_cents;
- assert.ok(balance>=a.amount_cents+8500); // Snapshot before A host send includes B commission and B remainder.
+ assert.ok(balance>=a.amount_cents+8500); // Authenticated funding covers the held balances without authorizing host release.
  }finally{await f.pg.close();}
 });
 
-test('failed, expired, processing and abandoned attempts reserve no funds and never become source credits',async()=>{
+test('unverified checkout attempts cannot create source credits or clear event-wide promoter priority',async()=>{
  const f=await setup();try{
  // No attempt TTL is used to guess a payment outcome or release money.
  for(let n=0;n<40;n++)await other(f,'abandoned_'+n);
  for(const suffix of ['failed','expired','processing']){const b=await other(f,suffix);await f.pg.query('update orders set status=$2 where id=$1',[b.order_id,suffix==='failed'?'payment_failed':'payment_pending']);f.extraTransactions.push({...b.charge.balance_transaction,status:'pending'});}
- await f.run();assert.equal(f.transfers.length,2);
+ await f.run();assert.deepEqual(f.transfers.map(t=>t.destination),['acct_promoter']);
  assert.equal((await f.pg.query('select count(*)::int n from dvnt_settlement.funding_sources')).rows[0].n,1);
  assert.equal((await f.pg.query('select count(*)::int n from dvnt_settlement.allocations')).rows[0].n,2);
  }finally{await f.pg.close();}
@@ -109,7 +110,7 @@ test('funding pagination is exhaustive, bounded and stable; no truncated or chan
 
 
 test('a pending balance transaction becoming available with the same ID does not bypass source membership',async()=>{
- const f=await setup();try{const b=await other(f,'availability');f.extraTransactions.push({...b.charge.balance_transaction,status:'pending'},tx('sweep',-9000,{type:'payout'}));await f.run();assert.equal(f.transfers.filter(t=>t.destination==='acct_host').length,0);f.extraTransactions[0].status='available';await f.run();assert.equal(f.transfers.filter(t=>t.destination==='acct_host').length,0);await enroll(f,b);await f.run();assert.equal(f.transfers.filter(t=>t.destination==='acct_host').length,1);}finally{await f.pg.close();}
+ const f=await setup();try{const b=await other(f,'availability');f.extraTransactions.push({...b.charge.balance_transaction,status:'pending'},tx('sweep',-9000,{type:'payout'}));await f.run();assert.equal(f.transfers.filter(t=>t.destination==='acct_host').length,0);f.extraTransactions[0].status='available';await f.run();assert.equal(f.transfers.filter(t=>t.destination==='acct_host').length,0);await enroll(f,b);await f.run();assert.equal(f.transfers.filter(t=>t.destination==='acct_host').length,0);assert.equal((await f.pg.query('select credited_cents from dvnt_settlement.funding_audits')).rows[0].credited_cents,21000);}finally{await f.pg.close();}
 });
 
 test('processing and failed payment intent responses never enroll a source or send',async()=>{

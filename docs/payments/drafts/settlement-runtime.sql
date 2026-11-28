@@ -455,6 +455,23 @@ BEGIN
   OR p_available IS NULL OR p_available<pending+protected_commission+risk_reserve+dvnt_settlement.unsettled_outflows(o.currency)+a.amount_cents THEN
   RAISE EXCEPTION 'insufficient unreserved funds';
  END IF;
+ -- Event-wide promoter priority. Use the same mutex used by source
+ -- enrollment and transfer reconciliation. A completed order does not clear
+ -- a different order's commission, and a missing allocation is not proof
+ -- that a paid order has no commission.
+ IF a.role='organizer' AND (
+   EXISTS(SELECT 1 FROM public.orders src
+     JOIN dvnt_settlement.allocations pa ON pa.order_id=src.id AND pa.role='promoter'
+     WHERE src.event_id=e.id AND src.id<>o.id AND NOT dvnt_settlement.promoter_obligation_satisfied(pa.id))
+   OR EXISTS(SELECT 1 FROM public.orders src
+     LEFT JOIN dvnt_settlement.checkouts q ON q.order_id=src.id
+     WHERE src.event_id=e.id AND src.id<>o.id AND coalesce(src.promoter_commission_amount_cents,0)>0
+       AND (src.status IN ('paid','partially_refunded','disputed')
+         OR (q.attempted_at IS NOT NULL AND q.retired_at IS NULL AND q.source_verified_at IS NULL))
+       AND NOT EXISTS(SELECT 1 FROM dvnt_settlement.allocations pa WHERE pa.order_id=src.id AND pa.role='promoter'
+         AND pa.amount_cents=src.promoter_commission_amount_cents
+         AND dvnt_settlement.promoter_obligation_satisfied(pa.id)))
+ ) THEN RAISE EXCEPTION 'promoter settlement pending'; END IF;
  result:=dvnt_settlement.reserve(a.id,p_destination);
  UPDATE dvnt_settlement.deliveries SET last_error=NULL WHERE allocation_id=a.id;
  RETURN result || jsonb_build_object('order_id',o.id,'transfer_group','dvnt_settlement_'||o.id::text);

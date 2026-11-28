@@ -6,7 +6,7 @@ This contract originated in the paused `f38034ca` source slice and is now includ
 
 Each new separate-charge order freezes its promoter identity, commission and organizer remainder before the provider payment is created. A commission is an accounting liability, not a separate Stripe escrow account. Only a successfully paid, verified separate platform charge may enroll in source-backed transfer allocations. Pending/failed payments do not create spendable money.
 
-The executor attempts the promoter allocation first, regardless of database result ordering. The database independently locks the source order and requires verified promoter completion before reserving that order's organizer remainder. A missing recipient account, restricted capability, failed verification, funding shortage, reserved attempt, ambiguous timeout or recovery obligation blocks that order's organizer allocation. It never erases or reallocates the commission. Unrelated healthy orders, including those in the same event, are not subject to a new whole-event hold.
+The executor attempts the promoter allocation first, regardless of database result ordering. The database independently locks the source order and funding controls and requires verified promoter completion across the same event before reserving any organizer remainder. A missing recipient account, restricted capability, failed verification, funding shortage, reserved attempt, ambiguous timeout or recovery obligation blocks organizer allocations for that event. It never erases or reallocates the commission. Other events are not subject to this same-event dependency, but the global funding checks continue to protect unsettled commissions.
 
 Completion here means the exact, unreversed Stripe transfer has been verified into the intended connected account's balance. It does **not** mean the recipient's bank received money. Verified automatic-payout membership and bank status remain separate. Standard payout timing, onboarding restrictions and bank delays still apply; there is no guarantee of instant bank payment. A stricter bank-paid-before-host policy would be a different reviewed decision.
 
@@ -38,7 +38,7 @@ Historical destination-funded charges and missing charge-model rows remain ineli
 
 ## Validation and rollout gates
 
-The synthetic SQL/engine tests cover frozen checkout commission, promoter-first database enforcement, delayed onboarding, same-event independent orders, global commission protection, the pre-enrollment gap, missing/risk reserve policy, stale funding epochs, negative funds, exact account ownership, source processing-fee shortage, destination-funded exclusion, overlapping workers, unknown outcomes, refunds/disputes and bank-status separation.
+The synthetic SQL/engine tests cover frozen checkout commission, promoter-first database enforcement, delayed onboarding, same-event organizer hold and cross-event funding independence, global commission protection, the pre-enrollment gap, missing/risk reserve policy, stale funding epochs, negative funds, exact account ownership, source processing-fee shortage, destination-funded exclusion, overlapping workers, unknown outcomes, refunds/disputes and bank-status separation.
 
 Native PostgreSQL cases also cover promoter-claim versus organizer reservation and promoter-confirmation versus stale organizer balance reads. A local PGlite pass does not certify cross-process locks; require the exact commit's isolated PostgreSQL CI result. No live or Stripe-sandbox financial calls are part of these tests.
 
